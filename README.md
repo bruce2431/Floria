@@ -40,11 +40,9 @@
 
 ### 会话处理折叠：进行中流式展开 → 完成后自动收起
 
-处理中：旁白/思考/工具步流式展示 + 实时计时。
+处理中流式展示旁白/思考/工具 + 计时；完成后自动收起为「已处理 X」，仅留总结。
 
 ![处理中：流式展开](./_agent-src/docs/screenshots/session-live.png)
-
-完成后：自动收起为「已处理 X」一行（计时定格），仅保留总结。
 
 ![完成后：自动折叠仅留总结](./_agent-src/docs/screenshots/session-fold.png)
 
@@ -56,13 +54,9 @@
 
 ![设备配对授权门](./_agent-src/docs/screenshots/pairing-gate.png)
 
-### 项目个性化预览：archify 架构总览（dark / light）
+### 项目个性化预览
 
-![架构图 dark 主题](./_agent-src/docs/screenshots/preview-arch-dark.png)
-
-![架构图 light 主题](./_agent-src/docs/screenshots/preview-arch-light.png)
-
-### 项目个性化预览：Pj13 论文精读实例
+产物由 skill 落 `<项目>/.claude/preview/`，网关静态托管 `/preview/<label>/*`，项目页 iframe 直开（无预览回落内置默认主页），远程设备经 `/backend/<label>/` 反代可看。
 
 ![Pj13 项目个性化预览：论文精读](./_agent-src/docs/screenshots/preview-pj13.png)
 

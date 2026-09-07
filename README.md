@@ -70,14 +70,14 @@
 
 - 构建命令（在 `_agent-src/` 内执行）：`bun install` / `bun run dev`（源码直跑）/ `bun run build:dev`（dev 构建 `cli-dev-<ts>.exe`，2026-08-25 起**默认含内置私有化网关**；2026-09-04 定案统一本命令）/ `bun run compile`（正式编译 `dist/cli-<ts>.exe`）。
 - 构建产物（2026-08-25 起 dev 构建直出项目根，免手动复制）：dev 构建（`build:dev`）→ **项目根** `cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`；正式编译 → `_agent-src/dist/cli-<YYYYMMDDHHMMSS>.exe`。带时间戳命名，独立保留。
-- 部署/运行：构建完成即已在项目根，直接用带时间戳的产物 exe 启动（如 `cli-dev-<YYYYMMDDHHMMSS>.exe`；2026-08-28 起 PRIVATE_GATEWAY 进默认特性，`build:dev` 即含网关，产物名不再带 -PRIVATE_GATEWAY 代号），**重启会话/网关进程才生效**。**产物带时间戳是强制规范，不允许覆盖**（不设固定名部署副本）。当前最新构建：`cli-dev-20260906165821.exe`（**09-06 便携根裸机初始化**：信任对话框「Yes, I trust this folder」yes 分支挂 `maybeInitPortableRoot`，裸机于 exe 邻接播种 `.claude/.claude-portable`，配置根下一轮启动跟随 exe；09-06 白天=首条消息接管帧收口（sw v235）+wsession 异步化与消息暂存补投（v233）+首条消息三态根治（v229）+侧栏浮起/会话行菜单四轮根修（v219-v234）+web 拖拽上传图片（v231）+web 打断撤回链，均经用户实测通过；09-05=神经元内置 NEURON_RAG 引擎 TS 化全链（recall/remember 内置工具+leiden.ts+coggraph TS 接线，Python engine 退役）+archify 项目个性化预览首实例+iPad 触屏兼容根修，见下「版本控制」；历史部署链见 `LOG.md`，此处不再累积**）。注：`build:dev` 产物名不带 `-PRIVATE_GATEWAY` 代号但同样含内置网关；**2026-09-04 定案：构建（含发布）一律用 `build:dev`，`build:dev:gateway` 废弃不再使用，历史带代号产物仅存档**。
+- 部署/运行：构建完成即已在项目根，直接用带时间戳的产物 exe 启动（如 `cli-dev-<YYYYMMDDHHMMSS>.exe`；2026-08-28 起 PRIVATE_GATEWAY 进默认特性，`build:dev` 即含网关，产物名不再带 -PRIVATE_GATEWAY 代号），**重启会话/网关进程才生效**。**产物带时间戳是强制规范，不允许覆盖**（不设固定名部署副本）。当前最新构建：`cli-dev-20260907110439.exe`（**09-07 v14 发布资产=本产物**：手机档输入栏变形/项目 chip 省略号根修（sw v236-v237）+移除侧栏「最近」折叠三角与空会话占位行（v238-v239）+钉顶劈开第二实锤根修·图片异步撑高路径（v240）+README 截图扩充两轮，均经用户实测通过；09-06=首条消息接管帧收口（sw v235）+wsession 异步化与消息暂存补投（v233）+首条消息三态根治（v229）+侧栏浮起/会话行菜单终局（v219-v234）+web 拖拽上传图片（v231）+web 打断撤回链+便携根裸机初始化（maybeInitPortableRoot），均经用户实测通过；09-05=神经元 schema v2.3 收口+NEURON_RAG exe 全链实测，见下「版本控制」；历史部署链见 `LOG.md`，此处不再累积**）。注：`build:dev` 产物名不带 `-PRIVATE_GATEWAY` 代号但同样含内置网关；**2026-09-04 定案：构建（含发布）一律用 `build:dev`，`build:dev:gateway` 废弃不再使用，历史带代号产物仅存档**。
 - codegraph 索引：`_agent-src/src/.codegraph/`（相对路径存储，随 `_agent-src` 迁移有效），MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
 
 ## 版本控制（git）
 
 - 2026-08-15 git init，远程 `bruce2431/codeagent-build`，**仅跟踪 `_agent-src/`、`README.md`、`STANDARDS.md` 三个路径**；`CLAUDE.md`/`LOG.md`/子项目目录/报告 md 由项目根 `.gitignore` 排除，`.gitignore` 本身不入库。
 - 构建产物 exe 不在 git（`.gitignore` 排除 `*.exe`），部署副本只在项目根。
-- **GitHub Release 发布（2026-08-31 起）**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<sw>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`，如 `2.1.87-dev.20260831.t062738.sha60f851fa`）；流程 = commit+push → 同名 tag → GitHub Release（notes 按 LOG 当日条目主题分组）→ 附对应 gateway 代号版 exe 为 asset。发布记录见 `LOG.md`（最新：版本 13，2026-09-04 发布，tag `2.1.87-dev.20260904.t041234.shacff088a0`，asset `cli-dev-20260904121234.exe`；上版：版本 12，2026-09-03，tag `2.1.87-dev.20260902.t110533.sha6e045fe1`，asset `cli-dev-20260902190533-PRIVATE_GATEWAY.exe`）。
+- **GitHub Release 发布（2026-08-31 起）**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<sw>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`，如 `2.1.87-dev.20260831.t062738.sha60f851fa`）；流程 = commit+push → 同名 tag → GitHub Release（notes 按 LOG 当日条目主题分组）→ 附对应 gateway 代号版 exe 为 asset。发布记录见 `LOG.md`（最新：版本 14，2026-09-07 发布，tag `2.1.87-dev.20260907.t030439.shab9158a14`，asset `cli-dev-20260907110439.exe`；上版：版本 13，2026-09-04，tag `2.1.87-dev.20260904.t041234.shacff088a0`，asset `cli-dev-20260904121234.exe`）。
 
 ## 新结构速览（便携根 = `@WrokSpace`）
 

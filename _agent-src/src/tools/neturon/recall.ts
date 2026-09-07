@@ -60,7 +60,7 @@ export const RecallTool = buildTool({
     return '检索神经元的长期经验/知识库'
   },
   async prompt() {
-    return `Retrieve long-term experience and knowledge from persistent memory neurons (vector + keyword search over accumulated task records). Use BEFORE attempting multi-step or unfamiliar work — a past session likely already solved it, including working scripts (men.core_file), pitfalls (pattern=try/failed) and verified methods (pattern=succeed). Also use to recall facts about people, projects and environments. Results include a precog record — annotate it afterwards via neuron_fill_precog.`
+    return `Retrieve long-term experience and knowledge from persistent memory neurons (vector + keyword search over accumulated task records). Use BEFORE attempting multi-step or unfamiliar work — a past session likely already solved it, including working scripts (men.core_file), pitfalls and verified methods. Also use to recall facts about people, projects and environments. Results include a precog record — annotate it afterwards via neuron_fill_precog.`
   },
   get inputSchema(): InputSchema {
     return inputSchema()

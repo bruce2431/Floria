@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=197" />
+  <link rel="stylesheet" href="/styles.css?v=238" />
 </head>
 <body>
 <div id="app">
@@ -63,7 +63,6 @@
           <div id="recent-head">
             <div id="recent-left">
               <span id="recent-label">最近</span>
-              <button id="recent-fold" class="fold-btn" title="折叠/展开会话">▼</button>
             </div>
             <div id="recent-right">
               <button id="recent-more" class="rh-btn" title="整理会话">…</button>
@@ -234,7 +233,8 @@
     </div>
   </div>
 </div>
+<div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=197"></script>
+<script src="/app.js?v=240"></script>
 </body>
 </html>

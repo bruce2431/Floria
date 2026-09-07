@@ -156,6 +156,39 @@ const externals = [
   'url-handler-napi',
 ]
 
+// sharp stub（2026-09-04）：自包含 exe 内 sharp 原生绑定无法加载（@img/sharp-win32-x64 的
+// .node 依赖同目录 libvips DLL，兄弟 DLL 打包后到不了位 → LoadLibrary 失败），而
+// @huggingface/transformers 对 sharp 是静态 import（image.js:17）——不 stub 则 transformers
+// 整包加载即炸，BGE 文本嵌入链瘫痪。仅对 transformers 的 import 重定向：BGE 纯文本嵌入
+// 不调用 sharp 任何 API，stub 保持可 import（保住模块图）但真实调用立即报错（不留兜底）。
+// 其它 importer（FileReadTool 等）保持真 sharp，行为不变（exe 内其自带 try/catch 降级链）。
+const SHARP_STUB_SOURCE = `
+const thrower = (prop) => () => {
+  throw new Error('sharp.' + String(prop) + '() is stubbed out of the compiled exe: native bindings cannot load in a self-contained binary (DLL siblings unavailable). Text-only pipelines are unaffected; run from source (bun run dev) for image processing.')
+}
+export default new Proxy({}, { get: (_t, prop) => thrower(prop) })
+`
+
+const sharpStubPlugin: BunPlugin = {
+  name: 'sharp-stub-for-transformers',
+  setup(builder) {
+    builder.onResolve({ filter: /^sharp$/ }, (args) => {
+      if (
+        args.importer &&
+        args.importer.includes('@huggingface') &&
+        args.importer.includes('transformers')
+      ) {
+        return { path: 'sharp-stub', namespace: 'sharp-stub' }
+      }
+      return undefined
+    })
+    builder.onLoad({ filter: /.*/, namespace: 'sharp-stub' }, () => ({
+      contents: SHARP_STUB_SOURCE,
+      loader: 'js',
+    }))
+  },
+}
+
 const defines = {
   'process.env.USER_TYPE': JSON.stringify('external'),
   'process.env.CLAUDE_CODE_FORCE_FULL_LOGO': JSON.stringify('true'),
@@ -182,39 +215,6 @@ const defines = {
   ),
 } as const
 
-const cmd = [
-  'bun',
-  'build',
-  './src/entrypoints/cli.tsx',
-  '--compile',
-  '--target',
-  'bun',
-  '--format',
-  'esm',
-  '--outfile',
-  outfile,
-  '--minify',
-  '--bytecode',
-  '--packages',
-  'bundle',
-  '--conditions',
-  'bun',
-  '--windows-icon',
-  'assets/icon.ico',
-]
-
-for (const external of externals) {
-  cmd.push('--external', external)
-}
-
-for (const feature of features) {
-  cmd.push(`--feature=${feature}`)
-}
-
-for (const [key, value] of Object.entries(defines)) {
-  cmd.push('--define', `${key}=${value}`)
-}
-
 // 前端资源打包：把 src/gateway/web/ → web-assets.generated.ts（内置网关 PRIVATE_GATEWAY 内嵌 serve 用）
 // 生成产物会打进 exe，因此每次构建都自动重跑，保证 exe 内前端为最新。
 const genWeb = Bun.spawnSync({
@@ -228,15 +228,31 @@ if (genWeb.exitCode !== 0) {
   process.exit(genWeb.exitCode ?? 1)
 }
 
-const proc = Bun.spawnSync({
-  cmd,
-  cwd: process.cwd(),
-  stdout: 'inherit',
-  stderr: 'inherit',
+// 2026-09-04：CLI spawn 改 Bun.build() API（旗标经探针验证完整等价，探针留档
+// 20260904202312-sharp-stub-exe修复/）——API 才能挂 onResolve 插件做 sharp stub。
+const result = await Bun.build({
+  entrypoints: ['./src/entrypoints/cli.tsx'],
+  target: 'bun',
+  format: 'esm',
+  minify: true,
+  bytecode: true,
+  packages: 'bundle',
+  conditions: ['bun'],
+  compile: {
+    outfile,
+    windowsIcon: 'assets/icon.ico',
+  },
+  external: externals,
+  define: defines,
+  features,
+  plugins: [sharpStubPlugin],
 })
 
-if (proc.exitCode !== 0) {
-  process.exit(proc.exitCode ?? 1)
+if (!result.success) {
+  for (const log of result.logs) {
+    console.error(log)
+  }
+  process.exit(1)
 }
 
 if (existsSync(outfile)) {

@@ -1,64 +1,39 @@
 /**
  * 记忆写入器 — remember 工具后端（add=追加 / update=supersede 修正）
  *
- * 对照 Python 基线 engine/core/memwriter.py 1:1 移植。
- * 一次调用三件事：追加 mem.json + 增量重建 embeddings 索引 + 刷检索缓存。
- * 全程原子写（tmp + rename），先算后写（慢的模型编码发生在落盘前，中断零副作用）。
+ * 对照 Python 基线 engine/core/memwriter.py 1:1 移植；2026-09-04 存储层 DB 化
+ * （SubPj7 定案同步）：mem.json → mem.db（db.ts memories 表）。
+ * 一次调用三件事：INSERT mem.db + 增量重建 embeddings 索引 + 刷检索缓存。
+ * 先算后写（慢的模型编码发生在落盘前，中断零副作用）；embeddings 写失败回滚 DB。
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { ConfigError, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
 import { encode } from './embedder.js'
 import { readNpyF32, writeNpyF32 } from './npyio.js'
-import { serializeMem } from './serialize.js'
+import {
+  countMemories,
+  deleteMemory,
+  insertMemory,
+  markDeprecated,
+  readMemories,
+  type MemEntry,
+} from './db.js'
 import { clearRetrieverCache } from './retriever.js'
-import type { MemEntry } from './retriever.js'
 import { parse as parseYaml } from 'yaml'
 
-function readJson<T>(path: string): T | null {
-  if (!existsSync(path)) return null
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as T
-  } catch {
-    return null
-  }
+function readYaml(path: string): Record<string, unknown> {
+  return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
 }
 
-function readYamlSafe(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {}
-  try {
-    return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
-  } catch {
-    return {}
-  }
-}
-
-function entryBlocks(entry: MemEntry): string[] {
-  const blocks = entry.sem?.blocks ?? []
-  const supp = entry.sem?.supplement_blocks ?? []
-  const combined = [...blocks, ...supp]
-  if (!combined.length) return [entry.men?.content ?? '']
-  return combined
-}
-
-function generateMemoryId(personId: string, entries: MemEntry[], now: Date): string {
+function generateMemoryId(personId: string, existingIds: Set<string>, now: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   const base = `${personId}_MEM_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`
-  const existing = new Set(entries.map(e => e.memory_id ?? ''))
-  if (!existing.has(base)) return base
+  if (!existingIds.has(base)) return base
   let seq = 1
-  while (existing.has(`${base}_${String(seq).padStart(2, '0')}`)) seq++
+  while (existingIds.has(`${base}_${String(seq).padStart(2, '0')}`)) seq++
   return `${base}_${String(seq).padStart(2, '0')}`
-}
-
-function loadEmbeddings(embPath: string): Float32Array | null {
-  if (!existsSync(embPath)) return null
-  try {
-    return readNpyF32(embPath).data
-  } catch {
-    return null
-  }
 }
 
 /** 计算 entries 的 embedding 矩阵（增量：仅编码最后一条 vstack；否则全量）。纯计算无落盘。 */
@@ -70,7 +45,7 @@ async function computeEmbeddings(
 ): Promise<{ data: Float32Array; shape: [number, number] }> {
   if (existing && existingDim > 0 && existing.length / existingDim === entries.length - 1 && entries.length > 0) {
     // ── 增量 ──
-    const newBlocks = entryBlocks(entries[entries.length - 1]!)
+    const newBlocks = entries[entries.length - 1]!.blocks ?? []
     if (newBlocks.length) {
       const blockEmbs = await encode(newBlocks, modelCacheDir)
       // max-pooling（与 p2-mem_build.py 一致）
@@ -96,7 +71,7 @@ async function computeEmbeddings(
   const entryMap: Array<[number, number]> = []
   for (const e of entries) {
     const start = allBlocks.length
-    allBlocks.push(...entryBlocks(e))
+    allBlocks.push(...(e.blocks ?? []))
     entryMap.push([start, allBlocks.length])
   }
 
@@ -129,7 +104,8 @@ async function computeEmbeddings(
   return { data: new Float32Array(entries.length * 512), shape: [entries.length, 512] }
 }
 
-async function rebuildEmbeddings(
+/** 全量重建 embeddings 索引（迁移脚本用：mem 行折叠后 rowid 重排，npy 必须重编码对位） */
+export async function rebuildEmbeddings(
   neuronPath: string,
   entries: MemEntry[],
   modelCacheDir: string,
@@ -142,13 +118,9 @@ async function rebuildEmbeddings(
   let existing: Float32Array | null = null
   let existingDim = 0
   if (!forceFull && existsSync(embPath)) {
-    try {
-      const { data, shape } = readNpyF32(embPath)
-      existing = data
-      existingDim = shape[1] ?? 0
-    } catch {
-      existing = null
-    }
+    const { data, shape } = readNpyF32(embPath)
+    existing = data
+    existingDim = shape[1] ?? 0
   }
 
   const result = await computeEmbeddings(entries, modelCacheDir, existing, existingDim)
@@ -168,18 +140,10 @@ function writeIndexConfig(confPath: string, shape: [number, number]): void {
   renameSync(tmp, confPath)
 }
 
-function atomicWriteMem(memPath: string, entries: MemEntry[]): void {
-  const tmp = `${memPath}.tmp`
-  writeFileSync(tmp, serializeMem(entries) + '\n', 'utf-8')
-  renameSync(tmp, memPath)
-}
-
 export interface RememberInput {
   neuron: string
   content: string
-  summary?: string
   blocks?: string[]
-  pattern?: string
   source?: string
   confidence?: number
   half_life?: number
@@ -204,7 +168,6 @@ export type RememberResult =
 function validateCommon(input: RememberInput): string | null {
   if (!input.content?.trim()) return 'content 不能为空'
   if (!input.source?.trim()) return 'source 不能为空'
-  if (!input.pattern?.trim()) return 'pattern 不能为空'
   return null
 }
 
@@ -215,7 +178,7 @@ function loadNeuron(neuronId: string, cwd?: string): { neuronPath: string; cfg: 
   } catch (e) {
     return { error: (e as Error).message }
   }
-  const cfg = readYamlSafe(join(neuronPath, 'config.yaml'))
+  const cfg = readYaml(join(neuronPath, 'config.yaml'))
   const cfgContext = `Neuron '${neuronId}' config.yaml: ${join(neuronPath, 'config.yaml')}`
   try {
     cfgRequired(cfg, 'person.id', cfgContext)
@@ -228,6 +191,41 @@ function loadNeuron(neuronId: string, cwd?: string): { neuronPath: string; cfg: 
   return { neuronPath, cfg, modelCacheDir: join(getGlobalRoot(), 'cache', 'models') }
 }
 
+function buildEntry(
+  input: RememberInput,
+  mid: string,
+  cfg: Record<string, unknown>,
+): MemEntry {
+  return {
+    memory_id: mid,
+    revelant: input.revelant ?? [],
+    blocks: input.blocks?.length ? input.blocks : [input.content],
+    source: input.source!,
+    confidence: input.confidence ?? Number(cfgRequired(cfg, 'memory.default_confidence', '')),
+    half_life: input.half_life ?? Number(cfgRequired(cfg, 'memory.default_half_life', '')),
+    core_file: input.core_file ?? null,
+    supersedes: null,
+    deprecated_by: null,
+  }
+}
+
+/** embeddings 与 mem 行数一致性自愈（不一致先全量重建） */
+async function ensureIndexAligned(
+  neuronPath: string,
+  entries: MemEntry[],
+  modelCacheDir: string,
+): Promise<{ existing: Float32Array | null; existingDim: number }> {
+  const embPath = join(neuronPath, 'l2.mem', 'embeddings.npy')
+  if (!existsSync(embPath)) return { existing: null, existingDim: 0 }
+  const { data, shape } = readNpyF32(embPath)
+  if (shape[0] !== entries.length) {
+    await rebuildEmbeddings(neuronPath, entries, modelCacheDir, true)
+    const rebuilt = readNpyF32(embPath)
+    return { existing: rebuilt.data, existingDim: rebuilt.shape[1] ?? 0 }
+  }
+  return { existing: data, existingDim: shape[1] ?? 0 }
+}
+
 /** 追加一条记忆到 Neuron 记忆层，并自动重建索引 */
 export async function addMemory(input: RememberInput, cwd?: string): Promise<RememberResult> {
   const invalid = validateCommon(input)
@@ -238,76 +236,37 @@ export async function addMemory(input: RememberInput, cwd?: string): Promise<Rem
 
   const memDir = join(neuronPath, 'l2.mem')
   mkdirSync(memDir, { recursive: true })
-  const memPath = join(memDir, 'mem.json')
-  const entries = readJson<MemEntry[]>(memPath)
-  if (entries && !Array.isArray(entries)) {
-    return { status: 'error', message: `mem.json 顶层不是数组，拒绝写入: ${typeof entries}` }
-  }
-  const list: MemEntry[] = entries ?? []
+  const dbPath = join(memDir, 'mem.db')
+  const entries = readMemories(dbPath)
 
   // ── 生成 memory_id ──
   let mid: string
   if (input.memory_id) {
     mid = input.memory_id.trim()
-    if (list.some(e => e.memory_id === mid)) {
+    if (entries.some(e => e.memory_id === mid)) {
       return { status: 'error', message: `memory_id 已存在: ${mid}` }
     }
   } else {
     const personId = String(cfgRequired(cfg, 'person.id', ''))
-    mid = generateMemoryId(personId, list, new Date())
+    mid = generateMemoryId(personId, new Set(entries.map(e => e.memory_id)), new Date())
   }
 
-  const entry: MemEntry = {
-    memory_id: mid,
-    men: {
-      content: input.content,
-      source: input.source!,
-      revelant: input.revelant ?? [],
-      core_file: input.core_file ?? [],
-    },
-    sem: {
-      summary: input.summary ?? input.content.slice(0, 80),
-      pattern: input.pattern!,
-      blocks: input.blocks?.length ? input.blocks : [input.content],
-    },
-    confidence: input.confidence ?? Number(cfgRequired(cfg, 'memory.default_confidence', '')),
-    half_life: input.half_life ?? Number(cfgRequired(cfg, 'memory.default_half_life', '')),
-  }
+  const entry = buildEntry(input, mid, cfg)
 
   // ── 自愈：mem/emb 不一致先全量重建 ──
-  const embPath = join(memDir, 'embeddings.npy')
-  let existing: Float32Array | null = null
-  let existingDim = 0
-  if (existsSync(embPath)) {
-    try {
-      const { data, shape } = readNpyF32(embPath)
-      if (shape[0] !== list.length) {
-        await rebuildEmbeddings(neuronPath, list, modelCacheDir, true)
-        const rebuilt = readNpyF32(embPath)
-        existing = rebuilt.data
-        existingDim = rebuilt.shape[1] ?? 0
-      } else {
-        existing = data
-        existingDim = shape[1] ?? 0
-      }
-    } catch {
-      existing = null
-    }
-  }
+  const aligned = await ensureIndexAligned(neuronPath, entries, modelCacheDir)
 
   // ── 追加 + 编码（先算后写） ──
-  list.push(entry)
-  const embeddings = await computeEmbeddings(list, modelCacheDir, existing, existingDim)
+  const list = [...entries, entry]
+  const embeddings = await computeEmbeddings(list, modelCacheDir, aligned.existing, aligned.existingDim)
 
-  // ── 落盘（原子写） ──
-  atomicWriteMem(memPath, list)
+  // ── 落盘（DB + 索引；索引写失败回滚 DB 行） ──
+  insertMemory(dbPath, entry)
   try {
-    writeNpyF32(embPath, embeddings.data, embeddings.shape)
+    writeNpyF32(join(memDir, 'embeddings.npy'), embeddings.data, embeddings.shape)
     writeIndexConfig(join(memDir, 'index_config.json'), embeddings.shape)
   } catch (e) {
-    // 索引写失败 → 回滚刚追加的条目
-    list.pop()
-    atomicWriteMem(memPath, list)
+    deleteMemory(dbPath, mid)
     throw e
   }
 
@@ -322,7 +281,7 @@ export async function addMemory(input: RememberInput, cwd?: string): Promise<Rem
   }
 }
 
-/** supersede 修正：追加修正条目（men.supersedes=旧id）+ 旧条目标注 men.deprecated_by */
+/** supersede 修正：追加修正条目（supersedes=旧id）+ 旧条目标注 deprecated_by */
 export async function updateMemory(
   input: RememberInput & { memory_id: string },
   cwd?: string,
@@ -335,81 +294,48 @@ export async function updateMemory(
 
   const memDir = join(neuronPath, 'l2.mem')
   mkdirSync(memDir, { recursive: true })
-  const memPath = join(memDir, 'mem.json')
-  const entries = readJson<MemEntry[]>(memPath)
-  if (entries && !Array.isArray(entries)) {
-    return { status: 'error', message: `mem.json 顶层不是数组，拒绝写入: ${typeof entries}` }
-  }
-  const list: MemEntry[] = entries ?? []
+  const dbPath = join(memDir, 'mem.db')
+  const entries = readMemories(dbPath)
 
   // ── 旧条目校验（必须存在且未被废弃） ──
-  const old = list.find(e => e.memory_id === input.memory_id)
+  const old = entries.find(e => e.memory_id === input.memory_id)
   if (!old) {
     return { status: 'error', message: `memory_id 不存在: ${input.memory_id}` }
   }
-  if (old.men?.deprecated_by) {
+  if (old.deprecated_by) {
     return {
       status: 'error',
-      message: `memory_id 已被 ${old.men.deprecated_by} 废弃，请对最新条目再做 update`,
+      message: `memory_id 已被 ${old.deprecated_by} 废弃，请对最新条目再做 update`,
     }
   }
 
-  const mid = generateMemoryId(String(cfgRequired(cfg, 'person.id', '')), list, new Date())
+  const mid = generateMemoryId(
+    String(cfgRequired(cfg, 'person.id', '')),
+    new Set(entries.map(e => e.memory_id)),
+    new Date(),
+  )
   const entry: MemEntry = {
-    memory_id: mid,
-    men: {
-      content: input.content,
-      source: input.source!,
-      revelant: input.revelant ?? [],
-      core_file: input.core_file ?? [],
-      supersedes: input.memory_id, // 纠错链：指向被修正的旧条目
-    },
-    sem: {
-      summary: input.summary ?? input.content.slice(0, 80),
-      pattern: input.pattern!,
-      blocks: input.blocks?.length ? input.blocks : [input.content],
-    },
-    confidence: input.confidence ?? Number(cfgRequired(cfg, 'memory.default_confidence', '')),
-    half_life: input.half_life ?? Number(cfgRequired(cfg, 'memory.default_half_life', '')),
+    ...buildEntry(input, mid, cfg),
+    supersedes: input.memory_id, // 纠错链：指向被修正的旧条目
   }
 
   // ── 自愈 ──
-  const embPath = join(memDir, 'embeddings.npy')
-  let existing: Float32Array | null = null
-  let existingDim = 0
-  if (existsSync(embPath)) {
-    try {
-      const { data, shape } = readNpyF32(embPath)
-      if (shape[0] !== list.length) {
-        await rebuildEmbeddings(neuronPath, list, modelCacheDir, true)
-        const rebuilt = readNpyF32(embPath)
-        existing = rebuilt.data
-        existingDim = rebuilt.shape[1] ?? 0
-      } else {
-        existing = data
-        existingDim = shape[1] ?? 0
-      }
-    } catch {
-      existing = null
-    }
-  }
+  const aligned = await ensureIndexAligned(neuronPath, entries, modelCacheDir)
 
   // ── 追加 + 旧条目标废弃 + 编码 ──
-  list.push(entry)
-  if (!old.men) old.men = { content: '', source: '' }
-  old.men.deprecated_by = mid
-  const embeddings = await computeEmbeddings(list, modelCacheDir, existing, existingDim)
+  const list = [...entries, entry]
+  const embeddings = await computeEmbeddings(list, modelCacheDir, aligned.existing, aligned.existingDim)
 
   // ── 落盘 ──
-  atomicWriteMem(memPath, list)
+  insertMemory(dbPath, entry)
+  markDeprecated(dbPath, input.memory_id, mid)
   try {
-    writeNpyF32(embPath, embeddings.data, embeddings.shape)
+    writeNpyF32(join(memDir, 'embeddings.npy'), embeddings.data, embeddings.shape)
     writeIndexConfig(join(memDir, 'index_config.json'), embeddings.shape)
   } catch (e) {
     // 回滚（撤新增 + 撤废弃标注）
-    list.pop()
-    delete old.men.deprecated_by
-    atomicWriteMem(memPath, list)
+    deleteMemory(dbPath, mid)
+    markDeprecated(dbPath, input.memory_id, null)
     throw e
   }
 
@@ -420,7 +346,7 @@ export async function updateMemory(
     memory_id: mid,
     superseded: input.memory_id,
     entry,
-    superseded_entry: old,
+    superseded_entry: { ...old, deprecated_by: mid },
     mem_count: list.length,
     embeddings_shape: embeddings.shape,
   }

@@ -72,38 +72,33 @@ function describeDefaultUrl(port: number = PORT): string {
 //   auth            → 列出已授权设备（设备摘要 + 授权时间 + 最后活跃时间/IP；网关侧带票证请求时回写）
 //   auth add <码>   → 把设备门显示的请求码加入授权名单（设备端轮询 /gateway/activate 自动激活）
 //   auth off <n>    → 撤销第 n 台已授权设备（其 cookie 立即失效）
-function deviceSummary(ua?: string): string {
-  if (!ua) return '未知设备（待设备访问后记录）'
-  const os = /iPad/.test(ua)
-    ? 'iPad'
-    : /iPhone/.test(ua)
-      ? 'iPhone'
-      : /Android/.test(ua)
-        ? 'Android'
-        : /Windows/.test(ua)
-          ? 'Windows'
-          : /Macintosh/.test(ua)
-            ? 'Mac'
-            : '其它'
-  const br = /Edg(iOS|A)?\//.test(ua)
+function deviceSummary(ua?: string, hint?: string): string {
+  const u = ua ?? ''
+  if (!u && !hint) return '未知设备（待设备访问后记录）'
+  // hint = 设备自报类型（前端 deviceHint 上报）：iPadOS Safari 桌面模式 UA 与 macOS 全同，UA 侧无解，hint 优先
+  const os = hint
+    ? hint
+    : /iPad/.test(u)
+      ? 'iPad'
+      : /iPhone/.test(u)
+        ? 'iPhone'
+        : /Android/.test(u)
+          ? 'Android'
+          : /Windows/.test(u)
+            ? 'Windows'
+            : /Macintosh/.test(u)
+              ? 'Mac'
+              : '其它'
+  const br = /Edg(iOS|A)?\//.test(u)
     ? 'Edge'
-    : /OPR\//.test(ua)
+    : /OPR\//.test(u)
       ? 'Opera'
-      : /Firefox\//.test(ua)
+      : /Firefox\//.test(u)
         ? 'Firefox'
-        : /CriOS\//.test(ua) || /Chrome\//.test(ua)
+        : /CriOS\//.test(u) || /Chrome\//.test(u)
           ? 'Chrome'
           : 'Safari'
   return `${os} · ${br}`
-}
-
-function relSeen(ts?: number): string {
-  if (!ts) return '从未'
-  const s = Math.floor((Date.now() - ts) / 1000)
-  if (s < 60) return '刚刚'
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
-  return new Date(ts).toLocaleString('sv-SE').replace('T', ' ')
 }
 
 async function doAuth(rest: string[]): Promise<string> {
@@ -111,11 +106,9 @@ async function doAuth(rest: string[]): Promise<string> {
   if (!sub || sub === 'list') {
     const list = listGatewayTickets()
     if (!list.length) return `暂无已授权设备。新设备授权：设备打开 ${`http://floria.local:${PORT}/`} 显示请求码 → /server auth add <请求码>`
-    const lines = list.map((t, i) => {
-      const when = t.created ? new Date(t.created).toLocaleString('sv-SE').replace('T', ' ') : '（存量）'
-      const info = [`授权 ${when}`, `活跃 ${relSeen(t.lastSeen)}`, t.lastIp ? `IP ${t.lastIp}` : null].filter(Boolean).join(' · ')
-      return `${i + 1}. ${t.id.slice(0, 8)}…  ${deviceSummary(t.ua)}\n   ${info}`
-    })
+    const lines = list.map((t, i) =>
+      `${i + 1}. ${t.id.slice(0, 8)}…  ${[deviceSummary(t.ua, t.hint), t.lastIp ? `IP ${t.lastIp}` : null].filter(Boolean).join(' · ')}`
+    )
     return `已授权设备 ${list.length} 台：\n${lines.join('\n')}\n撤销: /server auth off <n>`
   }
   if (sub === 'add') {

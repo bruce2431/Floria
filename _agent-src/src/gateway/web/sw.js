@@ -1,6 +1,6 @@
 /* 遥测 · 会话查看器 — Service Worker（静态资源缓存 + 离线兜底） */
 /* 2026-08-28 CORE 改绝对路径：SPA 路径路由（/session/<hash>）下 SW scope=/，相对路径等价但显式绝对防歧义 */
-const CACHE = 'floria-v198'
+const CACHE = 'floria-v240'
 const CORE = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icon.ico',
   '/char/1.jpg', '/char/2.jpg', '/char/3.jpg', '/char/4.jpg',
   '/gate/state-token.webp', '/gate/state-newchat.webp', '/gate/transition.webm', '/gate/transition.mp4']

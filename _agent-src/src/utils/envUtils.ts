@@ -1,5 +1,5 @@
 import memoize from 'lodash-es/memoize.js'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 
@@ -50,6 +50,26 @@ function findPortableRoot(startDir: string): string | null {
     if (parent === dir) return null // reached filesystem root
     dir = parent
   }
+}
+
+// Bare-machine bootstrap, called from the TrustDialog "yes" branch: when the
+// exe would otherwise fall through to the home-dir default (no env var, no
+// adjacent `.claude`, no portable marker up the tree), trusting the folder
+// seeds the portable root next to the exe so the config home follows the exe
+// from the next launch onward. Throws on failure (e.g. read-only dir) — the
+// caller reports it without blocking the trust flow. This run keeps using the
+// fallback config home; the marker is picked up on the next launch.
+export function maybeInitPortableRoot(): void {
+  if (process.env.CLAUDE_CONFIG_DIR) return
+  const exeDir = dirname(process.execPath)
+  if (exeDir === homedir()) return
+  // Never touch an existing `.claude` next to the exe — it may be project-local
+  // session storage; seeding into it could hijack or pollute it.
+  if (existsSync(join(exeDir, '.claude'))) return
+  if (findPortableRoot(exeDir)) return
+  const configHome = join(exeDir, '.claude')
+  mkdirSync(configHome)
+  writeFileSync(join(configHome, PORTABLE_MARKER_FILE), '')
 }
 
 export const getClaudeConfigHomeDir = memoize(

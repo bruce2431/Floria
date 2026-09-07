@@ -15,12 +15,7 @@ import { getCwdRoot, getGlobalRoot, listNeurons } from './config.js'
 const INLINE_LIMIT = 8
 
 export function renderNeuronRoster(cwd?: string): string {
-  let neurons
-  try {
-    neurons = listNeurons(cwd)
-  } catch {
-    return '' // id 冲突等扫描异常：名册静默缺席，不阻断会话
-  }
+  const neurons = listNeurons(cwd)
   if (!neurons.length) return ''
 
   const cwdRoot = getCwdRoot(cwd)
@@ -51,11 +46,7 @@ export function renderNeuronRoster(cwd?: string): string {
 
 /** 名册是否可用（有 cwd 根或全局根神经元）——供注入点快速短路 */
 export function hasNeuronRoster(cwd?: string): boolean {
-  try {
-    if (existsSync(join(getCwdRoot(cwd), 'neurons'))) return true
-    if (existsSync(join(getGlobalRoot(), 'neurons'))) return true
-  } catch {
-    return false
-  }
+  if (existsSync(join(getCwdRoot(cwd), 'neurons'))) return true
+  if (existsSync(join(getGlobalRoot(), 'neurons'))) return true
   return false
 }

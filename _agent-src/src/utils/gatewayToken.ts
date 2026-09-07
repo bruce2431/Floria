@@ -199,6 +199,7 @@ export function listGatewayTickets(): (GatewayTicket & DeviceInfo)[] {
 // 展示时按 id 合并。devices 文件两进程都读（TTL 3s 刷新），只有网关进程写（内存副本权威）。
 interface DeviceInfo {
   ua?: string // 最近一次见到的 User-Agent 原文（截断 200；展示层渲染成「iPad · Safari」摘要）
+  hint?: string // 设备自报类型（2026-09-05：iPadOS Safari 桌面模式 UA 与 macOS 全同，iPad 判定只能前端上报；展示层 hint 优先于 UA）
   lastIp?: string // 最近一次活跃的来源 IPv4
   lastSeen?: number // 最近一次活跃时间戳
 }
@@ -228,14 +229,15 @@ function ensureDevicesLoaded(): void {
 const TOUCH_PERSIST_MS = 60_000
 const touchPersistAt = new Map<string, number>()
 
-/** 设备活跃回写（仅网关进程调用：受保护 HTTP 请求 + WS 升级）。写盘节流 60s/票。 */
-export function touchGatewayTicket(id: string, ua?: string, ip?: string): void {
+/** 设备活跃回写（仅网关进程调用：受保护 HTTP 请求 + WS 升级 + activate 配对）。写盘节流 60s/票。 */
+export function touchGatewayTicket(id: string, ua?: string, ip?: string, hint?: string): void {
   if (!id) return
   ensureDevicesLoaded()
   const d = devices[id] ?? (devices[id] = {})
   const now = Date.now()
   d.lastSeen = now
   if (ua) d.ua = ua.slice(0, 200)
+  if (hint) d.hint = hint
   if (ip) d.lastIp = ip
   if (now - (touchPersistAt.get(id) ?? 0) > TOUCH_PERSIST_MS) {
     touchPersistAt.set(id, now)

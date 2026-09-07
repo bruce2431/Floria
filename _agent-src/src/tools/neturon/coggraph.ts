@@ -6,6 +6,9 @@
  *
  * 全链：recall 落 pre 记录 → fill_precog 标注 → build_graph 折叠进认知图
  * （pre→consumed）→ detect_communities 多分辨率 Leiden → community.json（读侧反查）。
+ * 2026-09-04 存储层 DB 化（SubPj7 定案同步）：mem/cog 读写走 mem.db/precog.db，
+ * 认知图/社群仍为 JSON 快照（p5-p7 派生重建=整体替换）；含防假标注门禁
+ * （pre 记录未标注完不许跑认知管线，SubPj7 2026-08-12 修复同步）。
  *
  * 与 Python 的既定差异：
  *   - 版本快照（_snapshot_version/lineage）不移植——TS 内置引擎全线无版本系统
@@ -24,11 +27,18 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { dirname, join } from 'node:path'
 import { cfgGet, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
 import { parse as parseYaml } from 'yaml'
-import { serializeCog } from './serialize.js'
+import {
+  deletePrecog,
+  deriveEntryText,
+  markPrecogConsumed,
+  readMemories,
+  readPrecogRecords,
+  type MemEntry,
+  type PrecogRecord,
+} from './db.js'
 import { hasChinese, segmentChinese } from './segment.js'
 import { encode } from './embedder.js'
 import { leidenCommunities, type LeidenEdgeInput } from './leiden.js'
-import type { MemEntry, PrecogRecord } from './retriever.js'
 
 // ───────────────────────── 类型 ─────────────────────────
 
@@ -104,33 +114,17 @@ export interface DetectCommunitiesResult {
 
 function readJson<T>(path: string): T | null {
   if (!existsSync(path)) return null
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as T
-  } catch {
-    return null
-  }
+  return JSON.parse(readFileSync(path, 'utf-8')) as T
 }
 
-function readYamlSafe(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {}
-  try {
-    return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
-  } catch {
-    return {}
-  }
+function readYaml(path: string): Record<string, unknown> {
+  return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
 }
 
 function writeJsonAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
   writeFileSync(tmp, `${JSON.stringify(data, null, 1)}\n`, 'utf-8')
-  renameSync(tmp, path)
-}
-
-function writeCogJsonAtomic(path: string, data: unknown): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const tmp = `${path}.tmp`
-  writeFileSync(tmp, `${serializeCog(data as never)}\n`, 'utf-8')
   renameSync(tmp, path)
 }
 
@@ -504,12 +498,14 @@ async function foldIntoExisting(
 }
 
 function loadMemIndex(neuronPath: string): Map<string, MemEntry> {
-  const entries = readJson<MemEntry[]>(join(neuronPath, 'l2.mem', 'mem.json'))
+  const dbPath = join(neuronPath, 'l2.mem', 'mem.db')
+  const entries = readMemories(dbPath)
+  if (!entries.length && !existsSync(dbPath)) {
+    throw new Error(`mem.db 不存在（未迁移 DB 化）: ${dbPath}`)
+  }
   const map = new Map<string, MemEntry>()
-  if (entries) {
-    for (const e of entries) {
-      if (e.memory_id) map.set(e.memory_id, e)
-    }
+  for (const e of entries) {
+    if (e.memory_id) map.set(e.memory_id, e)
   }
   return map
 }
@@ -544,7 +540,7 @@ async function phase2Associate(
   for (const c of cog1List) {
     const blockTexts: string[] = []
     for (const t of [...c.true_set].sort()) {
-      const s = memIndex.get(t)?.sem?.summary ?? ''
+      const s = memIndex.get(t) ? deriveEntryText(memIndex.get(t)!) : ''
       if (s) blockTexts.push(s)
     }
     allNodes.push({
@@ -648,21 +644,46 @@ async function phase2Associate(
 
 // ───────────────────────── p5 入口 ─────────────────────────
 
+/** 防假标注门禁（SubPj7 2026-08-12 修复同步）：pre 记录 description 空或任一 results[].accuracy 空 → 违规清单 */
+function incompletePreRecords(records: PrecogRecord[]): string[] {
+  const violations: string[] = []
+  for (const r of records) {
+    if (r.status !== 'pre') continue
+    if (!(r.description ?? '').trim()) {
+      violations.push(`${r.record_id}: description 为空`)
+      continue
+    }
+    for (const res of r.results ?? []) {
+      if (!(res.accuracy ?? '').trim()) {
+        violations.push(`${r.record_id}: results[${res.id ?? ''}].accuracy 为空`)
+      }
+    }
+  }
+  return violations
+}
+
 /** 批折叠构建认知图（显式目录版——测试隔离用） */
 export async function buildCogGraphInDir(neuronPath: string): Promise<CogGraphBuildResult> {
   const cfgPath = join(neuronPath, 'config.yaml')
-  const cfg = readYamlSafe(cfgPath)
+  const cfg = readYaml(cfgPath)
   const cfgContext = `config.yaml: ${cfgPath}`
-  const cogPath = join(neuronPath, 'l1.cog', 'cog.json')
+  const precogDbPath = join(neuronPath, 'l1.cog', 'precog.db')
   const graphPath = join(neuronPath, 'l1.cog', 'cog_graph.json')
 
-  const data = readJson<{ precog_records?: PrecogRecord[]; cog_records?: unknown[] }>(cogPath)
-  if (!data) return { status: 'error', message: 'cog.json 不存在' }
+  const records = readPrecogRecords(precogDbPath)
+  if (!records.length) return { status: 'error', message: 'precog.db 无记录' }
 
-  const records = data.precog_records ?? []
+  // 防假标注门禁：pre 记录没标注完不许跑认知管线
+  const violations = incompletePreRecords(records)
+  if (violations.length) {
+    return {
+      status: 'error',
+      message: `存在未标注完整的 pre 记录（先经 neuron_fill_precog 填写，防假标注门禁）：${violations.join('; ')}`,
+    }
+  }
 
   const { kept, removed: removedTtl } = ttlCleanup(records, cfg)
-  const activeRecords = removedTtl > 0 ? kept : records
+  const activeRecords = kept
 
   const personId = String(cfgRequired(cfg, 'person.id', cfgContext))
   const cogPrefix = `C${personId}`
@@ -687,32 +708,33 @@ export async function buildCogGraphInDir(neuronPath: string): Promise<CogGraphBu
     ? await foldIntoExisting(preNodes, existing, opts)
     : await phase1Merge(preNodes, opts)
 
-  // 生命周期：本次聚合的 pre → consumed
-  let nPre = 0
-  for (const r of activeRecords) {
-    if (r.status === 'pre') {
-      r.status = 'consumed'
-      nPre++
-    }
+  // 生命周期：TTL 过期 consumed 清除 + 本次聚合的 pre → consumed
+  if (removedTtl > 0) {
+    const ttlDays = Number(cfgGet(cfg, 'precog.ttl_days', 90))
+    const cutoff = Date.now() - ttlDays * 86_400_000
+    const expired = records.filter(r => {
+      if (r.status !== 'consumed') return false
+      const rt = recordTime(r.record_id ?? '')
+      return rt !== null && rt.getTime() < cutoff
+    })
+    deletePrecog(precogDbPath, expired.map(r => r.record_id))
   }
+  const preIds = activeRecords.filter(r => r.status === 'pre').map(r => r.record_id)
+  markPrecogConsumed(precogDbPath, preIds)
 
   // Phase 2：重算边（含折叠后的节点全集）
   const memIndex = loadMemIndex(neuronPath)
   const graph = await phase2Associate(cog1List, [], opts, memIndex)
 
   writeJsonAtomic(graphPath, graph)
-  if (removedTtl > 0 || preNodes.length) {
-    data.precog_records = activeRecords
-    writeCogJsonAtomic(cogPath, data)
-  }
 
   return {
     status: 'ok',
     nodes: graph.nodes.length,
     edges: graph.edges.length,
-    consumed: nPre,
+    consumed: preIds.length,
     ttl_removed: removedTtl,
-    message: `cog_graph.json (${graph.nodes.length} nodes, ${graph.edges.length} edges)，consumed ${nPre} 条 pre 记录，TTL 清理 ${removedTtl}`,
+    message: `cog_graph.json (${graph.nodes.length} nodes, ${graph.edges.length} edges)，consumed ${preIds.length} 条 pre 记录，TTL 清理 ${removedTtl}`,
   }
 }
 
@@ -741,7 +763,7 @@ interface MemberOut {
 /** 多分辨率 Leiden 社群检测（显式目录版）——重写 community.json（旧文件 .bak） */
 export function detectCommunitiesInDir(neuronPath: string): DetectCommunitiesResult {
   const cfgPath = join(neuronPath, 'config.yaml')
-  const cfg = readYamlSafe(cfgPath)
+  const cfg = readYaml(cfgPath)
   const cfgContext = `config.yaml: ${cfgPath}`
   const graphPath = join(neuronPath, 'l1.cog', 'cog_graph.json')
   const commPath = join(neuronPath, 'l1.cog', 'community.json')

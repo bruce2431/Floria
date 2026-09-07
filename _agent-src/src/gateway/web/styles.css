@@ -185,6 +185,9 @@ a { text-decoration: none; color: inherit; }
    按先后顺序独立堆叠）：收紧间距，保持用户气泡形态 */
 .done-body .msg.user { margin: 3px 0; }
 .done-body .msg.user .body { padding: 7px 12px; }
+/* 撤回动画（2026-09-06，app.js restored case 加 msg-out）：气泡塌缩淡出——max-height 由 JS
+   内联设初值，!important 归零驱动过渡；配套 margin 收拢防残白 */
+.msg.msg-out { overflow: hidden; opacity: 0; transform: translateY(-6px); max-height: 0 !important; margin-top: 0 !important; margin-bottom: 0 !important; transition: opacity .2s ease, transform .26s ease, max-height .32s cubic-bezier(.4, 0, .2, 1), margin .32s ease; pointer-events: none; }
 .done-think { color: var(--text); font-size: 14px; line-height: 1.65; word-break: break-word; }
 .done-think p, .done-think .p { margin: 2px 0; }
 
@@ -396,6 +399,7 @@ a { text-decoration: none; color: inherit; }
 .change-card .ch-toggle svg { width: 12px; height: 12px; display: block; transition: transform 0.2s ease; }
 .change-card .ch-toggle.open svg { transform: rotate(90deg); }
 @media (hover: none) { .change-card .ch-toggle { opacity: 1; } }
+body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪装 hover:hover，同 body.touch 段） */
 .change-card .ch-list { border-top: 1px solid #eee; }
 .change-card .ch-row {
   display: flex; align-items: baseline; gap: 8px; padding: 7px 12px;
@@ -515,11 +519,15 @@ a { text-decoration: none; color: inherit; }
   width: calc(100% - 32px);
 }
 /* 会话态：docked 沉底（DOM 在 #chat-area 内，相对 chat-area 定位，bar 底边距 22px；
-   宽度=dsh 卡片上限 780px = 聊天内容 748 + 32px） */
+   宽度随窗口自适应（2026-09-06 二轮定案）：正常/大窗口保持 dsh 卡片 780px 原尺寸不变，
+   小窗口按 70vw 比例收缩（820px 窗口起生效，取代旧版「>820px 恒 780」的死板行为）；
+   calc(100% - 40px) 防溢出（100%=chat-area 宽，侧栏展开时自动收窄）。
+   首版 max(780px,70vw)+1100 封顶方向搞反（大窗口变宽）被用户否决已回滚。
+   空态（#empty-hint #input-wrap）不受影响：输入栏绑定趴栏画面，维持 stage 比例） */
 #input-wrap.docked {
   top: calc(100% - 22px);
   transform: translate(-50%, -100%);
-  width: min(780px, calc(100% - 40px));
+  width: min(780px, 70vw, calc(100% - 40px));
 }
 /* dsh .card：白输入表面 + 22px 圆角 + 0.10 输入描边 + shadow-lv2 + 16/24 基础字 */
 #input-bar {
@@ -537,7 +545,7 @@ a { text-decoration: none; color: inherit; }
   box-sizing: border-box;
   border: none; outline: none; resize: none; background: transparent;
   padding: 4px 12px 0 16px;
-  font: inherit; line-height: inherit; color: #0f1115;
+  font: inherit; line-height: inherit; color: #0f1115; text-align: left;
   white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
   min-height: 52px; max-height: 336px; overflow-y: auto;
 }
@@ -605,6 +613,22 @@ a { text-decoration: none; color: inherit; }
   cursor: pointer; display: grid; place-items: center;
 }
 #img-pills .img-pill .img-x:hover { background: #2c3138; }
+/* 2026-09-06 拖拽上传浮层：全屏提示「松开以添加图片」。display:none 默认态 +
+   :not([hidden]) 才 flex（同 #img-pills 写法，防作者 display 覆盖 UA [hidden]）；
+   pointer-events:none 拖拽事件穿透到 document，计数不被浮层自身干扰 */
+#drop-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(10, 12, 15, 0.55);
+  pointer-events: none;
+}
+#drop-overlay:not([hidden]) { display: flex; }
+#drop-overlay .drop-hint {
+  padding: 14px 28px;
+  border: 2px dashed #7a8494; border-radius: 12px;
+  background: rgba(22, 26, 31, 0.9);
+  color: #e8eaed; font-size: 15px;
+}
 /* dsh ModelSelect .trigger —— 28px chip、透明无边框、24px 圆角、13/20/500 secondary 字、
    4px gap、caption 色 14px chevron；max-width 跟随容器 45cqw */
 #model-seat.trigger {
@@ -725,11 +749,12 @@ a { text-decoration: none; color: inherit; }
    外观=dsh .trigger 同族（28px chip）；弹层=cmd-pop 同表面（r12 白底 shadow-lv3，向上弹出）。
    空态=目标项目选择（可点切换）；会话态（#chat-area.in-session）=工作文件夹标识保留显示
    但锁定不可改（.locked 去箭头/禁 hover，白底常驻）；管理/预览态挂载点不在 chat-area 自动隐藏 */
-#proj-root { position: relative; display: none; }
+#proj-root { position: relative; display: none; min-width: 0; }
 #empty-hint #proj-root { display: flex; }
 #chat-area.in-session #proj-root { display: flex; }
 #proj-seat {
   display: inline-flex; align-items: center; gap: 4px;
+  min-width: 0; max-width: 100%;
   height: 28px; padding: 0 8px;
   border: none; border-radius: 999px; background: #fff; color: #0f1115;
   font-size: 13px; font-weight: 500; line-height: 20px; cursor: pointer;
@@ -740,7 +765,10 @@ a { text-decoration: none; color: inherit; }
 #proj-seat.locked .chevron { display: none; }
 #proj-seat .projIco { display: inline-flex; flex: none; color: #81858c; }
 #proj-seat .projIco svg { width: 14px; height: 14px; display: block; }
-#proj-seat .projLabel { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 标签截断：240px 上限（防超长项目名）+ min-width:0 打通 row→tools→proj-root→proj-seat
+   收缩链（flex 默认 min-width:auto 挡收缩，手机窄卡里 chip 撑爆工具行、trailing 被挤换行），
+   放得下显全称、放不下省略号 */
+#proj-seat .projLabel { max-width: 240px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #proj-seat .chevron { display: inline-flex; flex: none; color: #adb2b8; }
 #proj-seat .chevron svg { width: 14px; height: 14px; display: block; }
 #proj-pop {
@@ -1146,12 +1174,6 @@ body.token-gate #input-wrap { display: none; }
 #recent-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px 16px; position: relative; }
 #recent-left { display: flex; align-items: center; gap: 4px; min-height: 24px; }
 #recent-label { font-size: 13px; font-weight: 600; color: #a9a9ae; cursor: default; }
-.fold-btn {
-  width: 20px; height: 20px; display: none; align-items: center; justify-content: center;
-  color: var(--text-3); border-radius: 6px; font-size: 11px;
-}
-#recent-head:hover .fold-btn { display: flex; }
-.fold-btn:hover { background: var(--hover); color: var(--text); }
 #recent-right { display: flex; align-items: center; gap: 2px; }
 .rh-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--text-2); font-size: 15px; }
 .rh-btn:hover { background: var(--hover); color: var(--text); }
@@ -1222,6 +1244,7 @@ body.token-gate #input-wrap { display: none; }
 .mgr-desc { font-size: 12px; color: var(--text-2); margin-top: 3px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; } /* min-height 固定两行介绍位（12px×1.5×2），保证全部卡片等高（每卡都能承载两行介绍） */
 .mgr-more { flex: none; width: 26px; height: 26px; border-radius: 7px; color: var(--text-2); font-size: 16px; line-height: 1; opacity: 0; transition: opacity 0.15s, background 0.15s; }
 .mgr-card:hover .mgr-more, .mgr-more:focus-visible { opacity: 1; }
+body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 hover:hover，同 body.touch 段） */
 .mgr-more:hover { background: var(--active); }
 /* 管理视图：项目列表（仿插件布设，每个项目胶囊占据一整行） */
 .mgr-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1284,12 +1307,15 @@ body.token-gate #input-wrap { display: none; }
 #recent-body { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
 #recent-body::-webkit-scrollbar { width: 8px; }
 #recent-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-#recent-body.collapsed { display: none; }
 
 .sess-item {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   padding: 7px 10px; border-radius: 8px; color: var(--text); font-size: 13px; line-height: 1.4;
-  transition: background 0.12s; cursor: pointer; border: none;
+  /* 变深不做动画（2026-09-06 用户定案）：hover/选中深底是「保存的状态」不浮起时静态展示。
+     原 0.12s 背景过渡与扶起 .lift-anim 抢同一属性——未选中行 hover 有可见变深脉冲，
+     选中行 .on 盖过 :hover 背景从不变深故无感；移除后扶起过渡成为唯一背景动画，
+     恢复路径（anim:false）也因此真正做到直接终态。 */
+  cursor: pointer; border: none;
 }
 .sess-item:hover { background: var(--hover); }
 .sess-item.on { background: var(--active); }
@@ -1456,6 +1482,10 @@ body.token-gate #input-wrap { display: none; }
   #model-seat.trigger { max-width: 128px; padding: 0 8px; }
   #model-seat.trigger .triggerEffort, #model-seat.trigger .chevron { display: none; }
   #cmd-pop, #model-pop { max-height: 300px; }
+  /* 手机 docked 输入栏宽度：70vw 比例收缩是桌面小窗定案（#input-wrap.docked 主规则），
+     手机视口下 70vw≈275px 反成 min 把卡片压窄变形、且与空态宽度（calc(100% - 32px)）不一致；
+     手机档固定近满宽 + 16px 边距，空态/会话态一致。 */
+  #input-wrap.docked { width: calc(100% - 32px); }
 }
 
 /* ===== 侧栏行 hover 操作（2026-08-24 DSH 侧栏行菜单移植：会话 … 重命名/归档 · 项目 + 新建）===== */
@@ -1469,8 +1499,25 @@ body.token-gate #input-wrap { display: none; }
 @media (hover: hover) and (pointer: fine) {
   .sess-item .sess-more { display: none; }
   .sess-item:hover .sess-more { display: inline-flex; }
+  /* 浮起行三点恒显：列表重建重扶后新节点不恢复 :hover，靠 .lift 兜底（菜单行三点不因重建消失） */
+  .sess-item.lift .sess-more { display: inline-flex; }
 }
+/* 真触屏（body.touch，JS 判定）：iPadOS 桌面模式报 hover:hover+pointer:fine 骗过媒体查询，
+   上列「hover 才显」规则在 iPad 生效 → iOS「hover 改变布局 → 首击吞 click」双击（笔按钮实测）。
+   触屏一律恒显，与下方 hover:none 分支语义对齐。 */
+body.touch .sess-item .sess-more { display: inline-flex; }
 .sess-item .sess-more:hover { background: rgba(0, 0, 0, 0.06); color: var(--text); }
+
+/* ===== 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸露出完整标题 =====
+   JS 把 hover 行临时 position:fixed（#recent-body overflow 裁剪容器，行内加宽必被裁）。
+   .lift = 扶起终态（白卡+描边阴影+上移 2px），.lift-anim = 四路过渡（背景/阴影/上移/宽度）；
+   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一白卡。z-index 60 盖过主区、低于 .row-menu(1100)。 */
+.sess-item.lift {
+  background: #fff; border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+.sess-item.lift-anim { transition: width 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease; }
 .folder-head .folder-add {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 5px; color: var(--text-3); cursor: pointer;
@@ -1480,9 +1527,15 @@ body.token-gate #input-wrap { display: none; }
   .folder-head .folder-add { display: none; }
   .folder-head:hover .folder-add { display: inline-flex; }
 }
+body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显（iPad 伪装 hover:hover，见 sess-more 段注释） */
 .folder-head .folder-add:hover { background: rgba(0, 0, 0, 0.06); color: var(--text); }
 
-/* 会话行菜单（2026-08-24 DSH ui-primitives Menu 移植：白底 r12 + 4px padding + 40px 行 icon16+label） */
+/* 会话行菜单（2026-08-24 DSH ui-primitives Menu 移植：白底 r12 + 4px padding + 40px 行 icon16+label）
+   2026-09-06 子元素化（用户定案）：菜单挂 .sess-item 行内（浮窗=tab 的一部分，鼠标在浮窗上
+   mouseleave 不触发、浮起保持）；fixed 躲 #recent-body overflow 裁剪，定位基准=浮起行 .lift
+   （toggleRowMenu 先 liftStart 扶起才挂菜单，行恒有 transform=fixed 菜单的 containing block，
+   且行自身 fixed 已脱出列表裁剪、触屏同享）；坐标由 positionRowMenu 按 offset 布局系计算
+   （右缘对齐 … 向左展开，弹在行正下方——tab→浮窗路径全程行∪浮窗覆盖，2026-09-06 二轮根修）。 */
 .row-menu {
   position: fixed; z-index: 1100;
   display: flex; flex-direction: column; padding: 4px;

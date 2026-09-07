@@ -11,6 +11,7 @@ import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js';
 import { checkHasTrustDialogAccepted, saveCurrentProjectConfig } from '../../utils/config.js';
 import { getCwd } from '../../utils/cwd.js';
+import { maybeInitPortableRoot } from '../../utils/envUtils.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
 import { Select } from '../CustomSelect/index.js';
@@ -175,6 +176,11 @@ export function TrustDialog(t0) {
         setSessionTrustAccepted(true);
       } else {
         saveCurrentProjectConfig(_temp5);
+      }
+      try {
+        maybeInitPortableRoot();
+      } catch (error) {
+        console.error(`Failed to initialize portable config root next to the exe: ${error}`);
       }
       onDone();
     };

@@ -134,14 +134,11 @@ function backendRegistryPath(): string {
   return join(getPortableRoot(), '.claude', 'backend-registry.json')
 }
 function readBackendRegistry(): Record<string, { pid: number; port: number; startedAt: number }> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(backendRegistryPath(), 'utf8'))
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, { pid: number; port: number; startedAt: number }>)
-      : {}
-  } catch {
-    return {}
-  }
+  if (!existsSync(backendRegistryPath())) return {}
+  const parsed: unknown = JSON.parse(readFileSync(backendRegistryPath(), 'utf8'))
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? (parsed as Record<string, { pid: number; port: number; startedAt: number }>)
+    : {}
 }
 function persistBackendRegistry(): void {
   try {
@@ -237,14 +234,11 @@ function persistWebSessions(): void {
   }
 }
 function adoptWebSessions(): void {
-  let entries: Array<{ sessionId: string; pid: number; startedAt: number }>
-  try {
-    const raw: unknown = JSON.parse(readFileSync(webSessionsRegistryPath(), 'utf8'))
-    if (!Array.isArray(raw)) return
-    entries = raw as Array<{ sessionId: string; pid: number; startedAt: number }>
-  } catch {
-    return
-  }
+  const regPath = webSessionsRegistryPath()
+  if (!existsSync(regPath)) return
+  const raw: unknown = JSON.parse(readFileSync(regPath, 'utf8'))
+  if (!Array.isArray(raw)) return
+  const entries = raw as Array<{ sessionId: string; pid: number; startedAt: number }>
   for (const e of entries) {
     if (!e?.sessionId || !Number.isFinite(e.pid) || webSessions.has(e.sessionId)) continue
     if (!isPidAlive(e.pid)) continue
@@ -307,6 +301,11 @@ const sessionModels = new Map<string, { model: string; updatedAt: number }>()
 // 排队项（仅用户 prompt）。web 排队区置底数据源：/gateway/session.queued 首载 + SSE queue-state 增量。
 // 纯引擎内存态镜像，CLI 断开即随 detach 删除。
 const sessionQueues = new Map<string, { items: Array<{ content: string; ts: number }>; updatedAt: number }>()
+// 2026-09-06 web 打断收口二轮：回合被中止的网关权威时刻（per-session）。打断后 jsonl 零写入，
+// 本时刻是刷新后恢复收口判定的唯一持久源（turn-state SSE 只覆盖不刷新的实时路径）；无 TTL、
+// 不入 sweepStaleMaps——被打断的回合永无回复，语义同前端 turnEndFlags「无 TTL 防运行态复活」。
+// 网关重启即清零：重启连坐杀全部 CLI 进程 → state=null（存活 pid 判定）在 closeSeg 先行收口，无泄漏。
+const turnEndAt = new Map<string, number>()
 // C1 修复：两个内存 Map 无上限（只增不删）→ 长跑泄漏。加 TTL + 死进程惰性清扫。
 const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新视为过期
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
@@ -759,13 +758,9 @@ function readWebAsset(name: string): Buffer | null {
   if (cached) return cached
   const b64 = webAssets[name]
   if (b64 === undefined) return null
-  try {
-    const buf = Buffer.from(b64, 'base64')
-    webAssetCache.set(name, buf)
-    return buf
-  } catch {
-    return null
-  }
+  const buf = Buffer.from(b64, 'base64')
+  webAssetCache.set(name, buf)
+  return buf
 }
 
 const MIME: Record<string, string> = {
@@ -810,12 +805,7 @@ function findProjects(root: string): ProjectInfo[] {
   const groups: ProjectInfo[] = []
   const global = join(root, '.claude', 'projects')
   if (isDir(global)) groups.push({ label: '全局根 · 散装对话', dir: global, scope: 'global', hasPreview: false })
-  let entries: Array<{ name: string; isDirectory: () => boolean }> = []
-  try {
-    entries = readdirSync(root, { withFileTypes: true })
-  } catch {
-    return groups
-  }
+  const entries = readdirSync(root, { withFileTypes: true })
   for (const e of entries) {
     if (!e.isDirectory()) continue
     if (e.name.startsWith('.')) continue
@@ -843,24 +833,20 @@ function findProjects(root: string): ProjectInfo[] {
 function readBackendCfg(previewDir: string): BackendCfg | undefined {
   const pj = join(previewDir, 'preview.json')
   if (!existsSync(pj)) return undefined
-  try {
-    const raw = JSON.parse(readFileSync(pj, 'utf-8')) as {
-      backend?: { name?: unknown; cmd?: unknown; cwd?: string; port?: number; idleMinutes?: number; readyPath?: string }
-    }
-    const b = raw?.backend
-    if (!b || !Array.isArray(b.cmd) || !b.cmd.length) return undefined
-    return {
-      name: typeof b.name === 'string' && b.name ? b.name : undefined,
-      cmd: b.cmd.map(String),
-      // cwd 相对 preview.json 所在目录解析（如 "../../comfyui-backend" → 项目根下 comfyui-backend），
-      // 缺省 = preview 目录本身
-      cwd: typeof b.cwd === 'string' && b.cwd ? resolve(previewDir, b.cwd) : previewDir,
-      port: typeof b.port === 'number' ? b.port : 0,
-      idleMinutes: typeof b.idleMinutes === 'number' ? b.idleMinutes : GATEWAY_IDLE_MINUTES,
-      readyPath: typeof b.readyPath === 'string' && b.readyPath ? b.readyPath : '/api/system_stats', // 项目后端(如 ComfyUI)自身 API,勿随网关前缀迁移
-    }
-  } catch {
-    return undefined
+  const raw = JSON.parse(readFileSync(pj, 'utf-8')) as {
+    backend?: { name?: unknown; cmd?: unknown; cwd?: string; port?: number; idleMinutes?: number; readyPath?: string }
+  }
+  const b = raw?.backend
+  if (!b || !Array.isArray(b.cmd) || !b.cmd.length) return undefined
+  return {
+    name: typeof b.name === 'string' && b.name ? b.name : undefined,
+    cmd: b.cmd.map(String),
+    // cwd 相对 preview.json 所在目录解析（如 "../../comfyui-backend" → 项目根下 comfyui-backend），
+    // 缺省 = preview 目录本身
+    cwd: typeof b.cwd === 'string' && b.cwd ? resolve(previewDir, b.cwd) : previewDir,
+    port: typeof b.port === 'number' ? b.port : 0,
+    idleMinutes: typeof b.idleMinutes === 'number' ? b.idleMinutes : GATEWAY_IDLE_MINUTES,
+    readyPath: typeof b.readyPath === 'string' && b.readyPath ? b.readyPath : '/api/system_stats', // 项目后端(如 ComfyUI)自身 API,勿随网关前缀迁移
   }
 }
 
@@ -943,10 +929,60 @@ const isPidAlive = (pid: number): boolean =>
 
 /** Windows 杀进程树兜底：child.kill() 只杀直接进程，taskkill /F /T 连同子孙进程一并结束。 */
 function killTree(pid: number): void {
-  try {
-    spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true })
-  } catch {
-    /* 忽略 */
+  spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true })
+}
+
+/**
+ * 杀进程树但豁免某进程及其子树（2026-09-05 网关自保）：网关是「跑 /server restart 或被自愈
+ * 拉起」的那个 CLI 会话的子进程，web「关闭会话」命中宿主 CLI 时 taskkill /T 会连坐杀掉网关
+ * 自身 → 先枚举全量进程表建父子索引，豁免进程在目标树内时逐个 taskkill 并整体跳过豁免子树；
+ * 不在树内则走 taskkill /T 快路径。枚举失败直接抛错（交由调用方 sendError），不做降级。
+ */
+function killTreeExcept(pid: number, exempt: number): void {
+  if (pid === exempt) return // 防 pid 复用巧合自杀
+  const res = spawnSync(
+    'powershell',
+    ['-NoProfile', '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress'],
+    { encoding: 'utf8', windowsHide: true },
+  )
+  if (res.status !== 0 || !res.stdout?.trim()) {
+    throw new Error(`进程树枚举失败（拒绝盲杀，防连坐网关）：${res.stderr || 'stdout 为空'}`)
+  }
+  const parsed: unknown = JSON.parse(res.stdout)
+  const rows = (Array.isArray(parsed) ? parsed : [parsed]) as { ProcessId: number; ParentProcessId: number }[]
+  const childMap = new Map<number, number[]>()
+  for (const row of rows) {
+    const cpid = Number(row.ProcessId)
+    if (!Number.isInteger(cpid) || cpid <= 0) continue
+    const ppid = Number(row.ParentProcessId)
+    const list = childMap.get(ppid)
+    if (list) list.push(cpid)
+    else childMap.set(ppid, [cpid])
+  }
+  // BFS 收集 root 的整棵子树（seen 防 PID 环）
+  const collectSubtree = (root: number): number[] => {
+    const out = [root]
+    const seen = new Set<number>([root])
+    for (let i = 0; i < out.length; i++) {
+      for (const c of childMap.get(out[i]) ?? []) {
+        if (!seen.has(c)) {
+          seen.add(c)
+          out.push(c)
+        }
+      }
+    }
+    return out
+  }
+  const subtree = collectSubtree(pid)
+  if (!subtree.includes(exempt)) {
+    killTree(pid) // 网关不在目标树内：原 taskkill /T 快路径
+    return
+  }
+  const skip = new Set(collectSubtree(exempt))
+  for (const p of subtree) {
+    if (skip.has(p)) continue
+    spawnSync('taskkill', ['/F', '/PID', String(p)], { stdio: 'ignore', windowsHide: true })
   }
 }
 
@@ -990,10 +1026,11 @@ async function listSessions(root: string) {
       const p = join(g.dir, f)
       const uuid = f.replace(/\.jsonl$/, '')
       const act = sessionActivity.get(uuid)
-      // 会话状态（2026-08-25 定案，web 与 CLI 一视同仁，无来源注册表）：进程在跑 → busy（绿）·
-      // 停止 → 无点（透明）。不再常驻 idle 红点——会话只是磁盘转录，未在跑就等同 CLI 未打开；
-      // 运行中的 CLI 会话经 activity 上报（act + 存活 pid）判定，web 会话经 webSessions 判定。
-      const state = webSessions.has(uuid) ? 'busy' : act && isPidAlive(act.pid) ? act.status : null
+      // 会话状态（2026-08-25 定案「web 与 CLI 一视同仁」；2026-09-04 根修恒绿）：一律经 activity
+      // 上报（act + 存活 pid）判定——busy=绿 · idle/waiting=红/橘 · 停止/进程退出 → 无点（透明）。
+      // 旧案 webSessions 短路恒报 busy：web 会话回合结束进程常驻仍显示绿点，已废；
+      // webSessions 仅保留 spawn 幂等/stop 路由/重启收养用途，不再参与显示判定。
+      const state = act && isPidAlive(act.pid) ? act.status : null
       sessions.push({
         id: Buffer.from(p).toString('base64url'),
         projectLabel: g.label,
@@ -1004,6 +1041,9 @@ async function listSessions(root: string) {
         messageCount: meta.messageCount,
         updatedAt: meta.updatedAt,
         state,
+        // 2026-09-06 回合中止权威时刻（有才有键）：web 首载恢复 turnEndFlags，防打断后刷新
+        // 「正在处理」无限计时复活（closeSeg 二信号之一）。
+        turnEndAt: turnEndAt.get(uuid),
       })
     }
   }
@@ -1588,6 +1628,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   if (req.method === 'GET' && url.pathname === '/gateway/activate') {
     const code = (url.searchParams.get('code') || '').trim()
     if (code && isGatewayTicket(code)) {
+      // 设备自报类型（iPad 等 UA 无解场景）随配对轮询上报，记入设备情况
+      const hint = (url.searchParams.get('device') || '').trim()
+      if (hint) touchGatewayTicket(code, undefined, undefined, hint)
       res.setHeader('Set-Cookie', `${AUTH_COOKIE_NAME}=${code}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`)
       sendJson(res, 200, { ok: true })
     } else {
@@ -1701,8 +1744,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 2026-08-23 web 独立会话（受上方 /gateway/* token 校验保护）：
-  //   POST /gateway/wsession {resume?} → spawn headless CLI 子进程，返回 {id}；resume 恢复已有会话
-  //   POST /gateway/wsession/stop {id} → 优雅关闭子进程
+  //   POST /gateway/wsession {resume?} → 预分配 sid 立即返回 {id,hash}，spawn+注册后台进行（2026-09-06 异步化）；
+  //   resume 恢复已有会话同路径。POST /gateway/wsession/stop {id} → 关闭会话（web spawn=优雅停子进程关窗口；终端直开=按 activity pid killTree）
   if (req.method === 'POST' && url.pathname === '/gateway/wsession') {
     try {
       const parsed = await readReportBody(req)
@@ -1711,7 +1754,17 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       // 2026-08-24 指定项目：project = findProjects 命中的项目 label → 会话落该项目 .claude/projects
       const project =
         typeof parsed.project === 'string' && parsed.project.trim() ? parsed.project.trim() : undefined
-      const sid = await spawnWebSession(resume, project)
+      // 2026-09-06 异步化（首条消息单状态根治，用户「可不可以只有一个状态」）：预分配 sid 立即
+      // 返回，spawn+注册后台进行——前端瞬时进会话态（乐观气泡直通落盘），消除同步等注册 1-2s 的
+      // 「创建中」中间态。spawn 期间到达的 send 经 pendingDeliveries 暂存、CLI 注册钩子补投；
+      // 失败/注册超时经 SSE ws-failed 群发（前端清合成条目+回滚首条事务+报错），不留静默。
+      const sid = resume ?? randomUUID()
+      spawnWebSession(resume, project, sid).catch((e) => {
+        console.error(`[gateway] wsession: 后台启动失败 sid=${sid}`, e)
+        pendingDeliveries.delete(sid)
+        const s = `data: ${JSON.stringify({ type: 'ws-failed', session: sid, error: e?.message ?? String(e) })}\n\n`
+        sendAll(sseClients, (c) => { c.res.write(s) })
+      })
       // id = listSessions 同源 base64url（web 会话落盘 <项目根>/.claude/projects；笔=全局根、项目=项目根）；
       // hash = 前端导航/WS 过滤用的会话哈希（= 转录文件名去 .jsonl，即 sessionId）
       // resume 未显式指定项目时按磁盘会话文件定位（与 spawnWebSession effectiveProject 同源）
@@ -1729,7 +1782,20 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     try {
       const parsed = await readReportBody(req)
       const id = typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : ''
-      sendJson(res, 200, { ok: id ? stopWebSession(id) : false })
+      // 2026-09-04 关闭会话扩展：web 会话（网关 spawn）走 stopWebSession（taskkill pid 树，窗口随之关闭）；
+      // 非 web spawn 的在线会话（用户终端直开，activity 上报 pid=CLI 进程本体 process.pid）同样按
+      // pid killTree——「关闭会话」对任何在线会话都是两次 Ctrl+C 退出语义，不存在需要回终端手动退的分支。
+      // killTree 用豁免版：网关自身是宿主 CLI 的子进程，树杀须整体跳过网关子树（防关宿主会话连坐杀网关）。
+      let ok = id ? stopWebSession(id) : false
+      if (!ok && id) {
+        const act = sessionActivity.get(id)
+        if (act && act.pid && isPidAlive(act.pid)) {
+          killTreeExcept(act.pid, process.pid)
+          sessionActivity.delete(id)
+          ok = true
+        }
+      }
+      sendJson(res, 200, { ok })
     } catch (e) {
       sendError(res, e)
     }
@@ -2305,15 +2371,21 @@ function resumeAndDeliver(
 // 逐项校验后透传给 CLI（CLI 侧 gatewayClient 构造 pastedContents → 与本地粘贴图片同链路）。
 // 限制：≤4 张/条（API 多图保守上限）、单张 base64 ≤7MB（API 限 5MB 二进制，留编码余量）、
 // mediaType 白名单 image/*（png/jpeg/gif/webp）；不合法项静默丢弃。
-function sanitizeInboundImages(raw: unknown): Array<{ content: string; mediaType: string; filename?: string }> {
+// 2026-09-06 显式 id 透传：web 前端 2026-09-02 起分配全会话唯一 id（[Image #N] 占位与之一一
+// 对应），此处此前重组时把 id 剥掉 → CLI pastedContentsFromImages 收不到显式号，回落每条从 1
+// 递增——同会话所有带图消息全存 1.png 互覆错图，且占位 [Image #N] 与落盘 imagePasteIds 错位
+// （conversationDisplay 拆分并回条件不满足 → 非排队首条带图消息渲染成文本/图两个气泡）。
+// 仅透传正整数显式 id；缺省/非法仍由 CLI 侧自造递增兜底（旧前端兼容不变）。
+function sanitizeInboundImages(raw: unknown): Array<{ id?: number; content: string; mediaType: string; filename?: string }> {
   if (!Array.isArray(raw)) return []
-  const out: Array<{ content: string; mediaType: string; filename?: string }> = []
+  const out: Array<{ id?: number; content: string; mediaType: string; filename?: string }> = []
   for (const item of raw.slice(0, 4)) {
     if (!item || typeof item !== 'object') continue
-    const it = item as { content?: unknown; mediaType?: unknown; filename?: unknown }
+    const it = item as { id?: unknown; content?: unknown; mediaType?: unknown; filename?: unknown }
     if (typeof it.content !== 'string' || !it.content || it.content.length > 7_000_000) continue
     if (typeof it.mediaType !== 'string' || !/^image\/(png|jpeg|gif|webp)$/i.test(it.mediaType)) continue
     out.push({
+      ...(typeof it.id === 'number' && Number.isInteger(it.id) && it.id > 0 ? { id: it.id } : {}),
       content: it.content,
       mediaType: it.mediaType.toLowerCase(),
       ...(typeof it.filename === 'string' && it.filename ? { filename: it.filename.slice(0, 120) } : {}),
@@ -2336,7 +2408,6 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
       // 2026-08-24 web 会话改造：web 会话 = 本地可见交互 REPL（CLI 自己连 /clients 注册），
       // 消息不再写子进程 stdin（stdin 归本地终端窗口），统一经 cliClients 精确路由 →
       // CLI 侧 gatewayClient enqueue 注入 REPL（与本地打字同路径）。审批也在本地窗口操作。
-      // 会话启动中（/gateway/wsession 已返回但 CLI 尚未注册 /clients，理论竞态）→ 提示稍后再发。
       // 2026-08-28 遥测端图片：images（base64 数组）校验后随消息透传，CLI 构造 pastedContents 走本地粘贴同链路。
       const images = sanitizeInboundImages(data.images)
       const sendPayload = images.length ? { type: 'send', text, images } : { type: 'send', text }
@@ -2344,8 +2415,13 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
         const target = cliClients.get(data.sessionId)
         if (target && target.readyState === WebSocket.OPEN) {
           target.send(JSON.stringify(sendPayload))
-        } else if (webSessions.has(data.sessionId)) {
-          ws.send(JSON.stringify({ type: 'status', state: 'web 会话启动中，请稍后再发送' }))
+        } else if (webSessions.has(data.sessionId) || spawningPromises.has(data.sessionId)) {
+          // 2026-09-06 wsession 异步化配套：spawn/注册完成前到达的消息暂存，CLI 注册钩子
+          // flushPendingDeliveries 按序补投——原「web 会话启动中，请稍后再发送」= 用户消息
+          // 无声丢失（异步化后 spawn 在途是常态窗口），根除。
+          const q = pendingDeliveries.get(data.sessionId) ?? []
+          q.push({ text, images })
+          pendingDeliveries.set(data.sessionId, q)
         } else {
           // 2026-08-25 发送即 resume：进程未在线 → 按磁盘会话文件定位并先恢复本地 CLI 窗口再投递（web/CLI 一视同仁）
           resumeAndDeliver(data.sessionId, text, images, ws)
@@ -2357,6 +2433,22 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
         sendAll(cliClients.values(), (c) => c.send(JSON.stringify(sendPayload)))
       } else {
         ws.send(JSON.stringify({ type: 'status', state: '当前无在线 CLI 进程，消息未注入' }))
+      }
+      break
+    }
+    case 'interrupt': {
+      // 2026-09-04 web 打断按钮：web 前端 {type:'interrupt', sessionId} → 按会话精确路由给在线
+      // CLI → CLI 侧 onCancel（与本地 Ctrl+C 同路径）。会话未在线只回 status 提示（不 resumeAndDeliver：
+      // 打断对离线/空闲会话无意义，CLI 侧判活未命中本就是 no-op）。
+      if (!data.sessionId) {
+        ws.send(JSON.stringify({ type: 'status', state: '缺少会话标识，无法打断' }))
+        break
+      }
+      const target = cliClients.get(data.sessionId)
+      if (target && target.readyState === WebSocket.OPEN) {
+        target.send(JSON.stringify({ type: 'interrupt' }))
+      } else {
+        ws.send(JSON.stringify({ type: 'status', state: '会话未在线，无法打断' }))
       }
       break
     }
@@ -2799,7 +2891,28 @@ function reclaimIdleBackends(): void {
  * resolve 在 CLI 完成 /clients 注册后返回 sessionId（保证 web 首条消息可注入，不丢消息）；
  * 注册超时（CLI 启动失败/网关未探测到）→ reject。
  */
-function spawnWebSession(resume?: string, project?: string): Promise<string> {
+// 2026-09-06 wsession 异步化配套（首条消息单状态根治）：
+//   spawningPromises = spawn 在途登记（预分配 sid 后台 spawn；同 sid 并发调用——wsession 与
+//   resumeAndDeliver 竞速——复用同一 promise，防双进程双写同一 jsonl）；settle 即清。
+//   pendingDeliveries = spawn/注册完成前到达的消息暂存（send 路由入队），CLI /clients 注册钩子
+//   flushPendingDeliveries 按序补投——原「web 会话启动中，请稍后再发送」丢弃路径根除。
+const spawningPromises = new Map<string, Promise<string>>()
+const pendingDeliveries = new Map<string, { text: string; images: ReturnType<typeof sanitizeInboundImages> }[]>()
+
+// CLI /clients 注册钩子调用：spawn 期间暂存的消息按序补投。cliClients 刚 set（注册即 OPEN），
+// 不 OPEN 则保留等下次注册再投（断连重连同钩子触发）——不丢消息。投递形态与 send 路由直投一致。
+function flushPendingDeliveries(sessionId: string): void {
+  const q = pendingDeliveries.get(sessionId)
+  if (!q?.length) return
+  const t = cliClients.get(sessionId)
+  if (!t || t.readyState !== WebSocket.OPEN) return
+  pendingDeliveries.delete(sessionId)
+  for (const m of q) {
+    t.send(JSON.stringify(m.images.length ? { type: 'send', text: m.text, images: m.images } : { type: 'send', text: m.text }))
+  }
+}
+
+function spawnWebSession(resume: string | undefined, project: string | undefined, sidForNew?: string): Promise<string> {
   // 幂等：resume 的会话进程已在跑（前端切走再切回）→ 复用现有进程，不重复 spawn（双进程会双写同一 jsonl）
   if (resume && webSessions.has(resume)) {
     const existing = webSessions.get(resume)
@@ -2815,13 +2928,17 @@ function spawnWebSession(resume?: string, project?: string): Promise<string> {
     console.log(`[gateway] wsession: 近期注册痕迹（${Date.now() - lastReg}ms 前），复用活进程不 spawn sid=${resume}`)
     return Promise.resolve(resume)
   }
+  // 新建场景 sid 由 wsession handler 预分配传入（异步化：响应需先于 spawn 返回）；resume 场景 sid=resume
+  const sid = resume ?? sidForNew ?? randomUUID()
+  // spawn 在途：同 sid 并发调用复用同一 promise（2026-09-06，异步化后 wsession 与 resumeAndDeliver 可竞速）
+  const inflight = spawningPromises.get(sid)
+  if (inflight) return inflight
   // resume 未显式指定项目时，按磁盘会话文件定位项目（项目会话切回后仍落在原项目，web/CLI 一视同仁）
   let effectiveProject = project
   if (resume && !effectiveProject) {
     effectiveProject = sessionProjectRootOf(resume)?.projectLabel
   }
-  return new Promise((resolve, reject) => {
-    const sid = resume ?? randomUUID()
+  const p = new Promise<string>((resolve, reject) => {
     const args = resume ? ['--resume', resume] : ['--session-id', sid]
     // cwd = 项目根（指定项目 → 该项目根）：会话 jsonl 落盘到 <项目根>/.claude/projects/<sessionId>.jsonl（与 CLI 同目录）
     const cwd = webSessionProjectRoot(effectiveProject)
@@ -2913,6 +3030,8 @@ function spawnWebSession(resume?: string, project?: string): Promise<string> {
       reject(err)
     })
   })
+  spawningPromises.set(sid, p)
+  return p
 }
 
 // 2026-08-24 web 会话改造：web 消息经 cliClients 注入（CLI 侧 gatewayClient enqueue），
@@ -2929,7 +3048,8 @@ function stopWebSession(sessionId: string): boolean {
   webSessions.delete(sessionId)
   persistWebSessions()
   const pid = p.pid ?? p.child.pid
-  if (pid && isPidAlive(pid)) killTree(pid)
+  // 豁免版树杀：web 会话里跑 /server on 会把网关挂到该会话进程树下，普通 /T 会连坐杀网关
+  if (pid && isPidAlive(pid)) killTreeExcept(pid, process.pid)
   return true
 }
 
@@ -3067,9 +3187,11 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
       socket.destroy()
       return
     }
-    // 授权设备活跃回写（WS 长连接是设备在线的主要形态，upgrade 即更新 UA/IP/lastSeen）
+    // 授权设备活跃回写（WS 长连接是设备在线的主要形态，upgrade 即更新 UA/IP/lastSeen；
+    // 设备自报类型 hint 一并更新——存量票证不经 activate，靠 WS 重连补齐）
     if (cOk) {
-      touchGatewayTicket(wsCookieVal, req.headers['user-agent'], remoteIPv4(req.socket.remoteAddress))
+      const hint = (url.searchParams.get('device') || '').trim()
+      touchGatewayTicket(wsCookieVal, req.headers['user-agent'], remoteIPv4(req.socket.remoteAddress), hint || undefined)
     }
     if (url.pathname === '/ws') {
       // 遥测端（浏览器 floria）连接
@@ -3103,6 +3225,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
         cliRegisterAt.set(sid, Date.now())
         approvalTrailPush('cli-register', sid)
         ensureSseWatches(root) // P0：新 CLI 会话上线（web spawn / 终端在全新项目首开会话）→ 补齐其落盘目录 watch
+        flushPendingDeliveries(sid) // 2026-09-06 wsession 异步化：spawn 期间暂存的消息按序补投
         scheduleIdleShutdown()
         // 2026-08-24 审批双操作（web 与 CLI 均可）：CLI 交互权限弹窗经 /clients 上报审批请求，
         // 网关转 floria 审批卡；本地先操作/请求撤销 → 通知 floria 撤卡。
@@ -3150,6 +3273,24 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           // summary 同毫秒落盘于结束时刻），SSE 'updated' 不会来——本事件是 web「正在压缩」唯一实时源。
           if (m.type === 'compact-state') {
             const s = `data: ${JSON.stringify({ type: 'compact-state', session: sid, active: m.active === true })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          // 2026-09-06 web 打断收口/撤回链：CLI onCancel → {type:'turn-state', live:false}（web 收口
+          // 「正在处理/正在思考」运行态——打断后 jsonl 零写入，本事件是 web「回合被中止」唯一实时源）；
+          // auto-restore（web 发起打断且无 meaningful 响应）→ {type:'restored', text}（web 摘开启气泡
+          // + 文本回填输入栏）。均无状态转发，web 自持 per-session 标记。
+          if (m.type === 'turn-state') {
+            // 2026-09-06 收口二轮：live:false = 回合被中止，记网关权威时刻（无 TTL）供
+            // /gateway/sessions 下发，前端刷新后凭此恢复收口判定（实时路径照旧 SSE 直达）。
+            if (m.live === false) turnEndAt.set(sid, Date.now())
+            const s = `data: ${JSON.stringify({ type: 'turn-state', session: sid, live: m.live === true })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          if (m.type === 'restored') {
+            const text = typeof m.text === 'string' ? m.text : ''
+            const s = `data: ${JSON.stringify({ type: 'restored', session: sid, text })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
             return
           }

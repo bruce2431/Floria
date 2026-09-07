@@ -2,7 +2,7 @@ import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
-import { listNeurons, listNeuronsInRoot, getBuiltinRoots } from './config.js'
+import { listNeurons, listNeuronsInRoot, getBuiltinRoots, listPendingMigration } from './config.js'
 import { getRetriever } from './retriever.js'
 import { fillPrecog, listUnfilled } from './precog.js'
 import { buildCogGraph, detectCommunities } from './coggraph.js'
@@ -27,7 +27,7 @@ export const NeuronListTool = buildTool({
     return '列出已发现的神经元（可带 root 扫任意目录）'
   },
   async prompt() {
-    return `Discover memory neurons. Without arguments: lists neurons in the engine's mounted roots (project + global). With root: scans <root>/neurons/ for new libraries anywhere on disk (each subdirectory containing config.yaml + l2.mem/mem.json registers as a neuron). Use when the roster mentions unscanned locations or before recalling another project's neurons.`
+    return `Discover memory neurons. Without arguments: lists neurons in the engine's mounted roots (project + global). With root: scans <root>/neurons/ for new libraries anywhere on disk (each subdirectory containing config.yaml + l2.mem/mem.db registers as a neuron). Use when the roster mentions unscanned locations or before recalling another project's neurons.`
   },
   get inputSchema(): ListInput {
     return listInput()
@@ -53,6 +53,7 @@ export const NeuronListTool = buildTool({
   },
   async call(input: ListInput) {
     const neurons = input.root ? listNeuronsInRoot(input.root) : listNeurons()
+    const pending = input.root ? [] : listPendingMigration()
     return {
       data: {
         roots: getBuiltinRoots(),
@@ -67,6 +68,13 @@ export const NeuronListTool = buildTool({
           cog2_count: n.cog2_count,
           last_updated: n.last_updated,
         })),
+        pending_migration: pending.length
+          ? pending.map(p => ({
+              id: p.id,
+              path: p.path,
+              note: '仍为 mem.json 旧存储（未迁移 mem.db），recall/remember 不可用',
+            }))
+          : undefined,
         usage: input.root
           ? '扫描结果即注册：这些 id 可直接用于 recall/remember（本会话内有效）。'
           : undefined,
@@ -98,7 +106,7 @@ export const NeuronSourceTool = buildTool({
     return '取回单条记忆的完整内容（含 core_file 产物）'
   },
   async prompt() {
-    return `Fetch the FULL content of one memory entry by id (recall results only show summaries). Use before relying on a hit — confirm the actual outcome. Returns men.content verbatim plus men.core_file (reusable scripts/configs — read l3.raw/<path> or take content directly instead of reinventing). Also works on deprecated entries for provenance (shows deprecated_by / supersedes links).`
+    return `Fetch the FULL content of one memory entry by id (recall results only show summaries). Use before relying on a hit — confirm the actual outcome. Returns the semantic blocks verbatim plus core_file (reusable scripts/configs — read the referenced path or take content directly instead of reinventing). Also works on deprecated entries for provenance (shows deprecated_by / supersedes links).`
   },
   get inputSchema(): SourceInput {
     return sourceInput()

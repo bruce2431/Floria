@@ -87,6 +87,7 @@ import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { CancelRequestHandler } from '../hooks/useCancelRequest.js';
+import { setGatewayInterruptHandle, consumeWebInterrupt } from '../bridge/gatewayInterruptHandle.js';
 import { useBackgroundTaskNavigation } from '../hooks/useBackgroundTaskNavigation.js';
 import { useSwarmInitialization } from '../hooks/useSwarmInitialization.js';
 import { useTeammateViewAutoExit } from '../hooks/useTeammateViewAutoExit.js';
@@ -910,6 +911,12 @@ export function REPL({
   // Ref for the synchronous restore callback — set after restoreMessageSync is
   // defined, read in the onQuery finally block for auto-restore on interrupt.
   const restoreMessageSyncRef = useRef<(m: UserMessage) => void>(() => {});
+  // 最近一次 web 发起打断的时刻（onCancel 时 consumeWebInterrupt 命中即置位）；auto-restore 判
+  // 10s 窗内 = 打断源自 web（restored 事件回填 web 输入栏）。过期自动失效，无需显式清理。
+  const webInterruptAtRef = useRef(0);
+  // 2026-09-06 web 打断撤回：auto-restore 回填 CLI 输入框的原文。守卫精确化——下次打断时
+  // CLI 框若恰好还是这份原文（用户没动），不算「用户正在打字」，照常回退；改过则守卫拦下。
+  const restoredToCliRef = useRef('');
 
   // Ref to the fullscreen layout's scroll box for keyboard scrolling.
   // Null when fullscreen mode is disabled (ref never attached).
@@ -2205,6 +2212,13 @@ export function REPL({
       return;
     }
     logForDebugging(`[onCancel] focusedInputDialog=${focusedInputDialog} streamMode=${streamMode}`);
+    // 2026-09-06 web 打断收口/撤回链：onCancel = 一切打断的汇聚点（Ctrl+C/web 按钮/编辑前打断）。
+    // ① 上报 turn-state(live:false)（compact-state 同链）让 web 收口「正在处理/正在思考」运行态
+    //    ——打断后 jsonl 零写入，web 判定回合结束只认 end_turn 回复落盘，无此信号运行态永挂；
+    // ② 消费打断来源标记（web 按钮置位）：命中则记时刻，auto-restore 据此把文本回填导向
+    //    web 输入栏（restored 事件）而非 CLI 输入框。
+    if (consumeWebInterrupt()) webInterruptAtRef.current = Date.now();
+    void import('../utils/gatewayClient.js').then(m => m.notifyTurnInterrupted()).catch(() => {});
 
     // Pause proactive mode so the user gets control back.
     // It will resume when they submit their next input (see onSubmit).
@@ -2296,6 +2310,19 @@ export function REPL({
     inputValue,
     streamMode
   };
+  // 2026-09-04 web 打断按钮：网关 interrupt 控制消息（gatewayClient → gatewayInterruptHandle）
+  // → 与 CLI Ctrl+C（app:interrupt）完全同路径落地 onCancel()。判活对齐 CancelRequestHandler
+  // 激活条件：有运行中回合（abortController 存活）或排队命令才生效，空闲误触不打扰。
+  // onCancel 每渲染重建 → ref 恒指最新（abortControllerRef 同法）。
+  const onCancelRef = useRef<() => void>(() => {});
+  onCancelRef.current = onCancel;
+  useEffect(() => {
+    setGatewayInterruptHandle(() => {
+      const signal = abortControllerRef.current?.signal;
+      if ((signal && !signal.aborted) || getCommandQueueLength() > 0) onCancelRef.current();
+    });
+    return () => setGatewayInterruptHandle(null);
+  }, []);
   useEffect(() => {
     const totalCost = getTotalCost();
     if (totalCost >= 5 /* $5 */ && !showCostDialog && !haveShownCostDialog) {
@@ -3101,13 +3128,15 @@ export function REPL({
       // Guards: reason === 'user-cancel' (onCancel/Esc; programmatic aborts
       // use 'background'/'interrupt' and must not rewind — note abort() with
       // no args sets reason to a DOMException, not undefined), !isActive (no
-      // newer query started — cancel+resubmit race), empty input (don't
-      // clobber text typed during loading), no queued commands (user queued
+      // newer query started — cancel+resubmit race), empty input or exactly
+      // the previously auto-restored text (don't clobber text typed during
+      // loading; CLI box holding last restore's original text untouched is
+      // fine to rewind again), no queued commands (user queued
       // B while A was loading → they've moved on, don't restore A; also
       // avoids removeLastFromHistory removing B's entry instead of A's),
       // not viewing a teammate (messagesRef is the main conversation — the
       // old Up-arrow quick-restore had this guard, preserve it).
-      if (abortController.signal.reason === 'user-cancel' && !queryGuard.isActive && inputValueRef.current === '' && getCommandQueueLength() === 0 && !store.getState().viewingAgentTaskId) {
+      if (abortController.signal.reason === 'user-cancel' && !queryGuard.isActive && (inputValueRef.current === '' || inputValueRef.current === restoredToCliRef.current) && getCommandQueueLength() === 0 && !store.getState().viewingAgentTaskId) {
         const msgs = messagesRef.current;
         const lastUserMsg = msgs.findLast(selectableUserMessagesFilter);
         if (lastUserMsg) {
@@ -3116,7 +3145,15 @@ export function REPL({
             // The submit is being undone — undo its history entry too,
             // otherwise Up-arrow shows the restored text twice.
             removeLastFromHistory();
+            // CLI 输入框回填（restoreMessageSync：rewind + 文本 + 图片），web/本地打断同路径。
+            // restoredToCliRef 记下回填原文：下次打断 CLI 框仍是这份原文（用户没动）时守卫放行，
+            // 用户改过字则守卫拦下——残留不阻塞撤回链。
             restoreMessageSyncRef.current(lastUserMsg);
+            restoredToCliRef.current = textForResubmit(lastUserMsg)?.text ?? '';
+            if (Date.now() - webInterruptAtRef.current < 10000) {
+              // 2026-09-06 web 打断撤回：打断源自 web → 文本经 restored 事件同时回填 web 输入栏。
+              void import('../utils/gatewayClient.js').then(m => m.notifyInterruptRestored(restoredToCliRef.current)).catch(() => {});
+            }
           }
         }
       }

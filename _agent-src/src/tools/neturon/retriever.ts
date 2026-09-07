@@ -3,20 +3,31 @@
  *
  * 对照 Python 基线 engine/core/retriever.py 1:1 移植（2026-09-03 TS 化定案）。
  * 双注入：mem-cog（cos+kw 加权）+ 认知检索（precog 反查锚定），两者独立注入不融合。
- * 每次search() 自动写 precog 到 l1.cog/cog.json。
+ * 每次 search() 自动写 precog 到 l1.cog/precog.db（2026-09-04 DB 化：纯追加 INSERT）。
  *
  * 分歧说明：分词用 Intl.Segmenter（见 segment.ts）；嵌入用 transformers.js
  * bge-small-zh-v1.5（Spike 已验证与 Python 生产路径 cos=1.0）。
+ * 存储定案：mem 不存 content/summary，文本由 blocks 派生（db.ts deriveEntryText）。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, statSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { cfgRequired, type ConfigError, getGlobalRoot, resolveNeuronPath } from './config.js'
-import { readNpyF32, writeNpyF32 } from './npyio.js'
-import { serializeCog } from './serialize.js'
+import { readNpyF32 } from './npyio.js'
+import {
+  appendPrecog,
+  deriveEntryText,
+  readMemories,
+  readPrecogRecords,
+  type MemEntry,
+  type PrecogRecord,
+  type PrecogResultItem,
+} from './db.js'
 import { splitQuery, GENERIC_TOKENS } from './segment.js'
 import { encode } from './embedder.js'
 import { parse as parseYaml } from 'yaml'
+
+export type { MemEntry, PrecogRecord, PrecogResultItem }
 
 export const SUPPORTED_MODEL = 'Xenova/bge-small-zh-v1.5'
 // Python 侧模型名（config/index_config 里记的是这个名字）
@@ -30,50 +41,6 @@ const ENGINE_COGNITION_DEFAULTS = {
   max_member_memories: 20,
 }
 
-// ── 数据格式类型（schema 与管线一致） ──
-
-export interface MemEntry {
-  memory_id: string
-  men: {
-    content: string
-    source: string
-    revelant?: string[]
-    core_file?: Array<{ name: string; path?: string; content?: string }>
-    supersedes?: string
-    deprecated_by?: string
-  }
-  sem: {
-    summary: string
-    pattern: string
-    blocks: string[]
-    supplement_blocks?: string[]
-  }
-  confidence: number
-  half_life: number
-}
-
-export interface PrecogResultItem {
-  id: string
-  accuracy: string
-  summary: string
-}
-
-export interface PrecogRecord {
-  record_id: string
-  status: string
-  query: string
-  keywords: string[]
-  source: string
-  top_k: number
-  results: PrecogResultItem[]
-  description: string
-}
-
-interface CogData {
-  precog_records?: PrecogRecord[]
-  cog_records?: unknown[]
-}
-
 // ── 工具函数 ──
 
 const TS_RE = /(\d{4}-\d{2}-\d{2}-\d{2}:\d{2}:\d{2})(?:_(\d+))?$/
@@ -85,21 +52,16 @@ export function recordTimeKey(recordId: string): [string, number] {
   return ['', 0]
 }
 
+function readYaml(path: string): Record<string, unknown> {
+  return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
+}
+
+/** JSON 宽读：文件缺失/损坏返回 null（cog 快照类文件损坏不阻断检索） */
 function readJson<T>(path: string): T | null {
-  if (!existsSync(path)) return null
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as T
   } catch {
     return null
-  }
-}
-
-function readYamlSafe(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {}
-  try {
-    return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
-  } catch {
-    return {}
   }
 }
 
@@ -153,7 +115,7 @@ export class NeuronRetriever {
     this.path = neuronPath
     this.neuronId = neuronId
     this.modelCacheDir = modelCacheDir ?? join(getGlobalRoot(), 'cache', 'models')
-    this.cfg = readYamlSafe(join(neuronPath, 'config.yaml'))
+    this.cfg = readYaml(join(neuronPath, 'config.yaml'))
     const ctx = this.cfgContext
     for (const key of REQUIRED_KEYS) cfgRequired(this.cfg, key, ctx)
     this.loadData()
@@ -201,26 +163,30 @@ export class NeuronRetriever {
   }
 
   private loadData(): void {
-    const memPath = join(this.path, 'l2.mem', 'mem.json')
+    const memDbPath = join(this.path, 'l2.mem', 'mem.db')
     const embPath = join(this.path, 'l2.mem', 'embeddings.npy')
     const confPath = join(this.path, 'l2.mem', 'index_config.json')
 
-    const raw = readJson<MemEntry[] | unknown>(memPath)
-    this.entries = Array.isArray(raw) ? (raw as MemEntry[]) : []
+    const raw = readMemories(memDbPath)
+    if (!raw.length && !existsSync(memDbPath)) {
+      throw new Error(`mem.db 不存在（未迁移 DB 化）: ${memDbPath}`)
+    }
+    this.entries = raw
 
     if (existsSync(embPath)) {
-      try {
-        const { data, shape } = readNpyF32(embPath)
-        this.embeddings = data
-        this.embeddingShape = [shape[0] ?? 0, shape[1] ?? 0]
-      } catch {
-        this.embeddings = null
-      }
+      const { data, shape } = readNpyF32(embPath)
+      this.embeddings = data
+      this.embeddingShape = [shape[0] ?? 0, shape[1] ?? 0]
     }
 
-    const idxCfg = readJson<{ encoded_ids?: string[]; model_name?: string }>(confPath)
-    this.encodedIds = idxCfg?.encoded_ids ?? []
-    this.indexModelName = idxCfg?.model_name ?? ''
+    if (existsSync(confPath)) {
+      const idxCfg = JSON.parse(readFileSync(confPath, 'utf-8')) as {
+        encoded_ids?: string[]
+        model_name?: string
+      }
+      this.encodedIds = idxCfg?.encoded_ids ?? []
+      this.indexModelName = idxCfg?.model_name ?? ''
+    }
     this.checkModel()
 
     // 一致性检查：mem/emb 行数不齐 → encoded_ids 重建对齐
@@ -251,39 +217,18 @@ export class NeuronRetriever {
     }
   }
 
-  // ── cog.json 管理（precog 记录） ──
-
-  private loadCog(): CogData {
-    return readJson<CogData>(join(this.path, 'l1.cog', 'cog.json')) ?? {
-      precog_records: [],
-      cog_records: [],
-    }
-  }
-
-  private saveCog(data: CogData): void {
-    const path = join(this.path, 'l1.cog', 'cog.json')
-    mkdirSync(dirname(path), { recursive: true })
-    const records = data.precog_records
-    if (Array.isArray(records)) {
-      records.sort((a, b) => {
-        const [ta, sa] = recordTimeKey(a.record_id ?? '')
-        const [tb, sb] = recordTimeKey(b.record_id ?? '')
-        return ta === tb ? sa - sb : ta < tb ? -1 : 1
-      })
-    }
-    const tmp = `${path}.tmp`
-    writeFileSync(tmp, serializeCog(data) + '\n', 'utf-8')
-    renameSync(tmp, path)
-  }
+  // ── precog 记录（l1.cog/precog.db，纯追加） ──
 
   private readL1Cog(name: string): unknown {
-    return readJson(join(this.path, 'l1.cog', name))
+    const p = join(this.path, 'l1.cog', name)
+    if (!existsSync(p)) return null
+    return JSON.parse(readFileSync(p, 'utf-8'))
   }
 
   /** 写一条 precog 记录（纯追加；同秒碰撞加 _1/_2 后缀） */
   private logPrecog(queryText: string, topK: number, ranked: RankedItem[]): PrecogRecord {
-    const data = this.loadCog()
-    const records = data.precog_records ?? (data.precog_records = [])
+    const dbPath = join(this.path, 'l1.cog', 'precog.db')
+    const records = readPrecogRecords(dbPath)
 
     const stamp = nowStamp()
     const baseId = `PC${this.personId}_${stamp}`
@@ -304,23 +249,21 @@ export class NeuronRetriever {
       results: ranked.map(({ entry }) => ({
         id: entry.memory_id,
         accuracy: '',
-        summary:
-          entry.sem?.summary || (entry.men?.content ?? '').slice(0, 60),
+        summary: deriveEntryText(entry).slice(0, 60),
       })),
       description: '',
     }
-    records.push(record)
-    this.saveCog(data)
+    appendPrecog(dbPath, record)
     return record
   }
 
   /** 该 query（归一化匹配）最近的一条 precog 记录（供附带引导标注） */
   getRecentPrecog(queryText: string): PrecogRecord | null {
-    const data = this.loadCog()
+    const records = readPrecogRecords(join(this.path, 'l1.cog', 'precog.db'))
     const norm = normQuery(queryText)
     let best: PrecogRecord | null = null
     let bestKey: [string, number] | null = null
-    for (const r of data.precog_records ?? []) {
+    for (const r of records) {
       if (normQuery(r.query ?? '') !== norm) continue
       const k = recordTimeKey(r.record_id ?? '')
       if (!bestKey || k[0] > bestKey[0] || (k[0] === bestKey[0] && k[1] > bestKey[1])) {
@@ -334,11 +277,7 @@ export class NeuronRetriever {
   // ── mem 排序（cos + kw） ──
 
   private keywordScore(query: string, entry: MemEntry, keywords?: string[]): number {
-    const search_text = (
-      (entry.men?.content ?? '') +
-      ' ' +
-      (entry.sem?.summary ?? '')
-    ).toLowerCase()
+    const search_text = deriveEntryText(entry).toLowerCase()
     const kws = keywords ?? splitQuery(query)
     if (!kws.length) return 0
     const hits = kws.filter(kw => search_text.includes(kw)).length
@@ -351,33 +290,24 @@ export class NeuronRetriever {
       rank: Number(rank.toFixed(4)),
       cos_score: Number(cos.toFixed(4)),
       kw_score: Number(kw.toFixed(4)),
-      pattern: entry.sem?.pattern ?? '',
-      has_core_file: !!entry.men?.core_file?.length,
-      summary: entry.sem?.summary ?? '',
-      blocks: entry.sem?.blocks ?? [],
+      has_core_file: !!entry.core_file?.length,
+      blocks: entry.blocks ?? [],
     }))
   }
 
-  /** cos + kw 加权检索（不写 precog）。embeddings 不可用时 fallbackKeyword=true 走关键词打分。 */
+  /** cos + kw 加权检索（不写 precog） */
   private async rankMem(
     queryText: string,
     topK?: number,
-    fallbackKeyword = false,
   ): Promise<{ ranked: RankedItem[]; formatted: ReturnType<NeuronRetriever['formatResults']> }> {
     const k = topK ?? this.defaultTopK
     if (!this.entries.length) return { ranked: [], formatted: [] }
     const keywords = splitQuery(queryText)
 
     if (!this.embeddings || this.embeddingShape[0] !== this.entries.length) {
-      if (!fallbackKeyword) return { ranked: [], formatted: [] }
-      const ranked: RankedItem[] = []
-      for (const entry of this.entries) {
-        if (entry.men?.deprecated_by) continue // supersede 废弃条目不参与检索
-        const s = this.keywordScore(queryText, entry, keywords)
-        if (s > 0) ranked.push({ rank: s, cos: 0, kw: s, entry })
-      }
-      ranked.sort((a, b) => b.rank - a.rank)
-      return { ranked: ranked.slice(0, k), formatted: this.formatResults(ranked.slice(0, k)) }
+      throw new Error(
+        `Neuron '${this.neuronId}' embeddings 索引缺失或与 mem.db 行数不一致（${this.embeddingShape[0]} ≠ ${this.entries.length}），先经 remember 写入重建索引`,
+      )
     }
 
     const [qEmb] = await encode([queryText], this.modelCacheDir)
@@ -388,7 +318,7 @@ export class NeuronRetriever {
       const cosScore = dot(this.embeddings, i * dim, qEmb!)
       if (cosScore < 0.1) continue
       const entry = this.entries[i]!
-      if (entry.men?.deprecated_by) continue // supersede 废弃条目不参与检索
+      if (entry.deprecated_by) continue // supersede 废弃条目不参与检索
       const kwScore = this.keywordScore(queryText, entry, keywords)
       ranked.push({ rank: this.wCos * cosScore + this.wKw * kwScore, cos: cosScore, kw: kwScore, entry })
     }
@@ -539,13 +469,13 @@ export class NeuronRetriever {
   }
 
   /** 节点直链 → 成员记忆（按 accuracy 分列，白名单过滤） */
-  private resolveMemberMemories(node: CognitionNode): Array<{ memory_id: string; accuracy: string; summary: string; time: string }> {
+  private resolveMemberMemories(node: CognitionNode): Array<{ memory_id: string; accuracy: string; time: string }> {
     const accRaw = this.fusionCfg('cognition.use_accuracies', ['true', 'revelant'])
     const accList = Array.isArray(accRaw) ? accRaw : [accRaw]
     const accWhitelist = new Set(accList.map(a => String(a).toLowerCase()))
     const idToEntry = new Map(this.entries.map(e => [e.memory_id ?? '', e]))
 
-    const mems: Array<{ memory_id: string; accuracy: string; summary: string; time: string }> = []
+    const mems: Array<{ memory_id: string; accuracy: string; time: string }> = []
     for (const [acc, mids] of [
       ['true', node.true_memories ?? []],
       ['revelant', node.revelant_memories ?? []],
@@ -557,7 +487,6 @@ export class NeuronRetriever {
         mems.push({
           memory_id: mid,
           accuracy: acc,
-          summary: entry.sem?.summary || (entry.men?.content ?? '').slice(0, 80),
           time: extractTime(mid),
         })
       }
@@ -569,12 +498,7 @@ export class NeuronRetriever {
   /** 命中节点 → 所属社群（community.json 默认分辨率） */
   private nodeCommunities(nodeIds: Set<string>): unknown[] {
     if (!nodeIds.size) return []
-    let defaultRes: string
-    try {
-      defaultRes = this.defaultResolution
-    } catch {
-      return []
-    }
+    const defaultRes = this.defaultResolution
     const comm = this.readL1Cog('community.json') as
       | Record<string, { communities?: Array<Record<string, unknown>> }>
       | null
@@ -714,12 +638,12 @@ export class NeuronRetriever {
     }
 
     // 4) 记忆层 — 强制全查（不写 precog；embeddings 不可用回退关键词）
-    const { formatted } = await this.rankMem(query, k, true)
+    const { formatted } = await this.rankMem(query, k)
     result.mem = formatted
     return result
   }
 
-  /** 按 memory_id 精确查找完整 mem.json 条目 */
+  /** 按 memory_id 精确查找完整 mem.db 条目 */
   getSource(memoryId: string): MemEntry | null {
     for (const entry of this.entries) {
       if (entry.memory_id === memoryId) return entry
@@ -766,7 +690,7 @@ export interface CognitionNode {
   true_memories: string[]
   revelant_memories: string[]
   hit_memories: number
-  member_memories?: Array<{ memory_id: string; accuracy: string; summary: string; time: string }>
+  member_memories?: Array<{ memory_id: string; accuracy: string; time: string }>
 }
 
 export interface Cognition {

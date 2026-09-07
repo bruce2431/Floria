@@ -15,11 +15,62 @@
 - `SubPj3-角色形象设计/` — 唯一现存子项目：#char 四态图源 + 界面动效/预览 demo。SubPj1（遥测前端）/SubPj2（私有化网关）实现已分别并入源码 `src/gateway/web/` 与 `src/gateway/localGateway.ts`（2026-08-29 起前端直改源码），子项目目录已移除。
 - `refer/` — 界面设计参考截图。
 
+## 功能速览
+
+- **单文件便携 exe**：`bun build --compile` 自包含单文件（CLI + 内置网关 + web 前端全打包），拷到任意目录运行；便携根标记 `.claude/.claude-portable`（在配置根内部，不可移动/删除）让 settings/插件/记忆/凭据跟随 exe 文件夹；裸机首次启动在信任对话框选 yes 即在 exe 旁播种便携根（`maybeInitPortableRoot`，下一轮启动生效）。
+- **双等权前端，共同后端**：CLI（React/Ink REPL）与 web（网关静态托管单页）是同一会话引擎的两个等权前端；局域网 iPad/手机访问 `floria.local`（mDNS）远程使用。
+- **设备配对授权**：新设备连入时授权门出一次性配对码，PC 端 `/server auth add <配对码>` 完成授权；票证持久化挂域 cookie，换网不重复授权。
+- **实时处理折叠**：处理中折叠流式展开旁白/思考/工具步 + 「正在处理」实时计时；回复落地自动收起为「已处理 X」（计时定格），仅保留总结，节约纵向空间。
+- **带图消息全链**：web 端拖拽/粘贴上传图片（一次最多 4 张），气泡内联缩略图 + lightbox 查看；CLI/web 双端渲染一致。
+- **远程审批**：CLI 权限弹窗实时中继为 web 审批卡，iPad/手机可远程批准/拒绝，双端竞速先操作者生效。
+- **项目个性化预览**：项目产物（架构图/可视化页）落 `<项目>/.claude/preview/`，由网关静态托管，web 项目预览页内直接查看。
+- **神经元知识库（NEURON_RAG，feature 门控）**：BGE 本地嵌入 + recall/remember 内置工具 + leiden 社群认知形成链，全链 TS 化进 exe。
+
+### Web 前端：插件页（官方市场 + 个人插件）
+
+![插件页：官方市场插件与个人插件](./_agent-src/docs/screenshots/web-plugins.jpeg)
+
+### Web 前端：项目页（项目分组 + 个性化预览入口）
+
+![项目页：按项目分组，点击进入项目个性化预览](./_agent-src/docs/screenshots/web-projects.jpeg)
+
+### Web 前端：模型页（全局默认模型切换）
+
+![模型页：设置全局默认模型](./_agent-src/docs/screenshots/web-models.jpeg)
+
+### 会话处理折叠：进行中流式展开 → 完成后自动收起
+
+处理中：旁白/思考/工具步流式展示 + 实时计时。
+
+![处理中：流式展开](./_agent-src/docs/screenshots/session-live.png)
+
+完成后：自动收起为「已处理 X」一行（计时定格），仅保留总结。
+
+![完成后：自动折叠仅留总结](./_agent-src/docs/screenshots/session-fold.png)
+
+### 引导消息碎片化交错渲染
+
+![引导消息：旁白与工具折叠行按线性序交错](./_agent-src/docs/screenshots/session-guide.png)
+
+### 设备配对授权门
+
+![设备配对授权门](./_agent-src/docs/screenshots/pairing-gate.png)
+
+### 项目个性化预览：archify 架构总览（dark / light）
+
+![架构图 dark 主题](./_agent-src/docs/screenshots/preview-arch-dark.png)
+
+![架构图 light 主题](./_agent-src/docs/screenshots/preview-arch-light.png)
+
+### 项目个性化预览：Pj13 论文精读实例
+
+![Pj13 项目个性化预览：论文精读](./_agent-src/docs/screenshots/preview-pj13.png)
+
 ## 构建与部署
 
-- 构建命令（在 `_agent-src/` 内执行）：`bun install` / `bun run dev`（源码直跑）/ `bun run build:dev`（dev 构建 `cli-dev-<ts>.exe`，2026-08-25 起**默认含内置私有化网关**）/ `bun run build:dev:gateway`（显式网关版 `cli-dev-<ts>-PRIVATE_GATEWAY.exe`，等价 build:dev 仅命名带代号）/ `bun run compile`（正式编译 `dist/cli-<ts>.exe`）。
-- 构建产物（2026-08-25 起 dev 构建直出项目根，免手动复制）：dev 构建（`build:dev` / `build:dev:gateway`）→ **项目根** `cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`；正式编译 → `_agent-src/dist/cli-<YYYYMMDDHHMMSS>.exe`。带时间戳命名，独立保留。
-- 部署/运行：构建完成即已在项目根，直接用带时间戳的产物 exe 启动（如 `cli-dev-<YYYYMMDDHHMMSS>.exe`；2026-08-28 起 PRIVATE_GATEWAY 进默认特性，`build:dev` 即含网关，产物名不再带 -PRIVATE_GATEWAY 代号），**重启会话/网关进程才生效**。**产物带时间戳是强制规范，不允许覆盖**（不设固定名部署副本）。当前最新构建：`cli-dev-20260904121234.exe`（**09-04 神经元内置 NEURON_RAG 引擎 TS 化全链**：recall/remember 内置工具落地+leiden.ts 完整实现（35/35+leidenalg 实图对照）+p5/p6 coggraph 认知形成链 TS 接线（114/114）+Python engine 退役归档，NEURON_RAG 门控默认关、默认构建已含网关；web 前端 sw v197-v198：压缩会话实时提示链+liveFoldBody 挤占根修+旁白/思考正文表格渲染根修；archify 项目个性化预览首实例：Pj16 架构图 deliver 进 `.claude/preview/`；v12（2026-09-03，asset=190533）=web 会话弹窗并入 WT 三态定稿+项目选择器全链 sw v196，见下「版本控制」；历史部署链见 `LOG.md`，此处不再累积**）。注：`build:dev` 产物名不带 `-PRIVATE_GATEWAY` 代号但同样含内置网关；发布/部署惯例用 `build:dev:gateway` 的带代号产物（v11 即是）。
+- 构建命令（在 `_agent-src/` 内执行）：`bun install` / `bun run dev`（源码直跑）/ `bun run build:dev`（dev 构建 `cli-dev-<ts>.exe`，2026-08-25 起**默认含内置私有化网关**；2026-09-04 定案统一本命令）/ `bun run compile`（正式编译 `dist/cli-<ts>.exe`）。
+- 构建产物（2026-08-25 起 dev 构建直出项目根，免手动复制）：dev 构建（`build:dev`）→ **项目根** `cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`；正式编译 → `_agent-src/dist/cli-<YYYYMMDDHHMMSS>.exe`。带时间戳命名，独立保留。
+- 部署/运行：构建完成即已在项目根，直接用带时间戳的产物 exe 启动（如 `cli-dev-<YYYYMMDDHHMMSS>.exe`；2026-08-28 起 PRIVATE_GATEWAY 进默认特性，`build:dev` 即含网关，产物名不再带 -PRIVATE_GATEWAY 代号），**重启会话/网关进程才生效**。**产物带时间戳是强制规范，不允许覆盖**（不设固定名部署副本）。当前最新构建：`cli-dev-20260906165821.exe`（**09-06 便携根裸机初始化**：信任对话框「Yes, I trust this folder」yes 分支挂 `maybeInitPortableRoot`，裸机于 exe 邻接播种 `.claude/.claude-portable`，配置根下一轮启动跟随 exe；09-06 白天=首条消息接管帧收口（sw v235）+wsession 异步化与消息暂存补投（v233）+首条消息三态根治（v229）+侧栏浮起/会话行菜单四轮根修（v219-v234）+web 拖拽上传图片（v231）+web 打断撤回链，均经用户实测通过；09-05=神经元内置 NEURON_RAG 引擎 TS 化全链（recall/remember 内置工具+leiden.ts+coggraph TS 接线，Python engine 退役）+archify 项目个性化预览首实例+iPad 触屏兼容根修，见下「版本控制」；历史部署链见 `LOG.md`，此处不再累积**）。注：`build:dev` 产物名不带 `-PRIVATE_GATEWAY` 代号但同样含内置网关；**2026-09-04 定案：构建（含发布）一律用 `build:dev`，`build:dev:gateway` 废弃不再使用，历史带代号产物仅存档**。
 - codegraph 索引：`_agent-src/src/.codegraph/`（相对路径存储，随 `_agent-src` 迁移有效），MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
 
 ## 版本控制（git）

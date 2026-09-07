@@ -16,6 +16,7 @@
 import WebSocket from 'ws'
 import { getSessionId } from '../bootstrap/state.js'
 import { invokeControlOverride } from '../bridge/controlOverrideHandle.js'
+import { invokeGatewayInterrupt } from '../bridge/gatewayInterruptHandle.js'
 import {
   setGatewayPermissionCallbacks,
 } from '../bridge/gatewayPermissionRelay.js'
@@ -38,12 +39,8 @@ function baseUrl(): string {
 }
 
 function wsHostPort(): { host: string; port: number } {
-  try {
-    const u = new URL(baseUrl())
-    return { host: u.hostname, port: Number(u.port || 8124) }
-  } catch {
-    return { host: '127.0.0.1', port: 8124 }
-  }
+  const u = new URL(baseUrl())
+  return { host: u.hostname, port: Number(u.port || 8124) }
 }
 
 let started = false
@@ -319,6 +316,13 @@ function openSocket(token: string): void {
         invokeControlOverride('rename', { sessionId: msg.sessionId, title: msg.title })
         return
       }
+      // 2026-09-04 web 打断按钮：网关把 web 前端的 interrupt 按会话精确路由过来 → 同 CLI 一次
+      // Ctrl+C（onCancel 全套：abort('user-cancel') + 清权限弹窗/队列 + 保留部分流式文本）。
+      // 句柄由 REPL 注册（gatewayInterruptHandle），未挂载（headless 无 REPL）静默忽略。
+      if (msg.type === 'interrupt') {
+        invokeGatewayInterrupt()
+        return
+      }
       if (msg.type === 'send' && typeof msg.text === 'string' && msg.text.trim()) {
         // 2026-08-28 遥测端图片：网关透传 images（base64 无 data: 前缀）→ 构造 pastedContents，
         // 与本地粘贴图片完全同链路（enqueue → handlePromptSubmit：仅当文本 [Image #N] 占位与
@@ -408,6 +412,38 @@ export function notifyCompactProgress(active: boolean): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify({ type: 'compact-state', active }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+/**
+ * 2026-09-06 web 打断收口链：REPL onCancel → /clients WS {type:'turn-state', live:false} →
+ * 网关 SSE 群发 → web 收口「正在处理/正在思考」运行态。打断后 jsonl 零写入（SSE 'updated'
+ * 不来），web 判定回合结束只认 end_turn 回复落盘——无本信号则运行态永挂。与 compact-state
+ * 同通道同形态；非关键路径，失败全静默。
+ */
+export function notifyTurnInterrupted(): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'turn-state', live: false }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+/**
+ * 2026-09-06 web 打断撤回链：auto-restore（打断且无 meaningful 响应回退）且打断源自 web →
+ * {type:'restored', text} → web 摘该条开启气泡 + 文本回填 web 输入栏。jsonl 不删（rewind 只动
+ * CLI 内存+换 conversationId），web 渲染按 per-session 标记永久跳过该 user。与 compact-state
+ * 同通道；非关键路径，失败全静默。
+ */
+export function notifyInterruptRestored(text: string): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'restored', text }))
     } catch {
       /* 断开忽略 */
     }

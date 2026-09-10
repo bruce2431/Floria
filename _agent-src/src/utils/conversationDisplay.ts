@@ -22,8 +22,10 @@ import {
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   isNotEmptyMessage,
   normalizeMessages,
+  NO_RESPONSE_REQUESTED,
   shouldShowUserMessage,
 } from './messages.js'
+import { RATE_LIMIT_FALLBACK_NOTICE_PREFIX } from '../services/api/errors.js'
 import { getGatewayToken } from './gatewayToken.js'
 
 /** 文件变更结构化数据（Edit/Write 工具的真实增删行数，权威数字 = diff.ts sumLinesChanged） */
@@ -227,7 +229,8 @@ function toDisplayBlock(
  * 已收尾历史 = 全剔 thinking；未收尾尾巴（最后一个 end_turn 之后；整个转录无 end_turn 则最后一条
  * 真实 user 消息之后）只保留【最后一条含 thinking/redacted_thinking 的 assistant 记录】里【最后一个】
  * 该类块的 `${uuid}:${j}`，其余全剔。用途：网关 readSession('prompt-tail-think') 把「正在思考」
- * 真实数据交给 floria liveFoldBody 行内状态（CLI REPL 渲染/上报路径不使用本模式，行为不变）。
+ * 真实数据交给 floria liveFoldBody 行内状态；2026-09-08 起 REPL 上报/delta 投影统一本 mode
+ * （同构根修，base 坐标与 fetch 序列恒对齐）。
  */
 function computeTailThinkingPassId(messages: readonly SourceMessage[]): string | null {
   const hasVisibleText = (m: SourceMessage | undefined): boolean => {
@@ -314,8 +317,9 @@ export function filterConversationForDisplay(
   }
   // 非中断系统提示开关（2026-08-28 用户定案：居中灰字提示仅保留「用户中断了对话」，
   // 其余全部隐藏，保留接口以便后续更改）。false = 不下发命令类（命令行 echo/local_command
-  // stdout+stderr/!bash）、后台任务通知、模型切换五类提示行；中断提示不受影响。
-  // 改回 true 即恢复显示。
+  // stdout+stderr/!bash）、模型切换等提示行；中断提示不受影响。改回 true 即恢复显示。
+  // 例外（2026-09-09 用户定案）：后台任务通知恒显示、不受本开关管辖——通知唤醒续跑的
+  // 回合里两次正式发言之间的空隙需原位可见（web 渲染为居中浅灰气泡，按时序堆叠）。
   const SHOW_NON_INTERRUPT_HINTS = false
   for (const msg of normalized) {
     const timestamp = tsMs(msg.timestamp)
@@ -386,7 +390,9 @@ export function filterConversationForDisplay(
         pushSystemHint('用户中断了对话', timestamp, msg.uuid)
         continue
       }
-      // 后台任务通知（2026-08-27 定案转居中提示）：转录把系统通知记成无 isMeta 的 user 记录
+      // 后台任务通知（2026-08-27 定案转居中提示；2026-09-09 用户定案恒显示——通知唤醒续跑
+      // 的回合里两次正式发言之间的空隙需原位可见，web=居中浅灰气泡按时序堆叠，不再受
+      // SHOW_NON_INTERRUPT_HINTS 总开关管辖）：转录把系统通知记成无 isMeta 的 user 记录
       // （origin.kind === 'task-notification'，内容 = <task-notification> XML 字符串，normalizeMessages
       // 转为 text 块），曾被当真实用户渲染成气泡。判据 = origin 字段（最可靠）+ 文本前缀兜底
       // （老记录无 origin）；文案对齐 SubPj1 server.mjs synthLabel（离线兜底镜像）。
@@ -397,10 +403,8 @@ export function filterConversationForDisplay(
         msg.origin?.kind === TASK_NOTIFICATION_TAG ||
         notifyTexts.some(t => t.trimStart().startsWith(`<${TASK_NOTIFICATION_TAG}>`))
       if (isTaskNotify) {
-        if (SHOW_NON_INTERRUPT_HINTS) {
-          const summary = extractXmlTag(notifyTexts.join('\n'), 'summary')?.trim()
-          pushSystemHint(summary ? `后台任务完成：${summary}` : '后台任务通知', timestamp, msg.uuid)
-        }
+        const summary = extractXmlTag(notifyTexts.join('\n'), 'summary')?.trim()
+        pushSystemHint(summary ? `后台任务完成：${summary}` : '后台任务通知', timestamp, msg.uuid)
         continue
       }
       if (!shouldShowUserMessage(msg, isTranscript)) continue
@@ -455,6 +459,11 @@ export function filterConversationForDisplay(
     }
 
     if (msg.type === 'assistant') {
+      // resume 补位哨兵（conversationRecovery 在末尾 user 消息后追加的 NO_RESPONSE_REQUESTED
+      // assistant 占位，保 API 结构合法）：数据层保留、UI 全端永不显示（2026-09-10 用户定案）。
+      // CLI 渲染已在 AssistantTextMessage 按精确文本 return null；web 侧曾从本投影漏出被渲染成
+      // 回复气泡（用户实测「No response requested.」入列），此处权威剔除，历史回放与实时投影同治。
+      if (content.some(b => b.type === 'text' && b.text === NO_RESPONSE_REQUESTED)) continue
       // 模型切换派生提示（2026-08-27）：assistant 记录自带实际请求模型名；流式回合内各片段同模型，
       // 切到新模型的第一条记录即新回合起点——提示自然落在回合结束后的边界（切在思考中也回合结束才出现）。
       // 注意：/model 是 local-jsx 命令，「Set model to …」不落盘，派生是历史回放唯一数据源。
@@ -479,6 +488,18 @@ export function filterConversationForDisplay(
         }
         const db = toDisplayBlock(b)
         if (db) blocks.push(db)
+      }
+      // 429 限流降级提示（errors.ts rateLimitFallbackNotice）：转 role:'system' 居中灰提示
+      // 下发（2026-09-10 用户定案「降级提示以居中灰色字体可见」——同后台任务通知先例，不受
+      // SHOW_NON_INTERRUPT_HINTS 总开关管辖）。web 端 .msg.system 即居中灰胶囊，零前端改动。
+      const noticeText = blocks
+        .filter(b => b.kind === 'text')
+        .map(b => b.text || '')
+        .join('\n')
+        .trim()
+      if (noticeText.startsWith(RATE_LIMIT_FALLBACK_NOTICE_PREFIX)) {
+        pushSystemHint(noticeText, timestamp, msg.uuid)
+        continue
       }
       if (blocks.length) out.push({ role: 'assistant', blocks, timestamp, stopReason: msg.message?.stop_reason as string | undefined, uuid: msg.uuid })
       continue
@@ -541,7 +562,7 @@ export async function sendConversationToServer(
  * 提示的跨扫描状态）；needFullSync = 网关失步，下轮全量直传对账。只存轻量展示投影
  * （过滤后的 blocks），与网关 conversationDisplays 同源同量级，进程退出即清。
  */
-type DisplayCacheEntry = { sent: DisplayMessage[]; lastModel?: string; needFullSync?: boolean }
+type DisplayCacheEntry = { sent: DisplayMessage[]; lastModel?: string; needFullSync?: boolean; seq?: number }
 const displayCacheBySession = new Map<string, DisplayCacheEntry>()
 
 /** 组合入口：过滤 + 增量发送一步完成，返回过滤结果（REPL 渲染处调用）。
@@ -573,6 +594,9 @@ export async function exportConversationToServer(
   if (cache && display.length > 0 && display[0]!.uuid) {
     const base = cache.sent.findIndex(m => m.uuid === display[0]!.uuid)
     if (base >= 0) {
+      // 窗口覆盖不变量（与 buildDisplayDelta 同款）：display 未覆盖到 sent 末尾 = state 塌缩
+      // 瞬态，禁止 mergedSent = display（base===0 时会直接把基线截断），本轮不推进基线。
+      if (base + display.length < cache.sent.length) return display
       const mergedSent = base === 0 ? display : [...cache.sent.slice(0, base), ...display]
       if (await sendConversationToServer(sessionId, display, base)) {
         cache.sent = mergedSent
@@ -592,6 +616,63 @@ export async function exportConversationToServer(
   await sendConversationToServer(sessionId, display)
   displayCacheBySession.set(cacheKey, { sent: display, lastModel })
   return display
+}
+
+/**
+ * 「尾部替换」增量构建（2026-09-08 事件流统一 P1，方案 20260908135557）：以 sent（上次发出的
+ * 全量投影序列）为基线，求 display 相对 sent 的尾部差异——delta = { base: 分歧点在 sent 中的
+ * 绝对位置, messages: display 自分歧点起的尾部 }。消费端应用 = 本地序列 slice(0, base).concat
+ * (messages)，与 /gateway/conversation 的 base 水位语义同构；append / 末条 blocks 更新 / 段收口
+ * 统一编码为「尾部替换」（幂等，无需三态标记）。
+ * 返回 null = 无可见变化或无可靠基线：CLI 重启后 cache 空由 exportConversationToServer 全量
+ * POST 建基线，此后本函数才可用——窗口全量不作 delta 下发（web 端会截断历史前缀，对账链
+ * /gateway/session 才是完整全量源）。投影结构失步（压缩/撤回/窗口滑出基线记忆，display 窗口
+ * 首条对不上 sent）同样不发，对账链恢复。
+ * 仅供 prompt 屏调用且恒以 'prompt-tail-think'（2026-09-08 同构根修：与网关 readSession 同
+ * mode，base 坐标与 web fetch 序列恒对齐；'prompt' 会因尾巴 thinking 条数差产生截断错位。
+ * transcript 屏投影不进事件流）。
+ * delta 构建即视为已发出（sent 就地推进、seq 递增）：WS 断开静默丢失不回滚，web 端 seq gap
+ * → 全量对账重建（不缓存 delta 历史，方案 §3.5 无状态转发定案）。
+ */
+export function buildDisplayDelta(
+  messages: readonly SourceMessage[],
+  sessionId: string,
+  mode: DisplayMode,
+): { seq: number; base: number; messages: DisplayMessage[] } | null {
+  const cacheKey = `${sessionId}:${mode}`
+  const cache = displayCacheBySession.get(cacheKey)
+  if (!cache || cache.sent.length === 0) return null
+  const lastModelOut: { lastModel?: string } = {}
+  const display = filterConversationForDisplay(messages, mode, {
+    initialLastModel: cache.lastModel,
+    lastModelOut,
+  })
+  // 窗口对齐：display 窗口首条在 sent（全量序列）中的位置（uuid = normalizeMessages 派生的
+  // 确定性幂等键）。lastModel 仅在 delta 实际发出时回写（与 exportConversationToServer 失步
+  // return 不回写同语义：保留下轮重产「已切换模型」提示）。
+  const base0 = display.length ? cache.sent.findIndex((m) => m.uuid && m.uuid === display[0]!.uuid) : -1
+  if (base0 < 0) return null
+  // 分歧点：自 base0 逐条比对至第一条不同（uuid 在对象内，序列化比较即含 uuid）。
+  // append-only 常态成本 O(变化量)（每轮只序列化到首条分歧），block 级触发率 ~2.5/s 可承受。
+  let k = base0
+  while (k < cache.sent.length && k - base0 < display.length) {
+    if (JSON.stringify(cache.sent[k]) !== JSON.stringify(display[k - base0])) break
+    k++
+  }
+  if (k - base0 >= display.length) return null // 与 sent 完全一致且无新增
+  // 窗口覆盖不变量：新投影必须到达 sent 末尾（base0 + display.length >= sent.length）才可发
+  // delta。不满足 = CLI React state 处于塌缩/重建瞬态（实证：非全屏 REACTIVE_COMPACT 边界
+  // setMessages(() => [boundary]) 把 state 收缩为单条，随后逐条回补，每个中间 commit 都会
+  // 触发本函数）——此时发出的小基线 delta 会把 web 已提交历史截断成残段（2026-09-09 录屏
+  // 逐帧分析定案：web 数组被切到仅剩 [11:17 用户消息]，段收口卡「正在处理 2h 43m」）。
+  // 正常尾部修正（思考蒸发/图片并回）只回改已发出的内容，窗口仍覆盖到 sent 末尾，不受此限；
+  // 若回改恰好伴随窗口未覆盖，延迟一轮由下一条 delta 或 /gateway/session 对账自愈。
+  if (base0 + display.length < cache.sent.length) return null
+  const delta = { seq: (cache.seq ?? 0) + 1, base: k, messages: display.slice(k - base0) }
+  cache.seq = delta.seq
+  cache.lastModel = lastModelOut.lastModel
+  cache.sent = [...cache.sent.slice(0, k), ...display.slice(k - base0)]
+  return delta
 }
 
 // ---------- 会话活动状态上报（PID 情况只发送、不落盘）----------

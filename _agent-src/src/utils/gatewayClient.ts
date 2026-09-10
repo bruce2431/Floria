@@ -23,7 +23,7 @@ import {
 import type { BridgePermissionCallbacks, BridgePermissionResponse } from '../bridge/bridgePermissionCallbacks.js'
 import { getMainLoopModel } from './model/model.js'
 import { enqueue, getCommandQueueSnapshot, subscribeToCommandQueue } from './messageQueueManager.js'
-import { getGatewayToken, loadGatewayTokenFromDisk, setGatewayToken } from './gatewayToken.js'
+import { getGatewayToken, loadGatewayPortFromDisk, loadGatewayTokenFromDisk, setGatewayToken } from './gatewayToken.js'
 import { compressImageBuffer } from './imageResizer.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
 import { feature } from 'bun:bundle'
@@ -33,9 +33,14 @@ const PROBE_RETRY_MS = 10_000
 const RECONNECT_BASE_MS = 1_000
 const RECONNECT_MAX_MS = 60_000
 
-/** 网关 HTTP 基地址（对齐 conversationDisplay.ts：FLOIRA_GATEWAY 优先，回退本地 8124）。 */
+/**
+ * 网关 HTTP 基地址：FLOIRA_GATEWAY env 优先；缺失（wt 直并入旧 WT 窗口时 env 不达子进程）
+ * 读盘 .claude/gateway-port（网关启动写）；再缺失回退默认 8124。
+ */
 function baseUrl(): string {
-  return (process.env.FLOIRA_GATEWAY || 'http://127.0.0.1:8124').replace(/\/+$/, '')
+  if (process.env.FLOIRA_GATEWAY) return process.env.FLOIRA_GATEWAY.replace(/\/+$/, '')
+  const port = loadGatewayPortFromDisk() || 8124
+  return `http://127.0.0.1:${port}`
 }
 
 function wsHostPort(): { host: string; port: number } {
@@ -47,6 +52,9 @@ let started = false
 let ws: WebSocket | null = null
 let timer: NodeJS.Timeout | null = null
 let attempt = 0
+// 2026-09-08 web 关闭会话优雅退出：网关 stopWebSession 精确路由 {type:'shutdown'} 后置位，
+// close 不再重连、进程 exit 0（WT closeOnExit=graceful 自动收 tab，不留「已退出进程」提示页）。
+let shuttingDown = false
 // 当前 WS 注册到网关 /clients 的 sessionId（openSocket 时快照）。
 // /resume、/clear、/branch 等 switchSession 换了 sessionId 后网关注册表仍挂旧 sid →
 // web 发送按旧 id 路由 miss → 网关误判会话离线 → 冷启动弹第二个窗口（同会话双进程）。
@@ -72,6 +80,16 @@ type PendingApprovalPayload = {
   blockedPath?: string
 }
 const pendingApprovalRequests = new Map<string, PendingApprovalPayload>()
+
+// 2026-09-07 网关重启状态真空窗根治：activity 镜像只存网关内存（sessionActivity），重启/断连
+// 即清零——此前只靠「状态变化 + 60s 心跳」补报，真空窗内网关 state=null，web closeSeg 把活
+// 回合误收口成「已处理」冻结计时（Pj5 会话重启截图实证）。与 sendQueueState 重连补发同模式：
+// REPL 经本钩子挂「重报当前状态」闭包（随 REPL effect 重建恒持最新 status），WS（重）连 open
+// 即触发；首次连接若钩子未及挂载，由 effect 挂载时的自报兜底，两路幂等。
+let activityResync: (() => void) | null = null
+export function registerActivityResync(fn: (() => void) | null): void {
+  activityResync = fn
+}
 
 function sendApprovalRequest(sock: WebSocket, p: PendingApprovalPayload): void {
   if (sock.readyState !== WebSocket.OPEN) return
@@ -259,7 +277,9 @@ function openSocket(token: string): void {
     setGatewayPermissionCallbacks(permissionCallbacks)
     // 2026-08-24 中继握手：告知网关本 CLI 带审批/提问中继代码（网关 /gateway/diagnostics trail 记 cli-hello，
     // 用于判断「cliClients 有会话但不中继」是旧进程还是新代码 bug）。
-    sock.send(JSON.stringify({ type: 'cli-hello', relay: true }))
+    // 2026-09-07 spawn 链 wt 直并后网关拿不到 -PassThru pid：握手上报本进程 pid，
+    // 网关填 webSessions 供 stopWebSession taskkill 树杀。
+    sock.send(JSON.stringify({ type: 'cli-hello', relay: true, pid: process.pid }))
     // 2026-08-24 模型 web/CLI 同步：连接后上报一次当前实际模型（网关存 sessionId→model 供 web 读取）
     reportCurrentModel()
     // 2026-08-30 队列快照：重连后补发一次当前排队状态（订阅期间的断线窗口靠它对齐）
@@ -267,6 +287,9 @@ function openSocket(token: string): void {
     // 2026-08-31 跨网关重启 pending 补发：仍挂起的审批/提问逐条重发 → 网关重新暂存+broadcast，
     // web 补弹可交互卡（重启前弹的卡随网关内存清空丢失，此前只剩只读兜底卡无法作答）
     resendPendingApprovalRequests(sock)
+    // 2026-09-07 重连即重报当前活动状态：sessionActivity 是网关内存镜像，重启即空，
+    // 等 60s 心跳的真空窗里 web 会把活回合误收口成「已处理」（见 registerActivityResync 注）
+    activityResync?.()
   })
   sock.on('message', async (data) => {
     try {
@@ -323,6 +346,17 @@ function openSocket(token: string): void {
         invokeGatewayInterrupt()
         return
       }
+      // 2026-09-08 web 关闭会话优雅退出：stopWebSession 先走本消息（树杀仅作 3s 兜底）。
+      // 停重连定时器 + 置位 shuttingDown（close 事件不再 schedule）→ 短延迟 exit 0，让
+      // close 帧先行——exit 0 令 WT closeOnExit(graceful) 自动收 tab，强杀 exit 1 会残留
+      // 「已退出进程，代码为 1」提示页（wt 直并链副作用，用户实测）。
+      if (msg.type === 'shutdown') {
+        shuttingDown = true
+        if (timer) { clearTimeout(timer); timer = null }
+        try { sock.close() } catch { /* 已断开 */ }
+        setTimeout(() => process.exit(0), 100)
+        return
+      }
       if (msg.type === 'send' && typeof msg.text === 'string' && msg.text.trim()) {
         // 2026-08-28 遥测端图片：网关透传 images（base64 无 data: 前缀）→ 构造 pastedContents，
         // 与本地粘贴图片完全同链路（enqueue → handlePromptSubmit：仅当文本 [Image #N] 占位与
@@ -347,6 +381,7 @@ function openSocket(token: string): void {
       // 2026-08-31 pendingResponses 提升模块级后断开不再 clear（原 per-connection 表断开即清）：
       // 重启前挂起弹窗的 handler 必须跨重连保留，approval-response 在新连接上才能命中。
       // 残留由 onResponse 退订 / approval-response 消费 / approval-cancel 逐点回收。
+      if (shuttingDown) return // 2026-09-08 优雅退出中：不再重连，进程即将 exit 0
       schedule(reconnectDelay())
     }
   })
@@ -435,6 +470,26 @@ export function notifyTurnInterrupted(): void {
 }
 
 /**
+ * 2026-09-07 web 僵死感知链：引擎每产出真实增量（thinking/text/subagent delta，REPL
+ * setResponseLength 内容增长分支）→ {type:'turn-beat'} → 网关记 turnBeatAt + SSE 群发 →
+ * web 运行态计时 tick 对账：beat 落后超阈值即显「无响应」。4s 节流（高频 delta 不刷屏），
+ * 进程/WS 活但 query 链僵死时 beat 恒停 = web 可判。非关键路径，失败全静默。
+ */
+let lastBeatSentAt = 0
+export function notifyTurnBeat(): void {
+  const now = Date.now()
+  if (now - lastBeatSentAt < 4000) return
+  lastBeatSentAt = now
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'turn-beat' }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+/**
  * 2026-09-06 web 打断撤回链：auto-restore（打断且无 meaningful 响应回退）且打断源自 web →
  * {type:'restored', text} → web 摘该条开启气泡 + 文本回填 web 输入栏。jsonl 不删（rewind 只动
  * CLI 内存+换 conversationId），web 渲染按 per-session 标记永久跳过该 user。与 compact-state
@@ -444,6 +499,42 @@ export function notifyInterruptRestored(text: string): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
       ws.send(JSON.stringify({ type: 'restored', text }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+/**
+ * 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎投影 delta 即发——REPL messages 变化
+ * （block 级，流式字符不入 messages）→ buildDisplayDelta（conversationDisplay.ts，过滤权威单源）
+ * → {type:'session-delta', seq, base, messages} → 网关 seq 记账 + SSE 群发 → web 增量渲染。
+ * 即发无防抖（block 级变化率 ~2.5/s 上限，方案 §3.1 定案不合帧）。sid 由 /clients 连接 query
+ * 提供（queue-state 同款，载荷不带）。WS 断开时静默丢弃：seq 已在 CLI 侧消耗不回滚，web 端
+ * gap 判定 → 全量对账重建（分布式流标准恢复语义，非兜底）。与 notifyCompactProgress 同通道
+ * 同形态；非关键路径，失败全静默。
+ */
+export function notifySessionDelta(seq: number, base: number, messages: unknown[]): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'session-delta', seq, base, messages }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+/**
+ * 2026-09-08 流式字符通道：引擎流式 delta（thinking/text，REPL onUpdateLength 单路累积）经
+ * 100ms 合帧 → {type:'stream-text', text} → 网关 SSE 群发 → web 状态行后流式预览。text 为
+ * 全文快照（无状态，丢失/乱序无害，尾部截断显示）；空串 = 块边界/消息落盘/打断 → web 清除
+ * 暂态（权威 delta 随后接管）。sid 由 /clients 连接 query 提供（turn-beat 同款）；非关键路径，
+ * 失败全静默。
+ */
+export function notifyStreamText(text: string): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'stream-text', text }))
     } catch {
       /* 断开忽略 */
     }

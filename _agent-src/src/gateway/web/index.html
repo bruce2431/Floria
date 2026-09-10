@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=238" />
+  <link rel="stylesheet" href="/styles.css?v=287" />
 </head>
 <body>
 <div id="app">
@@ -184,9 +184,11 @@
                 <button id="send-btn" class="primary" title="只读查看 · 无法发送" aria-label="发送"></button>
               </div>
             </div>
+            <!-- composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁入 #input-bar 子元素位，用户定案：
+                 审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
+                 隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
+            <div id="composer-takeover" hidden></div>
           </div>
-          <!-- composer takeover（2026-08-22）：DSH 提问/审批占输入栏（替换 #input-bar），而非渲染在 chat 内 -->
-          <div id="composer-takeover" hidden></div>
           <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]） -->
           <div id="cmd-pop" hidden></div>
           <!-- @ 提及浮窗：输入 @ 时在输入栏上方弹出（插件/技能 + 近48h 会话），宽度=输入栏 -->
@@ -235,6 +237,6 @@
 </div>
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=240"></script>
+<script src="/app.js?v=287"></script>
 </body>
 </html>

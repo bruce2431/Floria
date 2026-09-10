@@ -5,12 +5,10 @@
 ## 本项目内容
 
 - `_agent-src/` — Claude Code 源码 + 构建环境。包含 `src/`、`scripts/`、`package.json`、`bun.lock`、`node_modules/` 等。构建命令在 `cd _agent-src &&` 后执行（`bun install` / `bun run build:dev` / `bun run compile` / `bun run dev`）。
-- `STANDARDS.md` — 权威标准文档（skill / plugin / MCP / changelog / 工作区 / 构建的全部约定），见 `@WrokSpace/.claude/CLAUDE.md` 顶部引用。
+- `docs/` — 文档库（2026-09-10 自原 STANDARDS/FEATURES/ARCHITECTURE 三件重组，索引 `docs/README.md`）：`standards.md`（权威规则）/ `build.md`（构建+flag 审计）/ `glossary.md`（术语）/ `core.md`（源码核心机制）/ `gateway.md`（网关服务）/ `web-ui.md`（web 链路）。权威标准见 `@WrokSpace/.claude/CLAUDE.md` 顶部引用。
 - `README.md` — 本文（原 CODE2431 根目录结构说明迁入后重写）。
-- `CLAUDE.md` — 项目级 AI 指引（规则+指针型，架构细节在 `ARCHITECTURE.md`）。
-- `ARCHITECTURE.md` — 代码架构文档（源码核心机制 + 内置网关/web 前端链路定案）。
+- `CLAUDE.md` — 项目级 AI 指引（规则+指针型，架构细节在 `docs/`）。
 - `LOG.md` — 项目变更日志（只追加）。
-- `FEATURES.md` — feature flag 活审计。
 - `.claude/` — 项目级配置（会话存档 + 跨会话记忆 `projects/memory/`），`settings.json` 按 Pj 权限同步惯例。
 - `SubPj3-角色形象设计/` — 唯一现存子项目：#char 四态图源 + 界面动效/预览 demo。SubPj1（遥测前端）/SubPj2（私有化网关）实现已分别并入源码 `src/gateway/web/` 与 `src/gateway/localGateway.ts`（2026-08-29 起前端直改源码），子项目目录已移除。
 - `refer/` — 界面设计参考截图。
@@ -69,7 +67,7 @@
 
 ## 版本控制（git）
 
-- 2026-08-15 git init，远程 `bruce2431/codeagent-build`，**仅跟踪 `_agent-src/`、`README.md`、`STANDARDS.md` 三个路径**；`CLAUDE.md`/`LOG.md`/子项目目录/报告 md 由项目根 `.gitignore` 排除，`.gitignore` 本身不入库。
+- 2026-08-15 git init，远程 `bruce2431/codeagent-build`，**仅跟踪 `_agent-src/`、`README.md`、`docs/` 三个路径**（2026-09-10 起以 docs/ 替代原 STANDARDS.md，文档库重组）；`CLAUDE.md`/`LOG.md`/子项目目录/报告 md 由项目根 `.gitignore` 排除，`.gitignore` 本身不入库。
 - 构建产物 exe 不在 git（`.gitignore` 排除 `*.exe`），部署副本只在项目根。
 - **GitHub Release 发布（2026-08-31 起）**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<sw>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`，如 `2.1.87-dev.20260831.t062738.sha60f851fa`）；流程 = commit+push → 同名 tag → GitHub Release（notes 按 LOG 当日条目主题分组）→ 附对应 gateway 代号版 exe 为 asset。发布记录见 `LOG.md`（最新：版本 14，2026-09-07 发布，tag `2.1.87-dev.20260907.t030439.shab9158a14`，asset `cli-dev-20260907110439.exe`；上版：版本 13，2026-09-04，tag `2.1.87-dev.20260904.t041234.shacff088a0`，asset `cli-dev-20260904121234.exe`）。
 

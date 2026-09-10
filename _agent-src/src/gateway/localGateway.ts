@@ -44,6 +44,8 @@ import {
   setGatewayToken,
   saveGatewayTokenToDisk,
   clearGatewayTokenFromDisk,
+  saveGatewayPortToDisk,
+  clearGatewayPortFromDisk,
   isGatewayTicket,
   touchGatewayTicket,
 } from '../utils/gatewayToken.js'
@@ -203,9 +205,7 @@ function sweepBpSessions(now = Date.now()): void {
 // ============================================================================
 interface WebSessionProc {
   sessionId: string
-  /** 新 spawn 的会话有 child；网关重启后收养的存活会话无 child（仅凭 pid 管理生命周期） */
-  child?: import('node:child_process').ChildProcess
-  /** 真实 CLI 进程 pid（Start-Process -PassThru 输出；powershell 中转已退出，stopWebSession 用它 taskkill） */
+  /** 真实 CLI 进程 pid（2026-09-07 起由 cli-hello 上报补填——wt.exe 中转即退拿不到 pid。gracefulStopCli 用它做 3s 树杀兜底） */
   pid?: number
   clients: Set<WebSocket>
   startedAt: number
@@ -304,8 +304,45 @@ const sessionQueues = new Map<string, { items: Array<{ content: string; ts: numb
 // 2026-09-06 web 打断收口二轮：回合被中止的网关权威时刻（per-session）。打断后 jsonl 零写入，
 // 本时刻是刷新后恢复收口判定的唯一持久源（turn-state SSE 只覆盖不刷新的实时路径）；无 TTL、
 // 不入 sweepStaleMaps——被打断的回合永无回复，语义同前端 turnEndFlags「无 TTL 防运行态复活」。
-// 网关重启即清零：重启连坐杀全部 CLI 进程 → state=null（存活 pid 判定）在 closeSeg 先行收口，无泄漏。
+// 2026-09-07 落盘持久化（gateway-turnend.json，变更即写、启动恢复）：重启不杀 CLI 进程（09-05
+// 不杀定案），重启前被打断的回合其收口信号必须跨重启存活——否则 CLI 重连重报 activity 后 state
+// 恢复非 null，两收口信号全失，「正在处理」无限计时复活（09-06 2h26m 挂死的重启回归路径）。
+// 旧注释「重启连坐杀全部 CLI 进程 → state=null 先行收口」系不杀定案前的时代残留，已作废。
 const turnEndAt = new Map<string, number>()
+const turnEndAtPath = (): string => join(getPortableRoot(), '.claude', 'gateway-turnend.json')
+function persistTurnEndAt(): void {
+  try {
+    writeFileSync(turnEndAtPath(), JSON.stringify(Object.fromEntries(turnEndAt)), 'utf8')
+  } catch {
+    /* 落盘失败不影响运行：最坏情况重启后该次打断收口退化为内存态丢失 */
+  }
+}
+function loadTurnEndAt(): void {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(turnEndAtPath(), 'utf8'))
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+    for (const [sid, ts] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof ts === 'number' && Number.isFinite(ts) && ts > 0) turnEndAt.set(sid, ts)
+    }
+  } catch {
+    /* 无文件/坏 JSON：视为空（首次启动常态） */
+  }
+}
+// 2026-09-07 web 僵死感知：CLI 引擎每产出真实增量经 /clients 上报 turn-beat（gatewayClient 4s
+// 节流），记每会话最后活性时刻；SSE 群发 → web 运行态计时 tick 对账，beat 落后超阈值显「无响应」。
+// 进程/WS 活但 query 链僵死时 beat 恒停 = web 唯一可判信号（60s activity 心跳测不出 query 僵死）。
+// 仅内存运行态：turn-state(live:false) 即删、detach 进 3s 复核窗到期未重连才删（09-08），
+// 不入落盘与 sweep（过期由 web 阈值判定消化）。
+const turnBeatAt = new Map<string, number>()
+// 2026-09-08 事件流统一 P1（方案 20260908135557）：session-delta 的 per-session 单调 seq 记账。
+// 网关只做去重（seq <= last 丢弃，防 CLI 重发/广播竞态）与重置（cli-hello = 新 CLI 进程 seq 流
+// 重启），不缓存 delta 历史——丢失靠 web 端 seq gap → 全量对账恢复（无状态转发定案 §3.5）。
+// 仅内存：网关重启即空，CLI 重连（session-up → web 全量对账 + /gateway/session 附 deltaSeq）自然对齐。
+const sessionDeltaSeq = new Map<string, number>()
+// 2026-09-08 detach 复核窗：/clients WS 断开后延迟收口（activity null 群发/表清理）的定时器表。
+// 窗口内重连即静默跳过；同 sid 重复 detach 由 clearTimeout 去重。兜底语义与 session-down 一致：
+// 进程失联确认才收口，重连窗内 web 保持最后快照不感知。
+const detachTimers = new Map<string, ReturnType<typeof setTimeout>>()
 // C1 修复：两个内存 Map 无上限（只增不删）→ 长跑泄漏。加 TTL + 死进程惰性清扫。
 const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新视为过期
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
@@ -1745,7 +1782,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   // 2026-08-23 web 独立会话（受上方 /gateway/* token 校验保护）：
   //   POST /gateway/wsession {resume?} → 预分配 sid 立即返回 {id,hash}，spawn+注册后台进行（2026-09-06 异步化）；
-  //   resume 恢复已有会话同路径。POST /gateway/wsession/stop {id} → 关闭会话（web spawn=优雅停子进程关窗口；终端直开=按 activity pid killTree）
+  //   resume 恢复已有会话同路径。POST /gateway/wsession/stop {id} → 关闭会话（2026-09-08 起 web spawn/终端直开统一 gracefulStopCli：shutdown 优雅退出 + 3s 树杀兜底）
   if (req.method === 'POST' && url.pathname === '/gateway/wsession') {
     try {
       const parsed = await readReportBody(req)
@@ -1782,15 +1819,16 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     try {
       const parsed = await readReportBody(req)
       const id = typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : ''
-      // 2026-09-04 关闭会话扩展：web 会话（网关 spawn）走 stopWebSession（taskkill pid 树，窗口随之关闭）；
-      // 非 web spawn 的在线会话（用户终端直开，activity 上报 pid=CLI 进程本体 process.pid）同样按
-      // pid killTree——「关闭会话」对任何在线会话都是两次 Ctrl+C 退出语义，不存在需要回终端手动退的分支。
-      // killTree 用豁免版：网关自身是宿主 CLI 的子进程，树杀须整体跳过网关子树（防关宿主会话连坐杀网关）。
+      // 2026-09-04 关闭会话扩展：web 会话（网关 spawn）走 stopWebSession；非 web spawn 的在线
+      // 会话（用户终端直开，activity 上报 pid=CLI 进程本体 process.pid）按同协议优雅停——
+      // 2026-09-08 起两会话形态统一走 gracefulStopCli（shutdown → CLI exit 0 → WT 自动收 tab；
+      // 3s 树杀兜底豁免网关子树，防关宿主会话连坐杀网关），「关闭会话」对任何在线会话都是
+      // 两次 Ctrl+C 退出语义，不存在需要回终端手动退的分支。
       let ok = id ? stopWebSession(id) : false
       if (!ok && id) {
         const act = sessionActivity.get(id)
         if (act && act.pid && isPidAlive(act.pid)) {
-          killTreeExcept(act.pid, process.pid)
+          gracefulStopCli(id, act.pid)
           sessionActivity.delete(id)
           ok = true
         }
@@ -2101,6 +2139,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       data.vision = visionModel ? modelSupportsVision(visionModel) : false
       // 2026-08-30 队列快照（清单#2）：当前排队项（首载/刷新时与 SSE queue-state 增量同构）
       data.queued = sessionQueues.get(uuid)?.items ?? []
+      // 2026-09-08 事件流统一 P1：当前 delta seq 记账随全量下发——web 全量对账后以此为续流
+      // 起点（seq 连续应用 / gap 再对账），网关重启清零后 CLI 未发 delta 时回落 0（下条 seq=1 连续）。
+      data.deltaSeq = sessionDeltaSeq.get(uuid) ?? 0
       sendJson(res, 200, data)
     } catch (e) {
       sendError(res, e)
@@ -2897,6 +2938,10 @@ function reclaimIdleBackends(): void {
 //   pendingDeliveries = spawn/注册完成前到达的消息暂存（send 路由入队），CLI /clients 注册钩子
 //   flushPendingDeliveries 按序补投——原「web 会话启动中，请稍后再发送」丢弃路径根除。
 const spawningPromises = new Map<string, Promise<string>>()
+// 2026-09-07 wt 直并：cli-hello 上报的 pid 暂存（wt.exe 中转即退，注册成功前 cli-hello 到达时
+// webSessions 尚无该 sid）。spawnWebSession 注册成功时取走填入；仅 spawn 在途（spawningPromises
+// 命中）才暂存，普通 CLI 主进程的 cli-hello 不入此表防泄漏。
+const cliHelloPids = new Map<string, number>()
 const pendingDeliveries = new Map<string, { text: string; images: ReturnType<typeof sanitizeInboundImages> }[]>()
 
 // CLI /clients 注册钩子调用：spawn 期间暂存的消息按序补投。cliClients 刚 set（注册即 OPEN），
@@ -2942,60 +2987,45 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
     const args = resume ? ['--resume', resume] : ['--session-id', sid]
     // cwd = 项目根（指定项目 → 该项目根）：会话 jsonl 落盘到 <项目根>/.claude/projects/<sessionId>.jsonl（与 CLI 同目录）
     const cwd = webSessionProjectRoot(effectiveProject)
-    // 可见交互窗口：PowerShell Start-Process -PassThru（console 程序默认开新终端窗口，stdio 连窗口）。
-    // 2026-09-02 三次定稿：不带任何 -WindowStyle。同日两版实测——初版 Minimized=WT 拒托管回落独立 conhost
-    // 老式黑窗（用户所见「管理员窗口」且无法并入 WT；本地双击无样式 flag 不受影响）；二版 Hidden=SW_HIDE 被
-    // WT 委托链尊重 → 进程正常启动并注册但窗口完全不可见（「根本不启动窗口了」）。同链 cmd 探针 A/B/C 实验
-    // （归档 .trash/2026-09-02/20260902174824-wt-delegate-test.ps1）实证：只有无 flag 才并入 WT。
-    // 代价：并入时新标签激活 WT 窗口（可能抢焦点）——正确性优先；合并进已有终端窗口由默认终端委托（WT）+
-    // WT windowingBehavior=useAnyExisting 承担。
-    // 单引号 PS 字符串无转义（仅 '' 表示字面 '），复用 terminalLauncher.psQuote 同款策略。
-    const psQuote = (s: string): string => `'${s.replace(/'/g, "''")}'`
-    // 2026-08-31 根修：exe 一律网关自身（协议必然匹配；目录扫描旧案已废，见 webSessionExe 注释）
+    // 2026-09-07 根治定案：wt.exe -w last nt 直并最近 WT 窗口（无窗自动开新窗），启动链彻底脱离
+    // 系统默认终端委托（defterm）。背景：25H2 更新把 defterm 激活链本身弄坏（注册表配置正确仍全落
+    // conhost 老式黑窗——用户所见「管理员指令框」置顶抢眼、多窗不合并），配置层无解；原 powershell
+    // Start-Process 链依赖 defterm 托管，系统更新随时可能再坏。改为网关直接调 wt.exe，行为不再随
+    // defterm 配置漂移。配套：①真实 CLI pid 由 cli-hello 上报补填（wt 自身即退拿不到）；
+    // ②端口落盘 .claude/gateway-port（并入已存在 WT 窗口时新标签继承旧 WT 进程环境，FLOIRA_GATEWAY
+    // 传不到 → CLI env 缺失时读盘发现，见 gatewayToken.ts）。
+    // 2026-08-31 根修不变：exe 一律网关自身（协议必然匹配；目录扫描旧案已废，见 webSessionExe 注释）
     const exe = webSessionExe()
-    // 注入 FLOIRA_GATEWAY（CLI 探测网关地址；网关换过端口时回退 127.0.0.1:8124 会探测失败）
     const gwUrl = `http://127.0.0.1:${currentPort}`
     // 2026-08-31 取证日志（20260830222122 事故：spawn 全程零日志，「日志无失败记录」是假象）
     console.log(
       `[gateway] wsession: spawn 开始 resume=${resume ?? '新建'} sid=${sid} project=${effectiveProject ?? '(笔/全局根)'} exe=${exe} cwd=${cwd}`,
     )
-    const ps = [
-      `$env:FLOIRA_GATEWAY = ${psQuote(gwUrl)};`,
-      `$p = Start-Process -FilePath ${psQuote(exe)} -ArgumentList ${args.map(psQuote).join(',')} -WorkingDirectory ${psQuote(cwd)} -PassThru;`,
-      'Write-Output $p.Id',
-    ].join(' ')
     let child: import('node:child_process').ChildProcess
     try {
-      child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-        windowsHide: true, // powershell 中转进程本身隐藏，窗口由 Start-Process 弹出的 CLI 持有
-        stdio: ['ignore', 'pipe', 'ignore'],
+      child = spawn('wt.exe', ['-w', 'last', 'nt', '-d', cwd, exe, ...args], {
+        env: { ...process.env, FLOIRA_GATEWAY: gwUrl, FLORIA_IN_WT: '1' },
+        // 不设 windowsHide（2026-09-09 双启动根因）：SW_HIDE 随 STARTUPINFO 被 -w last 无窗时
+        // 新开的 WindowsTerminal 继承 = 首窗创建即隐藏；wt.exe 是 GUI 子系统，无黑窗可防。
+        stdio: 'ignore',
       })
     } catch (e) {
       reject(e as Error)
       return
     }
-    // 解析 Start-Process -PassThru 输出的真实 CLI pid（用于 stopWebSession taskkill）
-    let outBuf = ''
-    child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => {
-      outBuf += chunk
-    })
-    child.on('error', (err) => {
-      reject(err)
-    })
     // 等 CLI 完成 /clients 注册（cliClients.has(sid)）——注册成功即 resolve；
-    // 超时（CLI 启动失败/未能探测到网关）→ 清理并 reject。
+    // 超时（wt 打开失败/CLI 未能探测到网关）→ reject（wt pid 即退，无中转进程可杀）。
     const startedAt = Date.now()
     const REGISTER_TIMEOUT_MS = 20_000
     const timer = setInterval(() => {
       if (cliClients.has(sid)) {
         clearInterval(timer)
         console.log(`[gateway] wsession: 注册成功 sid=${sid} 耗时=${((Date.now() - startedAt) / 1000).toFixed(1)}s`)
-        const cliPid = Number(outBuf.trim())
+        const helloPid = cliHelloPids.get(sid)
+        cliHelloPids.delete(sid)
         const proc: WebSessionProc = {
           sessionId: sid,
-          child,
-          pid: cliPid || undefined,
+          pid: helloPid,
           clients: new Set(),
           startedAt,
           lastActive: Date.now(),
@@ -3008,21 +3038,18 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
       if (Date.now() - startedAt > REGISTER_TIMEOUT_MS) {
         clearInterval(timer)
         console.error(
-          `[gateway] wsession: 注册超时 sid=${sid} exe=${exe}（${REGISTER_TIMEOUT_MS / 1000}s 内未完成 /clients 注册，CLI 启动失败或探测不到网关）`,
+          `[gateway] wsession: 注册超时 sid=${sid} exe=${exe}（${REGISTER_TIMEOUT_MS / 1000}s 内未完成 /clients 注册，wt 打开失败或 CLI 探测不到网关）`,
         )
-        if (child.pid && isPidAlive(child.pid)) killTree(child.pid)
         reject(new Error(`web 会话启动超时（${REGISTER_TIMEOUT_MS / 1000}s 内未完成网关注册）`))
       }
     }, 300)
-    // powershell 中转进程 spawn 完 CLI 即退出——它退出不代表 CLI 窗口关闭。
-    // 不在此清 timer（CLI 可能尚未注册 /clients）；若 powershell 本身失败（stderr 报错/非 0 退出
-    // 且未产出 pid）→ 提前 reject，避免空等 20s。
+    // wt.exe 启动成功即正常退出（exit 0）——它退出不代表 CLI 窗口关闭，不在此清 timer。
+    // 非 0 退出且未注册 → wt 命令本身失败（无 WT/命令被拒），提前 reject 避免空等 20s。
     child.on('exit', (code) => {
-      const cliPid = Number(outBuf.trim())
-      if (code !== 0 && !cliPid && !webSessions.has(sid)) {
+      if (code !== 0 && !cliClients.has(sid) && !webSessions.has(sid)) {
         clearInterval(timer)
-        console.error(`[gateway] wsession: 打开 CLI 窗口失败 sid=${sid} powershell exit=${code ?? '?'}`)
-        reject(new Error(`打开本地 CLI 窗口失败（powershell exit ${code ?? '?'}）`))
+        console.error(`[gateway] wsession: wt 打开 CLI 窗口失败 sid=${sid} exit=${code ?? '?'}`)
+        reject(new Error(`打开本地 CLI 窗口失败（wt exit ${code ?? '?'}）`))
       }
     })
     child.on('error', (err) => {
@@ -3038,7 +3065,28 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
 // 审批在本地窗口操作 → 原 stdin 管道函数 sendWebSessionMessage/handleWebApproval 已删除。
 
 /**
- * 优雅停 web 会话：关闭本地可见 CLI 窗口（taskkill 真实 CLI pid 树，窗口随之关闭）。
+ * 优雅停 CLI 进程（2026-09-08 协议，web spawn 与终端直开两会话形态共用）：先经 /clients 通路
+ * 请 CLI 自行退出（gatewayClient 收 shutdown → 停重连 → exit 0）——WT 的 closeOnExit=graceful
+ * 只对 exit 0 自动收 tab，taskkill 强杀 exit 1 会残留「已退出进程，代码为 1」提示页（wt 直并
+ * 链副作用，用户实测）。3s 后进程仍活再树杀兜底（覆盖 WS 已断、收不到 shutdown 的 CLI，含旧
+ * exe 无 shutdown handler 的进程）。shutdown 按 sid 精确单发（cliClients.get），非广播不波及
+ * 其它会话。
+ */
+function gracefulStopCli(sid: string, pid: number | undefined): void {
+  const sock = cliClients.get(sid)
+  if (sock) {
+    try { sock.send(JSON.stringify({ type: 'shutdown' })) } catch { /* 断开忽略，走兜底 */ }
+  }
+  if (pid && isPidAlive(pid)) {
+    setTimeout(() => {
+      // 豁免版树杀：会话里跑 /server on 会把网关挂到该会话进程树下，普通 /T 会连坐杀网关
+      if (isPidAlive(pid)) killTreeExcept(pid, process.pid)
+    }, 3000)
+  }
+}
+
+/**
+ * 优雅停 web 会话：关闭本地可见 CLI 窗口（gracefulStopCli 优雅退出协议，窗口随之关闭）。
  * 仅用于用户显式关闭单个会话/超时清理；网关自身关停（off/restart/空闲/SIGINT）不得走这里——
  * web 会话与 CLI 会话同等权重，网关不在了窗口照常活着（2026-08-29 重启杀窗根修）。
  */
@@ -3047,9 +3095,7 @@ function stopWebSession(sessionId: string): boolean {
   if (!p) return false
   webSessions.delete(sessionId)
   persistWebSessions()
-  const pid = p.pid ?? p.child.pid
-  // 豁免版树杀：web 会话里跑 /server on 会把网关挂到该会话进程树下，普通 /T 会连坐杀网关
-  if (pid && isPidAlive(pid)) killTreeExcept(pid, process.pid)
+  gracefulStopCli(sessionId, p.pid)
   return true
 }
 
@@ -3138,9 +3184,13 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   // 向本网关上报 / 连接 /clients（否则非网关宿主的 CLI 无 token，上报会被 401 拒绝）。
   setGatewayToken(currentToken)
   saveGatewayTokenToDisk(currentToken)
+  // 2026-09-07 wt 直并配套：端口落盘 .claude/gateway-port——并入已存在 WT 窗口的新标签继承旧 WT
+  // 进程环境，FLOIRA_GATEWAY env 传不到 CLI 子进程，env 缺失时读盘发现（gatewayToken.ts TTL 缓存）。
+  saveGatewayPortToDisk(currentPort)
   const root = getPortableRoot()
   // 收养上一代网关遗留的存活 web 会话窗口（注册表落盘，重启不杀窗 → 必须收养，否则 resume 幂等失效双开进程）
   adoptWebSessions()
+  loadTurnEndAt() // 2026-09-07 恢复上一代网关的打断收口时刻（落盘见 turnEndAt 注）
   // 启动即挂上空闲回收计时：此时无任何连接，若后续一直无人使用，到点自动关闭
   scheduleIdleShutdown()
   // backend（2026-08-19）与 web 会话（2026-08-23）空闲回收合并定时器（P2 收敛，独立于网关自身空闲回收）
@@ -3226,6 +3276,12 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
         approvalTrailPush('cli-register', sid)
         ensureSseWatches(root) // P0：新 CLI 会话上线（web spawn / 终端在全新项目首开会话）→ 补齐其落盘目录 watch
         flushPendingDeliveries(sid) // 2026-09-06 wsession 异步化：spawn 期间暂存的消息按序补投
+        // 2026-09-07 断连感知闭环：注册成功=会话进程回归，SSE 群发 session-up → web 清「已断开」
+        // 提示并刷新（状态点恢复由 CLI 注册后的 activity 上报/60s 心跳兜底，网关不代答状态）。
+        {
+          const s = `data: ${JSON.stringify({ type: 'session-up', session: sid })}\n\n`
+          sendAll(sseClients, (c) => { c.res.write(s) })
+        }
         scheduleIdleShutdown()
         // 2026-08-24 审批双操作（web 与 CLI 均可）：CLI 交互权限弹窗经 /clients 上报审批请求，
         // 网关转 floria 审批卡；本地先操作/请求撤销 → 通知 floria 撤卡。
@@ -3242,6 +3298,10 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             response?: unknown
             items?: unknown
             active?: unknown
+            pid?: unknown
+            seq?: unknown
+            base?: unknown
+            messages?: unknown
           }
           try {
             m = JSON.parse(data.toString())
@@ -3250,7 +3310,22 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           }
           // 2026-08-24 中继握手：记录 CLI 是否带审批/提问中继代码（relay:true = 新代码）
           if (m.type === 'cli-hello') {
+            // 2026-09-08 事件流统一：cli-hello = 进程身份确立，seq 流随进程重启归 1 →
+            // 旧记账作废（否则新进程首条 delta 被「seq <= last」去重永久吞掉，web 卡死）。
+            sessionDeltaSeq.delete(sid)
             approvalTrailPush('cli-hello', sid, undefined, m.relay === true ? 'relay-on' : 'relay-off')
+            // 2026-09-07 wt 直并：真实 CLI pid 由 cli-hello 上报（wt.exe 中转即退，网关拿不到）。
+            // spawn 在途（webSessions 尚无此 sid）→ 暂存，spawnWebSession 注册成功时取走填入；
+            // 已入库 → 直接补填。普通 CLI 主进程（非 web spawn）不入暂存表。
+            if (typeof m.pid === 'number' && m.pid > 0 && (webSessions.has(sid) || spawningPromises.has(sid))) {
+              const proc = webSessions.get(sid)
+              if (proc && proc.pid !== m.pid) {
+                proc.pid = m.pid
+                persistWebSessions()
+              } else if (!proc) {
+                cliHelloPids.set(sid, m.pid)
+              }
+            }
             return
           }
           // 2026-08-30 队列快照（清单#2）：CLI commandQueue 当前排队项 → 存 per-session +
@@ -3283,14 +3358,56 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           if (m.type === 'turn-state') {
             // 2026-09-06 收口二轮：live:false = 回合被中止，记网关权威时刻（无 TTL）供
             // /gateway/sessions 下发，前端刷新后凭此恢复收口判定（实时路径照旧 SSE 直达）。
-            if (m.live === false) turnEndAt.set(sid, Date.now())
+            // 2026-09-07：回合中止即清活性 beat（旧 beat 不得跨回合参与新回合的无响应判定）。
+            if (m.live === false) {
+              turnEndAt.set(sid, Date.now())
+              persistTurnEndAt() // 2026-09-07 变更即写：打断收口信号跨网关重启存活
+              turnBeatAt.delete(sid)
+            }
             const s = `data: ${JSON.stringify({ type: 'turn-state', session: sid, live: m.live === true })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          if (m.type === 'turn-beat') {
+            // 2026-09-07 僵死感知：CLI 引擎增量心跳（4s 节流），记最后活性时刻 + SSE 群发。
+            // web 运行态计时 tick 对账：beat 落后超阈值 → 「无响应」提示（进程/WS 活但 query 链
+            // 僵死的唯一可判信号）。无状态转发语义，web 自持 per-session 时刻。
+            turnBeatAt.set(sid, Date.now())
+            const s = `data: ${JSON.stringify({ type: 'turn-beat', session: sid })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          if (m.type === 'stream-text') {
+            // 2026-09-08 流式字符通道：引擎流式 delta（CLI 100ms 合帧全文快照）无状态转发 +
+            // SSE 群发 → web 状态行后流式预览。空串 = 块边界/消息落盘/打断清除信号。纯暂态
+            // 显示层（不落盘、不进权威序列），载荷截断防滥用；丢失无害（下一帧覆盖）。
+            const text = typeof m.text === 'string' ? m.text.slice(0, 65536) : ''
+            const s = `data: ${JSON.stringify({ type: 'stream-text', session: sid, text })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
             return
           }
           if (m.type === 'restored') {
             const text = typeof m.text === 'string' ? m.text : ''
             const s = `data: ${JSON.stringify({ type: 'restored', session: sid, text })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          if (m.type === 'session-delta') {
+            // 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎投影 delta 直达 web。
+            // CLI 侧 buildDisplayDelta（过滤权威单源）即发 → 本处 seq 记账去重 + SSE 群发。
+            // seq <= last = 重复/迟到丢弃；gap（seq > last+1）照发——web 端 gap 判定 → 全量
+            // 对账重建基线（CLI 重启 seq 归 1 由 cli-hello 重置覆盖）。不缓存 delta 历史。
+            // 载荷基本校验（数组/对象/条数上限=投影窗口 200+裕量）防异常膨胀。
+            const seq = typeof m.seq === 'number' && Number.isInteger(m.seq) && m.seq > 0 ? m.seq : 0
+            if (!seq) return
+            const last = sessionDeltaSeq.get(sid) ?? 0
+            if (seq <= last) return
+            sessionDeltaSeq.set(sid, seq)
+            const base = typeof m.base === 'number' && Number.isInteger(m.base) && m.base >= 0 ? m.base : 0
+            const msgs = Array.isArray(m.messages)
+              ? m.messages.filter((x) => x && typeof x === 'object').slice(0, 220)
+              : []
+            const s = `data: ${JSON.stringify({ type: 'session-delta', session: sid, seq, base, messages: msgs })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
             return
           }
@@ -3336,14 +3453,36 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           if (cliClients.get(sid) === ws) cliClients.delete(sid)
           // 2026-08-30 队列快照：队列态只属于在线 CLI 进程，断开即清（重连后 queue-state 补发对齐）
           sessionQueues.delete(sid)
-          // 2026-08-24 web 会话：CLI 窗口被用户关闭 → 进程死亡 → 从运行表移除
-          // （会话仍可从磁盘 resume；2026-08-25 起无来源注册表，列表不再区分来源）。
-          // 仅进程真死才删（gatewayClient 断线重连期间进程仍活着，不能误删）。
-          const wp = webSessions.get(sid)
-          if (wp && wp.pid && !isPidAlive(wp.pid)) {
-            webSessions.delete(sid)
-            persistWebSessions()
-          }
+          // 2026-09-08 断连感知根修：detach 不再立即清 activity/beat + 群发 null——CLI /clients
+          // WS 断开 ~1s 重连（RECONNECT_BASE_MS）是常态（网络抖动/睡眠恢复），立即群发会让 web
+          // 把活回合误收口成「已处理」（未完成对话停止计时实证）。改 3s 复核窗：窗口内重连 →
+          // 全静默（CLI 重连 activityResync 重报自然恢复）；到期未重连才收口——activity null
+          // 群发与 session-down 从此共用同一判定时机（进程失联确认），状态源减少。
+          // （close 与 error 双触发由 detachTimers 去重；error 后 close 亦会到，幂等无害。）
+          const prevDetach = detachTimers.get(sid)
+          if (prevDetach) clearTimeout(prevDetach)
+          detachTimers.set(
+            sid,
+            setTimeout(() => {
+              detachTimers.delete(sid)
+              if (cliClients.has(sid)) return // 复核窗内重连：状态由重连重报恢复，静默
+              turnBeatAt.delete(sid)
+              sessionActivity.delete(sid)
+              const down = `data: ${JSON.stringify({ type: 'activity', session: sid, state: null })}\n\n`
+              sendAll(sseClients, (c) => { c.res.write(down) })
+              // 2026-08-24 web 会话：CLI 窗口被用户关闭 → 进程死亡 → 从运行表移除
+              // （会话仍可从磁盘 resume；2026-08-25 起无来源注册表，列表不再区分来源）。
+              // 仅进程真死才删（gatewayClient 断线重连期间进程仍活着，不能误删）。
+              const wp = webSessions.get(sid)
+              if (wp && wp.pid && !isPidAlive(wp.pid)) {
+                webSessions.delete(sid)
+                persistWebSessions()
+                // 进程真死 → 显式 session-down 群发，web toast 告知用户会话已退出、需点开重开
+                const exited = `data: ${JSON.stringify({ type: 'session-down', session: sid })}\n\n`
+                sendAll(sseClients, (c) => { c.res.write(exited) })
+              }
+            }, 3000),
+          )
           scheduleIdleShutdown()
         }
         ws.on('close', detach)
@@ -3416,6 +3555,19 @@ export function stopLocalGateway(): boolean {
     }
   }
   cliClients.clear()
+  // SSE 僵尸连接根治（2026-09-09）：server.close() 只停止接受新连接，不断开既有连接——已挂上的
+  // EventSource 流保持 ESTABLISHED，浏览器收不到 TCP FIN → onerror 永不触发 → 前端永不重连。
+  // 此前这里只 sseClients.clear() 清引用，旧页面的 SSE 就成了僵尸：消息区收不到
+  // updated/session-delta/stream-text，只剩首个乐观气泡永不更新（「web 新建会话长时间空白」根因）。
+  // 根治 = 显式 end() 所有 SSE 响应流：客户端收到流结束 → onerror → 3s 后 initLive 重连新网关
+  // → hello → refreshSession 全量对账，页面不刷新自动恢复（与上方 WS 显式 close → 自动重连对称）。
+  for (const c of sseClients) {
+    try {
+      c.res.end()
+    } catch {
+      /* 忽略 */
+    }
+  }
   sseClients.clear()
   sseSizes.clear()
   ssePrimed = false
@@ -3427,6 +3579,7 @@ export function stopLocalGateway(): boolean {
   // 2026-08-17 独立化：同时清盘 token 文件，避免遗留的 token 被误用（新一轮网关会重新生成写盘）。
   setGatewayToken('')
   clearGatewayTokenFromDisk()
+  clearGatewayPortFromDisk()
   // 2026-08-28 修订：/server off|restart 不再清设备授权票证（用户实测「重启后授权全没了」）——
   // 授权名单是手动配对的持久资产，只由 /server auth add / auth off 管理；gateway-token（内部）
   // 照旧清盘（重启随机新生成）。设备 cookie 的票证在名单里始终有效，跨重启免重配。

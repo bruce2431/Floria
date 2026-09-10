@@ -18,6 +18,10 @@ import {
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join } from 'path'
 import {
+  ARCHIVE_PLACEHOLDER_PREFIX,
+  isRenderArchivePlaceholder,
+} from './renderCap.js'
+import {
   findProjectDir,
   getProjectSessionDirsUpToHome,
 } from './sessionStoragePortable.js'
@@ -3333,6 +3337,14 @@ function pickDepthOneUuidCandidate(
   return candidates.at(-1)!
 }
 
+// 归档占位行的字节级指纹：content 字段值以渲染占位前缀开头（仅 cap 渲染占位
+// 消息带此前缀，正常 informational 消息不会）。供 walkChainBeforeParse 的
+// 调用门一次性检测——含占位的转录跳过 parse 前回走优化（见调用点注释）。
+const ARCHIVE_PLACEHOLDER_BYTES = Buffer.from(
+  `"content":"${ARCHIVE_PLACEHOLDER_PREFIX}`,
+  'utf8',
+)
+
 function walkChainBeforeParse(buf: Buffer): Buffer {
   const NEWLINE = 0x0a
   const OPEN_BRACE = 0x7b
@@ -3603,7 +3615,12 @@ export async function loadTranscriptFile(
       !opts?.keepAllLeaves &&
       !hasPreservedSegment &&
       !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP) &&
-      buf.length > SKIP_PRECOMPACT_THRESHOLD
+      buf.length > SKIP_PRECOMPACT_THRESHOLD &&
+      // 归档占位污染的转录不走本优化：walk 按 parentUuid 回走在占位的
+      // parentUuid=null 处提前截断，tip 之前的历史字节会被当 dead branch
+      // 丢弃（且 concat 门按字节占比判定后照样保 tip 段）。全量 parse 交给
+      // 下方 archiveBridge 桥接恢复链。
+      buf.indexOf(ARCHIVE_PLACEHOLDER_BYTES) === -1
     ) {
       buf = walkChainBeforeParse(buf)
     }
@@ -3652,6 +3669,16 @@ export async function loadTranscriptFile(
     // rewrite any subsequent message whose parentUuid lands in the bridge.
     const progressBridge = new Map<UUID, UUID | null>()
 
+    // 归档占位桥（2026-09-09）：P1 渲染 cap 的占位消息曾泄漏进转录——cap 砍头瞬间
+    // 占位在 React state 头部替换旧头部，useLogMessages 误判 compaction 走全量重录，
+    // 占位（随机新 uuid，不在 messageSet）被当新消息落盘且 startingParentUuid=undefined
+    // → parentUuid=null 各自成链根，把主链切成碎段（resume chain walk 停在占位 →
+    // 历史丢失）。与 progressBridge 同构：占位行不入链，指向占位的 parentUuid 重定向
+    // 到占位行之前文件序最近的真实链参与者（转录 append 顺序=链顺序，桥值即其逻辑
+    // 前驱）；写入端根修（useLogMessages 剥投影）后新转录不再产生占位行。
+    const archiveBridge = new Map<UUID, UUID | null>()
+    let lastChainUuid: UUID | null = null
+
     for (const entry of entries) {
       // Legacy progress check runs before the Entry-typed else-if chain —
       // progress is not in the Entry union, so checking it after TypeScript
@@ -3673,6 +3700,14 @@ export async function loadTranscriptFile(
         if (entry.parentUuid && progressBridge.has(entry.parentUuid)) {
           entry.parentUuid = progressBridge.get(entry.parentUuid) ?? null
         }
+        if (isRenderArchivePlaceholder(entry)) {
+          archiveBridge.set(entry.uuid, lastChainUuid)
+          continue
+        }
+        if (entry.parentUuid && archiveBridge.has(entry.parentUuid)) {
+          entry.parentUuid = archiveBridge.get(entry.parentUuid) ?? null
+        }
+        if (!entry.isSidechain) lastChainUuid = entry.uuid
         messages.set(entry.uuid, entry)
         // Compact boundary: prior marble-origami-commit entries reference
         // messages that won't be in the post-boundary chain. The >5MB

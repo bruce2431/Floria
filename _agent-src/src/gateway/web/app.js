@@ -99,7 +99,6 @@
       MODELS_LOADING = false
       renderMgrModels()
       renderModelSeat() // 2026-08-25 模型数据落地后刷新输入栏模型 seat（含 hideGate 补拉场景）
-      renderImgBtn() // 2026-08-28 图片门控：全局识图判定落地后刷新上传按钮显隐（空态兜底）
     }
     return MODELS
   }
@@ -151,7 +150,8 @@
   let ALL = []
   let timer = null
   // 阶段1 实时同步：SSE 变更驱动的去重/防抖状态
-  const live = { es: null, listSig: '', curSig: '', listT: null, sessT: null, lastUserSig: '', pinnedUserSig: '', lastMsgLen: null, lastDataTs: 0, curUuid: null, queueRemote: [], maxImgId: 0, compactFlags: new Map(), turnEndFlags: new Map(), restoredFlags: new Map(), txProcStart: 0 }
+  const live = { es: null, listSig: '', curSig: '', listT: null, sessT: null, lastUserSig: '', pinnedUserSig: '', lastMsgLen: null, lastDataTs: 0, curUuid: null, queueRemote: [], maxImgId: 0, compactFlags: new Map(), turnEndFlags: new Map(), restoredFlags: new Map(), turnBeat: new Map(), txProcStart: 0, localMessages: null, deltaSeq: null, streamText: '' }
+  let connUp = false // 2026-09-07 网关 WS 在线（setConn 维护）：运行态计时 tick 据此标「连接中断」
 
   // ---------- 工具 ----------
   const esc = (s) =>
@@ -334,7 +334,7 @@
     // cwd = 会话启动根（2026-08-29 变更卡相对路径显示），无则 null。
     // queued = 当前排队项快照（2026-08-30 队列快照链，CLI queue-state 上报，置底排队区首载数据源）；
     // file = jsonl 文件名（uuid），供 SSE queue-state 事件按会话精确匹配。
-    return { messages: data.display || data.messages, context: data.context || null, model: data.model || null, modelTs: data.modelTs || null, vision: !!data.vision, cwd: data.cwd || null, queued: Array.isArray(data.queued) ? data.queued : [], file: typeof data.file === 'string' ? data.file : null }
+    return { messages: data.display || data.messages, context: data.context || null, model: data.model || null, modelTs: data.modelTs || null, vision: !!data.vision, cwd: data.cwd || null, queued: Array.isArray(data.queued) ? data.queued : [], file: typeof data.file === 'string' ? data.file : null, deltaSeq: typeof data.deltaSeq === 'number' ? data.deltaSeq : null }
   }
   // 用 CLI 上报的会话实际模型校准模型 seat（2026-08-24 模型 web/CLI 同步）。仅当用户本次会话内
   // 未主动切换（modelUserPicked=false）时采纳，避免覆盖刚切的选择。modelTs 暂保留（供后续冲突判定）。
@@ -358,14 +358,79 @@
       let ev
       try { ev = JSON.parse(e.data) } catch { return }
       if (ev.type === 'hello') { refreshList(); refreshSession() }
-      else if (ev.type === 'activity') refreshList() // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）
+      else if (ev.type === 'activity') {
+        // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）。
+        // 2026-09-07 断连感知：state=null（CLI /clients 断开 → 网关 detach 群发）= 会话进程
+        // 断开 → 该会话状态点立即熄（不等 600ms 防抖重拉），当前打开的会话立即收口运行态
+        //（「正在思考/正在处理」停表），不再冻结在断流前的最后快照上假绿假转。
+        if (ev.state == null && typeof ev.session === 'string') {
+          const s = ALL.find((x) => hashOf(x) === ev.session)
+          if (s && s.state) { s.state = null; renderRecent() }
+          if (ev.session === live.curUuid) refreshSession(true)
+        }
+        // 2026-09-07 状态恢复对称刷新：state 由真空恢复（CLI 重连重报/60s 心跳补报——网关重启
+        // 清 sessionActivity 后的空窗）时，当前会话视图同样立即重渲。否则真空窗里的误收口
+        // （state=null 被 closeSeg 判「进程不在线」→ 活回合冻结成「已处理」停表）要等下一次
+        // jsonl 落盘才翻回，glm 长思考期可达十几分钟（Pj5 会话重启实证）。不变量：当前会话
+        // 视图状态显示收敛到网关最新 state，null↔非 null 两向同治。
+        else if (typeof ev.session === 'string' && ev.session === live.curUuid) refreshSession()
+        refreshList()
+      }
+      else if (ev.type === 'session-down') {
+        // 2026-09-07 进程退出显式告知：detach 且 pid 已死（非重连窗）→ 网关群发。收口运行态
+        // + toast 指路（转录在磁盘，列表点开即 resume 重开，积压消息自动补投）。
+        if (typeof ev.session === 'string') {
+          const s = ALL.find((x) => hashOf(x) === ev.session)
+          if (s && s.state) { s.state = null; renderRecent() }
+          if (ev.session === live.curUuid) refreshSession(true)
+          toast('会话进程已退出，可从列表点开重开（转录已保留）')
+        }
+      }
+      else if (ev.type === 'session-up') {
+        // 2026-09-07 会话进程回归（/clients 注册成功）：刷新列表与当前会话；状态点恢复由
+        // CLI 注册后的 activity 上报/60s 心跳随后到达，网关不代答状态。
+        refreshList()
+        if (ev.session === live.curUuid) refreshSession()
+      }
+      else if (ev.type === 'turn-beat') {
+        // 2026-09-07 僵死感知：引擎增量心跳（CLI setResponseLength → gatewayClient 4s 节流）
+        // → 记 per-session 最后活性时刻。bindLiveFoldTimer tick 对账：运行态持续而 beat 缺席
+        // 或落后超阈值 = 引擎无真实进展（进程/WS 活但 query 链僵死）→ 计时行标「无响应」。
+        if (typeof ev.session === 'string') live.turnBeat.set(ev.session, Date.now())
+      }
       else if (ev.type === 'queue-state') {
         // 2026-08-30 队列快照增量（清单#2/#4）：CLI commandQueue 变化 → 网关 SSE 群发（事件体
         // 直接带 items 全量快照）→ 当前会话置底排队区即时重渲，不等 400ms 防抖的 refreshSession。
         if (live.curUuid && ev.session === live.curUuid) {
           live.queueRemote = Array.isArray(ev.items) ? ev.items : []
-          renderQueueDock()
+          queueClaimAdopt(live.queueRemote) // 队首主张收编（同回程入口：CLI 端/另一端入队的瞬态同样立即主张化）
+          renderTransient() // 暂态区对账重渲（2026-09-07 收编：远端快照更新与气泡/主张折叠同趟对账）
         }
+      }
+      else if (ev.type === 'session-delta') {
+        // 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎变化 delta 直达——CLI 过滤投影
+        //（filterConversationForDisplay 权威单源）的「尾部替换」增量（base = 分歧点绝对水位，
+        // messages = 自分歧点起的尾部；append/末条 blocks 更新/段收口统一此编码，幂等）。
+        // seq 每会话单调：连续 → 应用进本地基线走 renderSessionBody（与全量对账同一渲染出口，
+        // absorbPending/renderTransient/钉顶/计时不变量同源）；重复忽略；gap/无基线/base 超前 →
+        // refreshSession(true) 全量对账重建基线（分布式流缺失恢复标准形态，对账源 = /gateway/
+        // session，display 链 P1 存活）。本回调同步执行无 await，无切会话写穿窗口。
+        if (ev.session !== live.curUuid) return
+        if (typeof ev.seq !== 'number' || !Number.isInteger(ev.seq) || ev.seq <= 0) return
+        if (live.deltaSeq == null) { refreshSession(true); return }
+        if (ev.seq <= live.deltaSeq) return
+        if (ev.seq !== live.deltaSeq + 1) { refreshSession(true); return }
+        if (!Array.isArray(ev.messages) || !ev.messages.length) return
+        const base = typeof ev.base === 'number' && Number.isInteger(ev.base) && ev.base >= 0 ? ev.base : 0
+        const cur = Array.isArray(live.localMessages) ? live.localMessages : null
+        if (!cur || base > cur.length) { refreshSession(true); return }
+        // 历史截断拒收（2026-09-09 录屏逐帧分析定案）：delta 覆盖范围不足（base + messages
+        // 长度 < 本地序列长度）= 发送端要求收缩已提交历史，违背 append-only + 尾部修正不变量
+        //（正常时 CLI 投影恒到达 live tail）。按 seq gap 同形态走全量对账，不应用。
+        if (base + ev.messages.length < cur.length) { refreshSession(true); return }
+        live.localMessages = cur.slice(0, base).concat(ev.messages)
+        live.deltaSeq = ev.seq
+        renderSessionBody(live.localMessages, { force: false, hash: state.currentHash })
       }
       else if (ev.type === 'compact-state') {
         // 2026-09-04 压缩实时态（queue-state 同款链）：CLI onCompactProgress → 网关 SSE 群发。
@@ -384,7 +449,21 @@
         // → 无 TTL（防重建后运行态复活）。jsonl 无变化 sig 不变 → refreshSession(true) 强制重渲。
         if (typeof ev.session === 'string' && ev.live === false) {
           live.turnEndFlags.set(ev.session, Date.now())
-          if (ev.session === live.curUuid) refreshSession(true)
+          if (ev.session === live.curUuid) {
+            live.streamText = '' // 2026-09-08 流式字符通道：回合中止 = 暂态收口（CLI 已 streamClear 同发，双端确定性）
+            refreshSession(true)
+          }
+        }
+      }
+      else if (ev.type === 'stream-text') {
+        // 2026-09-08 流式字符通道：CLI 引擎流式 delta（thinking/text，onUpdateLength 单路累积
+        // 100ms 合帧全文快照）→ 运行态状态显示行（.think-state）后/乐观主张折叠体内流式预览。
+        // 纯显示暂态：不进 localMessages 权威基线、不落盘；空串 = 块边界/消息落盘清除（权威
+        // delta 随后接管）。applyStreamPreview 直写 textContent，不走整页重建；重渲洗 DOM 后由
+        // renderSessionBody 出口重挂恢复。
+        if (ev.session === live.curUuid) {
+          live.streamText = typeof ev.text === 'string' ? ev.text : ''
+          applyStreamPreview()
         }
       }
       else if (ev.type === 'restored') {
@@ -396,6 +475,16 @@
         if (typeof ev.session === 'string' && typeof ev.text === 'string') {
           live.restoredFlags.set(ev.session, { ts: Date.now(), text: ev.text })
           if (ev.session === live.curUuid) {
+            // 撤回 = 该条乐观主张一并作废（jsonl 永无该 user，absorbPending 永不命中）——
+            // 不同步丢弃 pending 项，renderTransient 会让主张气泡/折叠复活（幻影回流）。
+            const t0 = ev.text.trim()
+            const n0 = pendingUserMsgs.length
+            pendingUserMsgs = pendingUserMsgs.filter((p) => {
+              const inCur = p.hash === state.currentHash || (p.hash === '' && firstSendHash === state.currentHash)
+              if (!inCur) return true
+              return String(p.text || '').replace(/\s*\[Image #\d+\]/g, '').trim() !== t0
+            })
+            if (pendingUserMsgs.length !== n0) renderTransient()
             if (!inputEl.textContent.trim()) {
               inputEl.textContent = ev.text
               syncGwSend()
@@ -498,7 +587,7 @@
       const s = findSession(hash)
       if (!s) return
       try {
-        const { messages, context, model, modelTs, cwd, queued, file } = await fetchMessages(s.id)
+        const { messages, context, model, modelTs, cwd, queued, file, deltaSeq } = await fetchMessages(s.id)
         // 2026-08-30 串会话根治：会话校验只在 await 前做过一次 → fetch 回程期间用户切到其它
         // 会话时，本响应（A 的整份消息/cwd/模型/上下文/队列快照）会写穿全部全局槽并把 A 的
         // 历史 innerHTML 整页渲染进新会话 DOM（CLI 单进程单会话无此异步边界，web 必须在每个
@@ -508,133 +597,162 @@
         // 2026-08-30 队列快照：jsonl 文件名（uuid）供 SSE queue-state 会话匹配；queued 交排队区
         live.curUuid = file ? file.replace(/\.jsonl$/, '') : live.curUuid
         live.queueRemote = queued
-        // 首条消息事务收口（2026-09-06）：本会话真实数据已落盘（SSE 接管起点）→ 销毁事务，
-        // queue-dock 恢复正常渲染。与 renderSession fetch 回程的收口同一判定、双入口对称。
-        // 接管帧（用户「两个状态的『正在处理』定位不同」根治）：乐观气泡/proc 折叠无 data-m，
-        // stampMsgIn 的 prev 采集命中不了 → 接管重建把同位真实元素判「新增」重播 fadeup
-        //（气泡+「正在处理」跳变重现）→ txTakeover 帧跳过 stampMsgIn（同位换皮不是新增）；
-        // 乐观 proc 计时起点（发送瞬间 T0）早于落盘 user ts（异步化后消息经暂存补投）→
-        // 移交 live.txProcStart 供 bindLiveFoldTimer 续算，「正在处理 Xs」跨接管连续不回跳。
-        let txTakeover = false
-        if (firstSendHash === hash && messages.length > 0) {
-          txTakeover = true
-          live.txProcStart = proc && proc.isConnected ? procStart : 0
-          firstSendHash = ''
-        }
-        live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
-        // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
-        // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
-        // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）
-        live.maxImgId = 0
-        for (const m of messages) {
-          for (const b of m.blocks || []) {
-            if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
-          }
-        }
         applySessionModel(model, modelTs) // 2026-08-24：实时刷新同样按 CLI 上报模型校准 seat
         renderCtxMeter(context)
-        // 2026-08-29 待落盘乐观消息吸收判定：jsonl 已出现该文本（单条落盘或 drainCommandQueue
-        // 多条合并成一条，join 后 includes 命中）→ 真实气泡已由渲染权威接管，不再重插
-        absorbPending(messages)
-        renderQueueDock() // 排队区与对话流同步重渲（吸收变化/远端快照更新后）
-        const last = messages.length ? messages[messages.length - 1] : null
-        const sig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
-        // 新增用户消息检测（实时同步的钉顶触发点）：末尾真实用户消息索引/时间变了 = 新回合。
-        // 注入引导消息（injected:true）不触发钉顶（用户定案：引导消息不钉顶，钉顶只属于新回合开启消息）
-        let lastU = -1
-        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
-        const uSig = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
-        const hasNewUser = live.lastUserSig !== '' && uSig && uSig !== live.lastUserSig
-        live.lastUserSig = uSig
-        // 2026-08-26 定案：处理中段实时重建。原 2026-08-24 抑制逻辑（回合进行中跳过整页 innerHTML 重建）
-        // 假设实时折叠由 WS out 增量填充——但网关从不给 web 发 out 消息（实时流走 SSE：conversationDisplay
-        // 上报 + jsonl + 列表刷新），WS out 是死代码 → 处理中折叠一直空白（用户反馈「完全没有渲染，并且也不同步」）。
-        // 现改为：回合未结束（数据在增长或 segIsProcessing）→ 照常整页重建，messagesHtml 对处理中段走
-        // liveFoldBody 只渲染一个工具折叠行（「正在运行：<当前工具>」轮转；400ms 去抖已限频，SSE 逐条写入时最多 ~2.5 次/秒）；
-        // 回合结束（末段回复落地）→ 关掉空 proc 折叠交回下方数据渲染一次性出最终态（已处理时长/回复/变更卡）。
-        // 2026-08-24 保留：仅当消息区已有真实消息时才关折叠——web 新会话首条消息发送后 jsonl 尚空，
-        // 界面停在空白（空会话无占位行，2026-09-07 移除），不关空折叠（下方正常重建让首条消息立即上屏）。
-        if (proc && proc.isConnected && messagesEl.querySelector('.msg') !== null) {
-          const dataMoving = sig !== live.curSig
-          if (!dataMoving && !segIsProcessing(messages)) procClose()
-          // 注意：首次整页重建后 proc 元素随 innerHTML 被替换而失连，本分支自然退出（不再重复关折叠）
-        }
-        // 2026-09-06 空 fetch 不洗盘：发送瞬间乐观气泡（data-t="u"）/proc 折叠已上屏，jsonl 尚未
-        // 落盘的窗口期 SSE 触发 refreshSession 拿到空 messages → 整页重建把乐观气泡洗成
-        // 空白消息区，落盘后才恢复（用户实测「刷新两次+空态一闪」根因；原空态占位行 2026-09-07 移除）。
-        // 消息区已有内容且数据为空 = 落盘窗口，跳过本次渲染保留乐观 DOM，等真实数据接管。
-        // force 例外：restored 撤回链靠重渲收口（含空态），必须放行。
-        if (!force && !messages.length && messagesEl.querySelector('[data-m], [data-t="u"], details')) return
-        if (sig === live.curSig && !force) return // force=true：turn-state/restored 等运行态信号到达，jsonl 无新落盘也强制重渲收口
-        live.curSig = sig
-        const sc = $('chat-scroll')
-        const atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 80
-        // 2026-08-26 增量重建根治：SSE 实时推送只追加/改写尾部「处理中段」，历史消息不变。
-        // 对处理中末段只替换该段 DOM（applySegDelta，头部保留）→ 消除每次推送整页 innerHTML
-        // 重建的闪烁，且 tool-running 光泽动画不再被重建打断（2.6s 扫光能完整播放）。
-        // 条件：上次渲染存在 + 消息数只增不减（SSE 纯追加；回退/压缩等减少则整页）+ 有处理中末段。
-        // 回复落地（段结束）/新回合/消息数减少 → 整页重建一次（低频，带「已处理」收拢可接受）。
-        const html = messagesHtml(messages)
-        // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
-        // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
-        // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
-        let lastRealUser = -1
-        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastRealUser = i; break }
-        // 2026-08-29 引导消息折叠链：引导消息气泡 data-m=段 key ≠ 自身索引 → 额外带 data-g=自身索引，
-        // 此处一并查（否则引导消息在末段时 userBubbleMissing 恒真 → 每次 SSE 都整页重建）
-        const userBubbleMissing = lastRealUser >= 0 && !messagesEl.querySelector(`[data-m="${lastRealUser}"][data-t="u"], [data-g="${lastRealUser}"]`)
-        const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && lastSegInfo && lastSegInfo.processing && lastSegInfo.html
-        live.lastMsgLen = messages.length
-        if (canDelta) {
-          applySegDelta(lastSegInfo)
-        } else {
-          // 按索引保留折叠开合（messagesHtml 只在末尾追加新折叠，索引稳定）
-          const openState = [...messagesEl.querySelectorAll('details')].map((d) => d.open)
-          const doneLivePrev = [...messagesEl.querySelectorAll('details')].map((d) => d.classList.contains('done-live'))
-          // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
-          const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
-          messagesEl.innerHTML = html
-          if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
-          // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
-          // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
-          // 用户手动展开的「已处理」折叠照常恢复。新增折叠（索引越界）保留默认：处理中展开、已处理收起
-          ;[...messagesEl.querySelectorAll('details')].forEach((d, i) => {
-            if (i >= openState.length) return
-            const finishedNow = doneLivePrev[i] && !d.classList.contains('done-live')
-            d.open = finishedNow ? false : openState[i]
-          })
-          // 2026-08-30 乐观改排队区（清单#4③）：整页重建洗掉 #queue-dock（无 data-m）→
-          // renderQueueDock 重渲即可，不再有对话流乐观气泡重插/乐观折叠补挂
-          renderQueueDock()
-        }
-        if (takeover === 'approval') { /* 交互式逐题审批卡已占据输入栏，勿用只读堆叠卡覆盖/清除 */ }
-        else if (pendingAskInput) showTakeover(questionCardHtml(pendingAskInput, null, { single: true }), 'ask')
-        else clearTakeover()
-        setChar(charNote) // 只读 SSE：按末段最近工具/处理状态切形象
-        bindLiveFoldTimer(messages)
-        syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
-        if (hasNewUser && uSig !== live.pinnedUserSig) {
-          // 真正的新用户消息 → 钉顶到视口顶部（平滑上划）；
-          // pinnedUserSig 防重复：网关 result 已解除钉顶后，迟到的刷新不会再重钉上一回合
-          live.pinnedUserSig = uSig
-          const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
-          if (el) pinApply(el, true)
-        } else {
-          syncPinAfterRender()
-        }
-        // 钉顶回合由 pin 逻辑接管滚动（动画期不滚、跟随期已由 pinScrollFollow 吸底）；
-        // 非钉顶回合保留原有「原本在底部就跟着吸底」行为；平滑解除帧（smoothDismissPending）
-        // 则让位——pinReserveApply 已 smooth 滚到底，auto 吸底会瞬间跳掉过渡
-        if (!pin.active) {
-          if (smoothDismissPending) { smoothDismissPending = false }
-          else {
-            sc.style.scrollBehavior = 'auto'
-            if (atBottom) sc.scrollTop = sc.scrollHeight
-            sc.style.scrollBehavior = ''
-          }
-        }
+        // 2026-09-08 事件流统一 P1（方案 20260908135557）：全量回程 = 权威快照，重置本地 delta
+        // 基线（localMessages 副本 + 网关 seq 记账）。此后 session-delta SSE 按「尾部替换」增量
+        // 演进副本；fetch 回程是基线唯一重置点（单源），gap/失步由本函数全量对账恢复。
+        live.localMessages = messages
+        live.deltaSeq = deltaSeq
+        renderSessionBody(messages, { force, hash, adoptQueue: queued })
       } catch { /* 瞬时错误忽略 */ }
     }, 400)
+  }
+
+  // 渲染统一出口（2026-09-08 事件流统一 P1 提取；方案 §5.5「应用 delta 后同样走既有出口对账」）：
+  // 全量对账（refreshSession fetch 回程）与 session-delta 增量应用共用同一条渲染路径——首条消息
+  // 事务收口/接管帧、absorbPending、暂态区对账、sig 幂等判定、增量末段替换或整页重建、计时/钉顶/
+  // 滚动全部同源，渲染不变量不因入口分叉（状态源不增加）。opts.adoptQueue 仅全量回程携带
+  //（queued 载荷驱动的队首主张收编；delta 路径无 queued 载荷，queue-state SSE 自有入口）。
+  function renderSessionBody(messages, opts) {
+    const { force, hash, adoptQueue } = opts
+    // 首条消息事务收口（2026-09-06）：本会话真实数据已落盘（SSE 接管起点）→ 销毁事务，
+    // queue-dock 恢复正常渲染。与 renderSession fetch 回程的收口同一判定、双入口对称。
+    // 接管帧（用户「两个状态的『正在处理』定位不同」根治）：乐观气泡/proc 折叠无 data-m，
+    // stampMsgIn 的 prev 采集命中不了 → 接管重建把同位真实元素判「新增」重播 fadeup
+    //（气泡+「正在处理」跳变重现）→ txTakeover 帧跳过 stampMsgIn（同位换皮不是新增）；
+    // 乐观 proc 计时起点（发送瞬间 T0）早于落盘 user ts（异步化后消息经暂存补投）→
+    // 移交 live.txProcStart 供 bindLiveFoldTimer 续算，「正在处理 Xs」跨接管连续不回跳。
+    let txTakeover = false
+    // 接管帧判定（2026-09-07 推广）：乐观开启气泡在屏（无 data-m 的 data-t="u"——真实渲染恒带
+    // data-m、引导气泡另带 data-g，无 data-m 的 user 气泡只可能是乐观 DOM）即乐观权威期，
+    // 不再只认 firstSendHash（web 新建事务）：CLI 启动会话的 web 首条消息同样经「乐观气泡→
+    // 落盘接管」同位换皮，漏判则真实气泡被 stampMsgIn 判「新增」重播 fadeup = 闪动。
+    if (messages.length > 0 && (firstSendHash === hash || messagesEl.querySelector('[data-t="u"]:not([data-m])'))) {
+      txTakeover = true
+      for (const p of pendingUserMsgs) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
+      live.txProcStart = claimStartTs()
+      if (firstSendHash === hash) firstSendHash = ''
+    }
+    live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
+    // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
+    // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
+    // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）
+    live.maxImgId = 0
+    for (const m of messages) {
+      for (const b of m.blocks || []) {
+        if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
+      }
+    }
+    // 2026-08-29 待落盘乐观消息吸收判定：jsonl 已出现该文本（单条落盘或 drainCommandQueue
+    // 多条合并成一条，join 后 includes 命中）→ 真实气泡已由渲染权威接管，不再重插
+    absorbPending(messages)
+    if (adoptQueue) queueClaimAdopt(adoptQueue) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
+    renderTransient() // 暂态区对账重渲（吸收变化/远端快照更新后；权威重建后由下方再渲带降级判定）
+    const last = messages.length ? messages[messages.length - 1] : null
+    const sig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
+    // 新增用户消息检测（实时同步的钉顶触发点）：末尾真实用户消息索引/时间变了 = 新回合。
+    // 注入引导消息（injected:true）不触发钉顶（用户定案：引导消息不钉顶，钉顶只属于新回合开启消息）
+    let lastU = -1
+    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
+    const uSig = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
+    const hasNewUser = live.lastUserSig !== '' && uSig && uSig !== live.lastUserSig
+    // 基线推进规则（2026-09-08 二轮根修）：无新回合（含 lastUserSig==='' 的基线补齐）→ 直接
+    // 跟随；hasNewUser 帧不在此推进——钉顶触发未命中气泡时保留旧基线 = 下帧 hasNewUser 仍真
+    // = 重试，直到气泡在屏命中才随 pinnedUserSig 一并推进（见下方触发块）。v261 注释宣称
+    // 「未命中保留重试」，但此处无条件推进使 hasNewUser 下帧即假、重试永不发生。
+    if (uSig && !hasNewUser) live.lastUserSig = uSig
+    // 2026-08-26 定案：处理中段实时重建。原 2026-08-24 抑制逻辑（回合进行中跳过整页 innerHTML 重建）
+    // 假设实时折叠由 WS out 增量填充——但网关从不给 web 发 out 消息（实时流走 SSE：conversationDisplay
+    // 上报 + jsonl + 列表刷新），WS out 是死代码 → 处理中折叠一直空白（用户反馈「完全没有渲染，并且也不同步」）。
+    // 现改为：回合未结束（数据在增长或 segIsProcessing）→ 照常整页重建，messagesHtml 对处理中段走
+    // liveFoldBody 只渲染一个工具折叠行（「正在运行：<当前工具>」轮转；400ms 去抖已限频，SSE 逐条写入时最多 ~2.5 次/秒）；
+    // 回合结束（末段回复落地）→ 关掉空 proc 折叠交回下方数据渲染一次性出最终态（已处理时长/回复/变更卡）。
+    // 2026-09-06 空 fetch 不洗盘：发送瞬间乐观气泡（data-t="u"）/乐观折叠已上屏，jsonl 尚未
+    // 落盘的窗口期 SSE 触发 refreshSession 拿到空 messages → 整页重建把乐观气泡洗成
+    // 空白消息区，落盘后才恢复（用户实测「刷新两次+空态一闪」根因；原空态占位行 2026-09-07 移除）。
+    // 消息区已有内容且数据为空 = 落盘窗口，跳过本次渲染保留乐观 DOM，等真实数据接管。
+    // force 例外：restored 撤回链靠重渲收口（含空态），必须放行。
+    if (!force && !messages.length && messagesEl.querySelector('[data-m], [data-t="u"], details')) return
+    if (sig === live.curSig && !force) return // force=true：turn-state/restored 等运行态信号到达，jsonl 无新落盘也强制重渲收口
+    live.curSig = sig
+    const sc = $('chat-scroll')
+    const atBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 80
+    // 2026-08-26 增量重建根治：SSE 实时推送只追加/改写尾部「处理中段」，历史消息不变。
+    // 对处理中末段只替换该段 DOM（applySegDelta，头部保留）→ 消除每次推送整页 innerHTML
+    // 重建的闪烁，且 tool-running 光泽动画不再被重建打断（2.6s 扫光能完整播放）。
+    // 条件：上次渲染存在 + 消息数只增不减（SSE 纯追加；回退/压缩等减少则整页）+ 有处理中末段。
+    // 回复落地（段结束）/新回合/消息数减少 → 整页重建一次（低频，带「已处理」收拢可接受）。
+    const html = messagesHtml(messages)
+    // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
+    // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
+    // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
+    let lastRealUser = -1
+    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastRealUser = i; break }
+    // 2026-08-29 引导消息折叠链：引导消息气泡 data-m=段 key ≠ 自身索引 → 额外带 data-g=自身索引，
+    // 此处一并查（否则引导消息在末段时 userBubbleMissing 恒真 → 每次 SSE 都整页重建）
+    const userBubbleMissing = lastRealUser >= 0 && !messagesEl.querySelector(`[data-m="${lastRealUser}"][data-t="u"], [data-g="${lastRealUser}"]`)
+    const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && lastSegInfo && lastSegInfo.processing && lastSegInfo.html
+    live.lastMsgLen = messages.length
+    if (canDelta) {
+      applySegDelta(lastSegInfo)
+      renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
+    } else {
+      // 按索引保留折叠开合（messagesHtml 只在末尾追加新折叠，索引稳定）
+      const openState = [...messagesEl.querySelectorAll('details')].map((d) => d.open)
+      const doneLivePrev = [...messagesEl.querySelectorAll('details')].map((d) => d.classList.contains('done-live'))
+      // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
+      const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
+      messagesEl.innerHTML = html
+      if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
+      // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
+      // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
+      // 用户手动展开的「已处理」折叠照常恢复。新增折叠（索引越界）保留默认：处理中展开、已处理收起
+      ;[...messagesEl.querySelectorAll('details')].forEach((d, i) => {
+        if (i >= openState.length) return
+        const finishedNow = doneLivePrev[i] && !d.classList.contains('done-live')
+        d.open = finishedNow ? false : openState[i]
+      })
+      // 2026-08-30 乐观改排队区（清单#4③）→ 2026-09-07 暂态区收编：整页重建洗掉 #live-zone
+      // → renderTransient 从状态整体重建（气泡/折叠/排队区恒定顺序挂回 pin-stage 之前）
+      renderTransient()
+    }
+    if (takeover === 'approval') { /* 交互式逐题审批卡已占据输入栏，勿用只读堆叠卡覆盖/清除 */ }
+    else if (pendingAskInput) showTakeover(questionCardHtml(pendingAskInput, null, { single: true }), 'ask')
+    else clearTakeover()
+    setChar(charNote) // 只读 SSE：按末段最近工具/处理状态切形象
+    bindLiveFoldTimer(messages)
+    applyStreamPreview() // 2026-09-08 流式字符通道：重渲洗 DOM 后重挂流式预览暂态（streamText 内存态恢复）
+    syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
+    if (hasNewUser && uSig !== live.pinnedUserSig) {
+      // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位+平滑上划贴顶。
+      // pinnedUserSig 防重复：迟到的刷新不会再重钉上一回合。
+      // 命中才推进 lastUserSig/pinnedUserSig（配合上方基线推进规则=真实可重试）。
+      const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
+      if (el) {
+        live.lastUserSig = uSig // 命中才推进（配合上方基线推进规则=真实可重试）
+        live.pinnedUserSig = uSig
+        if (stage.active && stage.key === 'optimistic') {
+          // 乐观气泡唤出的占位在场 → 接管帧同回合延续。必须走 stageStart 直终态（2026-09-09
+          // 「新消息跳动」根修）：乐观期开启的 750ms 平滑窗目标基于接管前几何，接管重建
+          // （live-zone 摘除 → innerHTML 重建）已改几何，沿用旧窗=到点瞬跳；且换 key 帧须
+          // 重量脚印（lockFoot=null 按接管后真实几何补算，勿沿用乐观期旧脚印整回合）。
+          // smooth=false：不重播上划动画，作废动画窗并按跟随几何同帧归位。
+          stageStart(el, uSig, false)
+        } else {
+          stageStart(el, uSig, true) // CLI 端发起的新回合（web 观察）同样唤出+动画（体验对齐）
+        }
+      }
+    } else {
+      renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
+    }
+    // 占位在场=两层跟随接管（stageFollow/动画期已自带让位逻辑）；
+    // 否则保留原有「原本在底部就跟着吸底」行为
+    if (!stage.active) {
+      sc.style.scrollBehavior = 'auto'
+      if (atBottom) sc.scrollTop = sc.scrollHeight
+      sc.style.scrollBehavior = ''
+    }
   }
 
   // 增量重建（2026-08-26）：只替换「处理中末段」的 DOM，头部历史消息保留不动（不整页 innerHTML，
@@ -655,16 +773,19 @@
       const nodes = messagesEl.querySelectorAll(`[data-m="${info.prev.key}"][data-t="${info.prev.type}"]`)
       anchor = nodes.length ? nodes[nodes.length - 1] : null
     }
-    // 插入点恒避让 .pin-spacer（占位必须是末元素）：段尾无后继或无锚点（首段处理中）时都插到
-    // spacer 之前——否则新段节点落到 spacer 后面，占位错位到内容中间且 pinReserveApply 只调
-    // 高度不搬位置，错位持续到刷新（2026-08-28 钉顶占位突然死亡根因一）。
-    const spacer = messagesEl.querySelector('.pin-spacer')
+    // 插入点恒避让暂态区与 .pin-stage（暂态区子元素/两层占位必须是流末）：段尾无后继或无锚点
+    //（首段处理中）时都插到 #live-zone 之前——否则新段节点越过暂态区/落到占位块后面，
+    // 占位错位到内容中间持续到刷新（2026-08-28 钉顶占位突然死亡根因一；2026-09-07 排队区
+    // 插到新消息上一行同根因，暂态区结构化消除）。
+    const zone = document.getElementById('live-zone')
+    const spacer = messagesEl.querySelector('.pin-stage')
+    const tail = zone || spacer
     if (anchor && anchor.isConnected) {
       let after = anchor.nextSibling
       while (after && after.nodeType !== 1) after = after.nextSibling
-      messagesEl.insertBefore(frag, after || spacer)
+      messagesEl.insertBefore(frag, after || tail)
     } else {
-      messagesEl.insertBefore(frag, spacer)
+      messagesEl.insertBefore(frag, tail)
     }
   }
 
@@ -676,7 +797,7 @@
   }
   function bindLiveFoldTimer(messages) {
     stopLiveFoldTimer()
-    const fold = messagesEl.querySelector('details.done-live')
+    const fold = messagesEl.querySelector('details.done-fold.done-live[data-m]') // 权威折叠（data-m）；乐观主张折叠在暂态区无 data-m，不参与
     if (!fold) return
     let t1 = live.txProcStart || 0
     live.txProcStart = 0 // 读取即清：移交起点只服务接管帧这一跳（残留会污染其它会话/回合的计时）
@@ -695,17 +816,84 @@
     const tick = () => {
       if (!fold.isConnected) { stopLiveFoldTimer(); return }
       const sec = Math.round((Date.now() - t1) / 1000)
-      sum.innerHTML = `<span class="d-chev">${CHEV}</span><span class="df-dot"></span>正在处理<span class="d-dur"> ${fmtDur(sec)}</span>`
-      // 思考/压缩态同源跳字（2026-08-27 四轮）：data-ts=真空期起点（末条落盘记录时刻），label 原
-      // 位替换在尾组 tool-fold summary 内、不属于本 summary innerHTML 覆盖范围，可安全原地更新
-      const stEl = fold.querySelector('.think-state[data-ts]')
+      // 僵死/断连对账（每秒 tick 无残留状态，信号恢复即自动消失）：
+      // ① beat = 引擎最后产出增量的时刻（turn-beat SSE）。落后 ≥150s（beat 缺席则从本折叠
+      //    计时起点起算）= query 链僵死或长任务无输出 → 标「无响应」。2026-09-08 判定统一：
+      //    与 claimTick 同规则，删掉「beat 缺席即标」的短路——纯工具回合（bash 长跑零增量）/
+      //    回合切换后 beat 窗口/旧 exe CLI（不发 beat）整回合误标「无响应」（未上屏先挂标实证）。
+      // ② connUp = 网关 WS 在线（setConn 维护）。断开（网关死/网络断）→ 标「连接中断」，
+      //    此前断流后计时行冻结假转（09-07 Pj5 断流残影实证），用户无从分辨。
+      // 回合基线（2026-09-08 无响应误标根治）：turnBeat 是 per-session 永续 Map，上回合残留
+      // beat（早于本段开启消息 t1）对新回合毫无意义——回合切换后的静默期（乐观窗口/首响前）
+      // 拿旧值算出 staleSec≥150 会立即误标「无响应 X 分」（12:42 实测：正在处理 5s 并挂无响应
+      // 2m59s）。beat 早于 t1 视同缺席，从本折叠起点 sec 起算，与本判定设计语义对齐。
+      const rawBeat = live.curUuid ? live.turnBeat.get(live.curUuid) || 0 : 0
+      const beatAt = rawBeat >= t1 ? rawBeat : 0
+      const staleSec = beatAt ? Math.round((Date.now() - beatAt) / 1000) : sec
+      const flags = (staleSec >= 150 ? '<span class="d-stale">· 无响应 ' + fmtDur(staleSec) + '</span>' : '')
+        + (!connUp ? '<span class="d-stale">· 连接中断</span>' : '')
+      // 两行各自独立跳字（2026-09-09 用户定案「折叠顶只留正在处理/已处理，状态标识归工具行层」；
+      // 二轮定案：工具调用行=折叠体，状态显示行是其内暂态层 .fold-state——有工具组并入 summary
+      // 同行、无工具组独立行，动画展示不留存）：① 折叠顶 summary 恒「正在处理 + d-dur 总时长」；
+      // ② 思考/压缩状态 .think-state 落 .fold-state 暂态层，tick 原地续「· Ns」。全程节点级
+      // textContent 更新、不 innerHTML 重建——重建会每秒重启扫光动画并洗掉 applyStreamPreview
+      // 挂的流式预览节点。
+      const stEl = fold.querySelector('.think-state')
       if (stEl) {
-        const dsec = Math.max(0, Math.round((Date.now() - Number(stEl.dataset.ts)) / 1000))
-        stEl.textContent = `${stEl.dataset.mode === 'compact' ? '正在压缩会话中……' : '正在思考'} · ${fmtDur(dsec)}`
+        const mode = stEl.dataset.mode
+        const ts = Number(stEl.dataset.ts) || 0
+        const dsec = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
+        const label = mode === 'compact' ? '正在压缩会话中……' : mode === 'generating' ? '正在生成' : mode === 'think' ? '正在思考' : ''
+        stEl.textContent = label && ts ? `${label} · ${fmtDur(dsec)}` : label
       }
+      const durEl = sum.querySelector('.d-dur')
+      if (durEl) durEl.textContent = ' ' + fmtDur(sec)
+      // 僵死/断连红标独立对账（原地，信号恢复即自动消失）；宿主=状态显示行 .fold-state（有工具组时
+      // 在工具行 summary 内、无工具组时段尾独立行）或 done-body 尾（乐观主张折叠），不上折叠顶
+      // summary（同上定案：折叠顶不留状态标识字样）
+      let flEl = fold.querySelector('.d-flags')
+      if (!flEl) {
+        flEl = document.createElement('span')
+        flEl.className = 'd-flags'
+        const fhost = stEl ? stEl.parentElement : fold.querySelector('.done-body')
+        if (!fhost) return
+        fhost.appendChild(flEl)
+      }
+      flEl.innerHTML = flags
     }
     tick()
     liveFoldTimer = setInterval(tick, 1000)
+  }
+
+  // 2026-09-08 流式字符通道：把 live.streamText 挂到状态显示行 .fold-state 内（权威段体工具行
+  // summary 内暂态层 / 段尾独立行 / 乐观主张折叠 #claim-fold 的 done-body 内，2026-09-09 定案
+  // 起不再进任何折叠顶 summary——折叠顶只留「正在处理/已处理」字样）。单行 rtl 保尾（.think-stream 样式，v151 .ch-file 同款技巧），
+  // JS 截 200 字符防 DOM 膨胀。无状态显示行在场且无主张折叠 = 不显示（内存保留，状态显示行渲染出
+  // 来后由下一帧/renderSessionBody 出口带出）；text 空 = 移除暂态节点。
+  // 清除信号：stream-text ''（块边界/消息落盘）、turn-state live:false（打断）、切会话清槽。
+  function applyStreamPreview() {
+    const old = messagesEl.querySelector('.think-stream')
+    const text = live.streamText || ''
+    if (!text) { if (old) old.remove(); return }
+    let host = null
+    let anchor = null
+    const stEl = messagesEl.querySelector('details.done-fold.done-live .think-state')
+    if (stEl) { anchor = stEl; host = stEl.parentElement }
+    else {
+      const claim = document.getElementById('claim-fold')
+      if (claim) host = claim.querySelector('.done-body')
+    }
+    if (!host) { if (old) old.remove(); return }
+    // 流式预览与状态文字同挂 .fold-state 暂态层一行（2026-09-09 定案：与工具行同一行）；已有节点全
+    // host 查找复用（行内 d-flags 与流式预览共存，anchor.nextElementSibling 判定会误判成
+    // 需重建 → 孤儿残留），只在缺节点时插入到状态文字之后（claim 路径 anchor 空则追加体尾）。
+    let el = host.querySelector(':scope > .think-stream')
+    if (!el) {
+      el = document.createElement('span')
+      el.className = 'think-stream'
+      if (anchor) anchor.after(el); else host.appendChild(el)
+    }
+    el.textContent = text.length > 200 ? '…' + text.slice(-200) : text
   }
 
   // ---------- 路由 ----------
@@ -732,7 +920,6 @@
 
   function route() {
     closeMentionPop()
-    liveChangeReset() // 导航（首页/会话/管理/预览切换）清空变更聚合 + 移除实时内联行
     const r = parseRoute()
     // 任何导航（route 被调用）→ 退出管理视图；管理视图只由 mgr-tab 点击直接 renderMgr 进入，不走 route
     state.mgr = null
@@ -755,7 +942,6 @@
       r.hash = sess ? hashOf(sess) : r.hash
     }
     state.currentHash = r.name === 'session' ? r.hash : null
-    if (r.name !== 'session') sessVision = undefined // 2026-08-28 离开会话：回落全局识图判定（空态用 /gateway/models vision）
     renderRecent()
     if (r.name === 'home') renderHome()
     else if (r.name === 'mgr') { state.mgr = r.mgr; loadMgrView(); renderMgr() }
@@ -853,10 +1039,23 @@
   function renderHome() {
     stopLiveFoldTimer()
     turnLive = false; syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
-    pinRelease()
+    stageRelease()
     clearTakeover() // 导航离开：清掉残留的提问/审批 takeover（输入栏恢复）
     state.currentHash = null
     messagesEl.innerHTML = ''
+    // 2026-09-08 新会话界面串行根治：回首页（空态）同样必须清「当前会话」全局槽——与
+    // renderSession 切会话清理（「切会话即清全局槽」定案）同一清单的对称延伸。不变量：
+    // live.curUuid 非空 ⇔ 当前视图正展示该会话；session-delta（419）/queue-state（405）守卫
+    // 都以它为前提。renderHome 原先只清 messagesEl 不清槽 → 上一会话的 delta 靠残留
+    // curUuid/deltaSeq 通过守卫，renderSessionBody 整页重建把该会话转录连同「正在处理/
+    // 正在思考」实时尾灌进首页消息区（实测：新会话界面显示别的会话完整消息流）。
+    live.lastMsgLen = null
+    live.localMessages = null
+    live.deltaSeq = null
+    live.queueRemote = []
+    live.curUuid = null
+    live.streamText = '' // 2026-09-08 流式字符通道：首页空态清流式暂态（切会话即清全局槽定案）
+    pendingUserMsgs = pendingUserMsgs.filter((p) => p.hash) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderCtxMeter(null) // 首页空态 → 隐藏上下文环
     renderProjSeat()
@@ -868,17 +1067,23 @@
     stopLiveFoldTimer()
     turnLive = false; syncGwSend() // 2026-09-04 打断按钮：切会话先复位，busy 会话由下方 syncTurnLive 按实况恢复
     // 切换会话：丢空态（hash=null）乐观项；各会话 pending 保留（2026-08-29 用户反馈
-    // 「切换会话引导消息会消失」→ 按 hash 关联，切回时 absorbPending + renderQueueDock 处理）
-    pendingUserMsgs = pendingUserMsgs.filter((p) => p.hash)
+    // 「切换会话引导消息会消失」→ 按 hash 关联，切回时 absorbPending + renderTransient 处理）。
+    // 首条消息事务进行中（firstSendHash 在场）hash='' 的乐观项属事务，不丢。
+    pendingUserMsgs = pendingUserMsgs.filter((p) => p.hash || (firstSendHash && p.hash === ''))
     live.lastMsgLen = null // 切换会话：重置增量重建守卫（首个刷新必整页渲染，防跨会话误增量）
+    // 2026-09-08 事件流统一 P1：清 delta 本地基线（localMessages/seq）——串会话防写穿（等权
+    // 正确性：切会话即清全局槽），新会话基线由 fetch 回程（renderSession/refreshSession）重建。
+    live.localMessages = null
+    live.deltaSeq = null
     // 2026-08-30 串会话根治：上一会话遗留的全局槽在切换瞬间必须清空——
-    // ① live.queueRemote 不清 → 新会话首屏 renderQueueDock 直接渲染上一会话的 CLI 队列快照
+    // ① live.queueRemote 不清 → 新会话首屏 renderTransient 直接渲染上一会话的 CLI 队列快照
     //   （确定性串染，连竞态都不需要；fetch 回来再硬重置为本会话 queued）；② live.curUuid
     //   不清 → 加载窗口内 queue-state SSE 按旧 uuid 匹配成功，把旧会话快照写进新会话视图。
     live.queueRemote = []
     live.curUuid = null
+    live.streamText = '' // 2026-09-08 流式字符通道：切会话清流式暂态（串会话防写穿，同 queueRemote/curUuid 槽清单）
     modelUserPicked = false // 切换会话：允许 /gateway/session 上报的会话模型校准 seat
-    pinRelease()
+    stageRelease()
     clearTakeover() // 切换会话：清掉残留的提问/审批 takeover（输入栏恢复）
     closeProjPop() // 切换会话：项目选择器弹层一并收起（初始界面专属件）
     renderProjSeat() // 会话态：工作文件夹标识按当前会话项目重渲（锁定只读）
@@ -919,9 +1124,13 @@
     inputWrap.classList.add('docked')
     chatArea.classList.add('in-session')
     fetchMessages(s.id)
-      .then(({ messages, context, model, modelTs, vision, cwd, file, queued }) => {
+      .then(({ messages, context, model, modelTs, cwd, file, queued, deltaSeq }) => {
         if (state.currentHash !== hash) return
         sessionCwd = cwd
+        // 2026-09-08 事件流统一 P1：首载回程同样重置 delta 本地基线（与 refreshSession 对称，
+        // 切会话清理后由本回程重建；此后 session-delta 增量演进至下轮全量对账）。
+        live.localMessages = messages
+        live.deltaSeq = deltaSeq
         // 切会话队列快照硬重置（2026-08-30）：以本会话响应为准，杜绝上一会话残留
         live.queueRemote = Array.isArray(queued) ? queued : []
         // 首条消息事务收口：本会话真实数据已落盘（渲染权威接管起点）→ 销毁事务，queue-dock
@@ -930,7 +1139,8 @@
         let txTakeover = false
         if (firstSendHash === hash && messages.length > 0) {
           txTakeover = true
-          live.txProcStart = proc && proc.isConnected ? procStart : 0
+          for (const p of pendingUserMsgs) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
+          live.txProcStart = claimStartTs() // 主张计时起点移交（bindLiveFoldTimer 续算，跨接管不回跳）
           firstSendHash = ''
         }
         // 2026-08-30 图片内联渲染：会话 uuid（image-cache 目录名）供用户气泡 <img> URL 拼接，
@@ -938,19 +1148,18 @@
         if (file) live.curUuid = file.replace(/\.jsonl$/, '')
         live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || 0 // 切会话：基线硬重置为本会话末条 ts
         applySessionModel(model, modelTs) // 2026-08-24：打开会话即用 CLI 上报的实际模型校准 seat
-        sessVision = vision // 2026-08-28 图片门控：该会话模型识图判定（网关按凭据池 override 判）
-        renderImgBtn()
         renderCtxMeter(context)
         // 首条消息事务期（2026-09-06）：fetch 空（CLI 尚未落盘首条 user）→ 跳过整页重建保留
-        // 乐观 DOM（气泡+proc 折叠是权威，不被「加载中…」/空态行洗掉），真实数据经 SSE
+        // 乐观 DOM（开启气泡+主张折叠是权威，不被「加载中…」/空态行洗掉），真实数据经 SSE
         // refreshSession 接管（refreshSession 同款「空 fetch 不洗盘」守卫已挡后续）。非空照常重建。
         if (!(firstSendHash === hash && messages.length === 0)) {
           messagesEl.innerHTML = messagesHtml(messages)
         }
-        // 2026-08-29 切回会话：吸收该会话已落盘消息（切走不再清空 pending）；2026-08-30 乐观
-        // 改排队区——重渲 #queue-dock（innerHTML 重建会洗掉 dock），不再有对话流重插/乐观折叠补挂
+        // 2026-08-29 切回会话：吸收该会话已落盘消息（切走不再清空 pending）；2026-09-07 暂态区
+        // 收编——innerHTML 重建洗掉 #live-zone，renderTransient 从状态整体重渲（气泡/主张折叠/排队区）
         absorbPending(messages)
-        renderQueueDock()
+        queueClaimAdopt(queued) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
+        renderTransient()
         if (takeover === 'approval') { /* 交互式逐题审批卡已占据输入栏，勿用只读堆叠卡覆盖/清除 */ }
         else if (pendingAskInput) showTakeover(questionCardHtml(pendingAskInput, null, { single: true }), 'ask')
         else clearTakeover()
@@ -962,25 +1171,24 @@
         if (firstSendHash !== hash && !txTakeover) stampMsgIn(new Set())
         const last = messages.length ? messages[messages.length - 1] : null
         live.curSig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
-        // 记录末尾真实用户消息基线：首屏默认不钉顶（只有实时同步新增用户消息才钉）
+        // 记录末尾真实用户消息基线：首屏默认不钉顶（只有实时同步新增用户消息才唤出）
         let lastU = -1
         for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastU = i; break }
         const baseU = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
         live.lastUserSig = baseU
         live.pinnedUserSig = baseU
-        // 最新真实用户消息之后的回复（含处理折叠）未填满视口 → 刷新后恢复钉顶 + 补占位：
-        // 处理中 / 短回复 / 长回复未填满视口都钉顶；长回复已填满视口则不钉顶、吸底。
-        // 2026-08-26 处理中折叠保持 messagesHtml 默认展开（用户需求：处理中展开处理过程），
-        // 不再强制收起；几何判定基于真实展开内容——未填满视口钉顶，已填满则吸底。
+        // 刷新/首屏恢复（两层消息流口径，2026-09-09 修订）：最后回合开启气泡在场即唤出占位
+        // ——占位=开启气泡在第二层的映射，同等地位（2026-09-09 用户定案）。旧口径「仅末段
+        // 处理中（done-live 在场）才唤出、回合已结束普通吸底」为 09-08 残留：回合收口「已
+        // 处理」后刷新/切回占位永久死亡且无法恢复（用户实证）。几何 stageFollow 自洽无需
+        // 分支：内容超一屏 → 贴顶位<内容底 → 吸底（与旧「普通吸底」逐像素一致）；不足一屏
+        // → 占位垫底停贴顶位（两层流正确形态）。
         let pinned = false
         if (lastU >= 0) {
           const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
           if (el) {
-            const g = pinGeometry(el)
-            if (g.baseH < g.target) {
-              pinApply(el, false)
-              pinned = true
-            }
+            stageStart(el, baseU, false)
+            pinned = true
           }
         }
         const sc = $('chat-scroll')
@@ -1004,10 +1212,17 @@
     TaskGet: '查询任务', Agent: '委派 Agent', Skill: '调用技能', TodoWrite: '更新待办',
     AskUserQuestion: '提问',
   }
+  // MCP 工具名 → 短显示名（沿用源码 mcpInfoFromString 的 split('__') 解析约定：
+  // mcp__<server>__<tool> 取 tool 段；仅显示层用，权限匹配仍走原始名）。无 tool 段退回 server 名。
+  function mcpShortName(name) {
+    const parts = name.split('__')
+    if (parts[0] !== 'mcp' || !parts[1]) return null
+    return parts.slice(2).join('__') || parts[1]
+  }
   // 工具块元信息：英文名 + 中文动作 + 详情（命令/路径/搜索词等）
   function toolMeta(block) {
     const name = block.name || 'tool'
-    const zh = TOOL_NAMES[name] || name
+    const zh = TOOL_NAMES[name] || mcpShortName(name) || name
     const inp = block.input && typeof block.input === 'object' ? block.input : null
     const detail = inp ? (inp.file_path || inp.filePath || inp.query || inp.pattern || inp.command || inp.toolName || inp.path || '') : ''
     return { name, zh, detail: typeof detail === 'string' && detail ? String(detail).slice(0, 120) : '' }
@@ -1097,53 +1312,65 @@
   }
   // 实时（处理中）段体（2026-08-26 用户定案：一个工具调用轮次只渲染一个工具折叠行）：
   // 有工具在运行 → summary 显示「正在运行：<当前工具>」+ 光泽扫动，点开看全部工具步明细
-  // （已完成行 + 当前运行行）；全部完成（回合间等待回复/思考）→ 折叠概括（与已处理段同形态）。
-  // 【思考/压缩态】尾动作为思考间隙/压缩标记时，「末尾工具组的折叠行 label 原位替换」为
-  // 『正在思考』/『正在压缩会话中……』（带 data-ts 起点，bindLiveFoldTimer 每秒补「· Ns」，
-  // 对齐 CLI spinner 计时；新一轮工具开始后恢复「正在运行：Y」——与工具调用等权轮转）。
-  // 仅纯空窗（items 无任何可见步骤，如刚发消息 CLI 首段思考）或尾项非工具组（提问卡已答/旁白，
-  // 2026-09-04 挤占根修：提问后压缩实测状态行被丢弃）才退化为折叠体内独立状态行兜底。
-  // 思考永不独立成行（if (it.kind === 'think') continue）：有尾工具组=label 原位替换，其余=兜底行。
-  // 2026-08-30 随 groupTools 一并从 182358 取回。引导气泡（kind 'guide'）按非 tool 项原样穿插，
-  // 打断工具组时组照常收口（状态只在真正的尾组上亮）。
+  // （已完成行 + 当前运行行）；全部完成 → 折叠概括（与已处理段同形态）。
+  // 【状态显示行落位（2026-09-09 用户定案两轮：①「折叠顶只留正在处理/已处理，状态标识
+  // 与工具调用行在一起」；②二轮澄清「工具调用行本质=折叠体，子 DOM 分两类——tf-label 工具
+  // 概括留存；正在思考/压缩/断连等标识显示动画但不留存」）】：状态显示行 .fold-state（扫光
+  // 文字 + data-ts 起点，bindLiveFoldTimer 每秒原地补「· Ns」，流式预览/无响应红标同层）并入
+  // 尾部工具折叠行 summary——四轮定案（2026-09-09）真空态并入时折叠顶只留状态显示行、不带已处理
+  // 概括（「正在思考时不应再有『运行了命令（N）』」，两状态同行并存=图二实测反例；工具明细
+  // 点开折叠仍在）；无状态并入时 summary=toolFoldLabel——单宿主单实例，不复现
+  // 09-08 前双轨（尾组 label 原位替换+独立兜底行）的随机命中；折叠顶 summary 恒「正在处理」
+  // 不轮转（v267 的 summary 轮转方案废弃）。
+  // 思考永不独立成行（if (it.kind === 'think') continue）。引导气泡（kind 'guide'）按非 tool
+  // 项原样穿插，打断工具组时组照常收口。
   function liveFoldBody(items, vacuumState, vacuumStart) {
     let html = ''
     let tools = []
-    let stateShown = false
-    const stateLabel = (st) => {
-      const verb = st === 'compact' ? '正在压缩会话中……' : '正在思考'
-      const attr = vacuumStart ? ` data-ts="${vacuumStart}" data-mode="${st}"` : ''
-      return `<span class="think-state"${attr}>${verb}</span>`
-    }
-    const flushTools = (tailState) => {
+    // 状态显示行并入走构造期拼接（2026-09-09 三轮根治）：stateAppend 仅循环后那次
+    // flushTools 生效（旁白打断的收口组不带）；v275 的 sumEnd 字符偏移回切废弃——偏移漏算
+    // `<details class="tool-fold"><summary>` 前缀 33 字符，插入点前错 33 字符把
+    // <span class="tf-label"> 切碎成 `pan class="tf-label">` 纯文本漏出。
+    let stateAppend = ''
+    let stateMerged = false
+    const flushTools = () => {
       if (!tools.length) return
       const rows = tools.map((g) => (g.kind === 'tool' && g.done) ? g.html : toolCurHtml(g.block)).join('')
       const running = tools.filter((g) => g.kind === 'tool' && !g.done)
+      let sumInner
       if (running.length) {
         const cur = toolMeta(running[running.length - 1].block)
-        html += `<details class="tool-fold"><summary><span class="tool-line tool-running"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' · ' + esc(cur.detail) : ''}</span></span></summary><div class="tool-fold-body">${rows}</div></details>`
-      } else if (tailState) {
-        // 尾组全部完成 + 真空期（思考/压缩）→ 复用此折叠行的 label 原位替换为状态闪烁文本（保扫光/可展开明细）
-        stateShown = true
-        html += `<details class="tool-fold"><summary><span class="tool-line tool-running"><span class="t-ico">${THINK_ICON}</span><span class="tl-text">${stateLabel(tailState)}</span></span></summary><div class="tool-fold-body">${rows}</div></details>`
+        sumInner = `<span class="tool-line tool-running"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' · ' + esc(cur.detail) : ''}</span></span>`
+      } else if (stateAppend) {
+        // 真空态（正在思考/生成/压缩）并入：折叠顶只留状态显示行、不带已处理概括（2026-09-09 四轮定案
+        // 「正在思考时不应再有『运行了命令（N）』」，两状态同行并存=图二实测反例）；工具明细点开折叠仍在
+        sumInner = ''
       } else {
-        html += `<details class="tool-fold"><summary><span class="tf-label">${esc(toolFoldLabel(tools))}</span></summary><div class="tool-fold-body">${rows}</div></details>`
+        sumInner = `<span class="tf-label">${esc(toolFoldLabel(tools))}</span>`
       }
+      html += `<details class="tool-fold"><summary>${sumInner}${stateAppend}</summary><div class="tool-fold-body">${rows}</div></details>`
+      if (stateAppend) stateMerged = true
+      stateAppend = ''
       tools = []
     }
     for (let i = 0; i < items.length; i++) {
       const it = items[i]
       if (!it || !it.html) continue // 占位/置空的块（reply 占位、被过滤的思考）
-      if (it.kind === 'think') continue // 思考永不独立成行：有尾工具组=label 原位替换；纯空窗=末尾兜底行
+      if (it.kind === 'think') continue // 思考永不独立成行（真空态=工具行内 .fold-state 状态显示行）
       if (it.kind === 'tool') { tools.push(it); continue } // 完成/运行中的工具都进当前组 → 统一成一个折叠行
-      flushTools(null) // 中途被旁白/文本/引导气泡打断的工具组按普通折叠收口
+      flushTools() // 中途被旁白/文本/引导气泡打断的工具组按普通折叠收口
       html += it.html
     }
-    flushTools(vacuumState || null) // 循环结束后仍挂着的尾组才可能进入思考/压缩态
-    // 状态行兜底（2026-09-04 挤占根修）：尾项非工具组（提问卡已答/旁白——flushTools 无料可挂，
-    // 原 `!html` 纯空窗判定也救不了，提问后压缩实测全程无提示）→ 状态行独立追加折叠体末尾，
-    // 与原纯空窗同形态（同 blink/计时：bindLiveFoldTimer 按 .think-state[data-ts] 通配，无需接线）。
-    if (vacuumState && !stateShown) html += stateLabel(vacuumState)
+    // 状态显示行（真空态；2026-09-09 二轮定案：工具调用行=折叠体，tf-label 留存、状态标识暂态不
+    // 留存）：有尾部工具组 → .fold-state 暂态层构造期并入其 summary（label 后同一行）；
+    // 尾部无工具组（纯思考真空/末尾是旁白）→ 段尾独立行。计时起点=段内最后一条落盘记录时刻。
+    if (vacuumState) {
+      const label = vacuumState === 'compact' ? '正在压缩会话中……' : vacuumState === 'generating' ? '正在生成' : '正在思考'
+      const stateInner = `<span class="think-state" data-ts="${vacuumStart || ''}" data-mode="${vacuumState}">${label}</span>`
+      stateAppend = `<span class="fold-state">${stateInner}</span>`
+      flushTools()
+      if (!stateMerged) html += `<div class="fold-state">${stateInner}</div>`
+    }
     return html
   }
   // 当前正在运行的工具步（实时段专用）：复用原灰色工具行（tool-line）的 inline 形态，仅加 .tool-running
@@ -1214,46 +1441,9 @@
     return `<div class="msg change-card collapsed"${key != null ? ` data-m="${key}" data-t="c"` : ''}><div class="ch-title"><span class="ch-count">${changes.size}个文件已更改</span><span class="ch-add">+${totalAdd}</span><span class="ch-del">-${totalDel}</span><button class="ch-toggle" title="收起/展开文件列表">${CHEV}</button></div><div class="ch-list">${rows}</div></div>`
   }
 
-  // ---- 文件变更内联行（2026-08-26 任务 C）：替代原输入栏上方悬浮胶囊。实时变更渲染在处理
-  //     折叠（done-fold body）内的一行「N个文件已更改 +N -M」，与消息流绑定一体；回合结束收拢
-  //     为汇总卡片（commitLiveChangeCard）。历史渲染走 messagesHtml 的 seg.changes（数据驱动，
-  //     从 transcript 的 tool_result.fileChange 重建，切会话/刷新不丢）----
-  // 新回合开始/回合结束：清空本回合变更聚合 + 移除处理折叠内的实时内联行
-  function liveChangeReset() {
-    liveChanges = new Map()
-    const inlineEl = document.querySelector('.change-inline')
-    if (inlineEl) inlineEl.remove()
-  }
-  // tool_result 有真实文件变更 → 在处理折叠内更新/新建内联行（N个文件已更改 +N -M，非悬浮）
-  function liveChangeInline() {
-    if (!liveChanges || !liveChanges.size) return
-    const d = procOpen()
-    const body = d.querySelector('.done-body')
-    if (!body) return
-    let el = body.querySelector(':scope > .change-inline')
-    if (!el) {
-      el = document.createElement('div')
-      el.className = 'change-inline'
-      body.appendChild(el)
-    }
-    let add = 0, del = 0
-    for (const c of liveChanges.values()) { add += c.added; del += c.removed }
-    el.innerHTML = `<span class="ci-n">${liveChanges.size}个文件已更改</span><span class="ch-add">+${add}</span><span class="ch-del">-${del}</span>`
-    scrollBottom()
-  }
-  // 回合结束：实时内联行收拢为消息流内的汇总卡片（复用 renderChangeCardHtml，默认折叠）。
-  // 无胶囊可 FLIP 变形，直接落地；历史/刷新形态与 messagesHtml 段尾卡片一致。
-  function commitLiveChangeCard() {
-    if (!liveChanges || !liveChanges.size) return
-    const html = renderChangeCardHtml(liveChanges)
-    liveChangeReset() // 清空本回合聚合 + 移除实时内联行
-    const wrap = document.createElement('div')
-    wrap.innerHTML = html
-    const card = wrap.firstElementChild
-    if (!card) return
-    msgAppend(card)
-    scrollBottom()
-  }
+  // ---- 文件变更汇总卡片：历史/实时统一由 messagesHtml 段尾 seg.changes 数据驱动渲染
+  //     （从 transcript 的 tool_result.fileChange 重建，切会话/刷新不丢）。原 WS out 实时内联行/
+  //     commitLiveChangeCard 链随 WS out 流退役删除（网关从不投递 out，2026-09-07 定案）----
   // 卡片右上角隐藏按钮：点击切换列表收起/展开（事件委托，innerHTML 重建不受影响）
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('.ch-toggle') : null
@@ -1497,9 +1687,10 @@
       const out = items.slice()
       for (let gi = guides.length - 1; gi >= 0; gi--) {
         const g = guides[gi]
+        const gbody = userBodyHtml(g.m)
         out.splice(Math.min(g.pos, out.length), 0, {
           kind: 'guide', gi,
-          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}><div class="body">${userBodyHtml(g.m)}</div>${userImgsHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）
+          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}>${gbody ? `<div class="body">${gbody}</div>` : ''}${userImgsHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）；纯图无文本不出空气泡（2026-09-07 空气炮根修）
         })
       }
       return out
@@ -1532,13 +1723,16 @@
       // 旁白 text 原位回填（与其后的动作交错，不再统一沉到段尾）；正式回复（end_turn）已在切段时
       // 气泡化（reply 项 → 折叠体外），不进 texts
       for (const t of s.texts) s.items[t.idx].html = processTextHtml(t.text)
-      // 思考行不做 running 态回填（2026-08-30 恢复 liveFoldBody：思考永不独立成行，
-      // 「正在思考」由尾工具组 label 原位替换/纯空窗兜底行呈现，与 182358 正常版一致）
+      // 思考行不做 running 态回填（思考永不独立成行：真空态=liveFoldBody 工具行内 .fold-state
+      // 状态显示行，2026-09-09 用户定案「状态标识与工具调用行在一起」，v267 summary 轮转方案废弃）
 
       let segHtml = ''
       if (s.user) {
         const m = s.user
-        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u"><div class="body">${userBodyHtml(m)}</div>${userImgsHtml(m)}<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div></div>`
+        // 纯图消息（文本剥 [Image #N] 占位后为空）不出 .body 空气泡，复制按钮同去（无文本可复制；
+        // 乐观气泡同构同去防接管帧形态跳变）——2026-09-07 空气炮根修
+        const ubody = userBodyHtml(m)
+        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u">${ubody ? `<div class="body">${ubody}</div>` : ''}${userImgsHtml(m)}${ubody ? `<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div>` : ''}</div>`
         lastNode = { key: s.key, type: 'u' }
       }
 
@@ -1555,34 +1749,52 @@
       }
 
       // 「正在思考/正在压缩」真空期占位（2026-08-27 机制沿用）：live fold 消费。
-      // 处理中 + 所有已登记工具均已收到结果 + 无待答提问 + 尾动作（lastStep）——result/thinking→
-      // think 态；compact（续接标记）→压缩态；lastStep=null（段刚开、首条 assistant 记录尚未落盘）
-      // → 也按思考推断亮态；旁白 text/提问 ask 不亮态。thinking 流式期间 jsonl 零写入 → SSE 不触发，
-      // web 保持本次渲染的思考态直到落盘轮转（须有本兜底才不空白）。
+      // busyOk = 处理中 + 所有已登记工具均已收到结果 + 无待答提问 → 引擎必然在产出下一动作
+      // （思考/旁白/工具参数），行为状态显示行恒亮（2026-09-10 真空窗口根治）。
+      // 【真空窗口实锤（ff7dc1c2 转录逐行计时）】CLI 按块流式落盘：旁白 text 落盘后 LLM 生成
+      // Edit 的 tool_use 参数 3~14s——期间 jsonl 零写入、stream-text 静默（tool_use 参数不进
+      // 流式字符通道）、turn-beat 只管无响应红标 → 旧白名单判定（result/thinking 才亮 think，
+      // text 不亮）使状态显示行整段真空数秒（用户实测「编辑文件时短暂真空期」）。
+      // text 落盘与 thinking 落盘语义相同（回合未收口、无工具运行 = 引擎在产出），判定不再
+      // 按尾动作类型区分；lastStep=null（段刚开、首条记录未落盘）同样亮态。
+      // 提问 ask 不在 busyOk 分支出现（lastAsk 待答时 busyOk 已假）——提问卡接管输入栏即状态，
+      // 不亮态（2026-09-09 定案维持）。thinking 流式期间 jsonl 零写入 → SSE 不触发，web 保持
+      // 本次渲染的思考态直到落盘轮转。
       const busyOk = processing && !s.pendingTools.length
         && !(s.lastAsk && s.lastAsk.answer == null)
       // 压缩实时态（2026-09-04 queue-state 同款链）：压缩进行中 jsonl 零写入（boundary+summary
       // 同毫秒落盘于结束时刻）→ lastStep 停在 'result'，CLI onCompactProgress → 网关 compact-state
-      // SSE 到达即强制真空态 compact（TTL 5min 防 compact_end 丢失卡死）；结束回退 lastStep 逻辑。
+      // SSE 到达即强制压缩态（TTL 5min 防 compact_end 丢失卡死）；结束回退思考态逻辑。
       const cfTs = live.compactFlags.get(live.curUuid)
       let vacuumState = null
       if (busyOk) {
         if (s.lastStep === 'compact' || (cfTs && Date.now() - cfTs < 300000)) vacuumState = 'compact'
-        else if (!s.lastStep || s.lastStep === 'result' || s.lastStep === 'thinking') vacuumState = 'think'
+        // 行为分级文本（2026-09-10 用户定案「根据行为确定状态显示行文本」）：思考落盘/流式、
+        // 工具结果刚回、段刚开 → 'think'「正在思考」；旁白已落盘、引擎产出下一动作（原真空窗，
+        // 典型=生成 tool_use 参数 3~14s）→ 'generating'「正在生成」。
+        else vacuumState = s.lastStep === 'text' ? 'generating' : 'think'
       }
       // 思考/压缩态计时起点：段内最后一条落盘记录的时刻（真空期从那时开始）；尚无记录退回段 user 时间
       const vacuumStart = s.lastTs || (s.user && s.user.timestamp) || 0
-      // 处理中（实时）段 = liveFoldBody（单工具折叠行轮转 + 思考/压缩 label 原位替换）；
-      // 已处理/被打断段 = groupTools（连续工具合并概括折叠，思考/旁白/引导原位穿插）。
-      // 2026-08-30 恢复 182358 形态（v163 stackBody 重写误删工具折叠，用户实测「工具行折叠的
-      // 功能消失」退回）。处理中恒渲染（即使空体——刚发消息乐观折叠语义）；完成态空体跳过。
+      // 处理中（实时）段 = liveFoldBody（单工具折叠行轮转 + 真空态段尾状态显示行，2026-09-09 定案
+      // 状态标识与工具行同一行）；已处理/被打断段 = groupTools（连续工具合并概括折叠，思考/旁白/
+      // 引导原位穿插）。2026-08-30 恢复 182358 形态（v163 stackBody 重写误删工具折叠，用户实测
+      // 「工具行折叠的功能消失」退回）。处理中恒渲染（即使空体——刚发消息乐观折叠语义）；完成态空体跳过。
       const bodyHtml = processing ? liveFoldBody(foldItems, vacuumState, vacuumStart) : groupTools(foldItems)
       if (bodyHtml || processing) {
         // dur 计时（CLI spinner 对应物）：t1=段开启消息 ts（开启消息/新回合段首引导），endTs=回复落盘 ts/段末 ts
         const t1 = (s.user && s.user.timestamp) || s.startTs || (isFinal ? lastUserTs : 0)
         const endTs = s.replyTs || s.lastTs
         const dur = !processing && t1 && endTs ? fmtDur(Math.round((endTs - t1) / 1000)) : ''
-        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing ? ' open' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${processing ? '正在处理' : '已处理'}${dur ? `<span class="d-dur"> ${dur}</span>` : ''}</summary><div class="done-body">${bodyHtml}</div></details>`
+        // 处理状态行（2026-09-09 用户定案「折叠顶只应有两字样」）：summary 恒「正在处理 + 总时长」
+        // （处理中）/「已处理 + 总时长」（完成），真空期（思考/生成/压缩）状态显示行由 liveFoldBody 并入
+        // 尾部工具折叠行 summary 同行（无工具组时段尾独立行），无响应/连接中断红标挂暂态层——折叠顶
+        // 不再出现任何其它字样（v267 的 summary 单行轮转方案废弃）。
+        const totalSec = processing && t1 ? Math.max(0, Math.round((Date.now() - t1) / 1000)) : 0
+        const stateHtml = processing
+          ? `正在处理<span class="d-dur"> ${fmtDur(totalSec)}</span>`
+          : `已处理${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
+        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing ? ' open' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${stateHtml}</summary><div class="done-body">${bodyHtml}</div></details>`
         lastNode = { key: s.key, type: 'f' }
       }
       // 流内项（按落盘序）：引导气泡 + 回复气泡（data-t 精确值供下段 prev 锚点查询命中）
@@ -1605,7 +1817,7 @@
       if (isContinuationMsg(m)) {
         // 压缩/自动摘要标记（2026-08-27 二轮修正）：不再产生任何可见行——曾以 note 吸进折叠或
         // 居中系统提示，都会打断实时工具折叠行的展示（用户实测）。现在处理中段记 lastStep=
-        // 'compact'，由 liveFoldBody 纯空窗兜底附加闪烁「正在压缩会话中……」状态行
+        // 'compact'，由 liveFoldBody 纯空窗兜底附加闪烁「正在压缩会话中……」状态显示行
         // （与「正在思考」同机制）；段间/已完成则静默吞行——数据层不剔 isCompactSummary 续接记录，拦截必须留。
         if (seg && !seg.finished) seg.lastStep = 'compact'
         continue
@@ -1780,6 +1992,13 @@
   let liftEl = null
   let liftSpacer = null
   let liftBound = false
+  // 滚动静默期（2026-09-08 侧栏滚轮失效根修）：scroll 后 150ms 内 hover 不扶起。
+  // 不变量：扶起（fixed 化+插占位符=布局重排）只发生在列表静止态——滚动中扶起与滚动互搏：
+  // 每格滚动触发「拍回删占位符（内容缩一行高）→ hover 重算重扶插占位符（内容长回）」，
+  // 占位符插删的净位移抵消滚动量 = 观感滚轮失效（wheel 到达+无 preventDefault，target 恒为
+  // 行——列表被行铺满无空白落点）；偶发正常=鼠标落点（白边/滚动条不触发）+主线程忙闲时序竞争。
+  // 连续滚动每次 scroll 续期；菜单/重建重扶走 liftStart 直调不受冷却约束（点击语义，非 hover）。
+  let liftCool = 0
   let reLiftHash = null // 行点击触发的导航：renderRecent 重建后按 hash 重扶被点行（用后即清）
   let mouseXY = null // 最近光标落点：renderRecent 重建后按落点重扶 hover 行（页面加载前 null 不误扶）
   function liftClear(force) {
@@ -1843,8 +2062,22 @@
     }
     if (!liftBound) {
       liftBound = true
-      bodyEl.addEventListener('scroll', liftClear, { passive: true })
+      bodyEl.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
       window.addEventListener('resize', liftClear)
+      // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
+      // viewport、把 DOM 祖先 #recent-body 从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后
+      // Chrome 还会按静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达
+      // +0 scroll，v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表=滚动意图：
+      // 同步拍回+强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
+      // non-passive 保证监听先于默认滚动动作执行。菜单开着=一并关闭（滚轮=菜单外交互；
+      // closeRowMenu 对鼠标在行内场景会保留浮起，故其后再无条件拍回，不变量：滚轮到达列表
+      // → 列表回纯在流态）。liftCool 与 scroll 门同参续期：滚轮持续=非静止态，防边界拍回/重扶循环。
+      bodyEl.addEventListener('wheel', () => {
+        if (!liftEl && !rowMenu) return
+        liftCool = Date.now() + 150
+        if (rowMenu) closeRowMenu()
+        if (liftEl) { liftClear(true); void bodyEl.offsetHeight }
+      }, { passive: false })
     }
   }
   function bindSessLift(root) {
@@ -1852,7 +2085,7 @@
     // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——菜单场景扶起走 toggleRowMenu 直调，不经此处
     if (IS_TOUCH_DEVICE || !matchMedia('(hover: hover) and (pointer: fine)').matches) return
     root.querySelectorAll('.sess-item').forEach((el) => {
-      el.addEventListener('mouseenter', () => liftStart(el))
+      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el) })
       el.addEventListener('mouseleave', liftClear)
     })
   }
@@ -1889,44 +2122,36 @@
     bindSessLift(root)
   }
 
-  // ---------- 会话行菜单（2026-08-24 DSH 侧栏 Menu 移植：… → [重命名 / 归档会话]）----------
-  // 仿 DSH ui-primitives Menu：白底 r12 卡片 + 4px padding + 40px 行（icon 16 + label），
-  // 点外部关闭（mousedown 判定，对齐 dsh Menu closeOnPointerLeave 之外的行为）。
-  // 2026-09-06 定案（用户方案）：菜单作为 tab 子元素挂行内——鼠标在浮窗上=仍在行 DOM 子树内，
-  // mouseleave 不触发、浮起天然保持。fixed 定位躲 #recent-body overflow 裁剪；行浮起（.lift，
-  // fixed+transform）为 containing block 且自身已脱出列表裁剪，菜单随之免裁。
-  // 2026-09-06 二轮根修（用户实测「浮窗消失不正常+tab 移到浮窗途中被拍回」）：旧版弹在 … 右下方
-  // （左缘=…右缘=行右缘）= 弹在侧栏外主区上空，tab→浮窗路径斜穿「行外+浮窗外」空隙，指针瞬间
-  // 落主区断 hover 链 → 偶现拍回。根治=浮窗右缘对齐 … 向左展开、弹在行正下方（全在侧栏内），
-  // 路径全程落在行∪浮窗并集内，空隙几何性消灭。定位用 offset 布局系（不受扶起动画中间态影响，
-  // 恒终态布局值），先挂载后量宽（offsetWidth 需在 DOM 内）。
+  // ---------- 会话 tab 内嵌展开菜单（2026-09-07 用户定案：浮窗改 tab 自身长高）----------
+  // 选项不再弹独立浮窗，作为 .sess-menu 挂 tab 行内第二行（flex-wrap），height 0→实测高
+  // 过渡 = tab 高度展开动画；再点 … /点外部（mousedown）关闭（瞬时收起）。菜单是行子元素：
+  // 鼠标在菜单上=仍在行 DOM 子树内，mouseleave 不触发、浮起天然保持（2026-09-06 子元素化
+  // 定案语义延续）；浮窗时代的定位/免裁/行∪浮窗几何判定（positionRowMenu/menuRect）随浮窗
+  // 整体删除——内嵌后展开域 ⊆ 行 rect，且行浮起（fixed）天然脱出 #recent-body 裁剪。
+  // 仍沿用浮起前提：菜单只存在于浮起 tab 上（liftStart anim:false 直终态，折叠行等不可浮场景不弹）。
   let rowMenu = null
-  function positionRowMenu(m, anchor) {
-    // 行 fixed = anchor 的 offsetParent；offsetLeft/Top 以行 padding box 为原点，与 fixed
-    // 子元素相对 CB（=行）的偏移同基准。菜单右缘=anchor 右缘、顶=anchor 底+4。
-    const mw = m.offsetWidth
-    m.style.left = Math.max(0, anchor.offsetLeft + anchor.offsetWidth - mw) + 'px'
-    m.style.top = (anchor.offsetTop + anchor.offsetHeight + 4) + 'px'
-  }
   function toggleRowMenu(anchor, hash) {
     if (rowMenu && rowMenu.dataset.hash === hash) { closeRowMenu(); return }
     closeRowMenu() // 换菜单（关旧开新）：旧行浮起去留交 closeRowMenu 的 hover 判定（鼠标已在新行 → 旧行拍回）
     const row = anchor.closest('.sess-item')
-    // 菜单挂载前提=行已成浮起宿主（fixed+.lift=菜单 CB+免裁），anim:false 直终态——动画中间态
-    // 布局逐帧变，定位必须按终态量（触屏首点无 hover 态可依，瞬扶无违和）。
+    // 菜单挂载前提=行已成浮起宿主（fixed+.lift=免裁+盖住下方行），anim:false 直终态
     if (row) liftStart(row, { anim: false })
     if (!row || !row.classList.contains('lift')) return // 折叠行等不可浮场景：不弹（不变量：菜单只存在于浮起 tab 上）
     const m = document.createElement('div')
-    m.className = 'row-menu'
+    m.className = 'sess-menu'
     m.dataset.hash = hash
     m.innerHTML =
+      '<div class="sess-menu-in">' +
       `<button type="button" class="rm-item" data-a="rename">${I.dshEdit}<span>重命名</span></button>` +
       `<button type="button" class="rm-item" data-a="archive">${I.dshArchive}<span>归档会话</span></button>` +
-      `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>`
-    row.appendChild(m) // 先挂载后定位：offsetWidth 需元素在 DOM 内才可量
-    positionRowMenu(m, anchor)
+      `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>` +
+      '</div>'
+    row.appendChild(m)
+    // 展开动画：class 基准 height:0 先强制 layout 提交，再落实测内容高触发 height 过渡
+    void m.offsetHeight
+    m.style.height = m.firstChild.offsetHeight + 'px'
     m.addEventListener('click', (e) => e.stopPropagation()) // 挡冒泡到行 click（否则点菜单项误 navigate）
-    // 菜单挂着=鼠标 hover 命中行子树 → 原生 title（文件名）tooltip 会在浮窗上弹出，暂存抑制
+    // 菜单挂着=鼠标 hover 命中行子树 → 原生 title（文件名）tooltip 会在菜单上弹出，暂存抑制
     row.dataset.title = row.title
     row.title = ''
     m.querySelector('.rm-item[data-a="rename"]').addEventListener('click', () => {
@@ -1944,9 +2169,7 @@
     rowMenu = m
   }
   function closeRowMenu() {
-    let menuRect = null
     if (rowMenu) {
-      menuRect = rowMenu.getBoundingClientRect() // remove 前量：鼠标在浮窗区=视觉上仍在 tab 浮起域
       const host = rowMenu.parentElement
       if (host && host.classList && host.classList.contains('sess-item')) {
         if (host.dataset.title !== undefined) { host.title = host.dataset.title; delete host.dataset.title }
@@ -1954,18 +2177,14 @@
       rowMenu.remove()
       rowMenu = null
     }
-    // 鼠标仍悬在浮起行或浮窗区（如点同一 … 关菜单）：浮起保持到移开鼠标（mouseleave 自然回位）。
-    // 判定域=行 rect ∪ 浮窗 rect：浮窗是 tab 的视觉延伸，鼠标悬在浮窗上时只按行 rect 判会误拍回。
-    // 几何判定而非 :hover：菜单开着时的列表重建会整列换节点（renderRecent 出口①重扶的新节点
-    // Chrome 不恢复 :hover），:hover 判定恒假 → closeRowMenu 把刚重扶的行拍回 → 下方补扶
-    // liftStart 走 anim 路径重播扶起动画+菜单按起步态 rect 定位错位（2026-09-06 用户实测
-    // 「直点 tab 没事、点 … 必现重新浮起」根因）。mouseXY=最近光标落点，重建换节点后依然成立。
+    // 鼠标仍悬在浮起行（如点同一 … 关菜单、点菜单项）：浮起保持到移开鼠标（mouseleave 自然回位）。
+    // 菜单是行子元素，展开域 ⊆ 行 rect，行矩形一个判定即可。几何判定而非 :hover：菜单开着时的
+    // 列表重建会整列换节点（renderRecent 重扶的新节点 Chrome 不恢复 :hover），:hover 判定恒假
+    // → closeRowMenu 把刚重扶的行拍回 → 下方补扶 liftStart 走 anim 路径重播扶起动画（2026-09-06
+    // 用户实测「直点 tab 没事、点 … 必现重新浮起」根因）。mouseXY=最近光标落点，重建换节点后依然成立。
     if (liftEl && mouseXY) {
       const r = liftEl.getBoundingClientRect()
-      const inRow = mouseXY[0] >= r.left && mouseXY[0] <= r.right && mouseXY[1] >= r.top && mouseXY[1] <= r.bottom
-      const inMenu = menuRect && mouseXY[0] >= menuRect.left && mouseXY[0] <= menuRect.right &&
-        mouseXY[1] >= menuRect.top && mouseXY[1] <= menuRect.bottom
-      if (inRow || inMenu) return
+      if (mouseXY[0] >= r.left && mouseXY[0] <= r.right && mouseXY[1] >= r.top && mouseXY[1] <= r.bottom) return
     }
     liftClear(true) // 菜单关闭=还原冻结解除：浮起行回位
   }
@@ -2004,8 +2223,9 @@
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
   // 第一击 interrupt（网关按 sessionId 精确路由 → CLI onCancel：回合进行中即打断，空闲为 no-op）；
-  // 第二击 POST /gateway/wsession/stop（网关统一杀进程：web spawn=taskkill pid 树关窗口；
-  // 终端直开会话=按 activity 上报 pid killTree）。转录保留磁盘，侧栏 tab 不消失，仅状态点熄灭。
+  // 第二击 POST /gateway/wsession/stop（网关统一优雅停 2026-09-08：shutdown → CLI exit 0 →
+  // WT 自动收 tab，3s 树杀兜底；web spawn/终端直开两会话形态同协议）。转录保留磁盘，
+  // 侧栏 tab 不消失，仅状态点熄灭。
   async function closeSession(hash) {
     const s = ALL.find((x) => hashOf(x) === hash)
     if (!s) return toast('未找到该会话')
@@ -2141,8 +2361,8 @@
   }
 
   function renderRecent() {
-    // 菜单挂行内（2026-09-06 子元素化定案）：整列 innerHTML='' 会连菜单销毁 → 先摘到 body 暂存，
-    // 重扶出口①按新行重挂+重定位；行已不在则 closeRowMenu 一并关。
+    // 菜单挂行内（2026-09-07 内嵌展开定案）：整列 innerHTML='' 会连菜单销毁 → 先摘到 body 暂存，
+    // 重建后按新行重挂；行已不在则 closeRowMenu 一并关。
     if (rowMenu) document.body.appendChild(rowMenu)
     // 重建前快照浮起行（hash + 终态视口矩形）：elementFromPoint 只认拍回后的列表行，
     // 鼠标悬在浮起拉宽区（超出行列表宽）/上移 2px 顶边缝时落空 → 鼠标未动 tab 无故下沉
@@ -2187,17 +2407,17 @@
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === rowMenu.dataset.hash)
       if (el) {
         liftStart(el, { anim: false })
-        const anchor = el.querySelector('.sess-more')
-        if (anchor) { // 菜单重挂到新行内（DOM 状态保留，仅换父+按新行布局重定位）
-          el.appendChild(rowMenu)
-          positionRowMenu(rowMenu, anchor)
-        }
+        el.appendChild(rowMenu) // 菜单重挂到新行内（内嵌高度态随节点保留，无需重定位/不重播展开动画）
       } else closeRowMenu() // 行已不在（归档/删除/换视图）→ 菜单一并关
     } else if (reLiftHash) {
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
       if (el) liftStart(el, { anim: false })
-    } else if (mouseXY) {
+    } else if (mouseXY && Date.now() >= liftCool) {
+      // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
+      // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
+      // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
+      // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
       const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
       if (hit && hit.dataset.hash) liftStart(hit, { anim: false })
       else if (prevLift &&
@@ -2219,7 +2439,7 @@
   function renderMgr() {
     closeMentionPop()
     stopLiveFoldTimer()
-    pinRelease()
+    stageRelease()
     state.currentHash = null
     state.preview = null
     const scrollEl = document.querySelector('#chat-scroll')
@@ -2532,7 +2752,7 @@
     if (state.preview === label && state.previewMounted === label && messagesEl.querySelector('.preview-frame')) return
     state.currentHash = null
     stopLiveFoldTimer()
-    pinRelease()
+    stageRelease()
     state.preview = label
     inputWrap.classList.remove('docked')
     chatArea.classList.remove('in-session')
@@ -2871,7 +3091,7 @@
     // 项目选择器：点 root 外（seat 除外，其 click toggle 接管开合）= 关闭
     if (psel.open && !projPop.contains(e.target) && !projSeatEl.contains(e.target)) closeProjPop()
   })
-  // 点击空白关闭弹层（@ 浮窗 / 整理会话 / 最近气泡 / 已处理折叠收起）
+  // 点击空白关闭弹层（@ 浮窗 / 整理会话 / 最近气泡）
   document.addEventListener('click', (e) => {
     // @ 浮窗：点浮窗外任意处关闭；点输入内 chip 的 × 删除该 chip
     if (e.target.closest('.mention .m-x')) {
@@ -2882,9 +3102,6 @@
     if (!e.target.closest('#mention-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
     if (!bubblePop.contains(e.target) && !e.target.closest('#rail-bubble')) bubblePop.classList.remove('show')
-    // 「已处理」折叠展开时，点击列表任意部分 → 收起（summary 点击走原生切换，跳过）
-    const df = e.target.closest('details.done-fold')
-    if (df && df.open && !e.target.closest('summary')) df.open = false
   })
   // 风险确认门：Escape 关闭（dsh Modal 的 Escape onClose 监听；输入栏 keydown 不覆盖遮罩态）
   document.addEventListener('keydown', (e) => {
@@ -3034,50 +3251,55 @@
       if (isMobile()) setPanel(false)
     }
   })
-  // 钉顶回合窗口尺寸变化（旋转/缩放）时，预留空间跟随新容器高度自适应；
-  // allowRelease=false：视口变化不算「回复撑满」，禁用解除判定（防视口变小误杀钉顶）
-  window.addEventListener('resize', () => { if (pin.active && pin.reserve) pinReserveApply(false) })
-
-  // 钉顶滚动监听：用户上滑离开底部 → 仅暂停跟随（pin.follow=false），钉顶/占位保持不解除；
-  // 回到底部重挂跟随（触发 pinReserveApply 的解除判定）。滚动不解除钉顶——2026-08-22 恢复：
-  // 2026-08-20 加的「上滑即 pinRelease」过度敏感，用户仅轻微滑动占位即消失。处理折叠展开
-  // 撑满视口、回复撑满视口的让位/解除均由 pinReserveApply 内容驱动（roundFoldOpen/replied
-  // 判定 + toggle 重算），无需滚动监听介入。
-  $('chat-scroll').addEventListener('scroll', () => {
-    if (!pin.active || !pin.el || !pin.el.isConnected || pin.animT) return
-    const sc = $('chat-scroll')
-    const atBottom = sc.scrollTop >= sc.scrollHeight - sc.clientHeight - 40
-    if (atBottom) {
-      if (!pin.follow) { pin.follow = true; pinScrollFollow() } // 回底重挂跟随 → 解除判定
-    } else {
-      // 上滑离开底部：仅暂停跟随，钉顶保持，回底重挂。
-      // 2026-08-30 占位自愈兜底：上滑后 follow=false，scrollBottom 全部静默（提前 return），
-      // 占位收缩/临时让位恢复（temp）失去最高频重算腿——低频入口（SSE syncPin/toggle）错过
-      // 内容变短窗口就让位态固化到刷新（用户实测「处理中上滑 → 消息+横线掉下来，刷新才恢复」）。
-      // 此处每帧重算占位但 allowRelease=false：内容变短即补占位/恢复 temp，绝不触发解除
-      // （对齐 resize 路径设计：滚动不是「回复撑满」，2026-08-20 「上滑即 pinRelease」教训）。
-      pin.follow = false
-      pinReserveApply(false)
-    }
-  })
-  // 展开/收起处理折叠（details toggle）→ 内容高度变化，重算钉顶占位：展开的处理折叠内容
-  // 撑满视口即临时让位（roundFoldOpen 判正文，折叠收起后恢复钉顶），收起后短内容重新补回占位。
-  messagesEl.addEventListener('toggle', () => { if (pin.active) pinReserveApply() }, true)
-
-  // 图片异步加载改变内容高度 → 重算钉顶几何（用户实测「带图片的会错误计算」根因）：
-  // 钉顶/占位在 <img> 高度为 0 时算定，图片加载完成后 baseH/pin.top 全部过期——
-  // ①spacer 按图 0 高算大 → scrollHeight 虚高 → 吸底过冲，消息滚出视口顶（上方露出历史）；
-  // ②图加载后 baseH 猛增 → SSE syncPin（allowRelease=true）临时让位撤 sticky+横线；
-  // ③图高恒在 → 让位/占位判定恒基于过期几何，不刷新不自愈。load/error 均重算
-  // （error=404 裸文本兜底替换同样变高；load 不冒泡靠 capture，同 toggle）。
-  const pinImgRecalc = (e) => {
-    if (!pin.active || !pin.el || !pin.el.isConnected) return
-    if (!e.target || e.target.tagName !== 'IMG') return
-    if (!pin.temp) pin.top = pinNaturalTop() // 历史图懒加载也改上方高度，刷新吸附位
-    pinReserveApply()
+  // 两层消息流（2026-09-08 定案；2026-09-09 释放链铲除）：
+  // ① 屏幕尺寸变化（旋转/缩放）→ 占位高度跟随新 clientHeight（「占位大小根据屏幕大小计算」）
+  window.addEventListener('resize', () => { if (stage.active) stageSync() })
+  // ② 用户滚动输入（滚轮/触摸拖拽/鼠标拖滚动条/键盘）一律**只让位、永不摘占位**（2026-09-09
+  //    用户定案「为什么还会有释放链这种东西」——占位=真实 DOM 实体，与回合绑定，用户输入不在
+  //    其生命周期内；任何一处的 remove 都被实测定性为「死掉」）。触摸链：手势（含惯性，
+  //    touchend 后 scroll 静默 500ms 判停）期 touchHold 冻结程序跟随防 WebKit 触摸滚动基准
+  //    断裂，静默后 yielded 永久让位；tap（拖拽位移 ≤6px）不让位。stageRelease 仅剩视图级
+  //    退出调用（切会话/回首页/管理视图/项目预览）。
+  $('chat-scroll').addEventListener('wheel', () => {
+    if (stage.active && !stage.touchHold) stage.yielded = true
+  }, { passive: true })
+  const touchYield = () => {
+    if (stage.releaseT) clearTimeout(stage.releaseT)
+    stage.releaseT = setTimeout(() => {
+      stage.releaseT = null
+      stage.touchHold = false
+      stage.yielded = true
+    }, 500)
   }
-  messagesEl.addEventListener('load', pinImgRecalc, true)
-  messagesEl.addEventListener('error', pinImgRecalc, true)
+  let touchY0 = 0
+  let touchY = 0
+  $('chat-scroll').addEventListener('touchstart', (e) => {
+    stage.touchHold = true
+    if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
+    touchY0 = touchY = e.touches[0] ? e.touches[0].clientY : 0
+  }, { passive: true })
+  $('chat-scroll').addEventListener('touchmove', (e) => {
+    touchY = e.touches[0] ? e.touches[0].clientY : touchY
+  }, { passive: true })
+  $('chat-scroll').addEventListener('touchend', () => {
+    if (!stage.touchHold) return
+    if (Math.abs(touchY - touchY0) > 6) touchYield() // 拖拽过 = 滚动接管 → 惯性静默后让位
+    else stage.touchHold = false // tap：不算滚动操作
+  }, { passive: true })
+  $('chat-scroll').addEventListener('touchcancel', () => {
+    if (stage.touchHold) touchYield() // 系统打断（来电/手势争夺）：按拖拽保守处理
+  }, { passive: true })
+  $('chat-scroll').addEventListener('scroll', () => {
+    if (stage.touchHold) {
+      if (stage.releaseT) touchYield() // touchend 后惯性滚动：续期静默窗
+      return // 手势中的 scroll 不构成滚动输入信号（与触摸无法从事件本身区分，靠持有窗屏蔽）
+    }
+    // 非程序滚动（progScrollUntil 窗外）= 用户拖滚动条/键盘滚动 → 只让位，永不摘占位
+    if (stage.active && !stage.animT && Date.now() >= progScrollUntil) stage.yielded = true
+  })
+  // 旧体系三类内容几何监听（折叠 toggle 重算/收起 click 接管/图片 load 重算）随动态占位退役：
+  // 占位恒定 → 内容收起不再令 scrollTop 越出 maxScroll（无 clamp 闪动），图片异步撑高只改变
+  // 跟随目标而跟随每次渲染出口现算（renderSettle→stageSync→stageFollow），无需事件驱动重算。
 
   // ---------- 网关模式（SubPj2 私有化网关）----------
   // 检测 /gateway/health 返回 mode==='gateway' 即启用：composer 可发、WS 双向、工具审批。
@@ -3092,7 +3314,6 @@
   let gToken = new URLSearchParams(location.search).get('token') || ''
   let gws = null
   let reconnectTimer = null
-  let cur = null // 当前正在流的 assistant 消息元素
 
   // 安全加固（2026-08-15）：数据接口 URL 统一附加网关 token（query），与 WS 升级校验一致。
   // 2026-08-28 门控条件从「有无 gToken」改为「是否已验证」：cookie 授权设备刷新后直接可拉数据，
@@ -3168,8 +3389,10 @@
       .qa-skip:hover:not(:disabled){background:#f3f4f6;color:var(--text)}
       /* 2026-08-30 间距对齐（用户「最下一行到边界 vs 最上一行到边界差别很大」）：空状态行不吃空间
          （.appr-state padding 0 16px 12px + qa-main gap 10px 使脚行到卡底 ≈36px，眉行到卡顶仅 12px）；
-         折叠单行卡 qa-top 底垫 0→12px（原底部贴边不对称）。 */
-      .qa-card .appr-state:empty{display:none}
+         折叠单行卡 qa-top 底垫 0→12px（原底部贴边不对称）。
+         2026-09-08 :empty 隐藏全局化——普通审批卡同样漏挂（用户实测「按钮距卡底太远」=空 state
+         行仍吃 12px 底垫，与 .appr-btns padding-bottom 14px 叠成 26px），qa-card 特例并入。 */
+      .appr-state:empty{display:none}
       .qa-collapsed .qa-top{padding:12px 16px}
       /* 2026-08-26 任务 A2：审批增强——原因说明/被拒路径/「记住此规则」建议多选 */
       .appr-desc{color:var(--text-2);font-size:13px;line-height:20px}
@@ -3438,6 +3661,8 @@
     { name: 'skills', desc: '查看可用技能', bare: true },
     { name: 'plugins', desc: '查看插件清单', bare: true },
   ]
+  // 浮窗单页分组（2026-09-09 二轮定案：去顶层 tab，四类堆放一页）组名映射
+  const CMD_GROUP = { imgpick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
   // 推理等级（全局：Off/Low/High/Max，对齐 CLI effortValue 语义；Off=不发送 effort 参数。2026-08-22 由 per-model reasoning 改为全局）
   const EFFORT_LEVELS = [
     { id: 'low', name: 'Low' },
@@ -3489,8 +3714,8 @@
   // POST /gateway/model 尚未落地前的一次刷新把刚切的选择回滚成旧值。
   let modelUserPicked = false
   // 命令菜单状态（对齐 dsh PopupState：open/status/options/search/active/submitting/confirming/acknowledged/error）
-  // 2026-08-28 v137：+ 浮窗加 tab（图片 tab 在最上、仅识图模型渲染）；tab: 'img' | 'cmd'，打开回落命令
-  const cmd = { open: false, tab: 'cmd', status: 'pending', options: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  // 2026-09-09 二轮定案：去 tab 单页分组（上传/技能/引用会话/指令堆放一页）；items=渲染时平铺条目（键盘索引基准）
+  const cmd = { open: false, status: 'pending', items: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
   // 模型菜单状态（对齐 dsh ModelSelect Pane：root | model | effort）
   const msel = { open: false, pane: 'root', active: 0 }
   const cmdPop = $('cmd-pop')
@@ -3559,25 +3784,34 @@
   })
 
   // ---- 命令菜单（dsh PopupSelectController 移植：open→加载一次→本地过滤→高亮→选择→确认门）----
-  function cmdFiltered() {
+  // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
+  // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
+  function cmdEntries() {
     const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
-    if (!q) return cmd.options
-    return cmd.options.filter(o => o.name.toLowerCase().includes(q) || (o.desc && o.desc.toLowerCase().includes(q)))
+    const match = (s) => !q || String(s || '').toLowerCase().includes(q)
+    const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/4 · 自动压缩` : '一次最多 4 张，自动压缩' }]
+    if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
+    const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时（同 @ 提及）
+    for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', desc: relTime(s.updatedAt) })
+    }
+    for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
+    return items
   }
   function toggleCmdPop() {
     if (cmd.open) { closeCmdPop(); return }
     if (msel.open) closeModelPop()
     closeMentionPop()
     cmd.open = true
-    cmd.tab = 'cmd' // 每次打开回落命令 tab
-    cmd.status = 'ready' // 本地内置列表同步就绪（dsh PopupState：pending→ready 即出列表）
-    cmd.options = MOCK_COMMANDS
+    cmd.status = 'ready'
     cmd.search = ''
     cmd.active = 0
     cmd.confirming = null
     cmd.acknowledged = false
     cmd.error = null
     renderCmdPop()
+    // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
+    loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
   }
   function closeCmdPop() {
     if (!cmd.open) return
@@ -3592,49 +3826,29 @@
     if (!cmd.open) return
     // dsh confirmation gate：确认态下命令卡隐藏，改由全屏 RiskConfirmation 模态接管
     if (cmd.confirming) { cmdPop.hidden = true; renderRiskModal(); return }
-    // 2026-08-28 v137：顶部 tab 行——「图片」tab 在最上（仅识图模型渲染，vision 门控），「命令」恒在
-    const canImg = GATEWAY && visionOn()
-    const imgOn = cmd.tab === 'img' && canImg
-    let html = `<div class="tabs">`
-      + (canImg ? `<button type="button" class="tab${imgOn ? ' tabActive' : ''}" data-tab="img"><span class="tabIco">${I.dshImage}</span>图片</button>` : '')
-      + `<button type="button" class="tab${imgOn ? '' : ' tabActive'}" data-tab="cmd"><span class="tabIco">${I.dshPlus}</span>命令</button></div>`
-    if (imgOn) {
-      // 图片 tab：已选缩略图（可移除）+ 选择图片按钮 + 粘贴提示
-      html += `<div class="imgpane">`
-        + (pendingImages.length
-          ? `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
-          : `<div class="imgempty">尚未选择图片</div>`)
-        + `<button type="button" class="imgpick">${I.dshImage}选择图片…</button>`
-        + `<div class="imghint">也可直接粘贴图片到输入栏 · 一次最多 4 张，自动压缩</div></div>`
+    // 2026-09-09 二轮：单页分组渲染（无 tab）——搜索框 + 已选图片缩略图 + 四组行列表
+    cmd.items = cmdEntries()
+    let html = `<input class="search" type="text" placeholder="搜索全部类别…" aria-label="搜索" autocomplete="off"/>`
+    if (cmd.error !== null) {
+      html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
-      const items = cmdFiltered()
-      html += `<input class="search" type="text" placeholder="搜索命令…" aria-label="搜索命令" autocomplete="off"/>`
-      if (cmd.error !== null) {
-        html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
-      } else if (cmd.status === 'pending') {
-        html += `<div class="status">加载中…</div>`
-      } else if (cmd.status === 'ready' && !items.length) {
-        html += `<div class="status">没有匹配的命令</div>`
-      } else if (cmd.status === 'ready') {
-        html += `<div role="listbox" class="viewport">${items.map((o, i) => {
-          const on = i === cmd.active ? ' rowActive' : ''
-          return `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="label">/${o.name}</span>${o.desc ? `<span class="detail">${esc(o.desc)}</span>` : ''}${o.active === true ? `<span class="check">${I.dshCheck}</span>` : ''}</button>`
-        }).join('')}</div>`
+      if (pendingImages.length) {
+        // 已选图片缩略图（可移除）：粘贴/拖拽/未发送遗留，同旧图片 tab
+        html += `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
       }
+      let lastGrp = ''
+      html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
+        const grp = CMD_GROUP[it.kind] || ''
+        const gh = grp !== lastGrp ? `<div class="grp">${grp}</div>` : ''
+        lastGrp = grp
+        const on = i === cmd.active ? ' rowActive' : ''
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
+        const label = it.kind === 'cmd' ? `/${it.name}` : it.name
+        return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${it.desc ? `<span class="detail">${esc(it.desc)}</span>` : ''}</button>`
+      }).join('')}</div>`
     }
     cmdPop.innerHTML = html
     cmdPop.hidden = false
-    // tab 切换（vision 变化后图片 tab 可能消失：tab='img' 落回 'cmd' 已在渲染分支兜底）
-    cmdPop.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { cmd.tab = b.dataset.tab; renderCmdPop() }))
-    if (imgOn) {
-      cmdPop.querySelector('.imgpick')?.addEventListener('click', () => $('img-file').click())
-      cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
-        pendingImages.splice(+x.dataset.i, 1)
-        renderImgPills()
-        renderCmdPop()
-      }))
-      return
-    }
     // 搜索输入：本地过滤（dsh 语义——敲字不重查选项；←→ 保留原生光标）
     const box = cmdPop.querySelector('.search')
     if (box) {
@@ -3649,6 +3863,11 @@
       if (!isTouch()) box.focus() // 触屏不聚焦：iOS 会弹键盘；搜索仍可手动点输入框唤起
     }
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
+    cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
+      pendingImages.splice(+x.dataset.i, 1)
+      renderImgPills()
+      renderCmdPop()
+    }))
     cmdPop.querySelector('.retry')?.addEventListener('click', () => { cmd.error = null; cmd.status = 'ready'; renderCmdPop() })
     const on = cmdPop.querySelector('.row.rowActive')
     if (on) on.scrollIntoView({ block: 'nearest' })
@@ -3693,16 +3912,42 @@
     renderCmdPop()
   }
   function cmdMove(d) {
-    const n = cmdFiltered().length
+    const n = cmd.items.length
     if (!n) return
     cmd.active = (cmd.active + d + n) % n
     renderCmdPop()
   }
+  // 统一选择分发（2026-09-09 二轮）：图片行=选图（选完 img-file change 关浮窗）；技能/会话=chip 追加输入栏；
+  // 命令=原链（risk→确认门 / settle→写入输入栏）
   function cmdSelect() {
-    const o = cmdFiltered()[cmd.active]
-    if (!o || cmd.submitting) return
+    const it = cmd.items[cmd.active]
+    if (!it || cmd.submitting) return
+    if (it.kind === 'imgpick') { $('img-file').click(); return }
+    if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
+    if (it.kind === 'session') { appendMentionChip('session', it.name); closeCmdPop(); return }
+    const o = it.ref
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
     cmdSettle(o)
+  }
+  // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
+  // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
+  function appendMentionChip(kind, name) {
+    const chip = document.createElement('span')
+    chip.className = 'mention'
+    chip.contentEditable = 'false'
+    chip.dataset.kind = kind
+    chip.dataset.name = name
+    chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
+    inputEl.appendChild(chip)
+    chip.after(document.createTextNode('\u00A0'))
+    syncGwSend()
+    inputEl.focus()
+    const sel = window.getSelection()
+    if (sel) {
+      const r = document.createRange()
+      r.selectNodeContents(inputEl); r.collapse(false)
+      sel.removeAllRanges(); sel.addRange(r)
+    }
   }
   function cmdAck(v) { cmd.acknowledged = v; renderCmdPop() }
   function cmdConfirm() {
@@ -3887,11 +4132,7 @@
       MODEL_CUR = { ...MODEL_CUR, model: id, provider: (it && it.provider) || MODEL_CUR.provider }
       modelUserPicked = true // 2026-08-24：本次会话内主动切换，防止 /gateway/session 旧上报回滚
       saveModelCur() // 2026-08-24：持久化，刷新后恢复
-      // 2026-08-28 图片门控：会话内主动切模型 → 即时按凭据池标注重算识图判定
-      // （最终以 CLI 上报为准，下次 /gateway/session 拉到 vision 后再校准）
-      sessVision = it && it.vision !== undefined ? !!it.vision : !!(MODELS && MODELS.vision)
       renderModelSeat()
-      renderImgBtn()
       closeModelPop()
       // 2026-08-23 用户定案：model 每会话覆盖，带 sessionId 精确路由，网关不广播兜底
       void apiSetModel({ model: id, sessionId: state.currentHash || undefined })
@@ -3911,6 +4152,7 @@
   renderModelSeat() // 初始渲染模型 seat（trigger 显示当前模型名 · 推理等级）
 
   function setConn(on, label) {
+    connUp = !!on // 2026-09-07 运行态计时行「连接中断」标注的数据源
     const b = $('floria-conn')
     if (!b) return
     // 浅灰小字紧跟 Floria 品牌名后；on/off 仅控制文案（已连接/未连接/连接中…），颜色统一浅灰
@@ -3918,316 +4160,174 @@
   }
 
   function scrollBottom() {
-    // 钉顶回合：动画未就位或用户上滑离开跟随区时不强制滚动（不跟用户抢）
-    if (pin.active && (pin.animT || !pin.follow)) return
+    // 占位在场（回合展示期）→ 两层跟随接管（动画期 animT 内不抢）；否则普通吸底
+    if (stage.active) { stageFollow(); return }
     const sc = messagesEl.closest('#chat-scroll')
-    // 先按最新内容重算占位，再吸底：占位随回复增长收缩，scrollHeight 恒定 → 无跳动
-    if (pin.active) pinReserveApply()
-    // pinReserveApply 刚平滑解除并发出 smooth 滚到底 → 本帧 auto 吸底让位，不覆盖 smooth
-    if (smoothDismissPending) { smoothDismissPending = false; return }
+    progScroll()
     sc.style.scrollBehavior = 'auto'
     sc.scrollTop = sc.scrollHeight
     sc.style.scrollBehavior = ''
   }
 
-  // ---- 用户消息钉顶：最新发送/到达的用户消息吸附在视口顶部，下方预留空间给回复滚动 ----
-  // active 是否处于钉顶回合；key 服务端段索引（data-m）；el 当前钉顶元素；
-  // top 该消息自然位置对应的 scrollTop（滚动到此值消息即贴住视口顶部）；
-  // follow 是否跟随回复自动吸底；animT 初始平滑上划动画期（期间不跟随）；
-  // settleT 回合结束检测轮询；lastReplyLen 上次回复长度（稳定即视为回复结束）。
-  const pin = { active: false, key: null, el: null, top: null, follow: false, animT: null, settleT: null, lastReplyLen: -1, reserve: false, replied: false, temp: false }
-  // 解除帧标记：pinReserveApply 平滑解除（长回复一次性撑满视口）时已发 smooth 滚到底，
-  // 本帧内 scrollBottom / pinScrollFollow / refreshSession 的 auto 吸底要让位，避免覆盖 smooth
-  // （否则 smooth 刚启动就被 scrollTop=scrollHeight 顶掉，退化成瞬间跳底）。
-  let smoothDismissPending = false
+  // ---- 两层消息流（2026-09-08 定案）：层1=真实消息流，层2=静态占位块 .pin-stage ----
+  // 占位块由回合开启消息唤出（web 乐观气泡 / CLI 端权威新 user 消息），挂 #messages 流末
+  // （后续内容插它前面）。高度（2026-09-09 用户定案「过于大」根修）= max(0, 视口高 −
+  // paddingBottom − 内容脚印)：诞生时刻量脚印 footprint=内容底−气泡贴顶位，占位只补足
+  // 「贴顶视角下内容底到可视区底的余量」——可视区=clientHeight 扣常驻 padding-bottom
+  // 142px（docked 输入栏悬浮预留，不扣则占位铺到输入栏底下多一条）；新回合脚印只含开启
+  // 气泡（气泡钉在历史末尾），占位≈满屏减一气泡属几何必然。公式恰好保证贴顶位可达
+  // （maxScroll = 贴顶位 + padBot），空白永不越出可视区。诞生锁定（lockFoot 缓存，每回合
+  // stageStart 重量），resize 换新视口高重算，绝不随内容变化。
+  // 恒定不随内容收缩、回合结束不自动撤；**用户滚动输入永不摘占位**（2026-09-09 用户定案
+  // 「为什么还会有释放链这种东西」——滚轮/触摸/拖滚动条一律只让位跟随），拆收仅发生在
+  // 离开会话视图（切会话/回首页/管理视图/项目预览，stageRelease 的全部调用点）。
+  // 跟随吸底目标=真实内容底（占位起点贴视口底）：内容未满一屏时视口停在开启气泡贴顶位、
+  // 内容在下方生长；超过一屏后平滑转入内容底跟随、气泡自然上滑出视口顶——无 sticky 驻留、
+  // 无逐帧几何重算（旧 pin 体系 pinReserveApply/临时让位/settleCheck 轮询/劈开补丁全链退役）。
+  // 占位恒定使任何内容收起（折叠收起等）都不会令 scrollTop 越出 maxScroll → 历史收起闪动/
+  // clamp 补丁不再需要。key=回合开启消息标识（'optimistic'=乐观气泡在场 | 'idx:ts'=权威 user）；
+  // bubble=贴顶驻留参照气泡。
+  // touchHold=触摸手势持有中（含惯性）：手势进行中程序滚动/删除占位 = scrollHeight 骤减 =
+  // WebKit 触摸滚动基准断裂（2026-09-08 用户实测「iPad 滑动就死」）→ 持有期冻结程序跟随。
+  // yielded=用户滚动输入（滚轮/触摸/滚动条/键盘）后跟随永久让位（用户已接管视口；stageStart 复位）。
+  const stage = { active: false, key: null, el: null, bubble: null, animT: null, touchHold: false, releaseT: null, yielded: false, lockFoot: null }
+  // 程序滚动窗口：此时刻前的 scroll 事件不算用户操作（跟随/动画自身写入 scrollTop 会触发 scroll）
+  let progScrollUntil = 0
+  function progScroll() { progScrollUntil = Date.now() + 80 }
 
-  // 消息被 sticky 吸附时 offsetTop 会返回「渲染后的吸附位」而非自然流位置，不能直接用。
-  // 自然流位置 = 前一个兄弟消息的底部 + flex gap + 消息自身 marginTop（首条消息未被吸附，
-  // offsetTop 即自然位，可直接用）。
-  function flowTopOf(el) {
-    if (!el) return 0
-    const prev = el.previousElementSibling
-    if (prev) {
-      const gap = parseFloat(getComputedStyle(messagesEl).gap) || 0
-      return prev.offsetTop + prev.offsetHeight + gap + (parseFloat(getComputedStyle(el).marginTop) || 0)
-    }
-    return el.offsetTop
-  }
-  function pinFlowTop() { return flowTopOf(pin.el) }
-
-  // 任意消息 el 作为钉顶消息时的几何（供首屏恢复钉顶判定复用，不依赖 pin 状态）：
-  // baseH = 去占位后的真实滚动内容高（offsetHeight 布局高，不受 scrollHeight 在内容<视口时 clamp）；
-  // pinTop = el 吸附到视口顶部时对应的 scrollTop；target = pinTop + 视口高。
-  // baseH < target 说明「el + 其下回复 + 历史」未填满视口 → 需要钉顶补占位。
-  function pinGeometry(el) {
-    const sc = $('chat-scroll')
-    const scs = getComputedStyle(sc)
-    const padTop = parseFloat(scs.paddingTop) || 0
-    const padBot = parseFloat(scs.paddingBottom) || 0
-    const mGap = parseFloat(getComputedStyle(messagesEl).gap) || 0
-    const sp = messagesEl.querySelector('.pin-spacer')
-    const spH = sp ? sp.getBoundingClientRect().height : 0
-    const msH = messagesEl.offsetHeight - spH - (sp ? mGap : 0)
-    const baseH = padTop + msH + padBot
-    const natural = flowTopOf(el)
-    const pinTop = Math.max(0, natural - sc.offsetTop - padTop)
-    return { baseH, pinTop, target: pinTop + sc.clientHeight }
-  }
-
-  // 消息吸附到顶部时对应的 scrollTop：natural 相对 #chat-scroll 内容盒顶部。
-  // offsetTop 相对 #chat-area（唯一 positioned 祖先），减 #chat-scroll.offsetTop 得距滚动区
-  // 顶部的距离，再减滚动区 padding-top——目标=内容区顶部（sticky top:0 的实际吸附位）。
-  function pinNaturalTop() {
+  // 元素顶边在滚动内容坐标系中的 y（贴视口顶对应的 scrollTop）。旧体系 msg-pin 是 sticky，
+  // 吸附时 offsetTop 变吸附位须用兄弟几何推算；新体系无 sticky，offsetTop 恒自然流位可直接用。
+  function topInScroll(el) {
     const sc = $('chat-scroll')
     const padTop = parseFloat(getComputedStyle(sc).paddingTop) || 0
-    return Math.max(0, pinFlowTop() - sc.offsetTop - padTop)
+    return Math.max(0, el.offsetTop - sc.offsetTop - padTop)
   }
 
-  function pinRelease() {
-    if (pin.animT) { clearTimeout(pin.animT); pin.animT = null }
-    if (pin.settleT) { clearTimeout(pin.settleT); pin.settleT = null }
-    if (pin.el && pin.el.classList) pin.el.classList.remove('msg-pin')
-    // 2026-08-29 定位重叠根治：整页重建后 pin.el 悬挂（指向失连旧节点）时上面撤不到真身，
-    // DOM 里重渲染的旧回合消息残留 msg-pin（sticky 吸顶+横线）→ 与新回合钉顶消息两个 sticky
-    // 同粘 top:0 重叠（用户实测「正在处理和直线重叠、10s 后恢复」）。按消息流实际撤全部钉顶类。
-    messagesEl.querySelectorAll('.msg-pin').forEach((el) => el.classList.remove('msg-pin'))
-    pin.el = null
-    const sc = $('chat-scroll')
-    if (sc && sc.classList.contains('pin-active')) sc.classList.remove('pin-active')
-    messagesEl.querySelector('.pin-spacer')?.remove()
-    pin.active = false; pin.key = null; pin.el = null; pin.top = null
-    pin.follow = false; pin.lastReplyLen = -1; pin.reserve = false; pin.replied = false; pin.temp = false
-    smoothDismissPending = false
+  // 拆收：撤占位块+清状态。仅视图级退出触发（切会话 renderSession/回首页 renderHome/
+  // 管理视图 renderMgr/项目预览 openProjectPreview）——用户滚动输入不进入此函数（2026-09-09
+  // 释放链铲除定案，滚动输入只让位）。remove 瞬间 scrollHeight 骤减一屏，浏览器 clamp 把
+  // scrollTop 拉回合法值——视口在内容区则纹丝不动，内容连续零跳动（无需手动补偿）。
+  function stageRelease() {
+    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
+    if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
+    stage.touchHold = false
+    stage.yielded = false
+    if (stage.el) stage.el.remove()
+    stage.el = null
+    stage.active = false
+    stage.key = null
+    stage.bubble = null
+    stage.lockFoot = null
   }
 
-  function pinScrollFollow() {
-    if (!pin.active || !pin.follow) return
+  // pinned 跟随：scrollTop = max(开启气泡贴顶位, 内容底位)。
+  // 内容未满一屏时贴顶位更大 → 视口停在气泡贴顶处、折叠体/回复在下方生长（占位垫底）；
+  // 内容超过一屏后内容底位反超 → 平滑转入内容底跟随（最新内容贴视口底），气泡自然上滑出视口顶。
+  // 两视角在贴顶位处无缝衔接，无需 sticky、无需占位收缩。bubble 失联（换皮窗口）时退化为纯内容底。
+  // 拉伸动画期（animT 在场）跟随照常执行：rAF 每帧调本函数驱动视口上浮（落点随占位生长的
+  // maxScroll 增长连续升到贴顶位）；渲染出口偶发并发写入与 rAF 帧同落点幂等，无需互斥。
+  function stageFollow() {
+    // touchHold：手势中程序滚动=基准断裂；yielded：用户滚动输入后已接管视口，跟随永久让位
+    if (!stage.active || stage.touchHold || stage.yielded) return
     const sc = $('chat-scroll')
-    if (pin.active) pinReserveApply()
-    if (smoothDismissPending) { smoothDismissPending = false; return } // 平滑解除帧：smooth 已发，不覆盖
+    const stageEl = stage.el
+    if (!stageEl || !stageEl.isConnected) return
+    const padBot = parseFloat(getComputedStyle(sc).paddingBottom) || 0
+    const contentBottom = Math.max(0, topInScroll(stageEl) - sc.clientHeight + padBot)
+    const t0 = stage.bubble && stage.bubble.isConnected ? topInScroll(stage.bubble) : 0
+    const max = sc.scrollHeight - sc.clientHeight
+    progScroll()
     sc.style.scrollBehavior = 'auto'
-    sc.scrollTop = sc.scrollHeight
+    sc.scrollTop = Math.min(Math.max(t0, contentBottom), Math.max(0, max))
     sc.style.scrollBehavior = ''
   }
 
-  // 本回合处理折叠是否展开：处理中（done-live 自动展开）与用户手动展开「已处理」折叠（只读
-  // 路径回复落地后 done-live 被移除、只剩 done-fold）都算「正文」——roundFoldOpen() 直接参与
-  // 钉顶解除判定，处理过程撑满视口即解除，让消息上滑、思考/工具过程可滚动阅读。折叠须归属
-  // 当前（钉顶）回合：实时（WS）路径折叠是钉顶用户消息的直接后续兄弟，只读（SSE）路径折叠
-  // 嵌套在钉顶用户消息的回复消息内；两者取其一，避免历史回合展开的折叠误解除钉顶。
-  function roundFoldOpen() {
-    const next = pin.el && pin.el.nextElementSibling
-    if (!next) return false
-    const fold = next.matches('details.done-fold')
-      ? next
-      : next.querySelector('details.done-fold')
-    return !!(fold && fold.open)
-  }
-
-  // 预留空间自适应（占位）：sticky 的包含块是内容盒（padding 不算行程），钉顶消息要能被
-  // 平滑上划到视口顶部，必须用真实元素 .pin-spacer 撑高。占位高度 = 视口高 − 钉顶消息以下
-  // 的真实内容高（回复未满一屏时补足），使「钉顶消息 + 回复 + 占位」恒等于一屏——
-  // scrollHeight 全程恒定 → 跟随吸底不跳动；回复随流式增长时占位自动收缩（每帧几 px，无跳变）；
-  // 回复填满视口后占位为 0（移除元素，无位移）。高度按滚动容器实际可见高度 clientHeight
-  // 自适应（桌面/iPad/手机各自容器高，不依赖 iOS 100vh），resize 时重算。
-  function pinReserveApply(allowRelease = true) {
-    if (!pin.active || !pin.el || !pin.el.isConnected) return
-    const sc = $('chat-scroll')
-    const target = pin.top + sc.clientHeight
-    const sp = messagesEl.querySelector('.pin-spacer')
-    const spH = sp ? sp.getBoundingClientRect().height : 0
-    const mGap = parseFloat(getComputedStyle(messagesEl).gap) || 0
-    const scs = getComputedStyle(sc)
-    // scrollHeight 在内容 < 视口时被 clamp 到 clientHeight 不可直读；messagesEl.offsetHeight 是
-    // 布局高、不受 clamp。减去占位及其与末消息之间的 gap 得真实消息高，再加滚动区上下 padding
-    // 即 baseH（去占位后的滚动内容高）。
-    const msH = messagesEl.offsetHeight - spH - (sp ? mGap : 0)
-    const baseH = (parseFloat(scs.paddingTop) || 0) + msH + (parseFloat(scs.paddingBottom) || 0)
-    // 内容已 ≥ 目标：占位无法为负，撤掉。本回合已有「正文」（正式回复 pin.replied，或展开的
-    // 处理/思考折叠 roundFoldOpen——思考、工具调用如编辑文件本身就是正文）即平滑解除钉顶，
-    // 此刻 scrollTop 恰等于 pin.top（消息自然位 = 视口顶）→ 消息随内容自然上滑出视口
-    // （ChatGPT 式过渡），处理/思考过程可全屏滚动阅读；否则（钉顶初始、内容全为历史时 baseH
-    // 已大）只撤占位、保持钉顶，等正文出现。2026-08-20：放开 roundFoldOpen——此前展开的处理
-    // 折叠不被识别为正文，钉顶消息 sticky 悬浮遮挡可滚动阅读的思考/工具过程。
-    if (baseH >= target) {
-      if (sp) sp.remove()
-      // 视口驱动（resize）不参与解除判定：视口变小（iPad 工具栏收放/窗口缩放）也会令
-      // baseH≥target，属几何巧合而非「回复撑满」——曾在此永久解除钉顶致占位突然死亡
-      // （2026-08-28 根因二）。只撤占位保持钉顶资格，视口变回即由占位分支补回。
-      if (!allowRelease) return
-      if (pin.replied || roundFoldOpen()) {
-        const sc = $('chat-scroll')
-        const wasFollow = pin.follow
-        // 处理折叠展开撑满视口（roundFoldOpen）= **临时让位**：仅移除 sticky 让思考/工具过程
-        // 可滚动阅读，但保留钉顶资格（el/key/top）——折叠收起后内容变短即由下方占位分支恢复
-        // 钉顶（2026-08-20 用户反馈：展开撑满解除占位后折叠长度缩减、占位消失导致钉失效）。
-        // 无论是否已出正式回复都走临时让位：展开的「已处理」折叠撑满视口只是折叠内容撑满、
-        // 并非回复正文长，折叠收起须能恢复钉顶——此前用 `roundFoldOpen() && !pin.replied`
-        // 门住，回复落地后展开折叠落回永久 pinRelease()，折叠后钉顶消失（2026-08-23 用户反馈）。
-        // 正式回复正文自身撑满视口（pin.replied 且折叠未展开）= 永久解除（长回复完成）。
-        if (roundFoldOpen()) {
-          pin.el.classList.remove('msg-pin')
-          pin.temp = true
-          pin.follow = false
-          if (wasFollow || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 40) {
-            sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' })
-            smoothDismissPending = true // 本帧内各调用点 auto 吸底让位
-          }
-          return
-        }
-        pinRelease()
-        // 回复一次性完成（非逐字符流式 / 静态渲染 / 刷新）时，解除后平滑滚到最新内容
-        // （回复/文本底部），避免停在消息贴顶处看不到回复底部；流式场景解除后 streamText 的
-        // scrollBottom 会继续自然吸底（消息随内容增长上滑出视口），此 smooth 只兜一次性路径
-        if (wasFollow || sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 40) {
-          sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' })
-          smoothDismissPending = true // 本帧内各调用点 auto 吸底让位（scrollBottom/pinScrollFollow/refreshSession）
-        }
+  // 唤出（回合开启）：占位块挂/复用（stageSync）+ 乐观唤出（smooth=true）播占位拉伸动画
+  // （2026-09-09 用户定案：占位初始高=乐观气泡同高，rAF 750ms easeOutCubic 流畅拉伸到目标
+  // 高；旧「气泡平滑上划贴顶」独立滚动动画铲除——视口上浮由拉伸驱动：每帧 stageFollow 的
+  // 落点随占位生长的 maxScroll 被压在内容底、连续升到贴顶位，与空白生长合成单一动效）。
+  // smooth=false 直接按跟随几何就位（刷新恢复/接管帧等无动画路径）。
+  // 不变量：占位块至多一个（#messages 流末），由 stageSync 独占维护；拉伸期占位高度唯一
+  // 写入者=本 rAF（stageSync 检测 animT 在场跳过设高），重入/终止经 stageSync 收口终态。
+  function stageStart(bubbleEl, key, smooth) {
+    stage.active = true
+    stage.key = key
+    stage.bubble = bubbleEl
+    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
+    if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
+    stage.touchHold = false
+    stage.yielded = false
+    stage.lockFoot = null // 每回合重量脚印（新气泡=新贴顶参照，余量按本回合诞生时刻补足）
+    const fresh = stageSync()
+    if (smooth && stage.bubble && stage.el) {
+      const pStar = parseFloat(stage.el.style.height) || 0
+      const p0 = fresh ? Math.min(stage.bubble.offsetHeight, pStar) : (parseFloat(stage.el.style.height) || 0)
+      const t0ms = performance.now()
+      stage.el.style.height = p0 + 'px'
+      const step = (now) => {
+        const k = Math.min(1, (now - t0ms) / 750)
+        const e = 1 - Math.pow(1 - k, 3) // easeOutCubic
+        if (stage.el) stage.el.style.height = (p0 + (pStar - p0) * e) + 'px'
+        if (!stage.yielded && !stage.touchHold) stageFollow() // 让位/手势中：高度照常长满，视口停写
+        if (k < 1) { stage.animT = requestAnimationFrame(step) }
+        else { stage.animT = null; stageSync() } // 终帧经 stageSync 收口（校准高度+跟随归位）
       }
-      return
-    }
-    // 内容未满一屏：临时让位中内容变短（如折叠处理折叠）→ 恢复钉顶 sticky，重算吸附位。
-    // 2026-08-30：follow 只在用户本就在底部时重挂——上滑中触发恢复（滚动自愈兜底/SSE）若
-    // 强制 follow=true，下一个 delta 的 scrollBottom 会强行吸底抢走用户滚动位置。
-    let restoredFollow = false
-    if (pin.temp) {
-      pin.el.classList.add('msg-pin')
-      pin.temp = false
-      pin.top = pinNaturalTop()
-      pin.follow = sc.scrollTop >= sc.scrollHeight - sc.clientHeight - 40
-      restoredFollow = pin.follow
-    }
-    // 目标：加占位后 scrollHeight 恰为 target → maxScrollTop == pin.top，吸底时消息贴顶、
-    // 视口恰满、无死区、无跳动。边界时高算 0 也保留元素：靠 flex gap 补足，避免撤占位丢掉
-    // gap 使吸底差一截、消息贴不到顶（rel>0）。target 用恢复后的 pin.top 重算。
-    const h = Math.max(0, Math.round((pin.top + sc.clientHeight) - baseH - mGap))
-    const sp2 = sp || document.createElement('div')
-    if (!sp) { sp2.className = 'pin-spacer'; messagesEl.appendChild(sp2) }
-    sp2.style.height = h + 'px'
-    // 2026-09-06 钉顶偶发「劈开」根修：临时让位（done-live 展开撑满视口）→ 下一轮 SSE
-    // applySegDelta 把展开折叠换成收起折叠+正式回复 → 内容高度骤降，浏览器把 scrollTop
-    // clamp 到骤缩后的底部；恢复分支重挂 sticky+spacer 后 scrollHeight 回升，却无人把 clamp
-    // 残留的 scrollTop 对齐回 pin 几何——syncPinAfterRender 的 pinScrollFollow 先于本函数执行、
-    // 届时 follow 仍 false 空过，refreshSession 的吸底又被 pin.active 跳过 → 视口停在中间
-    // 偏移位：气泡不吸附/吸附错位、回复第一行露在气泡上方、中段被气泡白底或 spacer 遮挡，
-    // 画面「劈开」定格到 pinSettleCheck 兜底解除才自愈（偶发视觉错乱根因）。恢复且 follow
-    // （=用户本就在底部，clamp 后判定恒真）→ spacer 重挂后吸底一次：maxScrollTop=pin.top，
-    // 气泡恰好贴顶、几何归位；用户不在底（restoredFollow=false）不抢滚动，维持 2026-08-30 语义。
-    if (restoredFollow) {
-      sc.style.scrollBehavior = 'auto'
-      sc.scrollTop = sc.scrollHeight
-      sc.style.scrollBehavior = ''
-    }
-  }
-
-  // 回合结束后的解除兜底：回复填满视口（baseH ≥ 目标）且已出回复时，pinReserveApply 在
-  // 流式/刷新过程中已自动平滑解除（见上）；此处兜底覆盖「用户上滑离底时回复悄悄撑满视口、
-  // 回底重挂跟随才触发解除」等边角。短回复（未填满）保持钉顶占位不解除。
-  function pinMaybeRelease() {
-    if (!pin.active || !pin.el || !pin.el.isConnected) return
-    pinReserveApply()
-    if (!pin.active) return // 已在 pinReserveApply 内平滑解除
-    const sc = $('chat-scroll')
-    const sp = messagesEl.querySelector('.pin-spacer')
-    const spH = sp ? sp.getBoundingClientRect().height : 0
-    const mGap = parseFloat(getComputedStyle(messagesEl).gap) || 0
-    const baseH = sc.scrollHeight - spH - (sp ? mGap : 0)
-    // 仅当正式回复正文填满视口才永久解除：展开的处理/思考折叠（roundFoldOpen）只是折叠内容
-    // 撑满，须临时让位而非永久解除，折叠收起后由 pinReserveApply 恢复钉顶——否则展开折叠会被
-    // 误判为「长回复」触发永久解除、折叠后钉顶消失（2026-08-23 用户反馈）。pinReserveApply
-    // 已处理临时让位，此处只在折叠收起且回复正文填满视口时兜底解除。
-    if (pin.replied && !roundFoldOpen() && baseH >= pin.top + sc.clientHeight) pinRelease() // 回合结束、回复正文填满视口才解除
-  }
-
-  function pinApply(el, smooth) {
-    pinRelease()
-    pin.active = true
-    pin.el = el
-    el.classList.add('msg-pin')
-    pin.top = pinNaturalTop()
-    const sc = $('chat-scroll')
-    // 预留空间占位：钉顶消息下方回复未满一屏时用 .pin-spacer 补齐，使「消息+回复+占位」
-    // 恒等于一屏、scrollHeight 恒定 → 跟随吸底不跳动；回复增长时占位自动收缩，
-    // 填满视口后占位 0 并平滑解除钉顶（消息随内容自然上滑出视口）；短回复保持钉顶占位
-    sc.classList.add('pin-active')
-    pin.reserve = true
-    pinReserveApply()
-    if (smooth) {
-      // 平滑上划把该消息送到视口顶部；动画结束后进入跟随模式
-      pin.follow = false
-      pin.animT = setTimeout(() => { pin.animT = null; pin.follow = true; pinScrollFollow() }, 750)
-      sc.scrollTo({ top: pin.top, behavior: 'smooth' })
+      stage.animT = requestAnimationFrame(step)
     } else {
-      sc.style.scrollBehavior = 'auto'
-      sc.scrollTop = pin.top
-      sc.style.scrollBehavior = ''
-      pin.follow = true
+      stageFollow()
     }
-    // 仅对服务端渲染（有 data-m）的消息做回合结束轮询；网关本地消息靠 result 事件解除
-    if (el.dataset.m) pinSettleCheck()
   }
 
-  // 回合结束检测：钉顶段出现回复文本且长度连续两轮不变（间隔 2.5s）→ 回复已结束 → 解除钉顶
-  function pinSettleCheck() {
-    if (pin.settleT) clearTimeout(pin.settleT)
-    pin.settleT = setTimeout(() => {
-      pin.settleT = null
-      if (!pin.active || !pin.el || !pin.el.isConnected) return
-      const key = pin.el.dataset.m
-      if (!key) return
-      const reply = messagesEl.querySelector(`[data-m="${key}"][data-t="a"]`)
-      if (!reply) { pinSettleCheck(); return }
-      const len = reply.textContent.length
-      if (len === pin.lastReplyLen) pinMaybeRelease()
-      else { pin.lastReplyLen = len; pinSettleCheck() }
-    }, 2500)
-  }
-
-  // 重绘后同步钉顶：沿用 pin.key 定位元素并重贴 sticky；若出现更新的用户消息则切到新回合
-  function syncPinAfterRender() {
-    if (!pin.active) return
-    let el = pin.key ? messagesEl.querySelector(`[data-m="${pin.key}"][data-t="u"]`) : null
+  // 渲染权威出口对账：整页重建洗掉占位块/气泡失联 → 重挂（流末）+ 高度校准 + 气泡重定位，
+  // 然后按跟随几何归位。占位高度 = max(0, clientHeight − paddingBottom − 诞生脚印
+  // lockFoot)（2026-09-09「过于大」二轮根修：clientHeight 含常驻 padding-bottom 142px
+  // （docked 输入栏悬浮预留），不扣则占位铺到输入栏底下；扣除后空白恰铺到输入栏上沿，
+  // maxScroll 仍恰=贴顶位）；诞生锁定后仅 resize 换视口高重算，绝不随内容变化。
+  function stageSync() {
+    if (!stage.active) return false
+    const sc = $('chat-scroll')
+    let el = stage.el && stage.el.isConnected ? stage.el : messagesEl.querySelector('.pin-stage')
+    let created = false
     if (!el) {
-      const users = messagesEl.querySelectorAll('.msg.user[data-t="u"]')
-      el = users.length ? users[users.length - 1] : null
+      el = document.createElement('div')
+      el.className = 'pin-stage'
+      messagesEl.appendChild(el)
+      created = true
     }
-    if (!el) { pinRelease(); return }
-    const key = el.dataset.m
-    if (key !== pin.key) { pin.key = key; pin.lastReplyLen = -1 }
-    pin.el = el
-    pin.top = pinNaturalTop()
-    // 临时让位中（处理折叠展开撑满、sticky 已让位）：重绘后不强制贴 sticky，由下方
-    // pinReserveApply 按当前 baseH 判定（仍撑满→保持让位；变短→占位分支恢复钉顶）
-    if (!pin.temp) el.classList.add('msg-pin')
-    // 本回合已出回复（读路径：SSE 刷新渲染出回复即标记）→ 允许回复撑满视口时平滑解除
-    if (el.dataset.m && messagesEl.querySelector(`[data-m="${key}"][data-t="a"]`)) pin.replied = true
-    if (pin.follow) pinScrollFollow()
-    if (el.dataset.m) pinSettleCheck()
-    // 重建后 .pin-spacer 被 messagesEl.innerHTML 覆盖清掉，按当前状态重挂动态占位
-    if (pin.reserve) pinReserveApply()
+    stage.el = el
+    if (stage.lockFoot == null) {
+      // 诞生脚印：气泡贴顶位到内容底（占位块 offsetTop）的距离——el 高度未设不影响 offsetTop
+      const t0 = stage.bubble && stage.bubble.isConnected ? topInScroll(stage.bubble) : 0
+      stage.lockFoot = Math.max(0, topInScroll(el) - t0)
+    }
+    const padBot = parseFloat(getComputedStyle(sc).paddingBottom) || 0
+    // 拉伸动画期（animT 在场）占位高度唯一写入者=rAF step：此处跳过防中间态被拉到终态；
+    // 动画重入/终止路径先清 animT 再进本函数，自然走下方公式收口终态。
+    if (stage.animT == null) el.style.height = Math.max(0, sc.clientHeight - padBot - stage.lockFoot) + 'px'
+    if (!stage.bubble || !stage.bubble.isConnected) {
+      if (stage.key === 'optimistic') {
+        const zone = document.getElementById('live-zone')
+        const els = zone ? zone.querySelectorAll('.msg.user') : []
+        stage.bubble = els.length ? els[els.length - 1] : null
+      } else {
+        // 2026-09-09 跳动主根根修：stage.key 存 sig（"idx:ts"，防索引复用错位），但渲染权威
+        // 气泡 data-m=段起始索引（纯数字）——整页重建后按 sig 原样匹配 data-m 恒落空 → bubble
+        // 永久失联 → stageFollow t0 退化 0、落点从贴顶位瞬移内容底（差近一屏）=每回合首帧刷新
+        // 必跳。修=取 sig 索引部分（":" 前）匹配 data-m；sig 防错位语义保留在 key 本体。
+        stage.bubble = stage.key ? messagesEl.querySelector(`[data-m="${String(stage.key).split(':')[0]}"][data-t="u"]`) : null
+      }
+      if (stage.bubble && !stage.bubble.isConnected) stage.bubble = null
+    }
+    stageFollow()
+    return created
   }
 
-  // 2026-09-07 钉顶「劈开」第二实锤根修（用户 dump 取证：fold top=121 < 钉顶气泡视觉底 333，
-  // 气泡 pos=sticky 仍吸附、fold/reply/变更卡链路间距正常，唯独整体相对气泡上滑 ~220px）：
-  // 带图消息的图（userImgsHtml loading="lazy" / 回复内 img）**异步加载完成后撑高内容**，
-  // 而 .pin-spacer 是按图未加载时 baseH 算的静态值——图撑高 Δ 后 scrollHeight = pin.top+Δ，
-  // maxScrollTop 超出 pin.top Δ，吸底/停留的 scrollTop 令后续内容滑进钉顶气泡视觉矩形背后
-  // 被白底遮挡（Δ≈图高，dump 实测 220px）。回合已结束、无 SSE、无滚动 → 无人重算 → 劈开
-  // 定格（用户滚动一下触发 pinReserveApply 即自愈=偶发观感）。load 事件不冒泡 → 捕获阶段
-  // 委托 messagesEl 覆盖全部渲染路径的 img；重算后 baseH 增大 → spacer 收缩/解除判定，
-  // 浏览器自动 clamp 回正确滚动位。
-  messagesEl.addEventListener(
-    'load',
-    (e) => {
-      if (pin.active && e.target && e.target.tagName === 'IMG') pinReserveApply()
-    },
-    true,
-  )
-
-  // 追加到 #messages 末尾；若钉顶预留 .pin-spacer 在末尾则插到它之前（spacer 恒为最后一个元素，
-  // 否则预留空白会出现在消息中间）
+  // 追加到 #messages 末尾；插入点取暂态区 #live-zone（其子元素恒为消息流最末尾段）或两层占位
+  // .pin-stage 之前（占位块恒为最后一个元素，否则预留空白会出现在消息中间）。2026-09-07 两区
+  // 重构：权威内容永远插在暂态区之前——暂态区（气泡/主张折叠/排队区）恒贴底，不再与增量插入
+  // 竞争文档序（「排队消息渲染到上一行」根因的结构性消除）。
   function msgAppend(el) {
-    messagesEl.insertBefore(el, messagesEl.querySelector('.pin-spacer'))
+    messagesEl.insertBefore(el, document.getElementById('live-zone') || messagesEl.querySelector('.pin-stage'))
     return el
   }
 
@@ -4240,37 +4340,29 @@
     scrollBottom()
   }
 
-  // 2026-08-30 共同后端定案（接力文档清单#4②③）：回合中发送的乐观 = 排队区成员（对齐 CLI
-  // 语义：回合运行中入队，终端只显示队列预览）。生命周期：发送 → 置底排队区小气泡 → CLI
-  // 注入（injected 出现）→ 渲染权威折叠体内 injected 气泡接管，本端吸收移除 → dequeue 落盘
-  // （user 出现）→ 变开启气泡开新折叠体。pendingUserMsgs = 排队乐观尚未接管者（吸收 + dock）。
-  // 2026-08-30 忙碌/空闲区分（用户实测「开启消息刚开始也会被短暂认定为引导消息」）：
-  // DOM 有 done-live（回合运行中，含乐观折叠）才属排队语义；无 done-live（回合间隙）= 本次
-  // 发送是「新回合开启消息」，CLI 空闲即消费、无排队阶段 → 直接乐观渲染开启气泡进对话流
-  // （gwSend 随后 procOpen 挂「正在处理」折叠），真实数据经 SSE 整页重建接管。空档期误判
-  // 双向自愈：回合刚结束时误入 dock → dequeue user 落盘即被吸收移除。
+  // 2026-08-30 共同后端定案（接力文档清单#4②③）→ 2026-09-07 两区重构收编：回合中发送的乐观
+  // = 排队区成员（对齐 CLI 语义：回合运行中入队，终端只显示队列预览）；回合间隙发送 = 新回合
+  // 开启主张（开启气泡 + 「正在处理」主张折叠，renderTransient 统一渲染于 #live-zone 暂态区）。
+  // 生命周期：发送 → 乐观主张/排队成员 → CLI 注入（injected 出现）或 dequeue 落盘（user 出现）
+  // → absorbPending 文本吸收移除（渲染权威接管）；权威 done-live[data-m] 在场 → 主张降级
+  // （renderTransient 同趟：主张折叠不渲染、气泡项按排队成员渲染）。
   let pendingUserMsgs = []
-  // imgs：gwSend 传入的 pendingImages（{content,mediaType,filename,dataUrl}）——乐观阶段图尚未落盘，
-  // 用本地 dataUrl 即时渲染（排队小气泡 + 空档期开启气泡两分支），SSE 整页重建后由 image-cache URL 接管
   function addUser(text, imgs) {
-    liveAskInput = null
     clearTakeover() // 清掉残留的提问/审批 takeover
-    // 注意：回合中不动 proc 折叠/计时器/变更聚合——注入消息不打断当前回合的运行态（吸收后由
-    // 渲染权威折叠体内 injected 气泡呈现，计时基点不被打断）
-    const list = imgs || []
-    const imgsHtml = list.length
-      ? `<div class="msg-imgs">${list.map((im) => `<img class="msg-img" src="${im.dataUrl || ''}" alt="">`).join('')}</div>`
-      : ''
-    const bodyText = list.length ? String(text).replace(/\s*\[Image #\d+\]/g, '') : text
-    if (messagesEl.querySelector('details.done-fold.done-live')) {
-      pendingUserMsgs.push({ hash: state.currentHash, text, el: null, baseTs: live.lastDataTs || 0, imgs: list })
-      renderQueueDock()
-    } else {
-      const div = document.createElement('div')
-      div.innerHTML = `<div class="msg user msg-in" data-t="u"><div class="body">${renderUserText(bodyText)}</div>${imgsHtml}</div>`
-      msgAppend(div.firstElementChild)
+    // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
+    // 「新回合开启主张」。主张至多一个：主张折叠在场时后续发送恒为 dock 成员。
+    const hasLive = !!messagesEl.querySelector('details.done-fold.done-live')
+    pendingUserMsgs.push({ hash: state.currentHash, text, imgs: imgs || [], baseTs: live.lastDataTs || 0, form: hasLive ? 'dock' : 'bubble', claimTs: Date.now() })
+    renderTransient()
+    // 两层消息流：乐观开启气泡唤出占位（排队成员/dock 不唤——会话处理中发送不打断当前展示，
+    // 2026-09-08 定案「只有处于结束状态的会话发送乐观气泡才唤出占位」）。气泡取暂态区最后
+    // 开启气泡（主张至多一个=它），key='optimistic'，落盘接管后由 hasNewUser 链换权威 key。
+    if (!hasLive) {
+      const zone = document.getElementById('live-zone')
+      const els = zone ? zone.querySelectorAll('.msg.user') : []
+      if (els.length) stageStart(els[els.length - 1], 'optimistic', true)
     }
-    scrollBottom() // 发送后跟随下滑
+    scrollBottom() // 发送后跟随下滑（占位在场=两层跟随，动画期不抢）
   }
   // 吸收：当前会话 jsonl 已出现该文本（单条落盘或 drainCommandQueue 多条合并成一条，join 后
   // includes 命中）→ 真实气泡已由渲染权威接管，不再重插；其它会话的 pending 保留（切回时处理）。
@@ -4291,53 +4383,186 @@
       const realTexts = newer.map((m) => m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join(''))
       return !realTexts.some((t) => t.includes(p.text))
     })
-    if (pendingUserMsgs.length !== before) renderQueueDock()
+    if (pendingUserMsgs.length !== before) renderTransient()
   }
-  // 置底排队区（2026-08-30 清单#4②）：本地乐观 pending + CLI 队列快照（live.queueRemote，
-  // queue-state SSE / queued 首载）合并渲染在消息流最末尾——最后一个折叠体「正在思考」
-  // 状态行之下（dock 恒为 #messages 末元素，pin-spacer 之前）。文本去重防 web 自发消息与
-  // CLI 快照回报双份；按入队 ts 升序（FIFO）。全空 → 移除 dock。
-  function renderQueueDock() {
-    let dock = document.getElementById('queue-dock')
+  // 刷新两段式根治（2026-09-08）：队列快照的队首项在回合间隙（权威 done-live 不在场）= CLI
+  // 空闲入队即消费的瞬态——即将出队开新回合，应渲染为乐观开启主张（气泡+主张折叠）而非
+  // 「排队中」（此前刷新撞上「已入队未落盘」窗口：dock 先出「排队中」、气泡+折叠体等落盘
+  // +SSE 往返后才出现）。统一收编为 form='bubble'，形态由 renderTransient 按 authLive 自动
+  // 定（在场→降级 dock 成员 = 真排队；不在场→气泡 = 即将开回合），非队首项恒走 remote
+  // （真排队）。收编项落盘后走 absorbPending 文本接管 / 接管帧同位换皮 / claimStartTs 计时
+  // 移交——乐观链全部现成。首载回程/防抖回程/queue-state SSE 三入口统一调用；同文本已
+  // 收编或本地已发（dock 项）幂等跳过/原地升级，不产生第二份。
+  function queueClaimAdopt(items) {
     const cur = state.currentHash
-    const local = cur ? pendingUserMsgs.filter((p) => p.hash === cur) : []
-    // 首条消息事务进行中：注入中的开启消息保持对话流气泡形态——网关 flush 投递后 CLI 入队上报
-    // 快照（落盘接管前窗口）若照渲，同一条消息会以「排队中」形态重现（三态第②态根源）→ 事务期
-    // 只渲 local 乐观项；用户事务期连发第二条时其乐观排队气泡照显（remote 同文项与 local 去重）
+    if (!cur || (firstSendHash && firstSendHash === cur)) return // 首条消息事务期乐观 DOM 自理
+    const head = items && items[0]
+    if (!head || typeof head.content !== 'string' || !head.content) return
+    const local = pendingUserMsgs.find((p) => p.hash === cur && p.text === head.content)
+    if (local) {
+      if (local.form === 'dock') { local.form = 'bubble'; local.claimTs = Date.now() }
+      return
+    }
+    pendingUserMsgs.push({ hash: cur, text: head.content, imgs: [], baseTs: live.lastDataTs || 0, form: 'bubble', claimTs: Date.now() })
+  }
+  // ---- 暂态区（2026-09-07 两区重构）：#live-zone = 数据区与 .pin-stage 之间的唯一暂态容器，
+  //      承载三类乐观/运行态元素——回合开启气泡、回合开启主张折叠（「正在处理」）、置底排队区。
+  //      生命周期对齐根治：此前三类元素各自为政（气泡直插数据区、proc 折叠独立变量+计时器、
+  //      dock 独立挂载），整页重建洗掉一部分、增量路径洗不掉另一部分 → 「正在处理」幻影折叠
+  //      残留 / 排队区插到新落盘消息上一行（首段无锚点时 delta 追加越过 dock）。现一切暂态 DOM
+  //      由 pendingUserMsgs + live.queueRemote 单一状态源整体重建，每条渲染路径（整页/增量/
+  //      queue-state SSE/发送）末尾都跑 renderTransient 对账：
+  //      ① 权威 done-live[data-m] 折叠在场（回合实际运行中）→ 本区不持回合开启主张（主张折叠
+  //        不渲染、气泡项降级为排队成员）；主张折叠无 data-m，判定不会自匹配。
+  //      ② 吸收：absorbPending 文本命中（落盘接管）→ 项移除，区随趟收敛。
+  //      ③ 全空 → 容器整体摘除（主张计时随停）。
+  function renderTransient() {
+    const cur = state.currentHash
+    const authLive = !!messagesEl.querySelector('details.done-fold.done-live[data-m]')
+    // 事务期（首条消息乐观权威窗口）项 hash 暂空：hash='' 且事务在场（firstSendHash===cur，
+    // 含导航前 ''==='') 的项计入本会话——首页发送瞬间 currentHash/firstSendHash 双空也要能渲
+    // 出开启主张；'' 项的清理由会话切换/事务回滚/撤回链负责（renderSession 869/ws-failed/renderHome）
+    const local = pendingUserMsgs.filter((p) => p.hash === cur || (p.hash === '' && firstSendHash === cur))
+    const bubble = authLive ? [] : local.filter((p) => p.form === 'bubble')
+    // 排队区合并（2026-08-30 清单#4②）：本地乐观项（dock 形态 + 权威在场时降级的气泡项）
+    // + CLI 队列快照（live.queueRemote，queue-state SSE / queued 首载）。文本去重防 web 自发
+    // 消息与 CLI 快照回报双份；按入队 ts 升序（FIFO）。首条消息事务期 remote 不渲（注入中
+    // 开启消息保持对话流气泡形态，快照照渲会同条消息以「排队中」重现 = 三态第②态根源）。
     const inTx = firstSendHash && firstSendHash === cur
     const remote = cur && !inTx ? (live.queueRemote || []) : []
-    const items = []
+    const dockItems = []
     const seen = new Set()
     for (const p of local) {
       const t = String(p.text || '')
-      if (t && !seen.has(t)) { seen.add(t); items.push({ content: t, ts: p.baseTs || Date.now(), imgs: Array.isArray(p.imgs) ? p.imgs : [] }) }
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      if (!authLive && p.form === 'bubble') continue // 开启气泡走气泡渲染，不进 dock
+      dockItems.push({ content: t, ts: p.baseTs || p.claimTs || Date.now(), imgs: Array.isArray(p.imgs) ? p.imgs : [] })
     }
     for (const q of remote) {
       if (q && typeof q.content === 'string' && q.content && !seen.has(q.content)) {
         seen.add(q.content)
-        items.push({ content: q.content, ts: typeof q.ts === 'number' ? q.ts : 0 })
+        dockItems.push({ content: q.content, ts: typeof q.ts === 'number' ? q.ts : 0 })
       }
     }
-    items.sort((a, b) => (a.ts || 0) - (b.ts || 0))
-    if (!items.length) {
-      if (dock) dock.remove()
+    dockItems.sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    if (!bubble.length && !dockItems.length) {
+      const z0 = document.getElementById('live-zone')
+      if (z0) z0.remove()
+      claimTimerSet(false)
+      syncTurnLive()
+      renderSettle() // zone 摘除 = 内容高度骤减：两层占位/scrollTop 立即对账（防 clamp 跳变）
       return
     }
-    if (!dock) {
-      dock = document.createElement('div')
-      dock.id = 'queue-dock'
-      dock.className = 'queue-dock'
+    // 签名跳过：区内容无变化的重复调用（400ms 防抖刷新/逐条 SSE）不重建 DOM——重建会重播
+    // msg-in 入场动画（跳字/滚动路径上的闪烁根源）
+    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => q.content)])
+    let zone = document.getElementById('live-zone')
+    if (zone && zone.dataset.sig === sig) {
+      claimTimerSet(bubble.length > 0)
+      syncTurnLive()
+      return
     }
+    // 重建事务先移除旧区（2026-09-07 偶发重复渲染根修：漏移除则旧 zone 残留 DOM，新 zone
+    // 插到 spacer 前、getElementById 恒拿最旧第一个 → 其 sig 永不匹配 → 只增不减；回合运行中
+    // 走增量路径无整页重建洗地，queue-state/吸收翻转连发即堆出「排队消息 ×N」历史快照层）。
+    // 不变量：#live-zone 全文档至多一个，由本函数独占维护。
+    if (zone) zone.remove()
+    zone = document.createElement('div')
+    zone.id = 'live-zone'
+    zone.dataset.sig = sig
+    // 容器恒插在 .pin-stage 之前（两层占位块必须是 #messages 末元素）；display:contents 不产生盒，
+    // 子元素即 #messages 直接 flex 参与者，布局与散挂时完全一致（styles.css #live-zone）
+    messagesEl.insertBefore(zone, messagesEl.querySelector('.pin-stage'))
     // 2026-08-30 排队图片：本地乐观项带图 → 渲染缩略图并剥 [Image #N] 占位（占位仅供 CLI 注入
-    // 对应 pastedContents，原样显示即「排队图片没有渲染」根因）；remote（CLI 队列快照）无图数据仅文本
-    dock.innerHTML = items.map((q) => {
-      const imgs = Array.isArray(q.imgs) && q.imgs.length
-        ? `<div class="q-imgs">${q.imgs.map((im) => `<img class="q-img" src="${im.dataUrl || ''}" alt="">`).join('')}</div>`
-        : ''
-      const txt = imgs ? String(q.content).replace(/\s*\[Image #\d+\]/g, '') : q.content
-      return `<div class="q-item"><div class="q-body"><p>${renderUserText(txt)}</p>${imgs}</div><div class="q-tag">排队中</div></div>`
-    }).join('')
-    msgAppend(dock)
+    // 对应 pastedContents，原样显示即「排队图片没有渲染」根因）；remote（CLI 队列快照）无图数据仅文本。
+    // 乐观开启气泡与落盘气泡同构（2026-09-07）：带复制按钮（document 级委托天然可点），否则落盘
+    // 接管帧按钮凭空出现（无按钮→有按钮形态跳变）。
+    zone.innerHTML =
+      bubble.map((p) => {
+        const imgs = Array.isArray(p.imgs) && p.imgs.length ? p.imgs : []
+        const imgsHtml = imgs.length
+          ? '<div class="msg-imgs">' + imgs.map((im) => '<img class="msg-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
+          : ''
+        const bodyText = imgs.length ? String(p.text).replace(/\s*\[Image #\d+\]/g, '') : p.text
+        const bodyInner = renderUserText(bodyText)
+        // 纯图消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
+        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
+      }).join('') +
+      (bubble.length
+        ? '<details class="done-fold done-live msg-in" id="claim-fold" open><summary>' + procLabel('正在处理', '0s') + '</summary><div class="done-body"></div></details>'
+        : '') +
+      (dockItems.length
+        ? '<div class="queue-dock" id="queue-dock">' + dockItems.map((q) => {
+            const imgs = Array.isArray(q.imgs) && q.imgs.length
+              ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
+              : ''
+            const txt = imgs ? String(q.content).replace(/\s*\[Image #\d+\]/g, '') : q.content
+            return '<div class="q-item"><div class="q-body"><p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+          }).join('') + '</div>'
+        : '')
+    claimTimerSet(bubble.length > 0)
+    syncTurnLive() // 主张折叠在场 = 回合开启运行态（停止键）；权威接管/吸收后按实况校准
+    renderSettle()
+  }
+  // 渲染权威出口对账（2026-09-08 两层消息流收口）：渲染链每动 DOM 后在此强制 stageSync——
+  // 占位块重挂/高度校准/气泡重定位/两层跟随归位；占位未激活零开销。暂态区 #live-zone 高度
+  // 随乐观气泡/主张折叠/排队区增减、queue-state SSE 直调 renderTransient、发送瞬间主张上屏
+  // 等路径全部经此对账，无盲区。占位=机制态（内存状态机+DOM 投影），渲染权威是事实源。
+  function renderSettle() {
+    if (!stage.active) return
+    stageSync()
+  }
+  // 乐观主张计时起点移交（接管帧 refreshSession/renderSession）：取当前会话/事务未吸收的
+  // 开启气泡最早 claimTs——发送瞬间早于落盘 user ts（异步化暂存补投窗口），移交 live.txProcStart
+  // 供 bindLiveFoldTimer 续算，「正在处理 Xs」跨接管连续不回跳。
+  function claimStartTs() {
+    const cur = state.currentHash
+    let t0 = 0
+    for (const p of pendingUserMsgs) {
+      if (p.form !== 'bubble' || !p.claimTs) continue
+      if (p.hash !== cur && !(p.hash === '' && firstSendHash === cur)) continue
+      if (!t0 || p.claimTs < t0) t0 = p.claimTs
+    }
+    return t0
+  }
+  // 主张折叠计时：发送瞬间 T0 起跳字；权威折叠接管后由 bindLiveFoldTimer（数据起点）接棒，
+  // 本计时器随主张折叠移除/降级一并停止（claimTick 自检兜停）。
+  let claimTimer = null
+  function claimTick() {
+    const fold = document.getElementById('claim-fold')
+    if (!fold || !fold.isConnected) { claimTimerSet(false); return }
+    const claims = pendingUserMsgs.filter((p) => p.form === 'bubble' && p.claimTs && (p.hash === state.currentHash || (p.hash === '' && firstSendHash === state.currentHash)))
+    if (!claims.length) { claimTimerSet(false); return }
+    const t0 = Math.min(...claims.map((p) => p.claimTs))
+    const sum = fold.querySelector('summary')
+    if (sum) {
+      // 2026-09-07 僵死/断连对账（同 bindLiveFoldTimer tick）：乐观窗口 = 消息已发、引擎未应答
+      // ——正是「一直思考不说话」第一现场。beat 缺席/落后 ≥150s → 标「无响应」；网关 WS 断 →
+      // 标「连接中断」。beat 恢复即消失（每秒 tick 重算，无残留状态）。
+      // 同 tick 回合基线规则：beat 早于主张起点 t0 = 上回合残留 → 视同缺席（乐观窗口发送
+      // 瞬间恰是新回合开头，旧 beat 必残留，不 clamp 必误标——12:42 实测同根）。
+      const rawBeat = live.turnBeat.get(state.currentHash) || 0
+      const beatAt = rawBeat >= t0 ? rawBeat : 0
+      const staleSec = beatAt ? Math.round((Date.now() - beatAt) / 1000) : Math.round((Date.now() - t0) / 1000)
+      const flags = (staleSec >= 150 ? '<span class="d-stale">· 无响应 ' + fmtDur(staleSec) + '</span>' : '')
+        + (!connUp ? '<span class="d-stale">· 连接中断</span>' : '')
+      // 原地续时（2026-09-08 同 bindLiveFoldTimer tick 收口）：节点级更新不 innerHTML 重建。
+      // summary 恒「正在处理 + d-dur」；流式预览/红标挂 done-body（2026-09-09 定案：折叠顶
+      // 只留「正在处理/已处理」字样，与权威折叠同规则）。
+      const durEl = sum.querySelector('.d-dur')
+      if (durEl) durEl.textContent = ' ' + fmtDur(Math.round((Date.now() - t0) / 1000))
+      const cbody = fold.querySelector('.done-body')
+      if (cbody) {
+        let flEl = cbody.querySelector('.d-flags')
+        if (!flEl) { flEl = document.createElement('span'); flEl.className = 'd-flags'; cbody.appendChild(flEl) }
+        flEl.innerHTML = flags
+      }
+    }
+  }
+  function claimTimerSet(on) {
+    if (on && !claimTimer) { claimTimer = setInterval(claimTick, 1000); claimTick() }
+    else if (!on && claimTimer) { clearInterval(claimTimer); claimTimer = null }
   }
   // 本地状态系统行开关（2026-08-28 用户定案：连接/回合结束/审批回执/状态行等本地反馈
   // 一律不插入聊天流，保留接口以便后续更改；错误行 addError 不受影响）
@@ -4349,12 +4574,11 @@
   function addError(text) {
     appendMsg(`<div class="msg msg-system" style="color:#ef4444">${esc(text)}</div>`)
   }
-  // ---- 实时处理折叠：处理中展开流式展示思考/工具 + 「正在处理」实时计时，
-  //      正式回复文本发布时收起为「已处理 X」（计时定格），下面跟上回复正文 ----
-  // 2026-09-04 web 打断按钮：回合进行中（turnLive）发送按钮变圆形方孔停止键，点击经 /clients
-  // 通路发 {type:'interrupt', sessionId} → 网关精确路由 → CLI onCancel（与 Ctrl+C 同路径）。
-  // turnLive 由 procOpen/procClose 维护；切会话/整页重建后 syncTurnLive() 按渲染权威
-  // done-live 折叠在场与否校准（proc 变量跨重建悬挂，DOM 才是事实源）。
+  // ---- 回合运行态（2026-09-04 web 打断按钮）：turnLive = 发送按钮形态（发送/停止）。点击停止经
+  //      /clients 通路发 {type:'interrupt', sessionId} → 网关精确路由 → CLI onCancel（与 Ctrl+C 同路径）。
+  //      2026-09-07 两区重构：turnLive 不再由 procOpen/procClose 维护（链已退役）——由 syncTurnLive()
+  //      按 DOM 实况推导：权威 done-live[data-m] 折叠或暂态区乐观主张折叠在场 = 回合运行中；
+  //      每次渲染路径末尾（renderTransient / 整页重建）校准，DOM 才是事实源。
   let turnLive = false
   let btnMode = 'send'
   function setBtnMode(mode) {
@@ -4367,197 +4591,14 @@
     const has = !!messagesEl.querySelector('details.done-fold.done-live')
     if (has !== turnLive) { turnLive = has; syncGwSend() }
   }
-  let proc = null // 当前实时 .done-fold 元素
-  // 2026-08-26 任务定案（工具行只显示当前步）：工具调用行在该步未结束时总是显示「当前正在进行的步」，
-  // 连续工具调用时同一行替换（Read→Grep 直接变更），不累积「此前已运行命令」历史折叠；
-  // 步完成（收到结果/思考/提问出现）移除当前行，段结束（旁白/正式回复）时最后当前步折叠为文本行。
-  // procCurEl/procCurBlock=当前工具进行时元素与块。
-  let procCurEl = null
-  let procCurBlock = null
-  let procStart = 0 // 本次处理开始时间（ms）
-  let procTimer = null // 计时器 id
-  let liveChanges = new Map() // 当前回合文件变更聚合（tool_result 解析 → result 时渲染卡片）
   function procLabel(verb, dur) {
     const live = verb === '正在处理'
     return `<span class="d-chev">${CHEV}</span>${live ? '<span class="df-dot"></span>' : ''}${verb}${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
   }
-  function procTick() {
-    if (!proc || !proc.isConnected) { procStopTimer(); proc = null; return }
-    const sum = proc.querySelector('summary')
-    if (sum) sum.innerHTML = procLabel('正在处理', fmtDur(Math.round((Date.now() - procStart) / 1000)))
-  }
-  function procStartTimer() {
-    procStopTimer()
-    procTick() // 立即显示 0s，之后每秒跳字
-    procTimer = setInterval(procTick, 1000)
-  }
-  function procStopTimer() {
-    if (procTimer) { clearInterval(procTimer); procTimer = null }
-  }
-  function procOpen() {
-    if (!turnLive) { turnLive = true; syncGwSend() } // 2026-09-04 打断按钮：回合开启即停用键化
-    if (proc && proc.isConnected) return proc
-    // 2026-08-29 收养渲染权威折叠：整页重建后乐观折叠被 data-m「正在处理」折叠取代但 proc
-    // 变量悬挂指向失连旧元素——回合进行中发引导消息经此复用渲染权威的活跃折叠，不新建
-    // （防双「正在处理」+ 计时重开，用户 16:57 实测反馈）。收养不设 procStart/不启计时器：
-    // 该折叠计时由 bindLiveFoldTimer（数据起点）负责，proc 仅作幂等/收拢句柄。
-    const live = messagesEl.querySelector('details.done-fold.done-live')
-    if (live) { proc = live; return live }
-    // 注意：思考/工具折叠展开期间**不**置 pin.replied——思考过程不是回复，不构成回复语义。
-    // 处理折叠展开本身即「正文」：pinReserveApply 以 roundFoldOpen() 判定，展开的处理/思考
-    // 折叠撑满视口时直接解除钉顶（消息上滑让内容可滚动阅读，2026-08-20）。replied 只由
-    // streamText / syncPinAfterRender 在回复文本真正出现时置位，标识「正式回复已发布」。
-    procStart = Date.now()
-    proc = document.createElement('details')
-    proc.className = 'done-fold done-live msg-in'
-    proc.open = true
-    proc.innerHTML = `<summary>${procLabel('正在处理', '0s')}</summary><div class="done-body"></div>`
-    msgAppend(proc)
-    scrollBottom()
-    procStartTimer()
-    return proc
-  }
-  function procClose() {
-    procStopTimer()
-    if (turnLive) { turnLive = false; syncGwSend() } // 2026-09-04 打断按钮：回合收口即还原发送键
-    // 任务定案：段结束（旁白/正式回复）——最后当前工具步折叠为文本行（去运行态、保留为
-    // 已完成工具文本，与「已处理」内工具行形态一致），不累积「此前已运行命令」历史折叠
-    if (procCurEl && procCurEl.isConnected) {
-      const wrap = document.createElement('span')
-      wrap.innerHTML = toolLine(procCurBlock)
-      const line = wrap.firstElementChild
-      if (line) procCurEl.replaceWith(line)
-      else procCurEl.remove()
-      procCurEl = null
-      procCurBlock = null
-    }
-    // 回合结束：清掉工具折叠的运行态（扫光/脉冲点停止，对齐 DSH running → ok）；移除残留当前工具行
-    if (proc && proc.isConnected) {
-      proc.querySelectorAll('.tool-fold[data-state="running"]').forEach((el) => el.removeAttribute('data-state'))
-      proc.querySelectorAll('.tool-cur').forEach((el) => el.remove())
-    }
-    if (!proc || !proc.isConnected) { proc = null; return }
-    const dur = fmtDur(Math.round((Date.now() - procStart) / 1000))
-    const sum = proc.querySelector('summary')
-    if (sum) sum.innerHTML = procLabel('已处理', dur)
-    proc.open = false
-    proc = null
-    // 复位当前工具状态（下回合重新累积）
-    procCurEl = null
-    procCurBlock = null
-    // 思考折叠收起：占位在展开期可能已被 baseH≥target 撤掉，立即重算补回。不能依赖后续
-    // scrollBottom——用户上滑时 follow=false，scrollBottom 会提前 return 不重算，短回复期间
-    // 占位就持续缺失（上划即见占位消失）。
-    if (pin.active) pinReserveApply()
-  }
-  function procThink(text, start) {
-    setChar(1) // 思考过程 → 默认形象
-    finishCurTool() // 任务定案：思考出现 → 移除当前工具行（该步完成，无「正在运行」工具步）
-    const d = procOpen()
-    const body = d.querySelector('.done-body')
-    // start=true = 新一轮思考块开始：清掉折叠区内旧思考行，只保留当前块（对齐 CLI 实时只显示正在思考的块）
-    if (start) body.querySelectorAll('.think-row').forEach((el) => el.remove())
-    let th = body.lastElementChild
-    if (!th || !th.classList || !th.classList.contains('think-row')) {
-      th = document.createElement('details')
-      th.className = 'think-row'
-      th.dataset.state = 'running'
-      th.innerHTML = `<summary><span class="tr-leading" aria-hidden="true"><span class="tr-ico">${THINK_ICON}</span><span class="tr-chev">${THINK_CHEV}</span></span><span class="tr-title">思考</span></summary><div class="tr-body"></div>`
-      body.appendChild(th)
-    }
-    th.querySelector('.tr-body').appendChild(document.createTextNode(text))
-    scrollBottom()
-  }
-  function procTool(block) {
-    const d = procOpen()
-    const body = d.querySelector('.done-body')
-    // 任务定案：连续工具调用时同一行替换为新的「当前正在进行的步」（Read→Grep 直接变更），
-    // 不累积「此前已运行命令」历史折叠；无当前行（上一工具已随思考/结果移除）则新建
-    if (procCurEl && procCurEl.isConnected) {
-      procCurBlock = block
-      procCurEl.querySelector('.tool-fold-body').innerHTML = toolLine(block)
-      updateCurLabel()
-      scrollBottom()
-      return
-    }
-    const el = document.createElement('details')
-    el.className = 'tool-cur'
-    el.dataset.state = 'running'
-    el.open = true
-    el.innerHTML = `<summary><span class="tf-dot"></span><span class="tc-label"></span></summary><div class="tool-fold-body"></div>`
-    body.appendChild(el)
-    el.querySelector('.tool-fold-body').insertAdjacentHTML('beforeend', toolLine(block))
-    procCurEl = el
-    procCurBlock = block
-    updateCurLabel()
-    scrollBottom()
-  }
-  // P1：当前工具进行时摘要「正在运行：<工具>：<command/路径/查询>」，command 优先 + 超长省略
-  function updateCurLabel() {
-    if (!procCurEl || !procCurBlock) return
-    const t = toolMeta(procCurBlock)
-    const inp = procCurBlock.input && typeof procCurBlock.input === 'object' ? procCurBlock.input : null
-    const cmd = inp ? (inp.command || inp.file_path || inp.filePath || inp.query || inp.pattern || inp.path || '') : ''
-    const sum = procCurEl.querySelector('.tc-label')
-    const title = t.zh + (cmd ? '：' + String(cmd).slice(0, 64) : '')
-    if (sum) sum.textContent = '正在运行：' + title
-  }
-  // 任务定案：步完成（收到工具结果/思考/提问出现）→ 移除当前工具行（此时无「正在运行」的工具步，
-  // 不保留、不累积历史折叠；实时阶段只显示当前正在进行的步，刷新后历史加载仍全量显示）
-  function finishCurTool() {
-    if (procCurEl && procCurEl.isConnected) procCurEl.remove()
-    procCurEl = null
-    procCurBlock = null
-  }
-  function procResult(text) {
-    const d = procOpen()
-    const body = d.querySelector('.done-body')
-    const r = document.createElement('div')
-    r.className = 'done-result'
-    r.textContent = String(text || '')
-    body.appendChild(r)
-    scrollBottom()
-  }
-  function startReply() {
-    // 正式回复发布：先把处理折叠收起，再开启回复消息
-    procClose()
-    if (!cur || !cur.isConnected) {
-      const div = document.createElement('div')
-      div.className = 'msg assistant msg-in'
-      div.innerHTML = `<div class="body"><div class="blocks"></div><div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div></div>`
-      msgAppend(div)
-      scrollBottom()
-      cur = div
-    }
-  }
-  function addAssistant(text) {
-    streamText(text)
-  }
-  function streamText(text) {
-    startReply()
-    setChar(1) // 正式回复输出 → 默认形象
-    if (pin.active) pin.replied = true // 回复开始流式 → 撑满视口即平滑解除钉顶
-    const bl = cur.querySelector('.body .blocks')
-    let p = bl.querySelector('.p')
-    if (!p) {
-      p = document.createElement('div')
-      p.className = 'p'
-      bl.appendChild(p)
-    }
-    p.appendChild(document.createTextNode(text))
-    scrollBottom()
-  }
-  function streamThinking(text) {
-    // thinking_delta 追加：若上一个子元素不是思考块（即新思考块开始），先清旧思考块
-    const last = proc && proc.isConnected ? proc.querySelector('.done-body')?.lastElementChild : null
-    procThink(text, !(last && last.classList && last.classList.contains('think-row')))
-  }
-  function toolChip(block) {
-    const name = (block && block.name) || 'tool'
-    if (name === 'AskUserQuestion') { procAsk(block); return }
-    setChar(toolToChar(name)) // 工具调用 → 对应形象（读/搜=3、写/编=2、执行/插件/命令=4）
-    procTool(block)
-  }
+  // 2026-09-07 两区重构：实时流式渲染链（procThink/procTool/procResult/startReply/streamText/
+  // streamThinking/toolChip/addThinking 等）整体退役——网关从不给 web 投递 WS out 流，实时展示
+  // 只走 SSE 会话上报 + jsonl 渲染权威（整页/增量重建），「正在处理」乐观主张折叠由 renderTransient
+  // 从 pendingUserMsgs 统一渲染；历史定案注释（工具行只显当前步等）随链废弃，勿再引用。
   // ---- composer takeover（2026-08-22 修复）：DSH 提问/审批占输入栏（替换 #input-bar），而非渲染在 chat 内。
   //      takeover = 'ask' | 'approval' | null，记录当前占据输入栏的待答提问/待审批；
   //      解决（tool_result / 审批提交）后 #input-bar 回归（content swap，同输入栏卡片足迹）。 ----
@@ -4566,67 +4607,95 @@
   const takeoverEl = () => $('composer-takeover')
   // 2026-08-30 修复「提问卡相对位置大小奇怪」：takeover 卡片可远高于普通输入栏（多题卡 ~700px），
   // 而 #chat-scroll 的 padding-bottom 是按输入栏足迹设计的固定值（styles.css 142px）→ 卡片贴底
-  // 向上生长直接叠压消息。改为按 #input-wrap 实际高度动态同步聊天滚动区预留（卡高+22px 底距+12px 间隙），
-  // ResizeObserver 跟随整卡折叠/展开实时变化。
+  // 向上生长直接叠压消息。改为按 #input-wrap 实际高度动态同步聊天滚动区预留（卡高+22px 底距+12px 间隙）。
+  // 2026-09-09 根修：padding 只写「动画终值」一次（show=满高、clear=清零），与 320ms 高度过渡同时启动、
+  // 由 #chat-scroll 自带的 padding-bottom CSS 过渡承担平滑；动画期（wrapAnimating）ResizeObserver 的
+  // 中间高度一律跳过——旧版每帧覆写=CSS 过渡反复重定目标+长会话逐帧全聊天区 layout，掉帧根源。
   const chatScrollPadEl = $('chat-scroll')
-  function syncTakeoverPad() {
+  let lastPad = null
+  function syncTakeoverPad(forceH) {
+    if (wrapAnimating) return
+    let p = ''
     if (takeover) {
-      const h = inputWrap.getBoundingClientRect().height
-      if (h > 0) chatScrollPadEl.style.paddingBottom = Math.round(h + 34) + 'px'
-    } else {
-      chatScrollPadEl.style.paddingBottom = ''
+      const h = forceH != null ? forceH : inputWrap.getBoundingClientRect().height
+      if (h > 0) p = Math.round(h + 34) + 'px'
     }
+    if (p === lastPad) return
+    lastPad = p
+    chatScrollPadEl.style.paddingBottom = p
+    // 2026-09-10 根修：pad 写入与占位高度必须同帧一致——占位公式（clientHeight−padBot−
+    // lockFoot）以 pad 为参数，pad 变了占位不同帧重算 = scrollHeight 变化 = maxScroll 偏离
+    // 贴顶位，浏览器钳制视口=「折叠提问卡消息流随动」根因。pad 单一写者在此同帧对账，
+    // 不变量：scrollHeight 对 pad 写入不变（占位对冲 pad 增量）→ 视口零钳制零移动。
+    // styles.css 已删 pad 过渡（过渡期 computed pad 中间值会让 stageFollow 读到与占位
+    // 写入不同源的 padBot，同源破坏），此处 computed pad 恒=终值。
+    if (stage.active) stageSync()
   }
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTakeoverPad).observe(inputWrap)
+  // 2026-09-08 三轮重构（用户定案「审批 ui 应该是输入栏的子元素，改变输入栏的大小」）：#composer-takeover
+  //   迁入 #input-bar 内，出现/解决=输入栏本体高度变化（height px 起止过渡 + 动画期卡片 absolute
+  //   bottom:0 底边锚定：按钮行钉在原输入栏位置，出现=顶部向上展开、收回=向下收短）。
+  // 2026-09-09 根修（用户实测「看起来不是输入栏子状态/动画跳」逐帧取证后三处收口）：
+  //   ①表面连续——.bar-takeover 不再退场输入栏卡面（旧版边框/底色/阴影全透明 → 黄卡像浮在聊天区的
+  //     独立面板），只隐藏输入内容组、padding 让位 0，卡内容全出血贴卡面（styles.css）；
+  //   ②单一时间轴——卡片淡入/淡出机制（composer-fade/composer-fade-out/animFadeIn）整体删除：
+  //     显形与收合完全由 height 过渡+overflow 裁剪承担（旧版 220ms 淡入与 320ms 长高同跑=出现首帧
+  //     底部空白；收回 380ms 后输入行才淡入=0.3~0.4s 底部空窗）；输入行回归=收合完成后原位瞬换；
+  //   ③RO 守卫落地——wrapAnimating 真正被 syncTakeoverPad 读取（旧版只写不读，「动画期 RO 跳过」
+  //     未实现，动画期每帧覆写 padding=CSS 过渡重定目标+逐帧全聊天区 layout）。
+  //   连发竞态 wrapAnimToken 收敛不变（旧清理让位、新过渡捕获实时高度续走）。
+  const GROW_MS = 320
+  let wrapAnimToken = 0
+  let wrapAnimating = false
+  let takeoverPlainH = 0 // 进入 takeover 前的输入栏高度（收起动画目标）
   function showTakeover(html, kind) {
-    if (inputBarEl) inputBarEl.style.display = 'none'
+    const my = ++wrapAnimToken
+    const h0 = inputBarEl.getBoundingClientRect().height
+    if (!takeover) takeoverPlainH = h0
+    inputBarEl.classList.add('bar-takeover')
     const t = takeoverEl()
     if (t) { t.innerHTML = html; t.hidden = false }
     takeover = kind
-    syncTakeoverPad()
+    const h1 = inputBarEl.getBoundingClientRect().height
+    syncTakeoverPad(h1)
     scrollBottom()
+    if (Math.abs(h1 - h0) < 1.5) return
+    wrapAnimating = true
+    inputBarEl.style.height = h0 + 'px'
+    inputBarEl.classList.add('composer-growing')
+    void inputBarEl.offsetHeight
+    inputBarEl.style.height = h1 + 'px'
+    setTimeout(() => {
+      if (my !== wrapAnimToken) return
+      wrapAnimating = false
+      inputBarEl.classList.remove('composer-growing')
+      inputBarEl.style.height = ''
+    }, GROW_MS + 60)
   }
   function clearTakeover() {
-    if (inputBarEl) inputBarEl.style.display = ''
-    const t = takeoverEl()
-    if (t) { t.hidden = true; t.innerHTML = '' }
+    if (!takeover) return
+    const my = ++wrapAnimToken
     takeover = null
+    const t = takeoverEl()
+    const h0 = inputBarEl.getBoundingClientRect().height
+    const target = takeoverPlainH || h0
     syncTakeoverPad()
+    if (Math.abs(h0 - target) < 1.5) { finishClear(t); return }
+    wrapAnimating = true
+    inputBarEl.style.height = h0 + 'px'
+    inputBarEl.classList.add('composer-growing')
+    void inputBarEl.offsetHeight
+    inputBarEl.style.height = target + 'px'
+    setTimeout(() => {
+      if (my !== wrapAnimToken) return
+      wrapAnimating = false
+      finishClear(t)
+    }, GROW_MS + 60)
   }
-  // ---- 实时提问卡（AskUserQuestion）：DSH QuestionComposer 语义——提问占输入栏（composer takeover），
-  //      不进入 chat 流；tool_result 到来时输入栏回归、已答提问落到处理折叠只读展示 ----
-  let liveAskInput = null
-  function procAsk(block) {
-    setChar(1) // 提问 → 默认形象
-    finishCurTool() // 任务定案：提问出现 → 移除当前工具行（该步完成，无「正在运行」工具步）
-    liveAskInput = block.input
-    // 2026-08-26 修复：问输出路径已由审批中继渲染出「交互式逐题」卡（takeover==='approval'，
-    // renderApproval→renderQuestionApproval）时，不再用只读堆叠卡覆盖——否则用户看到的是全部问题
-    // 叠在一起且无法作答的等待卡。只读 questionCardHtml 仅作「CLI/网关未桥接审批」时的兜底展示。
-    if (takeover !== 'approval') showTakeover(questionCardHtml(block.input, null, { single: true }), 'ask')
-  }
-  function addToolResult(text) {
-    // 待答提问 → 输入栏回归，已答提问落到处理折叠只读展示（标记所选）；否则按普通结果行追加
-    if (takeover === 'ask' && liveAskInput) {
-      clearTakeover()
-      const d = procOpen()
-      const body = d.querySelector('.done-body')
-      const el = document.createElement('div')
-      el.className = 'ask-holder'
-      // 2026-08-26 任务 D 折叠：回答后的提问卡默认收起为「提问 · 已回答」一行（details），
-      // 点开展开问题详情与所选答案；不再全文展开显示（用户反馈「提问在折叠外」）
-      el.innerHTML = `<details class="ask-fold"><summary>${askLineHtml(true)}</summary><div class="ask-body">${questionCardHtml(liveAskInput, String(text || ''))}</div></details>`
-      body.appendChild(el)
-      liveAskInput = null
-      scrollBottom()
-      return
-    }
-    finishCurTool() // 任务定案：收到工具结果 → 移除当前工具行（该步完成，无「正在运行」工具步）
-    procResult(text)
-  }
-  function addThinking(text) {
-    // 完成的 assistant 思考块：替换流式增量（去重）并清掉旧思考块，只留当前回合最后一个
-    procThink(text, true)
+  function finishClear(t) {
+    inputBarEl.classList.remove('composer-growing', 'bar-takeover')
+    inputBarEl.style.height = ''
+    if (t) { t.hidden = true; t.innerHTML = '' }
   }
 
   // 2026-08-26 任务 A2：把 CLI 的 PermissionUpdate 建议转成前端可读标签/副标题
@@ -4882,54 +4951,6 @@
     }
   }
 
-  function handleLine(line) {
-    let m
-    try { m = JSON.parse(line) } catch { return }
-    const t = m.type
-    if (t === 'system') {
-      addSystem(m.subtype === 'init' ? '已连接 agent（session ' + (m.session_id || '') + '）' : (m.subtype || 'system'))
-    } else if (t === 'assistant') {
-      const content = (m.message && m.message.content) || []
-      for (const c of content) {
-        if (!c || typeof c !== 'object') continue
-        if (c.type === 'text') addAssistant(c.text)
-        else if (c.type === 'thinking') addThinking(c.thinking || c.text || '')
-        else if (c.type === 'tool_use') toolChip(c)
-      }
-    } else if (t === 'user') {
-      const content = (m.message && m.message.content) || []
-      const tr = content.filter((c) => c && c.type === 'tool_result')
-      for (const c of tr) {
-        const text = typeof c.content === 'string' ? c.content : ''
-        if (!text) continue
-        addToolResult(text)
-        const fc = parseFileChange(text)
-        if (fc) {
-          mergeChanges(liveChanges, fc) // 聚合文件变更 → 回合结束渲染汇总卡片
-          liveChangeInline() // 2026-08-26 任务 C：在处理折叠内内联展示变更行（不再悬浮输入栏上方）
-        }
-      }
-    } else if (t === 'stream_event') {
-      const se = m.event || {}
-      if (se.type === 'content_block_delta') {
-        const d = se.delta || {}
-        if (d.type === 'text_delta' && d.text) streamText(d.text)
-        else if (d.type === 'thinking_delta' && d.thinking) streamThinking(d.thinking)
-      } else if (se.type === 'message_start') {
-        const content = (((se.message || {}).content) || []).filter((c) => c && c.type === 'tool_use')
-        if (content.length) toolChip(content[0])
-      }
-    } else if (t === 'result') {
-      addSystem(m.is_error ? '（回合出错）' : '（回合结束）')
-      procClose()
-      clearTakeover() // 回合结束：清掉残留的提问/审批 takeover
-      cur = null
-      pinMaybeRelease() // 回合结束且回复填满视口 → 平滑解除钉顶；短回复保持占位
-      // 回合结束：输入栏上方胶囊 FLIP 平滑变形进消息流末尾，落地为默认折叠的汇总卡片
-      commitLiveChangeCard()
-    }
-  }
-
   // 2026-08-30 网关 pending approval 重放（DSH 同款「待答=会话持久状态」语义）：切会话/WS 重连时
   // 告知网关当前会话 → 网关回放该会话未决 approval（提问瞬间开着别的会话或页面没开 → 切回补弹交互卡，
   // 不再只剩只读兜底卡）。gws 未开/无当前会话时静默跳过（onopen 与 renderSession 双向兜底）。
@@ -4969,7 +4990,6 @@
     }
     gws.onclose = () => {
       setConn(false, '未连接')
-      liveChangeReset() // 断连清空变更聚合 + 移除实时内联行
       // 2026-08-18 修复：token 未验证成功即断开（URL token 过期——网关重启/换新 token、或门内输入错误）
       // 一律回 token 门重输，避免静默卡在空态、后续数据请求带着无效 token 全 401。
       if (!gateVerified) {
@@ -4989,12 +5009,11 @@
     gws.onmessage = (ev) => {
       let msg
       try { msg = JSON.parse(ev.data) } catch { return }
-      // 2026-08-23 web 独立会话：out/approval 带 session_id，仅当匹配当前会话才消费
-      // （多个独立会话并行运行，其它会话的流不干扰当前视图；CLI 会话不经 out 转发不受影响）
-      if (msg.type === 'out') {
-        if (msg.session_id && msg.session_id !== state.currentHash) return
-        handleLine(msg.line)
-      } else if (msg.type === 'approval') {
+      // 2026-08-23 web 独立会话：approval 带 session_id，仅当匹配当前会话才消费
+      // （多个独立会话并行运行，其它会话的流不干扰当前视图）。
+      // 2026-09-07：out 流分支删除——网关从不投递 out（实时流走 SSE 会话上报+jsonl，定案），
+      // 原 handleLine 直连 CLI 流式渲染链（streamText/procThink/实时变更卡）随之整体退役。
+      if (msg.type === 'approval') {
         if (msg.session_id && msg.session_id !== state.currentHash) return
         renderApproval(msg)
       } else if (msg.type === 'approval-confirmed') {
@@ -5018,7 +5037,6 @@
         if (approvalPending) { approvalPending = null }
         if (takeover === 'approval') clearTakeover()
       } else if (msg.type === 'status') addSystem('· ' + msg.state)
-      else if (msg.type === 'err') addError(msg.line)
     }
   }
 
@@ -5070,7 +5088,6 @@
 
   function showGate() {
     closeMentionPop()
-    liveChangeReset() // 回 token 门清空变更聚合 + 移除实时内联行
     gateAwait = true
     gateVerified = false
     document.body.classList.add('token-gate')
@@ -5175,21 +5192,12 @@
   }
   // 白板内 token 表单：回车提交（无发送按钮）—— 设备配对版已移除输入框，此绑定随 #g-token-input 删除
 
-  // ---------- 图片附件（2026-08-28）：仅识图模型开放（vision 门控），走 CLI 粘贴同链路 ----------
+  // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
+  // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
   // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl(预览)}。发送时文本拼
   // [Image #N] 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents
   // → handlePromptSubmit 占位匹配才发送（与本地粘贴图片完全同路径，不落盘、执行时才 resize）。
-  // vision 判定：凭据池 override（/key vision <model> on）为唯一权威，默认非识图。
   let pendingImages = []
-  let sessVision // undefined=空态/未知（回落全局 MODELS.vision）；boolean=当前会话 /gateway/session 的 vision
-  function visionOn() {
-    if (state.currentHash && sessVision !== undefined) return sessVision
-    return !!(MODELS && MODELS.vision)
-  }
-  function renderImgBtn() {
-    // 2026-08-28 v137 图片入口改 + 浮窗 tab（独立按钮移除）：vision 判定落地/变化时重渲浮窗刷新 tab 显隐
-    if (cmd && cmd.open) renderCmdPop()
-  }
   function clearPendingImages() {
     pendingImages = []
     renderImgPills()
@@ -5290,15 +5298,14 @@
       // navigate 之前回填，创建失败回滚空态（还原输入文本与图片胶囊）。
       flipInput(false)
       addUser(text, imgs)
-      procOpen()
       inputEl.textContent = ''
       syncGwSend()
       const d = await newWebSession(tgt || undefined)
       if (!d || !d.hash) {
         firstSendHash = '' // 事务终止：创建失败，乐观 DOM 随下方空态回滚一并清空
-        procStopTimer()
-        proc = null
+        pendingUserMsgs = pendingUserMsgs.filter((p) => p.hash) // 丢弃无归属（hash=''）的乐观项
         messagesEl.innerHTML = ''
+        renderTransient() // 暂态区对账：空主张 → 摘区/停主张计时/turnLive 复位
         flipInput(true) // 回滚空态（FLIP 滑回 stage，docked/in-session 一并移除）
         inputEl.textContent = text
         syncGwSend()
@@ -5308,10 +5315,10 @@
       }
       clearPendingImages()
       // newWebSession 已回填 firstSendHash（navigate 之前）并 navigate 进会话（renderSession
-      // 设置 currentHash + 拉历史）：首条消息事务生效——乐观气泡/proc 折叠是权威 DOM，等真实
-      // 数据落盘接管；期间 queue-dock 不渲染、空 fetch 不洗盘（守卫见 renderSession/refreshSession）。
+      // 设置 currentHash + 拉历史）：首条消息事务生效——乐观开启气泡/主张折叠是权威 DOM，等真实
+      // 数据落盘接管；期间队列快照不渲、空 fetch 不洗盘（守卫见 renderSession/refreshSession）。
       gws.send(JSON.stringify({ type: 'send', text, sessionId: d.hash, ...imgPayload }))
-      if (state.currentHash) procOpen()
+      // 主张折叠已由 addUser → renderTransient 上屏（事务期乐观 DOM 是权威），此处无需再挂
       return true
     }
     if (!inputWrap.classList.contains('docked')) {
@@ -5324,11 +5331,9 @@
     // 2026-08-17 网关独立化：带当前会话 hash，网关按 sessionId 精确路由给对应 CLI 进程
     // （未在具体会话时 currentHash 为 null → 字段省略，网关广播兜底）
     gws.send(JSON.stringify({ type: 'send', text, sessionId: state.currentHash || undefined, ...imgPayload }))
-    // 2026-08-24 已处理立即出现：乐观打开「正在处理」折叠，不等 SSE 回程（模型开始思考前即见反馈）。
-    // 2026-08-29 procOpen 幂等：回合进行中再发（引导/连发）复用既有折叠继续计时（不重置），
-    // 回合间隙发送新建折叠（旧「已处理」定格保留，仿 Codex：已处理 → 新消息 → 正在处理）。
-    // 仅真实会话内打开（currentHash 非空）；首页空态广播发送不开折叠，避免空区飘折叠。
-    if (state.currentHash) procOpen()
+    // 2026-09-07 两区重构：乐观「正在处理」主张折叠由 renderTransient 从 pendingUserMsgs
+    // 统一渲染（回合间隙发送 = 开启主张气泡+主张折叠；回合运行中 = 排队成员，不开折叠）——
+    // 原 procOpen 直挂 DOM 链退役（幻影折叠根源：proc 变量跨整页重建悬挂，收养/幂等皆失灵）。
     inputEl.textContent = ''
     clearPendingImages()
     syncGwSend()

@@ -24,6 +24,7 @@ import {
   createAssistantAPIErrorMessage,
   NO_RESPONSE_REQUESTED,
 } from 'src/utils/messages.js'
+import { isModelAlias } from 'src/utils/model/aliases.js'
 import {
   getDefaultMainLoopModelSetting,
   isNonCustomOpusModel,
@@ -166,6 +167,14 @@ export const CCR_AUTH_ERROR_MESSAGE =
 export const REPEATED_529_ERROR_MESSAGE = 'Repeated 529 Overloaded errors'
 export const CUSTOM_OFF_SWITCH_MESSAGE =
   'Opus is experiencing high load, please use /model to switch to Sonnet'
+// 429 统一限流降级提示（2026-09-10 用户定案）：降级由备用模型接手（getRateLimitErrorMessage
+// 返回 null）时不再发 NO_RESPONSE_REQUESTED 静默占位，改为基于当前使用模型的可见提示——
+// CLI 端 AssistantTextMessage 居中灰字渲染，web 端经 filterConversationForDisplay 转
+// role:'system' 居中灰提示；消息仍记入会话历史供 Claude 看到。固定前缀供两端识别。
+export const RATE_LIMIT_FALLBACK_NOTICE_PREFIX = '模型用量已达上限 · 已切换备用模型'
+export function rateLimitFallbackNotice(model: string): string {
+  return `${RATE_LIMIT_FALLBACK_NOTICE_PREFIX}（${model}）`
+}
 export const API_TIMEOUT_ERROR_MESSAGE = 'Request timed out'
 export function getPdfTooLargeErrorMessage(): string {
   const limits = `max ${API_PDF_MAX_PAGES} pages, ${formatFileSize(PDF_TARGET_RAW_SIZE)}`
@@ -524,12 +533,12 @@ export function getAssistantMessageFromError(
         })
       }
 
-      // If getRateLimitErrorMessage returned null, it means the fallback mechanism
-      // will handle this silently (e.g., Opus -> Sonnet fallback for eligible users).
-      // Return NO_RESPONSE_REQUESTED so no error is shown to the user, but the
-      // message is still recorded in conversation history for Claude to see.
+      // If getRateLimitErrorMessage returned null, the fallback mechanism handles
+      // the switch (e.g., Opus -> Sonnet fallback for eligible users). Surface a
+      // model-based notice instead of a silent placeholder (2026-09-10 用户定案：
+      // 居中灰色字体可见), still recorded in conversation history for Claude to see.
       return createAssistantAPIErrorMessage({
-        content: NO_RESPONSE_REQUESTED,
+        content: rateLimitFallbackNotice(model),
         error: 'rate_limit',
       })
     }
@@ -1214,12 +1223,20 @@ export function getErrorMessageIfRefusal(
 
   logEvent('tengu_refusal_api_response', {})
 
+  // 'violate our Usage Policy' must stay verbatim in every variant — it is the
+  // marker isUsagePolicyRefusalMessage matches on (reactive compact strip-and-
+  // retry recovery). The Anthropic AUP link and the /model fallback suggestion
+  // only make sense when the refusal comes from a Claude model; a non-Claude
+  // model string (e.g. a custom provider model) enforces its own upstream
+  // policy and has no Claude fallback to switch to.
+  const isClaudeModel = model.includes('claude') || isModelAlias(model)
+  const aupLink = isClaudeModel ? ' (https://www.anthropic.com/legal/aup)' : ''
   const baseMessage = getIsNonInteractiveSession()
-    ? `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Try rephrasing the request or attempting a different approach.`
-    : `${API_ERROR_MESSAGE_PREFIX}: Claude Code is unable to respond to this request, which appears to violate our Usage Policy (https://www.anthropic.com/legal/aup). Please double press esc to edit your last message or start a new session for Claude Code to assist with a different task.`
+    ? `${API_ERROR_MESSAGE_PREFIX}: Floria is unable to respond to this request, which appears to violate our Usage Policy${aupLink}. Try rephrasing the request or attempting a different approach.`
+    : `${API_ERROR_MESSAGE_PREFIX}: Floria is unable to respond to this request, which appears to violate our Usage Policy${aupLink}. Please double press esc to edit your last message or start a new session for Floria to assist with a different task.`
 
   const modelSuggestion =
-    model !== 'claude-sonnet-4-20250514'
+    isClaudeModel && model !== 'claude-sonnet-4-20250514'
       ? ' If you are seeing this refusal repeatedly, try running /model claude-sonnet-4-20250514 to switch models.'
       : ''
 

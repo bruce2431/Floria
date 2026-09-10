@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { useAppState } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js'
+import { isRenderArchivePlaceholder } from '../utils/renderCap.js'
 import {
   cleanMessagesForLogging,
   isChainParticipant,
@@ -34,7 +35,19 @@ export function useLogMessages(messages: Message[], ignore: boolean = false) {
   useEffect(() => {
     if (ignore) return
 
-    const currentFirstUuid = messages[0]?.uuid as UUID | undefined
+    // 2026-09-09 渲染投影剥离（占位断链根治）：归档占位（capRenderedMessages 产物）
+    // 是渲染投影专属标记，不属于转录权威。cap 砍头瞬间它在 state 头部替换旧头部
+    // （first-uuid 变化），本 hook 会误判为 compaction 走全量重录；占位 uuid 每次砍头
+    // 都新建（随机），不在 messageSet → 被当新消息落盘，且该路径 startingParentUuid
+    // = undefined → parentUuid=null 成链根，主链被切成碎段（resume chain walk 停在
+    // 占位 → 历史全丢，db31825f 实证 12 条占位 13 段链）。落盘/增量判定一律基于
+    // 剥投影后的数组；渲染仍消费完整投影（占位照常显示），两者在边界处分离。
+    // 2026-09-10 全量 filter 退役：占位「至多一条、恒在下标 0」已由 capRenderedMessages
+    // 归一化在唯一写入口强制（全量替换路径的中部残留同样被收拢剥除），此处 O(1) 头部
+    // 剥离即完备，不再每 effect O(n) 扫描+新建数组。
+    const authoritative = isRenderArchivePlaceholder(messages[0]) ? messages.slice(1) : messages
+
+    const currentFirstUuid = authoritative[0]?.uuid as UUID | undefined
     const prevLength = lastRecordedLengthRef.current
 
     // First-render: firstMessageUuidRef is undefined. Compaction: first uuid changes.
@@ -44,7 +57,7 @@ export function useLogMessages(messages: Message[], ignore: boolean = false) {
       currentFirstUuid !== undefined &&
       !wasFirstRender &&
       currentFirstUuid === firstMessageUuidRef.current &&
-      prevLength <= messages.length
+      prevLength <= authoritative.length
     // Same-head shrink: tombstone filter, rewind, snip, partial-compact.
     // Distinguished from compaction (first uuid changes) because the tail
     // is either an existing on-disk message or a fresh message that this
@@ -54,14 +67,14 @@ export function useLogMessages(messages: Message[], ignore: boolean = false) {
       currentFirstUuid !== undefined &&
       !wasFirstRender &&
       currentFirstUuid === firstMessageUuidRef.current &&
-      prevLength > messages.length
+      prevLength > authoritative.length
 
     const startIndex = isIncremental ? prevLength : 0
-    if (startIndex === messages.length) return
+    if (startIndex === authoritative.length) return
 
     // Full array on first call + after compaction: recordTranscript's own
     // O(n) dedup loop handles messagesToKeep interleaving correctly there.
-    const slice = startIndex === 0 ? messages : messages.slice(startIndex)
+    const slice = startIndex === 0 ? authoritative : authoritative.slice(startIndex)
     const parentHint = isIncremental ? lastParentUuidRef.current : undefined
 
     // Fire and forget - we don't want to block the UI.
@@ -75,7 +88,7 @@ export function useLogMessages(messages: Message[], ignore: boolean = false) {
           }
         : {},
       parentHint,
-      messages,
+      authoritative,
     ).then(lastRecordedUuid => {
       // For compaction/full array case (!isIncremental): use the async return
       // value. After compaction, messagesToKeep in the array are skipped
@@ -107,13 +120,13 @@ export function useLogMessages(messages: Message[], ignore: boolean = false) {
       // pointing at a message that never reached disk. Pass full messages as
       // replId context — REPL tool_use and its tool_result land in separate
       // render cycles, so the slice alone can't pair them.
-      const last = cleanMessagesForLogging(slice, messages).findLast(
+      const last = cleanMessagesForLogging(slice, authoritative).findLast(
         isChainParticipant,
       )
       if (last) lastParentUuidRef.current = last.uuid as UUID
     }
 
-    lastRecordedLengthRef.current = messages.length
+    lastRecordedLengthRef.current = authoritative.length
     firstMessageUuidRef.current = currentFirstUuid
   }, [messages, ignore, teamContext?.teamName, teamContext?.selfAgentName])
 }

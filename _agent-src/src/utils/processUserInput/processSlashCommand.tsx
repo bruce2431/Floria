@@ -311,13 +311,12 @@ export async function processSlashCommand(inputString: string, precedingInputBlo
   if (!parsed) {
     logEvent('tengu_input_slash_missing', {});
     const errorMessage = 'Commands are in the form `/command [args]`';
+    // 本地格式错误 = 系统警告，非用户发言（2026-09-08 用户实测：裸 user 消息落盘后被
+    // display 投影当真实用户气泡渲染——CLI 报错冒充用户消息）。对齐 args 警告形态：
+    // UI-only（API 前过滤、web 投影 system 子类型隐藏），CLI REPL 仍以警告行反馈。
+    // caveat 随被保护的 user 消息一并移除。
     return {
-      messages: [createSyntheticUserCaveatMessage(), ...attachmentMessages, createUserMessage({
-        content: prepareUserContent({
-          inputString: errorMessage,
-          precedingInputBlocks
-        })
-      })],
+      messages: [...attachmentMessages, createSystemMessage(errorMessage, 'warning')],
       shouldQuery: false,
       resultText: errorMessage
     };
@@ -345,13 +344,12 @@ export async function processSlashCommand(inputString: string, precedingInputBlo
         input: commandName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
       const unknownMessage = `Unknown skill: ${commandName}`;
+      // 本地报错 = 系统警告，非用户发言（2026-09-08 用户实测：裸 user 消息 jsonl 落盘
+      //（无 isMeta/可见性标记）→ delta 投影按真实用户气泡推给 web——CLI 报错冒充用户
+      // 发言/乐观气泡）。与下方 args 警告同形态：UI-only（API 前过滤、web 投影隐藏），
+      // CLI REPL 仍以黄点警告行反馈。caveat 随被保护的 user 消息一并移除。
       return {
-        messages: [createSyntheticUserCaveatMessage(), ...attachmentMessages, createUserMessage({
-          content: prepareUserContent({
-            inputString: unknownMessage,
-            precedingInputBlocks
-          })
-        }),
+        messages: [...attachmentMessages, createSystemMessage(unknownMessage, 'warning'),
         // gh-32591: preserve args so the user can copy/resubmit without
         // retyping. System warning is UI-only (filtered before API).
         ...(parsedArgs ? [createSystemMessage(`Args from unknown skill: ${parsedArgs}`, 'warning')] : [])],

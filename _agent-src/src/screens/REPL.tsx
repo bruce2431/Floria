@@ -134,7 +134,7 @@ import { hasConsoleBillingAccess } from '../utils/billing.js';
 import { logEvent, type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import { textForResubmit, handleMessageFromStream, type StreamingToolUse, type StreamingThinking, isCompactBoundaryMessage, getMessagesAfterCompactBoundary, getContentText, createUserMessage, createAssistantMessage, createTurnDurationMessage, createAgentsKilledMessage, createApiMetricsMessage, createSystemMessage, createCommandInputMessage, formatCommandInputTags } from '../utils/messages.js';
-import { exportConversationToServer, sendSessionActivity } from '../utils/conversationDisplay.js';
+import { buildDisplayDelta, exportConversationToServer, sendSessionActivity } from '../utils/conversationDisplay.js';
 import { generateSessionTitle } from '../utils/sessionTitle.js';
 import { BASH_INPUT_TAG, COMMAND_MESSAGE_TAG, COMMAND_NAME_TAG, LOCAL_COMMAND_STDOUT_TAG } from '../constants/xml.js';
 import { escapeXml } from '../utils/xml.js';
@@ -292,6 +292,7 @@ import { useMessageActions, MessageActionsKeybindings, MessageActionsBar, type M
 import { setClipboard } from '../ink/termio/osc.js';
 import type { ScrollBoxHandle } from '../ink/components/ScrollBox.js';
 import { createAttachmentMessage, getQueuedCommandAttachments } from '../utils/attachments.js';
+import { capRenderedMessages, logicalRenderedLength } from '../utils/renderCap.js';
 
 // Stable empty array for hooks that accept MCPServerConnection[] — avoids
 // creating a new [] literal on every render in remote mode, which would
@@ -310,35 +311,8 @@ const HISTORY_STUB = {
 const RECENT_SCROLL_REPIN_WINDOW_MS = 3000;
 
 // ---- P1 渲染历史上限（2026-08-31，20260828145952-内存增长根因与代码层修改建议.md）----
-// UI 渲染投影（React messages state）只保留尾部窗口，更早的消息替换为单条归档占位。
-// 磁盘 jsonl 不动（会话持久化权威在盘）；数据层（query 循环 / filterConversationForDisplay
-// 的完整尾部结构语义）不经此路径；尾部窗口恒完整。计数从占位文案自身解析，天然幂等，
-// /clear、resume 换会话后自动从零重计。
-const MAX_RENDER_MESSAGES = 200;
-const ARCHIVE_PLACEHOLDER_PREFIX = '… 早期 ';
-function isRenderArchivePlaceholder(msg: MessageType | undefined): msg is MessageType & { content: string } {
-  return msg?.type === 'system' && (msg as { subtype?: string }).subtype === 'informational'
-    && typeof (msg as { content?: unknown }).content === 'string'
-    && (msg as { content: string }).content.startsWith(ARCHIVE_PLACEHOLDER_PREFIX);
-}
-/** 占位已归档条数（首条非占位 = 0）。cap 后物理长度不再随追加增长，
- *  一切「数组长度 = 逻辑进度」语义（baseline/pending）必须走 logicalRenderedLength。 */
-function renderArchivedCount(list: MessageType[]): number {
-  const head = list[0];
-  if (!isRenderArchivePlaceholder(head)) return 0;
-  const n = parseInt(head!.content.slice(ARCHIVE_PLACEHOLDER_PREFIX.length), 10);
-  return Number.isFinite(n) ? n : 0;
-}
-function logicalRenderedLength(list: MessageType[]): number {
-  return list.length + renderArchivedCount(list);
-}
-function capRenderedMessages(list: MessageType[]): MessageType[] {
-  const excess = list.length - MAX_RENDER_MESSAGES;
-  if (excess <= 0) return list;
-  const archived = excess + renderArchivedCount(list);
-  const placeholder = createSystemMessage(`${ARCHIVE_PLACEHOLDER_PREFIX}${archived} 条消息已归档 — 完整历史在会话 jsonl（/transcript 可查）`, 'info');
-  return [placeholder, ...list.slice(excess)];
-}
+// cap 投影族 2026-09-09 迁至 utils/renderCap.ts（useLogMessages 落盘边界与读链桥接
+// 须识别同一占位标记；本处仅消费 cap/逻辑长度两个入口）。
 
 // Use LRU cache to prevent unbounded memory growth
 // 100 files should be sufficient for most coding sessions while preventing
@@ -1218,21 +1192,31 @@ export function REPL({
   // 注意不动上面的 updateSessionActivity 写盘逻辑（保持 BG_SESSIONS 门控原样）。
   const activitySessionId = getSessionId()
   useEffect(() => {
-    void sendSessionActivity(activitySessionId, {
-      status: sessionStatus,
-      pid: process.pid,
-      cwd: getOriginalCwd(),
-    })
-    // 60s 心跳：状态长期不变（长回合 busy / 挂机 idle）也要续期，防网关 ACTIVITY_TTL_MS
-    // （10 分钟）清扫后状态点消失（2026-08-29 状态点偶发观测不到修复）。状态变化即重建定时器。
-    const heartbeat = setInterval(() => {
+    const report = (): void => {
       void sendSessionActivity(activitySessionId, {
         status: sessionStatus,
         pid: process.pid,
         cwd: getOriginalCwd(),
       })
-    }, 60_000)
-    return () => clearInterval(heartbeat)
+    }
+    report()
+    // 2026-09-07 网关重启真空窗根治：WS（重）连 open 即重报当前状态——sessionActivity 是网关
+    // 内存镜像，重启即空，等 60s 心跳的真空窗里 web 会把活回合误收口成「已处理」（state=null
+    // 被 closeSeg 误判「进程不在线」）。闭包随本 effect 重建恒持最新 status；动态 import 与
+    // 本文件 gatewayClient 既有引用模式（notifyTurnBeat）一致。
+    let disposed = false
+    void import('../utils/gatewayClient.js').then((m) => {
+      if (disposed) return
+      m.registerActivityResync(report)
+    })
+    // 60s 心跳：状态长期不变（长回合 busy / 挂机 idle）也要续期，防网关 ACTIVITY_TTL_MS
+    // （10 分钟）清扫后状态点消失（2026-08-29 状态点偶发观测不到修复）。状态变化即重建定时器。
+    const heartbeat = setInterval(report, 60_000)
+    return () => {
+      disposed = true
+      clearInterval(heartbeat)
+      void import('../utils/gatewayClient.js').then((m) => m.registerActivityResync(null))
+    }
   }, [sessionStatus, activitySessionId])
 
   // 3P default: off — OSC 21337 is ant-only while the spec stabilizes.
@@ -1526,6 +1510,9 @@ export function REPL({
     // Updating lastTokenTime here ensures the denominator includes both
     // streaming time AND subagent execution time, preventing inflation.
     if (responseLengthRef.current > prev) {
+      // 2026-09-07 web 僵死感知：内容真实增长=引擎活性最强信号（thinking/text/subagent delta
+      // 全汇聚于此），gatewayClient 节流上报 turn-beat → web 运行态计时对账「无响应」。
+      void import('../utils/gatewayClient.js').then(m => m.notifyTurnBeat()).catch(() => {});
       const entries = apiMetricsRef.current;
       if (entries.length > 0) {
         const lastEntry = entries.at(-1)!;
@@ -1539,12 +1526,36 @@ export function REPL({
   // throttle batches rapid updates). Cleared on message arrival (messages.ts)
   // so displayedMessages switches from deferredMessages to messages atomically.
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  // 2026-09-08 流式字符通道（web 状态行流式预览）：onUpdateLength 单路累积引擎流式 delta
+  // （thinking/text 全汇聚于此，signature_delta 不来），100ms 合帧发全文快照；块边界/消息落盘/
+  // 打断清零。与 React streamingText state 解耦（state 语义原样不动）。清除走 notifyStreamText('')
+  // ——web 端暂态必须让位于权威 delta 接管，故立即发不合帧。
+  const streamTextRef = useRef('');
+  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamClear = useCallback(() => {
+    if (streamTimerRef.current) { clearTimeout(streamTimerRef.current); streamTimerRef.current = null; }
+    if (!streamTextRef.current) return;
+    streamTextRef.current = '';
+    void import('../utils/gatewayClient.js').then(m => m.notifyStreamText('')).catch(() => {});
+  }, []);
+  const streamSchedule = useCallback(() => {
+    if (streamTimerRef.current) return;
+    streamTimerRef.current = setTimeout(() => {
+      streamTimerRef.current = null;
+      void import('../utils/gatewayClient.js').then(m => m.notifyStreamText(streamTextRef.current)).catch(() => {});
+    }, 100);
+  }, []);
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
   const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
   const onStreamingText = useCallback((f: (current: string | null) => string | null) => {
+    // 2026-09-08 流式字符通道：块边界探测——messages.ts 调用本回调仅两类，传 () => null 的
+    // （content_block_start 新块开始含 tool_use / 消息落盘）与 text_delta 累积闭包（仅此一处）。
+    // 探测 f(null)：null 型恒返回 null（纯函数无副作用，StrictMode 重放安全），累积型返回
+    // delta 串（非 null 即忽略——delta 由 onUpdateLength 单路累积，避免双计）。
+    if (f(null) === null) streamClear();
     if (!showStreamingText) return;
     setStreamingText(f);
-  }, [showStreamingText]);
+  }, [showStreamingText, streamClear]);
 
   // Hide the in-progress source line so text streams line-by-line, not
   // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
@@ -1567,8 +1578,32 @@ export function REPL({
   // sessionId = getSessionId()（= 转录 jsonl 文件名），网关按此 uuid 存/查，floria /api/session 才能命中。
   const exportSessionId = getSessionId()
   useEffect(() => {
+    // 2026-09-08 投影同构根修（钉顶/蒸发链 v260-v262 三版现象共同根因）：prompt 屏投影统一
+    // 'prompt-tail-think'——与网关 /gateway/session（readSession）同 mode 同构，delta 的 base
+    // （sent 坐标）与 web localMessages（fetch 全量序列）恒对齐。原 'prompt' 与 tail-think 的
+    // 「尾巴 thinking」条数差（filterConversationForDisplay 对纯 thinking 消息 blocks 滤空即整条
+    // 蒸发）使回合处理中每次 fetch 回程比 sent 多一条 → 下一条 delta slice(0,base) 把 web 序列
+    // 尾部真实消息截掉（段内工具行蒸发 =「消息折进折叠体+下方空」）+ 索引漂移致 lastU 假阳性
+    // 重钉旧回合气泡（v260「跳顶再下滑」/v261「钉顶总是消失」/v262「并没有修复」全链吻合）。
+    // delta 与 POST 快照同键（下方 exportConversationToServer 同 mode），cache.sent 单基线双出口
+    // 演进；tail-think 的尾巴 thinking 蒸发（end_turn 落盘瞬间）是两侧同 mode 的确定性函数，
+    // 经 delta 尾部替换同步收敛，不再产生错位。
+    const mode = screen === 'transcript' ? 'transcript' : 'prompt-tail-think'
+    // 2026-09-08 事件流统一 P1（方案 20260908135557）：delta 即发（无防抖）——本 effect 触发粒度
+    // = block 级（流式字符不入 messages），SSE 载荷可控（§3.1 定案不合帧）；transcript 屏投影
+    // 不进事件流。cache 未建立（CLI 重启首轮）时返回 null，由下方 POST 全量建基线后下轮起生效；
+    // 构建即视为已发出（sent/seq 就地推进），WS 丢失由 web 端 seq gap → 全量对账恢复。
+    if (mode !== 'transcript') {
+      const d = buildDisplayDelta(messages, exportSessionId, mode)
+      if (d) {
+        void import('../utils/gatewayClient.js')
+          .then((m) => m.notifySessionDelta(d.seq, d.base, d.messages))
+          .catch(() => {})
+      }
+    }
+    // display POST 快照链保留（P1 全量对账基线，P2 另批退役）：600ms 防抖。
     const id = setTimeout(() => {
-      void exportConversationToServer(messages, exportSessionId, screen === 'transcript' ? 'transcript' : 'prompt')
+      void exportConversationToServer(messages, exportSessionId, mode)
     }, 600)
     return () => clearTimeout(id)
   }, [messages, exportSessionId, screen])
@@ -2218,6 +2253,7 @@ export function REPL({
     // ② 消费打断来源标记（web 按钮置位）：命中则记时刻，auto-restore 据此把文本回填导向
     //    web 输入栏（restored 事件）而非 CLI 输入框。
     if (consumeWebInterrupt()) webInterruptAtRef.current = Date.now();
+    streamClear(); // 2026-09-08 流式字符通道：打断后无落盘清除信号（jsonl 零写入），暂态必须显式收口
     void import('../utils/gatewayClient.js').then(m => m.notifyTurnInterrupted()).catch(() => {});
 
     // Pause proactive mode so the user gets control back.
@@ -2770,6 +2806,10 @@ export function REPL({
       // spinner animation) and apiMetricsRef (endResponseLength/lastTokenTime
       // for OTPS). No separate metrics update needed here.
       setResponseLength(length => length + newContent.length);
+      // 2026-09-08 流式字符通道：唯一无重放的 delta 汇聚点（thinking/text 都来，且不在 React
+      // 渲染路径），累积 + 100ms 合帧全文快照（web 状态行流式预览，块边界/落盘/打断清零）。
+      streamTextRef.current += newContent;
+      streamSchedule();
     }, setStreamMode, setStreamingToolUses, tombstonedMessage => {
       setMessages(oldMessages => oldMessages.filter(m => m !== tombstonedMessage));
       void removeTranscriptMessage(tombstonedMessage.uuid);
@@ -2784,7 +2824,7 @@ export function REPL({
         endResponseLength: baseline
       });
     }, onStreamingText);
-  }, [setMessages, setResponseLength, setStreamMode, setStreamingToolUses, setStreamingThinking, onStreamingText]);
+  }, [setMessages, setResponseLength, setStreamMode, setStreamingToolUses, setStreamingThinking, onStreamingText, streamSchedule]);
   const onQueryImpl = useCallback(async (messagesIncludingNewMessages: MessageType[], newMessages: MessageType[], abortController: AbortController, shouldQuery: boolean, additionalAllowedTools: string[], mainLoopModelParam: string, effort?: EffortValue) => {
     // Prepare IDE integration for new prompt. Read mcpClients fresh from
     // store — useManageMCPConnections may have populated it since the

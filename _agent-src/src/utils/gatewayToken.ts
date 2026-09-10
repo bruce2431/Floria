@@ -92,6 +92,59 @@ export function clearGatewayTokenFromDisk(): void {
   diskLoadTime = 0
 }
 
+// ---------- 2026-09-07 网关端口落盘发现（wt 直并配套） ----------
+// spawn 链改 wt.exe 直并后，并入「已存在 WT 窗口」的新标签继承的是旧 WT 进程的环境变量，
+// FLOIRA_GATEWAY 传不到 CLI 子进程 → 网关端口发现补磁盘通道：网关启动写 .claude/gateway-port，
+// CLI 探测在 env 缺失时读盘（与 gateway-token 同「读写路径分离 + TTL 缓存」模式）。
+// 网关换端口（占用顺延）后新起的 CLI 仍能找到网关。
+const portFilePath = () => join(getPortableRoot(), '.claude', 'gateway-port')
+let diskPortCache = 0
+let diskPortLoadedAt = 0
+const DISK_PORT_TTL_MS = 3000
+
+/** 网关进程启动时把端口写盘，供 env 缺失的 CLI 子进程发现（wt 并入旧窗口场景 env 不达）。 */
+export function saveGatewayPortToDisk(port: number): void {
+  try {
+    const p = portFilePath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, String(port), { encoding: 'utf8' })
+    diskPortCache = port
+    diskPortLoadedAt = Date.now()
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 读盘网关端口（env 缺失时的发现通道）。未落盘/非法值返回 0（调用方回退默认 8124）。 */
+export function loadGatewayPortFromDisk(): number {
+  const now = Date.now()
+  if (diskPortCache && now - diskPortLoadedAt < DISK_PORT_TTL_MS) return diskPortCache
+  diskPortLoadedAt = now
+  try {
+    const p = portFilePath()
+    if (existsSync(p)) {
+      const n = Number(readFileSync(p, 'utf8').trim())
+      diskPortCache = Number.isInteger(n) && n > 0 && n < 65536 ? n : 0
+      return diskPortCache
+    }
+  } catch {
+    /* 忽略 */
+  }
+  diskPortCache = 0
+  return 0
+}
+
+/** 网关停止时清盘端口，并重置磁盘缓存。 */
+export function clearGatewayPortFromDisk(): void {
+  try {
+    rmSync(portFilePath(), { force: true })
+  } catch {
+    /* 忽略 */
+  }
+  diskPortCache = 0
+  diskPortLoadedAt = 0
+}
+
 /**
  * 当前 token：内存优先（本进程管理网关时由 startLocalGateway 设置），否则读盘兜底。
  * 内存 token 同样可能过期（本进程曾成功连上旧网关、网关随后重启换新 token），TTL 后回落读盘刷新。

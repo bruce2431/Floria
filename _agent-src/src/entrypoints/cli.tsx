@@ -43,6 +43,38 @@ if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // 2026-09-07 conhost 宿主自举并入 WT（defterm 解耦收官，根治 web/双击弹「管理员指令框」黑窗）：
+  // 系统默认终端委托在 25H2 更新后激活链损坏且委托配置屡遭系统更新重置（08-29/09-02/09-07 三次
+  // 实证），CLI 交互会话不再信任宿主——交互式 TTY 且不在 WT 内（无 WT_SESSION）且未自举过
+  // （FLORIA_IN_WT）且非 bun 源码直跑 → 经 wt.exe -w last nt 并入最近 WT 窗口后本进程退出；
+  // wt 不可用/启动失败则留在当前宿主继续运行。护栏不变量：每个交互进程至多自举一次
+  // （FLORIA_IN_WT 由自举注入；WT 正常标签自带 WT_SESSION；VSCode 等自带宿主的终端不接管）。
+  if (
+    process.platform === 'win32' &&
+    process.stdout.isTTY &&
+    !process.env.WT_SESSION &&
+    !process.env.FLORIA_IN_WT &&
+    process.env.TERM_PROGRAM !== 'vscode' &&
+    !/(^|[\\/])bun(\.exe)?$/i.test(process.execPath)
+  ) {
+    const { spawn: spawnProc } = await import('node:child_process');
+    const child = spawnProc(
+      'wt.exe',
+      ['-w', 'last', 'nt', '-d', process.cwd(), process.execPath, ...args],
+      // 不设 windowsHide：SW_HIDE 会随 STARTUPINFO 被 -w last 无窗时新开的 WindowsTerminal
+      // 继承 = 首窗创建即隐藏、二次启动才可见（2026-09-09 双启动根因）。wt.exe 是 GUI 子系统，
+      // spawn 它不会带出控制台窗口，无需此 flag。
+      { env: { ...process.env, FLORIA_IN_WT: '1' }, stdio: 'ignore' },
+    );
+    const handedOff: boolean = await new Promise<boolean>((resolveHandoff) => {
+      child.once('spawn', () => resolveHandoff(true));
+      child.once('error', () => resolveHandoff(false));
+    });
+    if (handedOff) return;
+    // biome-ignore lint/suspicious/noConsole:: intentional console output
+    console.error('[cli] wt.exe 不可用，留在当前终端宿主运行');
+  }
+
   // Fast-path for --version/-v: zero module loading needed
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v' || args[0] === '-V')) {
     // MACRO.VERSION is inlined at build time

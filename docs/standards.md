@@ -1,8 +1,13 @@
-# Free Code Fork 标准（STANDARDS）
+# 权威标准（standards）
 
 > 本 fork（便携版 Claude Code 重构源码）已与官方产生结构性差异，官方文档不再适用。
 > 本文件是**权威标准**：新建/修改 skill、plugin、MCP、changelog、工作区内容时以本文为准。
 > 优先级：**本文 > `.claude/CLAUDE.md` 对应章节 > 官方文档**。
+>
+> 本文件属 `docs/` 文档库（2026-09-10 由原 `STANDARDS.md` 重组而来）。同库姊妹件：
+> **构建标准与 feature flag 活审计 → [build.md](build.md)**；
+> **项目预览页 Web 容器标准 → [gateway.md](gateway.md)**；
+> **代码机制细节 → [core.md](core.md)**（本文只写规则约束）。
 
 ## 1. 总则 / 设计原则
 
@@ -23,7 +28,7 @@
 │   └── .claude-portable  ← 便携标记（在配置根内部，不可移动/删除）
 ├── Pj16-CodeAgent构建/   ← 源码构建区 + 权威标准（原 CODE2431 根 _agent-src 迁入）
 │   ├── _agent-src/       ← 构建源码（src/ scripts/ package.json node_modules/ …）
-│   ├── STANDARDS.md      ← 本文
+│   ├── docs/             ← 文档库（本文件 + build/glossary/core/gateway/web-ui/README）
 │   └── README.md         ← 目录结构说明
 ├── Pj1-…/Pj15-…/         ← 项目
 ├── .trash/YYYY-MM-DD/    ← 归档（禁止删除，只归档）
@@ -60,6 +65,8 @@
 2. exe 旁边的 `.claude/`（**须带配置根标记**：`.claude-portable`/`.claude.json`/`settings.json`/`plugins`/`skills`/`commands`/`credentials.json`/`history.jsonl` 任一存在才认；**只有 `projects/` 不算** → 项目本地会话目录不会误判）
 3. 从 exe 目录**逐级向上**找 `.claude/.claude-portable` 标记 → 命中用「该 `.claude` 目录」
 4. 兜底 `~/.claude`
+
+（解析链与裸机初始化的机制细节 → [core.md](core.md)「便携配置根」。）
 
 **硬性约束**：
 - `.claude/.claude-portable` 和 `.claude/` **必须留在 `@WrokSpace` 根目录**。挪进子文件夹后，exe 副本从 `@WrokSpace\<项目>\` 运行向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。
@@ -153,10 +160,10 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - `.mcp.json` 用 `${CLAUDE_PLUGIN_ROOT}` 指向插件根定位脚本（相对路径，便携）。
 
 ### 5.7 现状清单
-- ~~`neturon/`~~（已移除，2026-09-04 核实不存在）— neturon-rag RAG 插件（MCP 形态 `rag_search`/`rag_cog_context`/`rag_fill_precog`/`rag_source`/`rag_should_search`）。已被 Pj16 TS 内置版取代：引擎重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件，NEURON_RAG 门控），插件随之退役。**数据根 `@WrokSpace/.claude/neturon/` 不动**（neurons/ 记忆库 + cache/models 模型，TS 版原样续用）；`engine/` Python 引擎已随之归档 `.trash/2026-09-04/engine/`（用户定案不留兜底，出问题直接报错；neurons/ 记忆库与 cache/models 留原位供 TS 版使用）。
+- ~~`neturon/`~~（已移除，2026-09-04 核实不存在）— neturon-rag RAG 插件（MCP 形态 `rag_search`/`rag_cog_context`/`rag_fill_precog`/`rag_source`/`rag_should_search`）。已被 Pj16 TS 内置版取代：引擎重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件，NEURON_RAG 门控，标准见 §7），插件随之退役。**数据根 `@WrokSpace/.claude/neturon/` 不动**（neurons/ 记忆库 + cache/models 模型，TS 版原样续用）；`engine/` Python 引擎已随之归档 `.trash/2026-09-04/engine/`（用户定案不留兜底，出问题直接报错；neurons/ 记忆库与 cache/models 留原位供 TS 版使用）。
 - `codegraph/`（name=`codegraph`）— 代码知识图谱 MCP，索引 `Pj16-CodeAgent构建/_agent-src/src/.codegraph/`
 - ~~`qwen-mm/`~~（已移除 2026-08-24 → `.trash/2026-08-24/qwen-mm/`）— Qwen-MM-Plugins 便携版（2026-08-14）：core（本地多模态读取/可视化 MCP + skill）+ api（云端 Qwen VL/Omni/ASR，需 DashScope key）。引擎 `src/`（精简 pyproject：core viz 全依赖 + api 依赖并入 `[project].dependencies`，entry `qwen-mm-plugins-core`/`qwen-mm-plugins-api`）+ `skills/qwen-mm-plugins-core/`、`skills/qwen-mm-plugins-api/` + `config/config` 活数据。`.mcp.json` 两个 server，均 `uvx --from ${CLAUDE_PLUGIN_ROOT}`（本地构建，不联网）：`qwen-mm-plugins-core` / `qwen-mm-plugins-api`，env `PYTHONUTF8=1`（防 Windows GBK `UnicodeEncodeError`）+ `QWEN_MM_CONFIG_DIR=${CLAUDE_PLUGIN_ROOT}/config`（便携）。config 写 `DASHSCOPE_API_KEY` + `DASHSCOPE_BASE_URL`（用户百炼专属网关 `…maas.aliyuncs.com/compatible-mode/v1`，可覆盖默认 dashscope 地址）。MCP 工具命名空间 `mcp__plugin_qwen-mm_qwen-mm-plugins-core__*` / `mcp__plugin_qwen-mm_qwen-mm-plugins-api__*`。移除原因：用户主动移除视觉插件；config 内 `DASHSCOPE_API_KEY` 已随目录进 `.trash` 未删除。MCP 工具下次重启会话后消失。
-- ~~`telemetry-monitor/`~~（已移除 2026-08-14 → `.trash/2026-08-14/telemetry-monitor/`）：会话遥测 MCP（notify_progress 推飞书 / get_session_status 读会话摘要）。`get_session_status` 用的旧桶 glob（`projects/*/*.jsonl`）与平铺会话存储不兼容已失效，功能被 SubPj1/SubPj2 `/gateway/sessions` 覆盖；`notify_progress` 飞书推送能力随 SubPj2 网关接管。MCP 工具下次重启会话后消失。
+- ~~`telemetry-monitor/`~~（已移除 2026-08-14 → `.trash/2026-08-14/telemetry-monitor/`）：会话遥测 MCP（notify_progress 推飞书 / get_session_status 读会话摘要）。`get_session_status` 用的旧桶 glob（`projects/*/*.jsonl`）与平铺会话存储不兼容已失效，功能被内置网关 `/gateway/sessions` 覆盖；`notify_progress` 飞书推送能力随内置网关接管。MCP 工具下次重启会话后消失。
 
 ## 6. MCP 服务器标准
 
@@ -169,7 +176,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 
 ## 7. 记忆 / RAG 标准（neturon）
 
-- **TS 内置化进行时（2026-09-03/09-04）**：引擎已重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/roster/index），`feature('NEURON_RAG')` 门控**默认关**。工具 = `neuron_recall` / `neuron_remember` / `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（build_graph / detect_communities）。双引擎对照 114/114 全绿。**两个 Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）、fold 路径 `merged_from` 恒空（仅 phase1 全量归并写入）。neturon-rag 插件**已移除**（2026-09-04，见 §5.7）——下方 MCP 时代流程描述仅作数据格式/管线语义参考。待重建 NEURON_RAG exe（`cd _agent-src && bun run ./scripts/build.ts --dev --feature=NEURON_RAG`）实测 p5/p6（`neuron_cog`），通过后定案 NEURON_RAG 转默认开。定案全文 → 项目根 `20260829142535-神经元内置架构定案.md`（v2.2）。
+- **TS 内置化进行时（2026-09-03/09-04）**：引擎已重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/roster/index），`feature('NEURON_RAG')` 门控**默认关**。工具 = `neuron_recall` / `neuron_remember` / `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（build_graph / detect_communities）。双引擎对照 114/114 全绿。**两个 Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）、fold 路径 `merged_from` 恒空（仅 phase1 全量归并写入）。neturon-rag 插件**已移除**（2026-09-04，见 §5.7）——下方 MCP 时代流程描述仅作数据格式/管线语义参考。待重建 NEURON_RAG exe（构建命令见 [build.md](build.md)）实测 p5/p6（`neuron_cog`），通过后定案 NEURON_RAG 转默认开。机制细节 → [core.md](core.md)「神经元内置检索/记忆」；定案全文 → 项目根 `20260829142535-神经元内置架构定案.md`（v2.2）。
 - **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段，blocks[0] 必须是原始 query）→ `l1.cog`（概念/社群/precog）。
 - **写记忆**：脚本/工具全文存 `l3.raw/`，`core_file` 只存**相对路径**引用；同一源不重复记录（复用同一源）。
 - **检索（双检索）**：`rag_search` 查 mem（唯一写 precog）+ `rag_cog_context` 全查五层（概念/社群/precog节点/聚合节点/mem）。
@@ -198,21 +205,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - 门控规则见 `.hermes.md`（禁止捏造事实、禁止删除、临时任务命名、操作后验证）。
 - **不自己运行** `启动.bat` / `start_site.py` 启动本地站点（0zijun 等由用户自己双击启动；需要站点运行时告知用户去启动）。
 
-## 10. 构建标准（Pj16-CodeAgent构建/_agent-src）
-
-- 源码构建区 `Pj16-CodeAgent构建/_agent-src/`：`src/` `scripts/` `package.json` `bun.lock` `tsconfig.json` `env.d.ts` `FEATURES.md` `node_modules/`。
-- 命令（均在 `cd Pj16-CodeAgent构建/_agent-src &&` 后执行）：
-  - `bun install` — 装依赖
-  - `bun run build:dev` → `Pj16-CodeAgent构建/_agent-src/cli-dev-<YYYYMMDDHHMMSS>`（dev 构建；产物带时间戳命名）
-  - `bun run build:dev:full` → 开全部实验 feature（产物 `cli-dev-<ts>`，时间戳不同不覆盖）
-  - `bun run compile` → `Pj16-CodeAgent构建/_agent-src/dist/cli-<YYYYMMDDHHMMSS>`（正式编译）
-  - `bun run dev` — 源码直跑
-- 产物命名（`scripts/build.ts`，2026-08-14 起）= `<前缀>-<YYYYMMDDHHMMSS>[-<显式 --feature 代号>]`，显式 feature 代号用 `+` 连接（如 `cli-dev-20260814114321-PRIVATE_GATEWAY.exe`）；前缀 dev=`cli-dev`、compile=`dist/cli`。默认三个 feature（VOICE_MODE + BUILTIN_EXPLORE_PLAN_AGENTS + PRIVATE_GATEWAY，2026-08-25 网关默认化）与 `--feature-set=dev-full` 不进文件名。
-- 产物是**自包含单文件二进制**（`bun build --compile --bytecode --packages bundle`），拷到任意项目目录即可用，运行时不需要 src/node_modules。**exe 产物带时间戳是强制规范，不允许覆盖**（禁止覆盖成固定名如 `cli-dev.exe`）；部署/换新 = 直接用新时间戳 exe 启动，旧产物原样保留。
-- codegraph 索引：`Pj16-CodeAgent构建/_agent-src/src/.codegraph/`（相对路径存储，随 src 迁移有效）；MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
-- dev 版本号从 git 派生（本目录 2026-08-15 起已 git init，sha 取自 git HEAD；仓库仅跟踪 `_agent-src/`、`README.md`、`STANDARDS.md`，其余项目文件由 .gitignore 排除）。
-
-## 11. 与官方版本的主要差异
+## 10. 与官方版本的主要差异
 
 | 项 | 官方 Claude Code | 本 fork |
 |---|---|---|
@@ -220,14 +213,14 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 | 插件发现 | marketplace + `--plugin-dir` | 额外扫描 `.claude/plugins/`（@pluginsdir 原地插件） |
 | MCP 命名空间 | `mcp__<server>__*` | `mcp__plugin_<plugin name>_<server>__*` |
 | Changelog | 根 CHANGELOG.md / GitHub 拉取 | `changes.md` → `cache/changelog.md` 同步 |
-| 构建 | npm 官方发布流程 | `bun --compile --bytecode` 自包含单文件 |
+| 构建 | npm 官方发布流程 | `bun --compile --bytecode` 自包含单文件（→ [build.md](build.md)） |
 | 项目 `.claude/` | trust/onboarding 触发创建 | **惰性创建**（首次写项目设置才 mkdir；会话存储的 `.claude/projects/` 写会话时自动建） |
 | 会话/记忆存储 | 全局 `~/.claude/projects/` 统一 | **会话/自动记忆均项目级、平铺**：会话 `<项目>/.claude/projects/*.jsonl`，记忆 `<项目>/.claude/projects/memory/` |
 | 权限规则 `@/` 前缀 | 无此语法 | **自定义特性，生效中**：`@/` 解析到便携根（`.claude-portable` 标记所在 `.claude` 的父目录 = `@WrokSpace`），Edit/Read 的 allow/deny 规则均有效（`filesystem.ts` `patternWithRoot`） |
 | `.claude` 目录编辑 | 可直接编辑 | **危险目录守卫**：路径任意段 = `.claude`（`.claude/worktrees` 除外）→ acceptEdits 与项目级 allow 被无视，强制弹「编辑自己配置」审批；唯一豁免 = **会话级** allow 规则 `/.claude/**` 或 `~/.claude/**`（审批框选项 2 即写入，会话结束失效） |
 | 品牌身份 | Claude Code / Anthropic | **白标 Floria**（2026-09-01 P0 落实：身份句族 11 处 + env 假情报 3 句 + 主提示散句 + 工具描述 + guide agent 改造为 Floria guide；`CLAUDE_CODE_ATTRIBUTION_HEADER` 全局关；D 层功能性标识 `.claude`/`CLAUDE_*`/工具协议等不动） |
 
-## 12. 常见坑速查
+## 11. 常见坑速查
 
 - **`.claude/.claude-portable` / `.claude/` 挪走** → exe 副本向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。
 - **exe 副本放进带配置根标记的项目 `.claude/`**（含 `.claude.json`/`settings.json`/`plugins`/`skills` 等）→ 配置根判定第 2 步静默切到项目本地，插件/记忆/凭证全失效（Pj2 已踩坑，见记忆 portable_config_behavior）。**只有 `projects/` 的目录不算配置根**。Pj16 现状（2026-09-04 核实）：`Pj16-CodeAgent构建/.claude/` 自带 `settings.json`（08-12 会话权限）标记位本就命中，但本机 `CLAUDE_CONFIG_DIR` 已设 **HKCU 用户级**恒指 `@WrokSpace/.claude`（envUtils.ts 第 1 步 env 永远赢）→ 邻接判定永不生效，项目级 skill（archify）/`preview/` 可安全存放；仅无该 env 的拷 exe 部署场景按本条处理。
@@ -237,51 +230,3 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - **MCP/插件/hook 改动不热加载** → 必须重启会话。
 - **编辑 `.claude` 下文件总弹审批** → 是危险目录守卫（`isDangerousFilePathToAutoEdit`）在拦，不是权限规则失效；审批框选项 2 = 写会话级 `/.claude/**` 豁免（会话结束失效）。`@/` 前缀规则本身有效，勿建议改写成绝对路径（违反便携红线）。
 - **MCP 序列化** → 禁裸 `json.dump(indent=2)`，用管线序列化器，否则 float32 崩溃。
-
-## 13. 项目预览页 Web 容器（backend 容器）标准
-
-> 预览页不止静态 HTML——项目 `.claude/preview/preview.json` 声明 `backend` 字段 → Pj16 网关 `localGateway.ts` 懒加载 **spawn 后端进程**、前端 iframe **直连后端端口**（仿 Hugging Face Spaces）。首个案例：Pj14-AI动画制作 官方 ComfyUI 前端 + 真实 ComfyUI 后端（2026-08-19 落地）。
-
-### 13.1 preview.json 的 backend 字段
-
-```json
-{
-  "name": "pj14-animation-workbench",
-  "version": "3.0.0",
-  "backend": {
-    "cmd": [".venv/Scripts/python.exe", "main.py", "--port", "{port}", "--listen", "127.0.0.1", "--cpu"],
-    "cwd": "../../comfyui-backend",
-    "port": 0,
-    "idleMinutes": 10,
-    "readyPath": "/api/system_stats"
-  }
-}
-```
-
-- `cmd`：spawn 命令数组；可含 `{port}` 占位符（网关 spawn 时替换为实际分配端口）；`cmd[0]` 相对路径按 `cwd` resolve（node spawn 只按进程 cwd 解析，须手动 resolve）。
-- `cwd`：相对 preview.json 所在目录（`../../comfyui-backend` → 项目根下 comfyui-backend）。
-- `port`：`0` = 网关从 8130 起探测顺延（上限 8160）；显式端口则固定。
-- `idleMinutes`：后端无活跃持续该时长被空闲回收（默认继承 `GATEWAY_IDLE_MINUTES`=10 分钟）。
-- `readyPath`：就绪探测路径（默认 `/api/system_stats`，项目后端自身 API，非网关前缀）。
-
-### 13.2 网关机制（localGateway.ts，已实现）
-
-- `findProjects` 读 `<项目>/.claude/preview/preview.json`，有 `backend` → 项目附 `hasBackend` + `backendCfg`。
-- `GET /gateway/backend?label=`（受 token 保护）：ensureBackend（未起则 spawn）→ `{url, port, pid}`；无 backend → 404。
-- spawn：`{port}` 替换 → cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘 `便携根/.claude/backend-<safeLabel>.log`）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
-- **就绪探测用原生 net socket**（`backendReady`）：编译产物 node:http 的 request 对 aiohttp/Python 后端会挂起，net 直连写 HTTP 头读响应状态（200/404 即就绪）。
-- 生命周期：`stopLocalGateway` 遍历 killAllBackends（child.kill + taskkill /F /T /PID 兜底）+ 停回收 timer；空闲回收每 60s（仅 `--gateway` 模式）。
-- 前端三级加载：① `/gateway/backend` 命中 → iframe 直连 + 60s 心跳防误回收；② 静态 preview；③ 默认项目主页兜底。
-
-### 13.3 安全
-
-- 后端只监听 `127.0.0.1`（ComfyUI `--listen` 默认）；后端 URL 获取须过网关 token（`/gateway/backend` 属 `/gateway/*` 自动受保护）。
-- 后端文件写路径由后端自身约束（如 ComfyUI `--input-directory`/`--output-directory`），粘贴图片落到项目内目录。
-
-### 13.4 远程端同源反代 /bp/<label>/（2026-08-27）
-
-- 背景：iframe 直连 `http://127.0.0.1:<port>/` 只在本机浏览器成立——手机/平板等远程宿主上 127.0.0.1 指向设备自身 → 连接拒绝、预览覆盖层永转圈；`/preview/*` 静态兜底因子资源不带 query token 全 401，不可用。
-- 路由：`/bp/<label>/<path>?<query>` → `http://127.0.0.1:<port>/<path>?<query>`。rest/search 原样透传（保留原始 %xx 编码，不二次解码重组，防中文路径双重编码错乱）；`proxyBackendRequest` 双向流式管道（媒体大文件不落盘），请求侧剥 hop-by-hop + host + cookie（不向项目后端泄露 floria_bp 票证），响应侧剥 hop-by-hop + 上游 set-cookie（防作用域泄漏），Location 改写回 `/bp` 前缀。后端仍只绑回环，访问面不变。
-- 鉴权：不靠 query token（页面内相对子请求必裸奔）。`/gateway/backend` 成功响应种 `HttpOnly` cookie `floria_bp`（Path=/bp、SameSite=Lax、24h）；票证存网关内存 Map（含 label 白名单，多项目并行预览互不顶掉，sweep 过期）。`/bp/*` 凭 cookie + 白名单放行，否则 401；label 须命中 findProjects 且 hasBackend，否则 404。
-- 前端分流：`openProjectPreview` 按 `location.hostname ∉ {127.0.0.1, localhost}` 判远程宿主 → iframe 用 `/bp/<label>/`（cookie 由上一拍 `/gateway/backend` 响应种下，子请求自动携带）；本机保持直连 `d.url` 零开销。心跳 60s `GET /gateway/backend` 不变（保 lastActive + 续票证）。
-- 配套约束：**经 /bp 代理的项目前端 API 一律相对路径**（根绝对路径 `/delete` 等在 /bp 前缀下会指回网关根 404）——Pj15 已清理全部根绝对 API 路径（2026-08-27 21:18）。

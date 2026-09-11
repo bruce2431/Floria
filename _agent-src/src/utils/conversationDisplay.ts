@@ -52,6 +52,13 @@ export type DisplayBlock = {
 export type DisplayMessage = {
   role: 'user' | 'assistant' | 'tool' | 'system'
   blocks: DisplayBlock[]
+  /**
+   * 归一化稳定键（2026-09-10 长会话 delta 对齐根修）：位置无关的跨端一致标识，消费端
+   * 据此定位增量替换锚点。规则 = 「源记录 uuid 前 24 位（deriveUUID 恒保留该前缀）+
+   * 同 parent 内块序」；无源 uuid 的派生提示行用「h#时间戳#文本前 32 字」。原文见
+   * filterConversationForDisplay 末尾赋值处。
+   */
+  sid?: string
   timestamp?: number | string
   /**
    * 助手消息的 stop_reason（2026-08-26 新增，供 floria 实时段「回合结束」判定）：
@@ -507,6 +514,36 @@ export function filterConversationForDisplay(
 
     // tool / progress / 其它 system 子类型：CLI 已把 tool_result 收进 user 消息，此处跳过
   }
+  // ── 归一化稳定键赋值（2026-09-10 长会话 delta 对齐根修，勿删）──
+  // 问题：normalizeMessages 的 uuid 派生受 isNewChain 粘性标志影响（遇多块消息后恒派生），
+  // 而该标志取决于「在输入数组中的位置」——CLI 侧输入是 capRenderedMessages 的 200 条尾部
+  // 窗口（utils/renderCap.ts:15），网关侧输入是 jsonl 全量。窗口每滑一条，派生分界点随之
+  // 漂移 → 同一消息在两端 uuid 时裸时派生 → 一切基于 uuid 的跨轮/跨端对齐（delta base0、
+  // 网关 mergeDisplay）在长会话下必然失配（实证：CLI base=145/170 vs 网关投影 732/5447，
+  // web 端「历史截断拒收」→ 全量对账风暴 → 回合中零更新）。
+  // 解法：不改 normalizeMessages（改动面过大），在投影出口构造位置无关稳定键——源记录 uuid
+  // 前 24 位为派生恒保留的不变前缀（Messages.tsx:240/528、REPL.tsx:3979 已依赖此语义做前缀
+  // 匹配），配以同 parent 内块序（遍历计数，与 deriveUUID 的 index 同源）即得稳定 id。
+  // 无源 uuid 的派生提示行（中断/后台任务/限流降级等）以内容+时间戳为身份。
+  {
+    let prevParent = ''
+    let blockIdx = 0
+    for (const m of out) {
+      const u = typeof m.uuid === 'string' ? m.uuid : ''
+      if (u) {
+        const parent = u.slice(0, 24)
+        if (parent === prevParent) blockIdx++
+        else { prevParent = parent; blockIdx = 0 }
+        m.sid = `${parent}#${blockIdx}`
+      } else {
+        prevParent = ''
+        blockIdx = 0
+        const text = m.blocks.map(b => b.text ?? '').join('')
+        const ts = typeof m.timestamp === 'number' ? m.timestamp : 0
+        m.sid = `h#${ts}#${text.slice(0, 32)}`
+      }
+    }
+  }
   if (opts?.lastModelOut) opts.lastModelOut.lastModel = lastModel
   return out
 }
@@ -562,8 +599,20 @@ export async function sendConversationToServer(
  * 提示的跨扫描状态）；needFullSync = 网关失步，下轮全量直传对账。只存轻量展示投影
  * （过滤后的 blocks），与网关 conversationDisplays 同源同量级，进程退出即清。
  */
-type DisplayCacheEntry = { sent: DisplayMessage[]; lastModel?: string; needFullSync?: boolean; seq?: number }
+type DisplayCacheEntry = { sent: DisplayMessage[]; lastModel?: string; needFullSync?: boolean }
 const displayCacheBySession = new Map<string, DisplayCacheEntry>()
+
+/**
+ * delta 序号账本（2026-09-10 二轮根修，进程生命周期，**独立于展示缓存条目**）：
+ * 旧实现把 seq 存在 DisplayCacheEntry 里，而全量路径 `displayCacheBySession.set(key,{sent,lastModel})`
+ * （下 659 行，全模块唯一 .set）重建条目时静默丢掉 seq → CLI 侧序号回落到 1；网关侧
+ * sessionDeltaSeq 是进程内存、只由 cli-hello 重置（localGateway.ts:3373）且 `seq <= last` 静默
+ * 丢弃（3461-3463）→ 塌缩/head-miss 之后每条 delta 都被吞，直到序号重新爬过水位（水位越高遮蔽
+ * 越久，长会话实时通道长期静默；实证：探针塌缩后 184 帧连丢、206 次 commit 才恢复）。迁出后
+ * 不变量成立：**delta 序号单调递增、只在 CLI 进程重启时归零** —— 与网关唯一的水位复位锚点
+ * （cli-hello = 进程身份确立）是同一个事件，缓存重建（塌缩/失步/重连）不再回退序号。
+ */
+const deltaSeqBySession = new Map<string, number>()
 
 /** 组合入口：过滤 + 增量发送一步完成，返回过滤结果（REPL 渲染处调用）。
  * P2（2026-08-31，20260828145952-内存增长根因与代码层修改建议.md）：全量上报改为
@@ -585,14 +634,28 @@ export async function exportConversationToServer(
   })
   const lastModel = lastModelOut.lastModel
 
+  // 塌缩瞬态守卫（2026-09-10 二轮根修）：投影为空 ≠ 会话空了。REACTIVE_COMPACT 边界
+  // `setMessages(() => [boundary])` 把 state 收缩为单条 compact_boundary（投影层 338 行跳过
+  // system/非 local_command）时 display 为空，旧实现落到下方全量路径：向网关 POST 空会话
+  // （/gateway/conversation 无 base = 全量替换，网关 conversationDisplays 被 set(sid,{messages:[]})
+  // 抹掉）+ 本地 cache.sent 清空（buildDisplayDelta 因 sent 空静默）＝基线双毁。不变量：
+  // **cache.sent 恒等于「最后一次成功上报的完整投影」**，瞬态空投影不是新基线——本轮不 POST、
+  // 不推进基线，等下一次非空投影（同一轮内 state 回补）按正常对齐语义续上。
+  if (cache && display.length === 0) return display
+
   // 失步后的强制全量对账：sent 已在失步轮本地合并（含前缀），直传恢复网关完整
   if (cache?.needFullSync && cache.sent.length > 0) {
     if (await sendConversationToServer(sessionId, cache.sent)) cache.needFullSync = false
     return display
   }
 
-  if (cache && display.length > 0 && display[0]!.uuid) {
-    const base = cache.sent.findIndex(m => m.uuid === display[0]!.uuid)
+  if (cache && display.length > 0 && display[0]!.sid) {
+    // 对齐键 = 稳定键 sid（2026-09-10 协议根修）：旧实现用 display[0].uuid 在已上报序列中定位
+    // 水位，而 uuid 受 normalizeMessages 的 isNewChain 位置相关派生影响——CLI 侧输入是 200 条
+    // 尾部窗口、跨轮滑动会让同一条记录的 uuid 时裸时派生 → 对齐恒失配 → 每轮退化为「窗口全量
+    // 替换」，网关缓存被 200 条窗口覆盖（P2 名义缺口常态化）。sid 位置无关（见下稳定键赋值段），
+    // 跨轮/跨端恒一致。
+    const base = cache.sent.findIndex(m => m.sid && m.sid === display[0]!.sid)
     if (base >= 0) {
       // 窗口覆盖不变量（与 buildDisplayDelta 同款）：display 未覆盖到 sent 末尾 = state 塌缩
       // 瞬态，禁止 mergedSent = display（base===0 时会直接把基线截断），本轮不推进基线。
@@ -622,8 +685,13 @@ export async function exportConversationToServer(
  * 「尾部替换」增量构建（2026-09-08 事件流统一 P1，方案 20260908135557）：以 sent（上次发出的
  * 全量投影序列）为基线，求 display 相对 sent 的尾部差异——delta = { base: 分歧点在 sent 中的
  * 绝对位置, messages: display 自分歧点起的尾部 }。消费端应用 = 本地序列 slice(0, base).concat
- * (messages)，与 /gateway/conversation 的 base 水位语义同构；append / 末条 blocks 更新 / 段收口
- * 统一编码为「尾部替换」（幂等，无需三态标记）。
+ * (messages)，编码为「锚点 + 锚点之后整体替换」（幂等，无需三态标记）：append / 末条 blocks
+ * 更新 / 段收口统一此形态。
+ * 2026-09-10 协议根修：旧实现发「数字坐标 base（sent 水位）+ 尾部」，消费端按长度拼接；但 CLI
+ * 侧输入是 capRenderedMessages 的 200 条窗口、消费端是全量投影，长会话下两侧长度与 uuid 派生
+ * 规则都不同（详见 filterConversationForDisplay 末尾稳定键注释）→ base 恒越界、delta 恒被拒。
+ * 现改为内容标识对齐：anchorSid = 分歧点前一条的稳定键，消费端定位后替换其后全部，长度差异
+ * 不再参与判定。
  * 返回 null = 无可见变化或无可靠基线：CLI 重启后 cache 空由 exportConversationToServer 全量
  * POST 建基线，此后本函数才可用——窗口全量不作 delta 下发（web 端会截断历史前缀，对账链
  * /gateway/session 才是完整全量源）。投影结构失步（压缩/撤回/窗口滑出基线记忆，display 窗口
@@ -634,11 +702,16 @@ export async function exportConversationToServer(
  * delta 构建即视为已发出（sent 就地推进、seq 递增）：WS 断开静默丢失不回滚，web 端 seq gap
  * → 全量对账重建（不缓存 delta 历史，方案 §3.5 无状态转发定案）。
  */
+/** 逐条比对键（buildDisplayDelta 专用）：剥 uuid 后序列化（理由见调用处注释）。 */
+function cmpKey(m: DisplayMessage): string {
+  return JSON.stringify(m, (k, v) => (k === 'uuid' ? undefined : v))
+}
+
 export function buildDisplayDelta(
   messages: readonly SourceMessage[],
   sessionId: string,
   mode: DisplayMode,
-): { seq: number; base: number; messages: DisplayMessage[] } | null {
+): { seq: number; anchorSid: string; messages: DisplayMessage[] } | null {
   const cacheKey = `${sessionId}:${mode}`
   const cache = displayCacheBySession.get(cacheKey)
   if (!cache || cache.sent.length === 0) return null
@@ -647,16 +720,20 @@ export function buildDisplayDelta(
     initialLastModel: cache.lastModel,
     lastModelOut,
   })
-  // 窗口对齐：display 窗口首条在 sent（全量序列）中的位置（uuid = normalizeMessages 派生的
-  // 确定性幂等键）。lastModel 仅在 delta 实际发出时回写（与 exportConversationToServer 失步
-  // return 不回写同语义：保留下轮重产「已切换模型」提示）。
-  const base0 = display.length ? cache.sent.findIndex((m) => m.uuid && m.uuid === display[0]!.uuid) : -1
+  // 窗口对齐：以稳定键 sid 在 sent 中定位 display 首条（sid 位置无关，见 filterConversationForDisplay
+  // 末尾赋值段——旧实现用 uuid，长会话下受 isNewChain 位置相关派生影响恒失配）。
+  // lastModel 仅在 delta 实际发出时回写（与 exportConversationToServer 失步 return 不回写同语义：
+  // 保留下轮重产「已切换模型」提示）。
+  const base0 = display.length ? cache.sent.findIndex((m) => m.sid && m.sid === display[0]!.sid) : -1
   if (base0 < 0) return null
-  // 分歧点：自 base0 逐条比对至第一条不同（uuid 在对象内，序列化比较即含 uuid）。
+  // 分歧点：自 base0 逐条比对至第一条不同。比对先剥掉 uuid——它是位置相关派生物（见稳定键注释：
+  // 窗口滑动会让同一条记录的 uuid 时裸时派生），留在比对里会让每一轮都判「首行即分歧」，delta
+  // 载荷退化为整窗重发（2026-09-10 探针实证：40 轮每轮 200+ 条）。记录身份已由 sid 承载，web 端
+  // 不消费 uuid（gateway/web-src 无 .uuid 引用）。未知字段仍参与比对（下落不明的新字段不会被漏掉）。
   // append-only 常态成本 O(变化量)（每轮只序列化到首条分歧），block 级触发率 ~2.5/s 可承受。
   let k = base0
   while (k < cache.sent.length && k - base0 < display.length) {
-    if (JSON.stringify(cache.sent[k]) !== JSON.stringify(display[k - base0])) break
+    if (cmpKey(cache.sent[k]!) !== cmpKey(display[k - base0]!)) break
     k++
   }
   if (k - base0 >= display.length) return null // 与 sent 完全一致且无新增
@@ -668,8 +745,16 @@ export function buildDisplayDelta(
   // 正常尾部修正（思考蒸发/图片并回）只回改已发出的内容，窗口仍覆盖到 sent 末尾，不受此限；
   // 若回改恰好伴随窗口未覆盖，延迟一轮由下一条 delta 或 /gateway/session 对账自愈。
   if (base0 + display.length < cache.sent.length) return null
-  const delta = { seq: (cache.seq ?? 0) + 1, base: k, messages: display.slice(k - base0) }
-  cache.seq = delta.seq
+  // 锚点（2026-09-10 协议根修，替代旧数字坐标 base）：分歧点前一条的稳定键。消费端以
+  // 「锚点之后整体替换」应用，不再要求 delta 覆盖到本地序列末尾——CLI 侧是 200 条窗口、
+  // web 侧是全量投影，两侧长度天然不同，只有内容标识（sid）能跨端对齐。k=0（无前一条）
+  // 属无可靠基线，不发，由 /gateway/session 对账链恢复。
+  const anchorSid = k > 0 ? cache.sent[k - 1]!.sid : undefined
+  if (!anchorSid) return null
+  // 序号取进程级账本（不变量见 deltaSeqBySession 声明处）：缓存重建不得回退序号
+  const seq = (deltaSeqBySession.get(cacheKey) ?? 0) + 1
+  deltaSeqBySession.set(cacheKey, seq)
+  const delta = { seq, anchorSid, messages: display.slice(k - base0) }
   cache.lastModel = lastModelOut.lastModel
   cache.sent = [...cache.sent.slice(0, k), ...display.slice(k - base0)]
   return delta

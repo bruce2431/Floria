@@ -12,6 +12,7 @@ import {
   resetTaskList,
 } from '../utils/tasks.js'
 import { isTeamLead } from '../utils/teammate.js'
+import { notifyTaskState } from '../utils/gatewayClient.js'
 
 const HIDE_DELAY_MS = 5000
 const DEBOUNCE_MS = 50
@@ -80,6 +81,16 @@ class TasksV2Store {
 
   #notify(): void {
     this.#changed.emit()
+    this.#report()
+  }
+
+  /**
+   * 2026-09-10 web 底栏任务浮窗：把当前可见清单上报网关（/clients WS {type:'task-state'}）。
+   * 出口与 CLI 渲染同源（getSnapshot：hidden 或空 → []），保证 web 与 CLI 判定一致；
+   * 载荷去重由 notifyTaskState 内部做（store 5s 兜底轮询会原样重发）。
+   */
+  #report(): void {
+    notifyTaskState(this.getSnapshot() ?? [])
   }
 
   /**

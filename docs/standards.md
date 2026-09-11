@@ -177,7 +177,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 ## 7. 记忆 / RAG 标准（neturon）
 
 - **TS 内置化进行时（2026-09-03/09-04）**：引擎已重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/roster/index），`feature('NEURON_RAG')` 门控**默认关**。工具 = `neuron_recall` / `neuron_remember` / `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（build_graph / detect_communities）。双引擎对照 114/114 全绿。**两个 Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）、fold 路径 `merged_from` 恒空（仅 phase1 全量归并写入）。neturon-rag 插件**已移除**（2026-09-04，见 §5.7）——下方 MCP 时代流程描述仅作数据格式/管线语义参考。待重建 NEURON_RAG exe（构建命令见 [build.md](build.md)）实测 p5/p6（`neuron_cog`），通过后定案 NEURON_RAG 转默认开。机制细节 → [core.md](core.md)「神经元内置检索/记忆」；定案全文 → 项目根 `20260829142535-神经元内置架构定案.md`（v2.2）。
-- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段，blocks[0] 必须是原始 query）→ `l1.cog`（概念/社群/precog）。
+- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段，blocks[0] 必须是原始 query）→ `l1.cog`（概念/社群/precog）。**raw 层惯例（2026-09-10 照 Neuron-李京瑾 定案）**：每条 mem 条目的 `revelant[0]` = 其 raw 层 `message_id`（`l3.raw/<来源>/message.db`），`source` = 来源标签（'LOG'/'MEM'/'QQ'/'微信'…）——Pj16 实例同此（LOG.md 原文已真移动进 `l3.raw/LOG/`，项目根不再有 LOG.md；新条目走 mem 层 = `log_append.ts`，LOG.md 冻结为历史存档）。
 - **写记忆**：脚本/工具全文存 `l3.raw/`，`core_file` 只存**相对路径**引用；同一源不重复记录（复用同一源）。
 - **检索（双检索）**：`rag_search` 查 mem（唯一写 precog）+ `rag_cog_context` 全查五层（概念/社群/precog节点/聚合节点/mem）。
 - 命中后用 `rag_source` 取完整 `men.content` 确认真实上下文，按 `core_file[].path` 复用脚本，不重复造轮子。

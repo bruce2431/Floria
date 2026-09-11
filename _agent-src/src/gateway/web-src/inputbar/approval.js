@@ -1,0 +1,811 @@
+// 瞬态/落定渲染 + 审批卡 + 提问卡 + 回合态（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
+
+import { TOOL_NAMES, fmtDur, CHEV, ICON_COPY, messagesHtml, pendingUserMsgs, statusFlags } from '../chat/messages.js'
+import { renderHome, renderSession } from '../chat/route.js'
+import { scrollBottom, stage, stageFollow, stageSync, appendMsg } from '../chat/stage.js'
+import { gws } from '../core/gateway.js'
+import { I } from '../core/icons.js'
+import { refreshSession, bindLiveFoldTimer } from '../core/live.js'
+import { messagesEl, inputWrap, inputBarEl, sendBtn, state, live, connUp, esc, toast } from '../core/state.js'
+import { renderUserText } from './mention.js'
+import { syncGwSend } from './send.js'
+import { firstSendHash } from '../sidebar/recent.js'
+  function renderTransient() {
+    const cur = state.currentHash
+    const authLive = !!messagesEl.querySelector('details.done-fold.done-live[data-m]')
+    // 事务期（首条消息乐观权威窗口）项 hash 暂空：hash='' 且事务在场（firstSendHash===cur，
+    // 含导航前 ''==='') 的项计入本会话——首页发送瞬间 currentHash/firstSendHash 双空也要能渲
+    // 出开启主张；'' 项的清理由会话切换/事务回滚/撤回链负责（renderSession 869/ws-failed/renderHome）
+    const local = pendingUserMsgs.filter((p) => p.hash === cur || (p.hash === '' && firstSendHash === cur))
+    const bubble = authLive ? [] : local.filter((p) => p.form === 'bubble')
+    // 排队区合并（2026-08-30 清单#4②）：本地乐观项（dock 形态 + 权威在场时降级的气泡项）
+    // + CLI 队列快照（live.queueRemote，queue-state SSE / queued 首载）。文本去重防 web 自发
+    // 消息与 CLI 快照回报双份；按入队 ts 升序（FIFO）。首条消息事务期 remote 不渲（注入中
+    // 开启消息保持对话流气泡形态，快照照渲会同条消息以「排队中」重现 = 三态第②态根源）。
+    const inTx = firstSendHash && firstSendHash === cur
+    const remote = cur && !inTx ? (live.queueRemote || []) : []
+    const dockItems = []
+    const seen = new Set()
+    for (const p of local) {
+      const t = String(p.text || '')
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      if (!authLive && p.form === 'bubble') continue // 开启气泡走气泡渲染，不进 dock
+      dockItems.push({ content: t, ts: p.baseTs || p.claimTs || Date.now(), imgs: Array.isArray(p.imgs) ? p.imgs : [] })
+    }
+    for (const q of remote) {
+      if (q && typeof q.content === 'string' && q.content && !seen.has(q.content)) {
+        seen.add(q.content)
+        dockItems.push({ content: q.content, ts: typeof q.ts === 'number' ? q.ts : 0 })
+      }
+    }
+    dockItems.sort((a, b) => (a.ts || 0) - (b.ts || 0))
+    if (!bubble.length && !dockItems.length) {
+      const z0 = document.getElementById('live-zone')
+      if (z0) z0.remove()
+      claimTimerSet(false)
+      syncTurnLive()
+      renderSettle() // zone 摘除 = 内容高度骤减：两层占位/scrollTop 立即对账（防 clamp 跳变）
+      return
+    }
+    // 签名跳过：区内容无变化的重复调用（400ms 防抖刷新/逐条 SSE）不重建 DOM——重建会重播
+    // msg-in 入场动画（跳字/滚动路径上的闪烁根源）
+    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => q.content)])
+    let zone = document.getElementById('live-zone')
+    if (zone && zone.dataset.sig === sig) {
+      claimTimerSet(bubble.length > 0)
+      syncTurnLive()
+      return
+    }
+    // 重建事务先移除旧区（2026-09-07 偶发重复渲染根修：漏移除则旧 zone 残留 DOM，新 zone
+    // 插到 spacer 前、getElementById 恒拿最旧第一个 → 其 sig 永不匹配 → 只增不减；回合运行中
+    // 走增量路径无整页重建洗地，queue-state/吸收翻转连发即堆出「排队消息 ×N」历史快照层）。
+    // 不变量：#live-zone 全文档至多一个，由本函数独占维护。
+    if (zone) zone.remove()
+    zone = document.createElement('div')
+    zone.id = 'live-zone'
+    zone.dataset.sig = sig
+    // 容器恒插在 .pin-stage 之前（两层占位块必须是 #messages 末元素）；display:contents 不产生盒，
+    // 子元素即 #messages 直接 flex 参与者，布局与散挂时完全一致（styles.css #live-zone）
+    messagesEl.insertBefore(zone, messagesEl.querySelector('.pin-stage'))
+    // 2026-08-30 排队图片：本地乐观项带图 → 渲染缩略图并剥 [Image #N] 占位（占位仅供 CLI 注入
+    // 对应 pastedContents，原样显示即「排队图片没有渲染」根因）；remote（CLI 队列快照）无图数据仅文本。
+    // 乐观开启气泡与落盘气泡同构（2026-09-07）：带复制按钮（document 级委托天然可点），否则落盘
+    // 接管帧按钮凭空出现（无按钮→有按钮形态跳变）。
+    zone.innerHTML =
+      bubble.map((p) => {
+        const imgs = Array.isArray(p.imgs) && p.imgs.length ? p.imgs : []
+        const imgsHtml = imgs.length
+          ? '<div class="msg-imgs">' + imgs.map((im) => '<img class="msg-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
+          : ''
+        const bodyText = imgs.length ? String(p.text).replace(/\s*\[Image #\d+\]/g, '') : p.text
+        const bodyInner = renderUserText(bodyText)
+        // 纯图消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
+        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
+      }).join('') +
+      (bubble.length
+        ? '<details class="done-fold done-live msg-in" id="claim-fold" open><summary>' + procLabel('正在处理', '0s') + '</summary><div class="done-body"></div></details>'
+        : '') +
+      (dockItems.length
+        ? '<div class="queue-dock" id="queue-dock">' + dockItems.map((q) => {
+            const imgs = Array.isArray(q.imgs) && q.imgs.length
+              ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
+              : ''
+            const txt = imgs ? String(q.content).replace(/\s*\[Image #\d+\]/g, '') : q.content
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body"><p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+          }).join('') + '</div>'
+        : '')
+    claimTimerSet(bubble.length > 0)
+    syncTurnLive() // 主张折叠在场 = 回合开启运行态（停止键）；权威接管/吸收后按实况校准
+    renderSettle()
+  }
+  // 渲染权威出口对账（2026-09-08 两层消息流收口）：渲染链每动 DOM 后在此强制 stageSync——
+  // 占位块重挂/高度校准/气泡重定位/两层跟随归位；占位未激活零开销。暂态区 #live-zone 高度
+  // 随乐观气泡/主张折叠/排队区增减、queue-state SSE 直调 renderTransient、发送瞬间主张上屏
+  // 等路径全部经此对账，无盲区。占位=机制态（内存状态机+DOM 投影），渲染权威是事实源。
+  function renderSettle() {
+    if (!stage.active) return
+    stageSync()
+  }
+  // 2026-09-10 排队消息催办：点击排队气泡 = 「这条我等不及了」——请求引擎把当前正在飞的
+  // 生成流就地收尾，好让本轮 drain 把它作为注入引导织进当前折叠体（与「模型自然答完后排队
+  // 消息被纳入」同一条路径、同一种渲染）。**不是中断**：不改回合边界、不撤回、不产生新回合、
+  // 不产生新的乐观气泡。
+  // 动作是队列级的（非按条定位）：网关按会话把 {type:'queue-nudge'} 路由给在线 CLI，由 CLI
+  // 侧判活决定是否置位（无在飞生成 / 队列里没有可 drain 的用户消息 → 静默 no-op）。
+  // 事件委托：队列区 DOM 由 renderTransient 反复重建（签名跳过不等于恒不重建），逐项绑定会
+  // 随重建失效（同 .msg-copy/.ch-toggle 的委托写法）。
+  document.addEventListener('click', (e) => {
+    const item = e.target && e.target.closest ? e.target.closest('.q-item') : null
+    if (!item || !messagesEl.contains(item)) return
+    if (!state.currentHash || !gws || gws.readyState !== 1) return
+    gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
+    toast('已催办：本条并入当前轮次')
+  })
+  // 乐观主张计时起点移交（接管帧 refreshSession/renderSession）：取当前会话/事务未吸收的
+  // 开启气泡最早 claimTs——发送瞬间早于落盘 user ts（异步化暂存补投窗口），移交 live.txProcStart
+  // 供 bindLiveFoldTimer 续算，「正在处理 Xs」跨接管连续不回跳。
+  function claimStartTs() {
+    const cur = state.currentHash
+    let t0 = 0
+    for (const p of pendingUserMsgs) {
+      if (p.form !== 'bubble' || !p.claimTs) continue
+      if (p.hash !== cur && !(p.hash === '' && firstSendHash === cur)) continue
+      if (!t0 || p.claimTs < t0) t0 = p.claimTs
+    }
+    return t0
+  }
+  // 主张折叠计时：发送瞬间 T0 起跳字；权威折叠接管后由 bindLiveFoldTimer（数据起点）接棒，
+  // 本计时器随主张折叠移除/降级一并停止（claimTick 自检兜停）。
+  let claimTimer = null
+  function claimTick() {
+    const fold = document.getElementById('claim-fold')
+    if (!fold || !fold.isConnected) { claimTimerSet(false); return }
+    const claims = pendingUserMsgs.filter((p) => p.form === 'bubble' && p.claimTs && (p.hash === state.currentHash || (p.hash === '' && firstSendHash === state.currentHash)))
+    if (!claims.length) { claimTimerSet(false); return }
+    const t0 = Math.min(...claims.map((p) => p.claimTs))
+    const sum = fold.querySelector('summary')
+    if (sum) {
+      // 2026-09-07 僵死/断连对账（同 bindLiveFoldTimer tick）：乐观窗口 = 消息已发、引擎未应答
+      // ——正是「一直思考不说话」第一现场。beat 缺席/落后 ≥150s → 标「无响应」；网关 WS 断 →
+      // 标「连接中断」。beat 恢复即消失（每秒 tick 重算，无残留状态）。
+      // 同 tick 回合基线规则：beat 早于主张起点 t0 = 上回合残留 → 视同缺席（乐观窗口发送
+      // 瞬间恰是新回合开头，旧 beat 必残留，不 clamp 必误标——12:42 实测同根）。
+      const rawBeat = live.turnBeat.get(state.currentHash) || 0
+      const beatAt = rawBeat >= t0 ? rawBeat : 0
+      const staleSec = beatAt ? Math.round((Date.now() - beatAt) / 1000) : Math.round((Date.now() - t0) / 1000)
+      // ③ 2026-09-11 审批等待不算「无响应」（同 bindLiveFoldTimer tick 判定，两处同一规则）：
+      // 审批卡在场 = 回合阻塞在等用户作答，引擎无产出是预期 → 本帧不参与僵死判定，传 0。
+      // 文案/阈值/优先级由 messages.js statusFlags 单源构造（2026-09-11 单状态槽定案：红标即状态，
+      // 文案不带前导「·」）。主张折叠体（.done-body）内无 .think-state，故无独占标可挂。
+      const flags = statusFlags(connUp, takeover !== 'approval' ? staleSec : 0)
+      // 原地续时（2026-09-08 同 bindLiveFoldTimer tick 收口）：节点级更新不 innerHTML 重建。
+      // summary 恒「正在处理 + d-dur」；流式预览/红标挂 done-body（2026-09-09 定案：折叠顶
+      // 只留「正在处理/已处理」字样，与权威折叠同规则）。
+      const durEl = sum.querySelector('.d-dur')
+      if (durEl) durEl.textContent = ' ' + fmtDur(Math.round((Date.now() - t0) / 1000))
+      const cbody = fold.querySelector('.done-body')
+      if (cbody) {
+        let flEl = cbody.querySelector('.d-flags')
+        if (!flEl) { flEl = document.createElement('span'); flEl.className = 'd-flags'; cbody.appendChild(flEl) }
+        flEl.innerHTML = flags
+      }
+    }
+  }
+  function claimTimerSet(on) {
+    if (on && !claimTimer) { claimTimer = setInterval(claimTick, 1000); claimTick() }
+    else if (!on && claimTimer) { clearInterval(claimTimer); claimTimer = null }
+  }
+  // 本地状态系统行开关（2026-08-28 用户定案：连接/回合结束/审批回执/状态行等本地反馈
+  // 一律不插入聊天流，保留接口以便后续更改；错误行 addError 不受影响）
+  const SHOW_LOCAL_SYS = false
+  function addSystem(text) {
+    if (!SHOW_LOCAL_SYS) return
+    appendMsg(`<div class="msg msg-system">${esc(text)}</div>`)
+  }
+  function addError(text) {
+    appendMsg(`<div class="msg msg-system" style="color:#ef4444">${esc(text)}</div>`)
+  }
+  // ---- 回合运行态（2026-09-04 web 打断按钮）：turnLive = 发送按钮形态（发送/停止）。点击停止经
+  //      /clients 通路发 {type:'interrupt', sessionId} → 网关精确路由 → CLI onCancel（与 Ctrl+C 同路径）。
+  //      2026-09-07 两区重构：turnLive 不再由 procOpen/procClose 维护（链已退役）——由 syncTurnLive()
+  //      按 DOM 实况推导：权威 done-live[data-m] 折叠或暂态区乐观主张折叠在场 = 回合运行中；
+  //      每次渲染路径末尾（renderTransient / 整页重建）校准，DOM 才是事实源。
+  let turnLive = false
+  let btnMode = 'send'
+  function setBtnMode(mode) {
+    if (btnMode === mode) return
+    btnMode = mode
+    sendBtn.innerHTML = mode === 'stop' ? I.dshStop : I.dshSend
+    sendBtn.title = mode === 'stop' ? '打断当前回合' : '发送'
+  }
+  function syncTurnLive() {
+    const has = !!messagesEl.querySelector('details.done-fold.done-live')
+    if (has !== turnLive) { turnLive = has; syncGwSend() }
+  }
+  function procLabel(verb, dur) {
+    const live = verb === '正在处理'
+    return `<span class="d-chev">${CHEV}</span>${live ? '<span class="df-dot"></span>' : ''}${verb}${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
+  }
+  // 2026-09-07 两区重构：实时流式渲染链（procThink/procTool/procResult/startReply/streamText/
+  // streamThinking/toolChip/addThinking 等）整体退役——网关从不给 web 投递 WS out 流，实时展示
+  // 只走 SSE 会话上报 + jsonl 渲染权威（整页/增量重建），「正在处理」乐观主张折叠由 renderTransient
+  // 从 pendingUserMsgs 统一渲染；历史定案注释（工具行只显当前步等）随链废弃，勿再引用。
+  // ---- composer takeover（2026-08-22 修复）：DSH 提问/审批占输入栏（替换 #input-bar），而非渲染在 chat 内。
+  //      takeover = 'approval' | null，记录当前占据输入栏的待审批卡（2026-09-11 ④ 起只读提问卡的 'ask'
+  //      接管已移除，见 chat/messages.js askLineHtml 注）；
+  //      解决（审批提交/审批撤销）后 #input-bar 回归（content swap，同输入栏卡片足迹）。 ----
+  let takeover = null
+  const takeoverEl = () => $('composer-takeover')
+  // 2026-08-30 修复「提问卡相对位置大小奇怪」：takeover 卡片可远高于普通输入栏（多题卡 ~700px），
+  // 而 #chat-scroll 的 padding-bottom 是按输入栏足迹设计的固定值（styles.css 142px）→ 卡片贴底
+  // 向上生长直接叠压消息。改为按 #input-wrap 实际高度动态同步聊天滚动区预留（卡高+22px 底距+12px 间隙）。
+  // 2026-09-09 根修：padding 只写「动画终值」一次（show=满高、clear=清零），与 320ms 高度过渡同时启动、
+  // 由 #chat-scroll 自带的 padding-bottom CSS 过渡承担平滑；动画期（wrapAnimating）ResizeObserver 的
+  // 中间高度一律跳过——旧版每帧覆写=CSS 过渡反复重定目标+长会话逐帧全聊天区 layout，掉帧根源。
+  const chatScrollPadEl = $('chat-scroll')
+  let lastPad = null
+  function syncTakeoverPad(forceH) {
+    if (wrapAnimating) return
+    let p = ''
+    if (takeover) {
+      const h = forceH != null ? forceH : inputWrap.getBoundingClientRect().height
+      if (h > 0) p = Math.round(h + 34) + 'px'
+    }
+    if (p === lastPad) return
+    lastPad = p
+    chatScrollPadEl.style.paddingBottom = p
+    // 2026-09-10 根修：pad 写入与占位高度必须同帧一致——占位公式（clientHeight−padBot−
+    // 当前脚印）以 pad 为参数，pad 变了占位不同帧重算 = scrollHeight 变化 = maxScroll 偏离
+    // 贴顶位，浏览器钳制视口=「折叠提问卡消息流随动」根因。pad 单一写者在此同帧对账，
+    // 不变量：scrollHeight 对 pad 写入不变（占位对冲 pad 增量）→ 视口零钳制零移动。
+    // styles.css 已删 pad 过渡（过渡期 computed pad 中间值会让 stageFollow 读到与占位
+    // 写入不同源的 padBot，同源破坏），此处 computed pad 恒=终值。
+    if (stage.active) stageSync()
+  }
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTakeoverPad).observe(inputWrap)
+  // 2026-09-08 三轮重构（用户定案「审批 ui 应该是输入栏的子元素，改变输入栏的大小」）：#composer-takeover
+  //   迁入 #input-bar 内，出现/解决=输入栏本体高度变化（height px 起止过渡 + 动画期卡片 absolute
+  //   bottom:0 底边锚定：按钮行钉在原输入栏位置，出现=顶部向上展开、收回=向下收短）。
+  // 2026-09-09 根修（用户实测「看起来不是输入栏子状态/动画跳」逐帧取证后三处收口）：
+  //   ①表面连续——.bar-takeover 不再退场输入栏卡面（旧版边框/底色/阴影全透明 → 黄卡像浮在聊天区的
+  //     独立面板），只隐藏输入内容组、padding 让位 0，卡内容全出血贴卡面（styles.css）；
+  //   ②单一时间轴——卡片淡入/淡出机制（composer-fade/composer-fade-out/animFadeIn）整体删除：
+  //     显形与收合完全由 height 过渡+overflow 裁剪承担（旧版 220ms 淡入与 320ms 长高同跑=出现首帧
+  //     底部空白；收回 380ms 后输入行才淡入=0.3~0.4s 底部空窗）；输入行回归=收合完成后原位瞬换；
+  //   ③RO 守卫落地——wrapAnimating 真正被 syncTakeoverPad 读取（旧版只写不读，「动画期 RO 跳过」
+  //     未实现，动画期每帧覆写 padding=CSS 过渡重定目标+逐帧全聊天区 layout）。
+  //   连发竞态 wrapAnimToken 收敛不变（旧清理让位、新过渡捕获实时高度续走）。
+  // 2026-09-10 用户定案收起（二轮修正「收起时候的渐隐和折叠应该是并行发生的」）：单一时间轴并行——
+  //   审批卡自下而上渐隐（.appr-out → styles.css apprOutUp：clip-path 底边插值自下往上裁 + 透明度）
+  //   与输入栏高度收回（HEIGHT_MS）**同帧起播**；输入内容组复现（撤 .bar-takeover）贴底对齐
+  //   （.bar-collapsing justify-content:flex-end）并在同帧淡入（.bar-reveal）完成交叉过渡。
+  // 不变量：①渐隐与折叠同起、同在 HEIGHT_MS 窗口内收口（旧版两段串行=490ms 拖沓，用户实测否决）；
+  //   ②收起期卡片仍 absolute bottom:0（composer-growing）=底边钉原位，只有顶边下移 ⇒ 卡被自下而上
+  //     削掉、下方同步露出输入内容，两个动作几何方向一致不打架；③任一时刻至多一个动画所有者
+  //   （wrapAnimToken），终态 finishClear 复位全部标记，不留「动画中」残留。
+  const HEIGHT_MS = 320 // 必须 = styles.css #input-bar 的 height 过渡时长（长出/收回共用一条时间轴）
+  let wrapAnimToken = 0
+  let wrapAnimating = false
+  let wrapClosing = false // 收起动画进行中（此时 takeover 已置 null，高度还不是普通高度）
+  let wrapCloseTimer = null
+  let takeoverPlainH = 0 // 进入 takeover 前的输入栏高度（收起动画目标）
+  // 收起中途来新 takeover：撤掉收起态残留 + 停掉待执行收尾（高度/内联样式保持现状，showTakeover 自会用
+  // 实测高度续走），保证新卡不继承旧卡的渐隐/淡入动画。
+  function cancelClose() {
+    if (wrapCloseTimer) { clearTimeout(wrapCloseTimer); wrapCloseTimer = null }
+    wrapClosing = false
+    inputBarEl.classList.remove('bar-collapsing', 'bar-reveal')
+    const t0 = takeoverEl()
+    if (t0) t0.classList.remove('appr-out', 'appr-in')
+  }
+  function showTakeover(html, kind) {
+    const my = ++wrapAnimToken
+    const wasClosing = wrapClosing // 必须在 cancelClose 复位前取：收起进行中 h0 仍是旧卡高度，不是普通高度
+    cancelClose()
+    // 入场动画只在「普通输入栏 → 卡片」这一次发生（换题/重渲染不重播，否则交互中整卡重跳一下）
+    const firstShow = !takeover && !wasClosing
+    // 旧动画残留（收起动画的内联高度 / 上一张卡生长动画中间值）必须先清：不清则 getBoundingClientRect
+    // 读到的是残留高度 ⇒ h1 实测失真、|h1-h0|<1.5 早退，输入栏被永久卡在错误高度（新卡还溢出在外）。
+    inputBarEl.style.height = ''
+    const h0 = inputBarEl.getBoundingClientRect().height
+    if (firstShow) takeoverPlainH = h0
+    inputBarEl.classList.add('bar-takeover')
+    const t = takeoverEl()
+    if (t) { t.innerHTML = html; t.hidden = false }
+    takeover = kind
+    renderTaskDock() // 2026-09-10 任务浮窗让位：接管卡在场 → 自动收敛 + 禁点（.blocked）
+    const h1 = inputBarEl.getBoundingClientRect().height
+    syncTakeoverPad(h1)
+    scrollBottom()
+    if (Math.abs(h1 - h0) < 1.5) return
+    wrapAnimating = true
+    // 入场内容动效（2026-09-10 用户实测「弹出有点生硬」）：与高度长出同帧起播——卡片内容自下方
+    // 浮起 + 淡入；卡面本体（白底/描边/圆角）全程在场，故不露空洞（09-09 铲除的 composer-fade 是
+    // 整卡渐隐，白底一起消失才出现首帧空洞）。
+    if (t && firstShow) t.classList.add('appr-in')
+    inputBarEl.style.height = h0 + 'px'
+    inputBarEl.classList.add('composer-growing')
+    void inputBarEl.offsetHeight
+    inputBarEl.style.height = h1 + 'px'
+    setTimeout(() => {
+      if (my !== wrapAnimToken) return
+      wrapAnimating = false
+      inputBarEl.classList.remove('composer-growing')
+      inputBarEl.style.height = ''
+      if (t) t.classList.remove('appr-in')
+    }, HEIGHT_MS + 60)
+  }
+  function clearTakeover() {
+    if (!takeover) return
+    const my = ++wrapAnimToken
+    takeover = null
+    const t = takeoverEl()
+    const h0 = inputBarEl.getBoundingClientRect().height
+    const target = takeoverPlainH || h0
+    // 卡不在场 / 高度本就等于普通高度：无动画可播，直接终态（先 finishClear 复位 wrapAnimating，
+    // 再清 pad——顺序反了会被 syncTakeoverPad 的动画期守卫挡掉，聊天区留下卡片高度的空垫）
+    if (!t || Math.abs(h0 - target) < 1.5) { finishClear(t); syncTakeoverPad(); return }
+    wrapClosing = true
+    // pad 在高度动画启动同帧清零（wrapAnimating 会挡 RO，必须在此直接写）
+    syncTakeoverPad()
+    wrapAnimating = true
+    t.classList.remove('appr-in') // 入场未播完即被收起时，不让 apprInUp 与 apprOutUp 争同一 animation 简写
+    t.classList.add('appr-out') // 渐隐：卡自下而上（clip-path 底边插值）——与下面 height 过渡同帧起播
+    inputBarEl.style.height = h0 + 'px'
+    // 卡底边锚定（composer-growing 的 absolute bottom:0）+ 输入内容组贴底复现（bar-collapsing）且淡入（bar-reveal）
+    inputBarEl.classList.add('composer-growing', 'bar-collapsing', 'bar-reveal')
+    inputBarEl.classList.remove('bar-takeover')
+    void inputBarEl.offsetHeight
+    inputBarEl.style.height = target + 'px' // 折叠：与渐隐并行，同 HEIGHT_MS 收口
+    wrapCloseTimer = setTimeout(() => {
+      wrapCloseTimer = null
+      if (my !== wrapAnimToken) return
+      finishClear(t)
+      syncTakeoverPad()
+    }, HEIGHT_MS + 60)
+  }
+  function finishClear(t) {
+    wrapClosing = false
+    wrapAnimating = false
+    inputBarEl.classList.remove('composer-growing', 'bar-takeover', 'bar-collapsing', 'bar-reveal')
+    inputBarEl.style.height = ''
+    if (t) { t.hidden = true; t.innerHTML = ''; t.classList.remove('appr-out', 'appr-in') }
+    renderTaskDock() // 2026-09-10 任务浮窗解除让位：卡撤走 → 恢复可点（仍是收敛态，由用户点开）
+  }
+
+  // 2026-08-26 任务 A2：把 CLI 的 PermissionUpdate 建议转成前端可读标签/副标题
+  // （addRules=始终允许/拒绝 <工具>(<内容>)；addDirectories=添加目录；setMode=权限模式）。
+  // 勾选项原样透传（sendApprove.permissions → 网关 approval-response.updatedPermissions → CLI persistPermissions）。
+  function sugLabel(u) {
+    if (!u || typeof u !== 'object') return '记住此规则'
+    switch (u.type) {
+      case 'setMode': return '权限模式：' + (u.mode || '')
+      case 'addDirectories': return '添加目录：' + (Array.isArray(u.directories) ? u.directories.join('、') : '')
+      case 'removeDirectories': return '移除目录：' + (Array.isArray(u.directories) ? u.directories.join('、') : '')
+      case 'addRules': case 'replaceRules': case 'removeRules': {
+        const r = (Array.isArray(u.rules) && u.rules[0]) || null
+        const tool = r && r.toolName ? r.toolName : ''
+        const content = r && r.ruleContent ? r.ruleContent : ''
+        const verb = u.type === 'removeRules' ? '取消规则' : (u.behavior === 'allow' ? '始终允许' : u.behavior === 'deny' ? '始终拒绝' : '始终询问')
+        return (verb + (tool ? ' ' + tool : '') + (content ? ' (' + content + ')' : '')).trim()
+      }
+      default: return '记住此规则'
+    }
+  }
+  function sugSub(u) {
+    if (!u || typeof u !== 'object' || u.destination === 'session') return ''
+    const D = { userSettings: '全局', projectSettings: '项目', localSettings: '本目录' }
+    return (D[u.destination] || '') + '生效'
+  }
+
+  // ===== 审批卡正文渲染（2026-09-10 用户实测「可不可以把 json 转化为好看点的文本格式」）=====
+  // 旧版把 a.input 原样 `JSON.stringify(input, null, 2)` 倒进 .appr-command —— Edit 的 old/new_string
+  // 就是几十行转义 JSON（\n 满天飞、不可读）。改为按工具语义渲染：Edit=红/绿两段文本 diff，其余=
+  // 中文字段标签 + 值列表（长值/多行值落成 mono 块）。纯 web 展示层格式化：进料仍是 CLI sendRequest
+  // 原样透传的 a.input，不改协议、不新增后端字段。
+  const FIELD_LABELS = {
+    file_path: '文件', notebook_path: '文件', path: '目录', pattern: '匹配', glob: '文件过滤',
+    output_mode: '输出', url: '网址', query: '关键词', prompt: '要求', offset: '起始行', limit: '行数',
+    timeout: '超时', description: '说明', subagent_type: '子代理', command: '命令', content: '内容',
+    old_string: '旧文本', new_string: '新文本', replace_all: '替换全部', cell_id: '单元格',
+    edit_mode: '模式', new_source: '源码', run_in_background: '后台运行', model: '模型', isolation: '隔离',
+  }
+  const TOOL_FIELD_ORDER = {
+    Read: ['file_path', 'offset', 'limit'],
+    Grep: ['pattern', 'path', 'glob', 'output_mode'],
+    Write: ['file_path', 'content'],
+    NotebookEdit: ['notebook_path', 'cell_id', 'edit_mode', 'new_source'],
+    WebFetch: ['url', 'prompt'],
+    WebSearch: ['query'],
+    Task: ['description', 'subagent_type', 'prompt'],
+    Bash: ['command', 'description', 'timeout', 'run_in_background'],
+  }
+  function kvRow(label, value) {
+    return `<div class="appr-kv"><span class="ak-l">${esc(label)}</span><span class="ak-v">${esc(value)}</span></div>`
+  }
+  function preBlock(text) { return `<pre class="appr-pre">${esc(text)}</pre>` }
+  function diffBlock(label, oldStr, newStr, note) {
+    const sign = (sg, s) => esc((s === '' ? '(空)' : s).split('\n').map((l) => sg + ' ' + l).join('\n'))
+    const n = (s) => (s === '' ? 0 : s.split('\n').length)
+    const file = label ? `<div class="appr-file">${esc(label)}</div>` : ''
+    const meta = note ? `<div class="appr-meta">${esc(note)}</div>` : ''
+    return file + meta +
+      '<div class="appr-diff">' +
+      `<div class="appr-diff-h">旧文本 · ${n(oldStr)} 行</div><pre class="appr-diff-b old">${sign('-', oldStr)}</pre>` +
+      `<div class="appr-diff-h">新文本 · ${n(newStr)} 行</div><pre class="appr-diff-b new">${sign('+', newStr)}</pre>` +
+      '</div>'
+  }
+  // 命令/正文类字段恒落 mono 代码块（哪怕一行——观感上是「一段代码」而不是「一个参数值」）；
+  // 其余短值走行内「标签 + 值」，多行/超长值自动升级成块。
+  const BLOCK_FIELDS = new Set(['command', 'content', 'new_source', 'prompt'])
+  function fieldRow(key, value, desc) {
+    const label = FIELD_LABELS[key] || key
+    if (typeof value === 'boolean') return value ? kvRow(label, '是') : ''
+    const s = typeof value === 'object' ? JSON.stringify(value) : String(value)
+    if (desc && s.trim() === desc) return '' // 与卡头说明重复的行不再渲染一遍
+    if (BLOCK_FIELDS.has(key) || s.includes('\n') || s.length > 140) {
+      return `<div class="appr-kv"><span class="ak-l">${esc(label)}</span></div>${preBlock(s)}`
+    }
+    return kvRow(label, s)
+  }
+  function prettyToolInput(toolName, input, desc) {
+    const o = input && typeof input === 'object' ? input : {}
+    const str = (v) => (v == null ? '' : String(v))
+    const present = (k) => o[k] != null && o[k] !== '' && !(Array.isArray(o[k]) && !o[k].length)
+    if (toolName === 'Edit') return diffBlock(str(o.file_path), str(o.old_string), str(o.new_string), o.replace_all ? '替换文件中全部匹配' : '')
+    if (Array.isArray(o.edits) && o.edits.length) { // MultiEdit 形态：逐处并列
+      const head = str(o.file_path) ? `<div class="appr-file">${esc(str(o.file_path))}</div>` : ''
+      return head + o.edits.map((e, i) => diffBlock(`第 ${i + 1} 处修改`, str(e.old_string), str(e.new_string), '')).join('')
+    }
+    const order = TOOL_FIELD_ORDER[toolName] || []
+    const keys = order.filter(present).concat(Object.keys(o).filter((k) => !order.includes(k) && present(k)))
+    if (!keys.length) return ''
+    return `<div class="appr-kvs">${keys.map((k) => fieldRow(k, o[k], desc)).join('')}</div>`
+  }
+
+  function renderApproval(a) {
+    // 2026-08-24 提问答复（web 与 CLI 均可）：AskUserQuestion 审批卡渲染为交互表单，逐题选答案，
+    // 提交后经 approve 带 {input, answers} 回 CLI（网关 updatedInput 透传 → 工具拿到 answers）。
+    const qs = a.input && Array.isArray(a.input.questions) ? a.input.questions : null
+    if (a.toolName === 'AskUserQuestion' && qs && qs.length) {
+      renderQuestionApproval(a, qs)
+      return
+    }
+    const zh = TOOL_NAMES[a.toolName] || ''
+    const headline = a.justification || a.headline || (zh || a.toolName || '工具调用')
+    // 2026-08-26 任务 A2：审批增强——展示 CLI 侧 sendRequest 已上报的 description（原因说明）与
+    // blockedPath（被阻止路径）；suggestions = 「记住此规则」候选（PermissionUpdate[]），可多选，
+    // 允许时随 approve 带 permissions 透传回 CLI persistPermissions（复用既有 onAllow 语义，不扩协议）。
+    const sugs = Array.isArray(a.suggestions) ? a.suggestions : []
+    const desc = a.description && typeof a.description === 'string' ? a.description.trim() : ''
+    const path = a.blockedPath && typeof a.blockedPath === 'string' ? a.blockedPath.trim() : ''
+    const input = prettyToolInput(a.toolName, a.input, desc)
+    let sugsHtml = ''
+    if (sugs.length) {
+      sugsHtml = `<div class="appr-sugs">${sugs.map((s, si) => {
+        const lbl = sugLabel(s)
+        const sub = sugSub(s)
+        return `<button type="button" class="appr-sug" data-si="${si}"><span class="as-box"></span><span class="as-copy"><span class="as-title">${esc(lbl)}</span>${sub ? `<span class="as-sub">${esc(sub)}</span>` : ''}</span></button>`
+      }).join('')}</div>`
+    }
+    // 2026-08-22 composer takeover：审批卡占输入栏（DSH ApprovalPanel 语义），不再 appendMsg 进 chat
+    showTakeover(`
+      <div class="appr-card">
+        <div class="appr-strip"><span class="appr-dot"></span>需要批准${zh ? ' · ' + esc(zh) : ''}${a.toolName ? '（' + esc(a.toolName) + '）' : ''}</div>
+        <div class="appr-body">
+          <div class="appr-headline">${esc(headline)}</div>
+          ${desc ? `<div class="appr-desc">${esc(desc)}</div>` : ''}
+          ${path ? `<div class="appr-path"><span class="ap-l">路径</span><span>${esc(path)}</span></div>` : ''}
+          <div class="appr-input">${input}</div>
+          ${sugsHtml}
+        </div>
+        <div class="appr-btns">
+          <button class="appr-deny">拒绝</button>
+          <button class="appr-allow">允许</button>
+        </div>
+        <div class="appr-state"></div>
+      </div>`, 'approval')
+    const t = takeoverEl()
+    const sel = new Set()
+    if (sugs.length) {
+      t.querySelectorAll('.appr-sug').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.dataset.si)
+          if (sel.has(i)) { sel.delete(i); btn.classList.remove('sel') }
+          else { sel.add(i); btn.classList.add('sel') }
+        })
+      })
+    }
+    t.querySelector('.appr-allow').addEventListener('click', () => sendApprove(a.requestId, true, null, [...sel].map((i) => sugs[i])))
+    t.querySelector('.appr-deny').addEventListener('click', () => sendApprove(a.requestId, false))
+  }
+
+  // 2026-08-24 提问交互表单：DSH「输入栏转化、依次显示」的降级——floria 在一张卡里列出所有问题，
+  // 每题为单选（点选 option），全答完点「提交答案」→ 经审批中继回 CLI（CLI 端 handleInteractivePermission
+  // 的桥应答对 allow 用 updatedInput={questions, answers}，工具即拿到答案）。
+  // 2026-08-26 用户「一次仅渲染一个」：与 DSH QuestionComposer 一致的逐题语义——输入栏只显示当前一题，
+  // 点选选项即记录，点「下一题」推进（带进度 第N/共M题），最后一题按钮变「提交答案」带全部 answers 回 CLI。
+  function renderQuestionApproval(a, qs) {
+    // 2026-08-30 提问卡对齐 DSH QuestionComposer（用户按 DSH 截图定稿）：eyebrow(header)+右上 折叠/×；
+    // 编号方块选项（label+描述同行）；「输入你的答案」自由输入行（自定义答案优先于选项）；
+    // 底部 <N/M> 翻题导航（可回看修改）+ 跳过本题 + 下一题/提交；整卡可折叠为一行（header+标题）。
+    // 多选题（multiSelect:true）同编号方块、可多选 toggle、eyebrow 带「（可多选）」；提交时多选
+    // join(", ") —— 与 CLI answers 契约对齐（record(question,string)，CLI join(", ") 同构）。
+    // 取消回答 = 右上 ×（sendApprove deny），不再设「拒绝」按钮；跳过本题 = 该题留空推进（允许空答）。
+    const answers = {}     // question -> string（单选）/ string[]（多选）
+    const customText = {}  // question -> 自由输入文本（非空时优先于选项答案）
+    let qi = 0
+    let collapsed = false
+    let submitting = false
+    const ansOf = (q) => {
+      const t = String(customText[q] || '').trim()
+      if (t) return t
+      const v = answers[q]
+      return Array.isArray(v) ? v.join(', ') : v
+    }
+    const submit = () => {
+      submitting = true
+      const out = {}
+      qs.forEach((qq) => {
+        const q = String(qq.question || '').trim()
+        const v = ansOf(q)
+        if (v) out[q] = v
+      })
+      sendApprove(a.requestId, true, { input: a.input, answers: out })
+    }
+    const bindChrome = (t) => {
+      // 折叠/展开与 ×（取消回答）——展开/收起两态共用；点击 qa-top 空白处也可切换
+      t.querySelector('.qa-top').addEventListener('click', (e) => {
+        if (submitting || e.target.closest('.qa-x')) return
+        collapsed = !collapsed
+        render()
+      })
+      t.querySelector('.qa-x').addEventListener('click', () => {
+        if (!submitting) sendApprove(a.requestId, false)
+      })
+    }
+    function renderCollapsed() {
+      const qq = qs[qi]
+      const question = String(qq.question || '').trim()
+      const header = String(qq.header || '提问')
+      showTakeover(`<div class="appr-card qa-card qa-collapsed"><div class="qa-top"><span class="qa-eyebrow">${esc(header)}</span><span class="qa-title-sm">${esc(question)}</span><span class="qa-fold" role="button" title="展开">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div></div>`, 'approval')
+      bindChrome(takeoverEl())
+    }
+    function renderOne() {
+      const qq = qs[qi]
+      const question = String(qq.question || '').trim()
+      const header = String(qq.header || '提问')
+      const opts = Array.isArray(qq.options) ? qq.options : []
+      const multi = qq.multiSelect === true
+      const isLast = qi + 1 >= qs.length
+      const fmt = (o) => (o && typeof o === 'object') ? String(o.label || '') : String(o || '')
+      const descOf = (o) => (o && typeof o === 'object' && o.description) ? String(o.description) : ''
+      const curAns = multi ? (Array.isArray(answers[question]) ? answers[question] : []) : answers[question]
+      let rows = ''
+      opts.forEach((o, oi) => {
+        const label = fmt(o)
+        const desc = descOf(o)
+        const sel = multi ? curAns.includes(label) : curAns === label
+        rows += `<button type="button" class="qa-opt${sel ? ' sel' : ''}" data-v="${esc(label)}"><span class="qa-num">${oi + 1}</span><span class="qa-copy"><span class="qa-label">${esc(label)}</span>${desc ? `<span class="qa-desc">${esc(desc)}</span>` : ''}</span></button>`
+      })
+      let html = '<div class="appr-card qa-card">'
+      html += `<div class="qa-top"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
+      html += `<div class="qa-main"><div class="qa-title">${esc(question)}</div>`
+      html += `<div class="qa-opts">${rows}</div>`
+      html += `<div class="qa-inputrow"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="输入你的答案" value="${esc(String(customText[question] || ''))}"></div>`
+      html += `<div class="qa-foot"><div class="qa-nav"><button type="button" class="qa-nav-btn prev${qi > 0 ? '' : ' off'}" data-nav="prev" title="上一题">${I.dshChevRight}</button><span class="qa-nav-pos">${qi + 1}/${qs.length}</span><button type="button" class="qa-nav-btn next${qi < qs.length - 1 ? '' : ' off'}" data-nav="next" title="下一题">${I.dshChevRight}</button></div>`
+      html += `<div class="qa-foot-btns"><button type="button" class="qa-skip">跳过本题</button><button type="button" class="appr-allow">${isLast ? '提交答案' : '下一题'}</button></div></div>`
+      html += '<div class="appr-state"></div></div></div>'
+      showTakeover(html, 'approval')
+      const t = takeoverEl()
+      bindChrome(t)
+      // 选项点选：只 toggle 行高亮不整卡重渲染（输入框不闪不失焦）；多选互不影响、单选互斥
+      t.querySelectorAll('.qa-opt').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (multi) {
+            const v = btn.dataset.v
+            const at = curAns.indexOf(v)
+            if (at >= 0) curAns.splice(at, 1)
+            else curAns.push(v)
+            btn.classList.toggle('sel')
+          } else {
+            t.querySelectorAll('.qa-opt').forEach((b) => b.classList.remove('sel'))
+            btn.classList.add('sel')
+            answers[question] = btn.dataset.v
+          }
+        })
+      })
+      const inp = t.querySelector('.qa-input')
+      inp.addEventListener('input', () => { customText[question] = inp.value })
+      t.querySelectorAll('.qa-nav-btn').forEach((b) => {
+        b.addEventListener('click', () => {
+          if (b.classList.contains('off')) return
+          if (b.dataset.nav === 'prev' && qi > 0) { qi--; render() }
+          if (b.dataset.nav === 'next' && qi < qs.length - 1) { qi++; render() }
+        })
+      })
+      t.querySelector('.qa-skip').addEventListener('click', () => {
+        if (submitting) return
+        delete answers[question]
+        delete customText[question]
+        if (isLast) submit()
+        else { qi++; render() }
+      })
+      t.querySelector('.appr-allow').addEventListener('click', () => {
+        if (submitting) return
+        if (isLast) submit()
+        else { qi++; render() }
+      })
+    }
+    function render() { if (collapsed) renderCollapsed(); else renderOne() }
+    render()
+  }
+
+  // 2026-08-26 P0 审批确认送达（Codex）：sendApprove 不再 WS send 后立即 clearTakeover。
+  // 进入「提交中」（禁用按钮 + 状态行），等网关 approval-confirmed（CLI 已处理回执）才关卡；
+  // approval-rejected（目标不在线）/断连 → 卡片保留 + 可见错误 + 重试按钮；等待无超时（2026-08-26 用户定案，与 CLI 一致，仅凭 confirmed/rejected/dismiss 收尾）。
+  let approvalPending = null // {requestId, allowed, qa, perms}：等待确认中的审批
+  function sendApprove(requestId, allowed, qa, perms) {
+    if (!gws || gws.readyState !== 1) return showApprovalError('连接已断开，审批未送达', requestId, allowed, qa, perms)
+    // 2026-08-23 web 独立会话：带 sessionId 供网关路由到对应子进程（CLI 会话无此字段走 broadcast 未接入提示）
+    const payload = { type: 'approve', requestId, allowed, sessionId: state.currentHash || undefined }
+    if (qa && qa.answers) { payload.input = qa.input; payload.answers = qa.answers } // 2026-08-24 提问答复
+    if (perms && perms.length) payload.permissions = perms // 2026-08-26 A2：勾选的「记住此规则」→ CLI persistPermissions
+    gws.send(JSON.stringify(payload))
+    if (approvalPending && approvalPending.requestId === requestId) approvalPending = null
+    approvalPending = { requestId, allowed, qa, perms }
+    const t = takeoverEl()
+    if (t) {
+      // 2026-08-30 提问卡改版：.qa-skip（跳过本题）同属提交动作按钮，busy 一并禁用
+      t.querySelectorAll('.appr-allow, .appr-deny, .qa-skip').forEach((b) => { b.disabled = true; b.classList.add('busy') })
+      let st = t.querySelector('.appr-state')
+      if (!st) {
+        const btns = t.querySelector('.appr-btns')
+        st = document.createElement('div')
+        st.className = 'appr-state'
+        if (btns) btns.parentNode.appendChild(st)
+      }
+      st.innerHTML = '<span class="as-wait">正在提交…</span>'
+    }
+  }
+  // P0：审批失败（断连/目标不在线/超时）→ 卡片保留 + 可见错误 + 重试；卡片不在则降级 addError
+  function showApprovalError(text, requestId, allowed, qa, perms) {
+    if (approvalPending && approvalPending.requestId === requestId) approvalPending = null
+    const t = takeoverEl()
+    if (t && takeover === 'approval') {
+      t.querySelectorAll('.appr-allow, .appr-deny, .qa-skip').forEach((b) => { b.disabled = false; b.classList.remove('busy') })
+      let st = t.querySelector('.appr-state')
+      if (!st) {
+        const btns = t.querySelector('.appr-btns')
+        st = document.createElement('div')
+        st.className = 'appr-state'
+        if (btns && btns.nextSibling) btns.parentNode.insertBefore(st, btns.nextSibling)
+        else if (btns) btns.parentNode.appendChild(st)
+      }
+      st.innerHTML = `<span class="as-err">${esc(text)}</span><button type="button" class="appr-retry">重试</button>`
+      const retry = st.querySelector('.appr-retry')
+      if (retry) retry.addEventListener('click', () => sendApprove(requestId, allowed, qa, perms))
+    } else {
+      addError(text)
+    }
+  }
+
+  // 2026-08-30 网关 pending approval 重放（DSH 同款「待答=会话持久状态」语义）：切会话/WS 重连时
+  // 告知网关当前会话 → 网关回放该会话未决 approval（提问瞬间开着别的会话或页面没开 → 切回补弹交互卡，
+  // 不再只剩只读兜底卡）。gws 未开/无当前会话时静默跳过（onopen 与 renderSession 双向兜底）。
+  function sendSubscribe() {
+    if (!gws || gws.readyState !== 1 || !state.currentHash) return
+    try { gws.send(JSON.stringify({ type: 'subscribe', sessionId: state.currentHash })) } catch { /* 连接已断 */ }
+  }
+
+  // 设备自报类型（2026-09-05）：iPadOS Safari 桌面模式 UA 与 macOS 全同（无 iPad 字样），
+  // 网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（MacIntel + 多点触控），
+  // 随 activate 轮询与 WS 连接上报，网关记入 gateway-devices（hint 优先于 UA 判定）。
+  // ===== 底栏任务浮窗（2026-09-10）=====
+  // 数据源 = CLI TodoV2 清单（源码 useTasksV2 单源出口 → /clients WS task-state → 网关 SSE /
+  // /gateway/session.tasks 首载）。web 只渲染不复刻判定（根本原则 1）：图标/排序/阻塞语义与 CLI
+  // TaskListV2 同构（✔ 完成 / ◼ 进行中 / ◻ 待办；blockedBy 命中未完成项 = 阻塞变暗；id 升序）。
+  // 形态（用户定案）：#input-bar 的子元素、贴其上沿（bottom:100%）——收敛露出 12px 把手条（.td-lip），
+  // 点击向上展开，再点头部向下收敛；宽度 = 输入栏宽 −48px 居中；展开底边与输入栏上沿留
+  // --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
+  // 接管卡（审批/提问）在场 → 自动收敛 + 禁点：.bar-takeover 规则本就以 display:none 让位，
+  // 此处再清 taskOpen，保证卡撤走后浮窗重现仍是收敛态。
+  const TASK_ICON = { completed: '✔', in_progress: '◼', pending: '◻' }
+  function taskById(a, b) {
+    const na = parseInt(a.id, 10)
+    const nb = parseInt(b.id, 10)
+    if (!isNaN(na) && !isNaN(nb)) return na - nb
+    return String(a.id).localeCompare(String(b.id))
+  }
+  function toggleTaskDock() {
+    if (takeover) return // 接管卡在场：禁点（卡即输入栏本体，任务浮窗让位）
+    live.taskOpen = !live.taskOpen
+    renderTaskDock()
+  }
+  function renderTaskDock() {
+    const dock = $('task-dock')
+    if (!dock) return
+    const panel = $('task-panel')
+    const lip = $('task-lip')
+    const list = Array.isArray(live.tasks) ? live.tasks : []
+    // 无清单（CLI 侧清空/隐藏，或未打开会话）→ 整窗不出现（与 CLI「tasks.length===0 → null」同判）
+    if (!list.length || !state.currentHash) {
+      dock.hidden = true
+      dock.classList.remove('open', 'blocked')
+      live.taskOpen = false
+      return
+    }
+    const blocked = !!takeover // 接管卡在场：收敛并禁点
+    if (blocked) live.taskOpen = false
+    const open = !!live.taskOpen
+    const keepTop = open ? panel.scrollTop : 0
+    const unresolved = new Set(list.filter((t) => t.status !== 'completed').map((t) => t.id))
+    const done = list.filter((t) => t.status === 'completed').length
+    const running = list.filter((t) => t.status === 'in_progress').length
+    const items = [...list].sort(taskById).map((t) => {
+      const status = t.status // 形状收口在网关 normalizeGatewayTasks（id/subject/status/blockedBy 已净化）
+      const blockers = t.blockedBy.filter((id) => unresolved.has(id))
+      const dim = status === 'completed' || blockers.length ? ' dim' : ''
+      // 提示文案（不占版面）：阻塞行说明等哪条，进行中行给 CLI spinner 同源的 activeForm
+      const tips = []
+      if (blockers.length) tips.push('等待前序任务：' + blockers.join('、'))
+      if (status === 'in_progress' && t.activeForm) tips.push(t.activeForm)
+      const title = tips.length ? ` title="${esc(tips.join(' · '))}"` : ''
+      const owner = t.owner ? `<span class="td-owner">@${esc(t.owner)}</span>` : ''
+      return `<div class="td-item${dim}" data-st="${status}"${title}>`
+        + `<span class="td-ico">${TASK_ICON[status]}</span>`
+        + `<span class="td-sub">${esc(t.subject)}</span>${owner}</div>`
+    }).join('')
+    const counts = ['共 ' + list.length + ' 项', done + ' 完成']
+    if (running) counts.push(running + ' 进行中')
+    // 面板整体重建（清单事件低频）：头部=收起把手（点击向下收敛），下方列表
+    panel.innerHTML = '<div class="td-head" role="button" tabindex="0" aria-label="收起任务清单">'
+      + '<span class="td-title">任务清单</span>'
+      + `<span class="td-counts">${counts.join(' · ')}</span>`
+      + `<span class="td-chev">${CHEV}</span>`
+      + '</div>'
+      + `<div class="td-list">${items}</div>`
+    dock.hidden = false
+    dock.classList.toggle('open', open)
+    dock.classList.toggle('blocked', blocked)
+    if (lip) {
+      lip.onclick = blocked ? null : toggleTaskDock
+      lip.disabled = blocked
+      lip.setAttribute('aria-expanded', open ? 'true' : 'false')
+      lip.title = blocked ? '任务清单（审批中）' : open ? '收起任务清单' : '展开任务清单（' + list.length + ' 项）'
+    }
+    const head = panel.querySelector('.td-head')
+    if (head) {
+      head.onclick = blocked ? null : toggleTaskDock
+      head.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTaskDock() } }
+    }
+    if (keepTop) panel.scrollTop = keepTop
+  }
+
+// —— 跨模块写入口（切割脚本生成）——
+export function setTakeover(v) { takeover = v }
+export function setTurnLive(v) { turnLive = v }
+export function setBtnModeSet(v) { btnMode = v }
+export function setApprovalPending(v) { approvalPending = v }
+
+export {
+  HEIGHT_MS,
+  SHOW_LOCAL_SYS,
+  addError,
+  addSystem,
+  approvalPending,
+  btnMode,
+  chatScrollPadEl,
+  claimStartTs,
+  claimTick,
+  claimTimer,
+  claimTimerSet,
+  cancelClose,
+  clearTakeover,
+  finishClear,
+  lastPad,
+  procLabel,
+  renderApproval,
+  renderQuestionApproval,
+  renderSettle,
+  renderTaskDock,
+  renderTransient,
+  sendApprove,
+  sendSubscribe,
+  setBtnMode,
+  showApprovalError,
+  showTakeover,
+  sugLabel,
+  sugSub,
+  syncTakeoverPad,
+  syncTurnLive,
+  takeover,
+  takeoverEl,
+  takeoverPlainH,
+  turnLive,
+  wrapAnimToken,
+  wrapAnimating,
+  wrapCloseTimer,
+  wrapClosing,
+}

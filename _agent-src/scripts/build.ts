@@ -215,6 +215,22 @@ const defines = {
   ),
 } as const
 
+// 前端 JS 模块拼接：src/gateway/web-src/（ESM 模块源码，唯一手改处）→ src/gateway/web/app.js（单 IIFE 产物）。
+// 不用 Bun.build 打包器：其按依赖图重排模块执行序，而各模块顶层立即执行代码（事件绑定/DOM 初始化）依赖
+// 原 IIFE 物理行序（重排 → TDZ 崩溃，2026-09-10 首跑实证），且切割会丢 IIFE 顶部区间外的 `const $` 声明
+// ——故用自写拼接器按切割区间行序拼回（行序=原执行序，语义保真），锚点检索防呆，产物可 diff 等价验证。
+// web/app.js 是生成物勿手改；产物文件名/引用不变（?v= cache-bust、sw CORE、gen-web-assets 全链零改动）。
+const bundleWeb = Bun.spawnSync({
+  cmd: ['bun', 'scripts/bundle-web-modules.ts'],
+  cwd: process.cwd(),
+  stdout: 'inherit',
+  stderr: 'inherit',
+})
+if (bundleWeb.exitCode !== 0) {
+  console.error('[build] 前端模块拼接失败（bundle-web-modules），终止构建')
+  process.exit(bundleWeb.exitCode ?? 1)
+}
+
 // 前端资源打包：把 src/gateway/web/ → web-assets.generated.ts（内置网关 PRIVATE_GATEWAY 内嵌 serve 用）
 // 生成产物会打进 exe，因此每次构建都自动重跑，保证 exe 内前端为最新。
 const genWeb = Bun.spawnSync({

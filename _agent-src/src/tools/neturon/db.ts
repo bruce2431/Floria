@@ -206,7 +206,7 @@ export function countMemories(dbPath: string): number {
 export function insertMemory(dbPath: string, entry: MemEntry): void {
   const db = openDb(dbPath)
   try {
-    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?,?)`, memEntryRow(entry))
+    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?)`, memEntryRow(entry))
   } finally {
     db.close()
   }
@@ -379,7 +379,7 @@ export function migrateMemJsonToDb(
   try {
     // OR REPLACE：源 mem.json 历史遗留重复 memory_id last-wins 折叠
     // （真身 LJJ 6 条重复 → 4397-6=4391 行，对照 SubPj7 实迁移行为）
-    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?)`)
     for (const e of entries) {
       const men = (e.men ?? {}) as Record<string, unknown>
       const sem = (e.sem ?? {}) as Record<string, unknown>

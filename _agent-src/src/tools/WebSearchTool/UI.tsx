@@ -24,12 +24,10 @@ function getSearchSummary(results: (SearchResult | string | null | undefined)[])
 }
 export function renderToolUseMessage({
   query,
-  allowed_domains,
-  blocked_domains
+  limit
 }: Partial<{
   query: string;
-  allowed_domains?: string[];
-  blocked_domains?: string[];
+  limit?: number;
 }>, {
   verbose
 }: {
@@ -42,13 +40,8 @@ export function renderToolUseMessage({
   if (query) {
     message += `"${query}"`;
   }
-  if (verbose) {
-    if (allowed_domains && allowed_domains.length > 0) {
-      message += `, only allowing domains: ${allowed_domains.join(', ')}`;
-    }
-    if (blocked_domains && blocked_domains.length > 0) {
-      message += `, blocking domains: ${blocked_domains.join(', ')}`;
-    }
+  if (verbose && limit !== undefined) {
+    message += `, limit: ${limit}`;
   }
   return message;
 }

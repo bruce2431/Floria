@@ -16,6 +16,7 @@ import type {
   ApiKeyEntry,
   CredentialsFile,
   ProviderConfig,
+  WebSearchCredentials,
 } from './types.js'
 
 const CREDENTIALS_FILENAME = 'credentials.json'
@@ -69,12 +70,19 @@ export function loadCredentials(): CredentialsFile {
       return createDefaultCredentials()
     }
     const data = parsed as Record<string, unknown>
-    return {
+    const creds: CredentialsFile = {
       activeProvider: typeof data.activeProvider === 'string' ? data.activeProvider : '',
       providers: (typeof data.providers === 'object' && data.providers !== null
         ? data.providers
         : {}) as Record<string, ProviderConfig>,
     }
+    // Carry the WebSearch tool section through: load→save round-trips (key
+    // rotation, /key ops) rewrite the whole file, so an unparsed section would
+    // be silently wiped on the next write.
+    if (typeof data.webSearch === 'object' && data.webSearch !== null) {
+      creds.webSearch = data.webSearch as WebSearchCredentials
+    }
+    return creds
   } catch {
     return createDefaultCredentials()
   }
@@ -87,11 +95,70 @@ export function saveCredentials(creds: CredentialsFile): void {
   writeCredentials(creds)
 }
 
+// ── 会话级供应商绑定（2026-09-10）────────────────────────────────────────────
+// 一个 CLI 进程 = 一个会话，请求凭据（baseUrl / apiKey / 默认模型）必须由本进程
+// 自己决定：全局 activeProvider / activeModel 的任何写入——其它会话切模型、首页设
+// 默认模型、/model 命令写池——都不得漂移已运行会话的供应商。否则会出现
+// 「模型名属于 A、endpoint/key 属于 B」的 400（2026-09-10 实测：
+// 新会话界面切 deepseek → 全局池被改写 → 两个在跑的 GLM 会话拿 glm-5.3-flash
+// 打 api.deepseek.com/anthropic 全数 400）。
+//
+// 解析顺序（不变量：本进程请求凭据只随本进程状态变化）：
+//   1. 显式 override —— 网关按会话路由 {type:'model', provider} 时设置（跨供应商切换）
+//   2. 进程启动快照 —— 首次解析时的 activeProvider + 该商 activeModel
+//   3. 池文件现值 —— 快照缺失 / 绑定供应商已被删除时
+let _sessionProviderOverride: string | null = null
+let _bootSnapshotTaken = false
+let _bootProviderSnapshot: string | null = null
+let _bootModelSnapshot: string | null = null
+
+/** 网关按会话路由模型切换时调用；null 清除（回落启动快照）。 */
+export function setSessionProviderOverride(name: string | null): void {
+  _sessionProviderOverride = name && name.trim() ? name.trim() : null
+}
+
+/** 本进程当前绑定的供应商名（会话有效），见 _resolveSessionProvider。 */
+export function getSessionProviderName(): string {
+  return _resolveSessionProvider(loadCredentials()).name
+}
+
+function _takeBootSnapshot(creds: CredentialsFile): void {
+  if (_bootSnapshotTaken) return
+  _bootSnapshotTaken = true
+  const cfg = creds.activeProvider ? creds.providers[creds.activeProvider] : undefined
+  _bootProviderSnapshot = cfg ? creds.activeProvider : null
+  _bootModelSnapshot = cfg?.activeModel ?? null
+}
+
+function _resolveSessionProvider(creds: CredentialsFile): {
+  name: string
+  cfg: ProviderConfig | null
+  explicit: boolean
+} {
+  _takeBootSnapshot(creds)
+  if (_sessionProviderOverride && creds.providers[_sessionProviderOverride]) {
+    return { name: _sessionProviderOverride, cfg: creds.providers[_sessionProviderOverride], explicit: true }
+  }
+  if (_bootProviderSnapshot && creds.providers[_bootProviderSnapshot]) {
+    return { name: _bootProviderSnapshot, cfg: creds.providers[_bootProviderSnapshot], explicit: false }
+  }
+  const name = creds.activeProvider
+  return { name, cfg: name ? (creds.providers[name] ?? null) : null, explicit: false }
+}
+
 /**
- * Get the config for the currently active provider.
+ * Get the config of this session's bound provider (request chain: baseUrl / keys).
  * Returns null if no provider is active or configured.
  */
 export function getActiveProviderConfig(): ProviderConfig | null {
+  return _resolveSessionProvider(loadCredentials()).cfg
+}
+
+/**
+ * Get the config of the pool's current activeProvider, ignoring this process's
+ * session binding. Management views only (gateway /gateway/models display).
+ */
+export function getGlobalActiveProviderConfig(): ProviderConfig | null {
   const creds = loadCredentials()
   if (!creds.activeProvider || !creds.providers[creds.activeProvider]) {
     return null
@@ -121,12 +188,33 @@ export function getActiveBaseUrl(): string | null {
 }
 
 /**
- * Get the active model name from the credential pool.
+ * Get this session's default model name (used when nothing overrides the model
+ * in-process). Bound to the session provider: without an explicit override it
+ * answers the boot snapshot's model, so another session writing the pool's
+ * activeModel cannot drift this session's model name away from its endpoint.
  * Returns null if none configured.
  */
 export function getActiveModel(): string | null {
-  const config = getActiveProviderConfig()
-  return config?.activeModel ?? null
+  const creds = loadCredentials()
+  const resolved = _resolveSessionProvider(creds)
+  if (resolved.explicit) return resolved.cfg?.activeModel ?? null
+  return _bootModelSnapshot ?? resolved.cfg?.activeModel ?? null
+}
+
+/**
+ * Get the pool's current activeModel, ignoring this process's session binding.
+ * Management views only (gateway /gateway/models display).
+ */
+export function getGlobalActiveModel(): string | null {
+  return getGlobalActiveProviderConfig()?.activeModel ?? null
+}
+
+/**
+ * Get the WebSearch tool's backend configuration section.
+ * Returns {} when never configured.
+ */
+export function getWebSearchCredentials(): WebSearchCredentials {
+  return loadCredentials().webSearch ?? {}
 }
 
 /**
@@ -197,27 +285,10 @@ export function findModelProvider(model: string): string | null {
 }
 
 /**
- * 2026-08-29 直接切模型自动切供应商：模型属其它供应商 → 全局切 activeProvider
- * 并写该供应商 activeModel（保持池状态一致）；同供应商 → 原样不动（会话级切换不写池）。
- * 返回归属供应商名；模型不在任何供应商清单 → null。
- */
-export function ensureProviderForModel(model: string): string | null {
-  const owner = findModelProvider(model)
-  if (!owner) return null
-  const creds = loadCredentials()
-  if (creds.activeProvider === owner) return owner
-  creds.activeProvider = owner
-  const cfg = creds.providers[owner]
-  if (cfg && Array.isArray(cfg.models) && cfg.models.includes(model)) {
-    cfg.activeModel = model
-  }
-  saveCredentials(creds)
-  return owner
-}
-
-/**
  * Switch model globally: resolve the owning provider, switch to it and write
- * its activeModel. Always writes (unlike ensureProviderForModel).
+ * its activeModel. Always writes. Global default only — session-level model
+ * switches bind the provider in-process (setSessionProviderOverride) and must
+ * NOT come through here (2026-09-10: that write used to leak across sessions).
  * Returns false if no provider lists the model.
  */
 export function switchModelAuto(model: string): boolean {

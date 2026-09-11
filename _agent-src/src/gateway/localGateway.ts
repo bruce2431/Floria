@@ -53,7 +53,7 @@ import {
 // 复用官方凭据池：模型校验与 CLI 同一来源（credentials.json activeProvider.models），
 // 每会话切换不写全局凭据池（不 switchModel）；getActiveModel 与 CLI getUserSpecifiedModelSetting 同源。
 // 设为默认模型 = switchModel 写凭据池 activeModel（全局默认，2026-08-23）。
-import { ensureProviderForModel, findModelProvider, getActiveModel, getActiveProviderConfig, loadCredentials, switchModelAuto } from '../utils/credentials/pool.js'
+import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, loadCredentials, switchModelAuto } from '../utils/credentials/pool.js'
 import { modelSupportsVision } from '../utils/model/vision.js'
 // 上下文占用（dsh ContextMeter 数据源）：复用 auto-compact 同源的模型上下文窗口解析，不本地复刻。
 import { getContextWindowForModel } from '../utils/context.js'
@@ -301,6 +301,41 @@ const sessionModels = new Map<string, { model: string; updatedAt: number }>()
 // 排队项（仅用户 prompt）。web 排队区置底数据源：/gateway/session.queued 首载 + SSE queue-state 增量。
 // 纯引擎内存态镜像，CLI 断开即随 detach 删除。
 const sessionQueues = new Map<string, { items: Array<{ content: string; ts: number }>; updatedAt: number }>()
+// 2026-09-10 web 底栏任务浮窗数据源：CLI 侧 /clients WS task-state 上报的当前可见任务清单
+//（TodoV2 TasksV2Store 单源出口快照，与 CLI TaskListV2 同源）。首载 = /gateway/session.tasks，
+// 增量 = SSE task-state。纯引擎内存态镜像，CLI 断开随 detach 删除（重连由 task-state 补发对齐）。
+// 字段对齐 CLI 源码 TaskSchema（utils/tasks.ts）+ TaskListV2 实际渲染列：状态图标/subject/
+// owner/进行中活动/阻塞计数。description 等长文本不透传（web 浮窗只显示清单行）。
+type GatewayTaskItem = {
+  id: string
+  subject: string
+  status: 'pending' | 'in_progress' | 'completed'
+  owner?: string
+  activeForm?: string
+  blockedBy: string[]
+}
+const sessionTasks = new Map<string, { tasks: GatewayTaskItem[]; updatedAt: number }>()
+
+/** CLI task-state 载荷净化：丢弃结构不符项，字段裁剪到浮窗所需最小集（形状边界在网关收口）。 */
+function normalizeGatewayTasks(raw: unknown): GatewayTaskItem[] {
+  if (!Array.isArray(raw)) return []
+  const out: GatewayTaskItem[] = []
+  for (const it of raw) {
+    if (!it || typeof it !== 'object') continue
+    const t = it as Record<string, unknown>
+    const status = t.status === 'completed' ? 'completed' : t.status === 'in_progress' ? 'in_progress' : 'pending'
+    if (typeof t.id !== 'string' || typeof t.subject !== 'string') continue
+    out.push({
+      id: t.id,
+      subject: t.subject.slice(0, 500),
+      status,
+      owner: typeof t.owner === 'string' ? t.owner : undefined,
+      activeForm: typeof t.activeForm === 'string' ? t.activeForm : undefined,
+      blockedBy: Array.isArray(t.blockedBy) ? (t.blockedBy as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+    })
+  }
+  return out
+}
 // 2026-09-06 web 打断收口二轮：回合被中止的网关权威时刻（per-session）。打断后 jsonl 零写入，
 // 本时刻是刷新后恢复收口判定的唯一持久源（turn-state SSE 只覆盖不刷新的实时路径）；无 TTL、
 // 不入 sweepStaleMaps——被打断的回合永无回复，语义同前端 turnEndFlags「无 TTL 防运行态复活」。
@@ -348,6 +383,7 @@ const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
 const SESSION_MODEL_TTL_MS = 10 * 60 * 1000 // sessionModels 10 分钟无上报视为过期
 const SESSION_QUEUE_TTL_MS = 10 * 60 * 1000 // sessionQueues 10 分钟无上报视为过期
+const SESSION_TASK_TTL_MS = 10 * 60 * 1000 // sessionTasks 10 分钟无上报视为过期
 const MAX_REPORT_BODY_BYTES = 1024 * 1024
 
 // ============================================================================
@@ -1039,6 +1075,9 @@ function sweepStaleMaps(now = Date.now()): void {
   for (const [sid, v] of sessionQueues) {
     if (now - v.updatedAt > SESSION_QUEUE_TTL_MS) sessionQueues.delete(sid)
   }
+  for (const [sid, v] of sessionTasks) {
+    if (now - v.updatedAt > SESSION_TASK_TTL_MS) sessionTasks.delete(sid)
+  }
 }
 
 async function listSessions(root: string) {
@@ -1477,8 +1516,10 @@ function listModels(root: string): Record<string, unknown> {
   const cfgItems = items.filter((it) => !poolSet.has(it.v))
   // 当前真实启用模型 = 凭据池 activeModel（与 CLI getUserSpecifiedModelSetting 同源，优先级高于 settings.model）；
   // 无凭据池配置时回落到 settings.model，保证显示值与 CLI 实际使用一致。
-  const activeModel = getActiveModel()
-  const activeCfg = getActiveProviderConfig()
+  // 管理视图语义（2026-09-10）：读池文件现值，不走本进程会话绑定（网关展示的是全局默认，
+  // 不因某个会话的绑定而变）。
+  const activeModel = getGlobalActiveModel()
+  const activeCfg = getGlobalActiveProviderConfig()
   return {
     workspace: root,
     model: activeModel ?? (settings.model !== undefined ? String(settings.model) : null),
@@ -1714,10 +1755,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 2026-08-22 模型/思考等级切换（受上方 /gateway/* token 校验保护）：
-  //   POST /gateway/model {model?, effortLevel?, sessionId?}
-  //   - model → 每会话切换：校验放宽到凭据池全部供应商（findModelProvider），归属其它供应商时
-  //     自动全局切供应商（ensureProviderForModel，2026-08-29）；按 sessionId 精确路由
-  //     到对应 CLI 进程（{type:'model'} 实时生效，该进程 STATE 覆盖仅本会话；无 sessionId/未命中广播兜底）。
+  //   POST /gateway/model {model?, effortLevel?, sessionId?, defaultModel?}
+  //   - model → 每会话切换：校验放宽到凭据池全部供应商（findModelProvider），随
+  //     {type:'model', provider} 按 sessionId 精确路由到对应 CLI 进程（该进程进程内绑定该
+  //     供应商的 baseUrl/key + STATE 模型覆盖），只影响本会话；未在线拒绝、无 sessionId 拒绝。
+  //     2026-09-10 根治：本分支不再写全局凭据池（原先 ensureProviderForModel 全局切
+  //     activeProvider，导致切一个会话的模型毒害其它在跑会话——模型名/endpoint 错配 400）。
+  //   - defaultModel → 全局默认模型（switchModelAuto 写池），只对之后新建的会话生效；
+  //     已运行会话按启动快照绑定，不受影响。
   //   - effortLevel → 写 settings.json effortLevel（全局持久化）+ 广播 {type:'effort'} 实时生效。
   if (req.method === 'POST' && url.pathname === '/gateway/model') {
     try {
@@ -1736,14 +1781,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         sendJson(res, 400, { error: 'invalid body' })
         return
       }
+      // 模型归属供应商：随路由下发，目标 CLI 进程据此绑定 baseUrl/key（跨供应商会话级切换）
+      let modelProvider: string | null = null
       if (model !== undefined) {
-        // 2026-08-29 直接切模型自动切供应商：校验放宽为凭据池全部供应商（findModelProvider）；
-        // 归属其它供应商 → ensureProviderForModel 全局切 activeProvider + 写该商 activeModel（key/baseUrl 随之生效）
-        if (!findModelProvider(model)) {
+        modelProvider = findModelProvider(model)
+        if (!modelProvider) {
           sendJson(res, 400, { error: `model "${model}" 不在凭据池任何供应商模型清单中` })
           return
         }
-        ensureProviderForModel(model)
       }
       if (defaultModel !== undefined) {
         // 设为全局默认模型：2026-08-29 起跨供应商自动切换——switchModelAuto 解析归属供应商、
@@ -1768,7 +1813,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       }
       if (model !== undefined) {
         // model 每会话覆盖，精确路由到目标会话；未在线/未连接则拒绝而非广播兜底（2026-08-23 用户定案）
-        if (!routeToClient(sessionId, { type: 'model', value: model })) {
+        // provider 一并下发：CLI 进程内绑定该供应商（baseUrl/key），与模型名同源，避免错配
+        if (!routeToClient(sessionId, { type: 'model', value: model, provider: modelProvider })) {
           sendJson(res, 400, { error: '目标会话未在线，无法切换模型' })
           return
         }
@@ -2135,10 +2181,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       data.modelTs = sm?.updatedAt ?? null
       // 2026-08-28 遥测端图片门控：该会话模型是否识图（有上报按上报模型，无上报回落全局 activeModel，
       // 与 model 字段回落同源）→ 前端 renderSession/applySessionModel 据此显隐图片上传入口
-      const visionModel = sm?.model ?? getActiveModel()
+      const visionModel = sm?.model ?? getGlobalActiveModel()
       data.vision = visionModel ? modelSupportsVision(visionModel) : false
       // 2026-08-30 队列快照（清单#2）：当前排队项（首载/刷新时与 SSE queue-state 增量同构）
       data.queued = sessionQueues.get(uuid)?.items ?? []
+      // 2026-09-10 任务清单快照：当前可见任务（首载/刷新时与 SSE task-state 增量同构）
+      data.tasks = sessionTasks.get(uuid)?.tasks ?? []
       // 2026-09-08 事件流统一 P1：当前 delta seq 记账随全量下发——web 全量对账后以此为续流
       // 起点（seq 连续应用 / gap 再对账），网关重启清零后 CLI 未发 delta 时回落 0（下条 seq=1 连续）。
       data.deltaSeq = sessionDeltaSeq.get(uuid) ?? 0
@@ -2456,13 +2504,22 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
         const target = cliClients.get(data.sessionId)
         if (target && target.readyState === WebSocket.OPEN) {
           target.send(JSON.stringify(sendPayload))
-        } else if (webSessions.has(data.sessionId) || spawningPromises.has(data.sessionId)) {
+        } else if (spawningPromises.has(data.sessionId) || webSessionEntryAlive(data.sessionId)) {
           // 2026-09-06 wsession 异步化配套：spawn/注册完成前到达的消息暂存，CLI 注册钩子
           // flushPendingDeliveries 按序补投——原「web 会话启动中，请稍后再发送」= 用户消息
           // 无声丢失（异步化后 spawn 在途是常态窗口），根除。
+          // 2026-09-10 判活收紧：webSessions 账面记录 ≠ 进程活性（pid 由 cli-hello 上报，缺失则
+          // pid 空），死记录命中此分支 = 消息暂存后无人消费（挡住下方 resumeAndDeliver 恢复路径）
+          // → web 恒显无响应（09-10「无响应+CLI 启动后接续」实测事故根因）。改按真实活性判定，
+          // 死记录落空走 resumeAndDeliver 恢复。
           const q = pendingDeliveries.get(data.sessionId) ?? []
           q.push({ text, images })
           pendingDeliveries.set(data.sessionId, q)
+          // 2026-09-10 暂存回执：spawn 在途是 wsession 异步化常态（前端会话态自明，不弹）；
+          // 活进程断连重连间隙的暂存须可见——否则 web 无响应而消息去向成谜。
+          if (!spawningPromises.has(data.sessionId)) {
+            ws.send(JSON.stringify({ type: 'status', state: '会话连接恢复中，消息已暂存，CLI 重连后自动补投' }))
+          }
         } else {
           // 2026-08-25 发送即 resume：进程未在线 → 按磁盘会话文件定位并先恢复本地 CLI 窗口再投递（web/CLI 一视同仁）
           resumeAndDeliver(data.sessionId, text, images, ws)
@@ -2490,6 +2547,24 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
         target.send(JSON.stringify({ type: 'interrupt' }))
       } else {
         ws.send(JSON.stringify({ type: 'status', state: '会话未在线，无法打断' }))
+      }
+      break
+    }
+    case 'queue-nudge': {
+      // 2026-09-10 web 排队消息催办：web 前端 {type:'queue-nudge', sessionId}（点击排队
+      // 气泡）→ 按会话精确路由给在线 CLI → CLI 侧判活后置位催办标记，query.ts 生成流
+      // 就地断流、本轮 drain 把该消息纳入当前轮次（与 interrupt 不同：不改回合边界、
+      // 不撤回、不产生新回合）。会话未在线只回 status（无生成流可断，排队消息在离线
+      // 会话里本就只会走常规投递），不 resumeAndDeliver。
+      if (!data.sessionId) {
+        ws.send(JSON.stringify({ type: 'status', state: '缺少会话标识，无法催办' }))
+        break
+      }
+      const target = cliClients.get(data.sessionId)
+      if (target && target.readyState === WebSocket.OPEN) {
+        target.send(JSON.stringify({ type: 'queue-nudge' }))
+      } else {
+        ws.send(JSON.stringify({ type: 'status', state: '会话未在线，无法催办' }))
       }
       break
     }
@@ -2959,10 +3034,20 @@ function flushPendingDeliveries(sessionId: string): void {
 
 function spawnWebSession(resume: string | undefined, project: string | undefined, sidForNew?: string): Promise<string> {
   // 幂等：resume 的会话进程已在跑（前端切走再切回）→ 复用现有进程，不重复 spawn（双进程会双写同一 jsonl）
+  // 2026-09-10 复用前验活：账面记录 ≠ 进程活性（死记录直接 resolve → 注入轮询 5s miss → 消息
+  // 未注入丢失）。死记录清理后走正常 spawn；防双写不破——死进程不写盘，活进程重连窗口仍由
+  // 下方 cliRegisterAt 近期注册痕迹保护兜住（不 spawn）。
   if (resume && webSessions.has(resume)) {
     const existing = webSessions.get(resume)
-    if (existing) existing.lastActive = Date.now()
-    return Promise.resolve(resume)
+    if (existing && webSessionEntryAlive(resume)) {
+      existing.lastActive = Date.now()
+      return Promise.resolve(resume)
+    }
+    if (existing) {
+      console.log(`[gateway] wsession: 复用检查发现死记录，清理后走恢复 spawn sid=${resume}`)
+      webSessions.delete(resume)
+      persistWebSessions()
+    }
   }
   // 2026-08-31 防双进程根修：近期有 /clients 注册痕迹 = 活进程在断连重连 → 复用不 spawn
   //（双进程乒乓根因，见 cliRegisterAt 注释）。wsession（点开会话）与 resumeAndDeliver（发送
@@ -3057,8 +3142,18 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
       reject(err)
     })
   })
-  spawningPromises.set(sid, p)
-  return p
+  // 2026-09-11 根治（②「web 发送信息，cli 侧无法正常 resume 并运行；手动 resume 后发送的信息自动出现」）：
+  // spawn 在途登记必须 settle 即清。此前只 set 无 delete（全文件零 delete）⇒ 该会话首次 spawn 后条目
+  // 永久驻留（含已 settle 的 promise）：① 上方 `inflight` 幂等短路恒命中旧 promise，再也 spawn 不起来；
+  // ② send 路由 `spawningPromises.has(sid)` 恒真 → 消息全落 pendingDeliveries 等一个永不再来的注册。
+  // 用户手动 resume（CLI 侧原生 --resume，不经此表）注册成功 → /clients 钩子 flushPendingDeliveries
+  // 补投 → 消息「自己出现」。新建会话 sid 每次新分配、不经此表 → 用户观察「开启会话是正常的」。
+  // 不变量：spawningPromises 里的条目恒为「真在途、未 settle」的 spawn。
+  const tracked = p.finally(() => {
+    spawningPromises.delete(sid)
+  })
+  spawningPromises.set(sid, tracked)
+  return tracked
 }
 
 // 2026-08-24 web 会话改造：web 消息经 cliClients 注入（CLI 侧 gatewayClient enqueue），
@@ -3099,16 +3194,29 @@ function stopWebSession(sessionId: string): boolean {
   return true
 }
 
+// 2026-09-10 账面活性判定（send 暂存分支 / spawn 幂等复用 / reclaim 三处共用一判）：
+// webSessions 记录 ≠ 进程活性（pid 由 cli-hello 上报补填，旧 exe 或上报缺失则 pid 空）。
+// 权威信号：pid 已知 → isPidAlive；pid 空 → cliClients WS 在（WS 由进程发起，连接在即进程在）。
+// 无记录 → false。守护的不变量：账面记录命中「存续」判定时，必有活进程或其活跃连接可承接消息/复用。
+function webSessionEntryAlive(sid: string): boolean {
+  const p = webSessions.get(sid)
+  if (!p) return false
+  return p.pid ? isPidAlive(p.pid) : cliClients.has(sid)
+}
+
 // 空闲回收：web 会话（本地可见交互 CLI 窗口）生命周期由用户本地操作决定——进程活着不回收
 // （lastActive 只是网关侧活跃，本地窗口用户可能正直接操作）；仅清理「进程已死」的残留注册。
+// 2026-09-10 判活统一走 webSessionEntryAlive：原条件 `p.pid && !isPidAlive(p.pid)` 对 pid 空
+// 记录恒不清（孤儿注册永存，恒挡 send 暂存分支）。边界：活进程 WS 重连间隙（≤30s backoff）
+// 恰逢 60s 步进被清记录 → 后续 send 走 resumeAndDeliver → spawnWebSession 由 cliRegisterAt
+// 近期注册痕迹保护复用不 spawn，无双写风险。
 function reclaimIdleWebSessions(): void {
   let changed = false
   for (const [sid, p] of [...webSessions]) {
-    if (p.pid && !isPidAlive(p.pid)) {
-      console.log(`[gateway] web 会话 ${sid} CLI 进程已退出，清理运行注册`)
-      webSessions.delete(sid)
-      changed = true
-    }
+    if (webSessionEntryAlive(sid)) continue
+    console.log(`[gateway] web 会话 ${sid} CLI 进程已退出，清理运行注册`)
+    webSessions.delete(sid)
+    changed = true
   }
   if (changed) persistWebSessions()
 }
@@ -3139,6 +3247,55 @@ function scheduleIdleShutdown(): void {
     process.exit(0)
   }, GATEWAY_IDLE_MINUTES * 60 * 1000)
   idleTimer.unref?.()
+}
+
+// 2026-09-11 ① 协议级心跳（web⇄CLI「总是显示连接中断」根修）：/ws 与 /clients 都是长连接，此前
+// 两侧判活只靠 TCP FIN——对端进程消失/链路半开（改网、睡眠唤醒、中间设备静默断流、NAT 超时）时不产生
+// FIN，连接永久滞留 ESTABLISHED：网关侧表现为 cliClients/sockets 里的僵尸（send 进黑洞、而
+// webSessionEntryAlive 的 `cliClients.has(sid)` 判活又据此误判「活进程」→ send 路由暂存兜住不投），
+// 浏览器侧表现为 connUp 该断不断或该连不连、永不自愈。ping/pong 是唯一不依赖 FIN 的判活手段
+// （两侧实现都自动回 pong：浏览器按 RFC 6455 由网络层应答，CLI 侧 ws 客户端默认 autoPong）。
+// 不变量：sockets/cliClients 里的连接恒为「最近一个心跳窗内可应答」的活连接——僵尸在 ≤60s 内被回收，
+// 上层判活/路由/暂存分支据此看见真相。
+const HEARTBEAT_INTERVAL_MS = 30_000
+// 连续 2 次无 pong（≈60s）才判死：> 事件循环可预见的最长阻塞（重任务/大批量向量推理），避免误杀活连接。
+const HEARTBEAT_MAX_MISS = 2
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+const wsMisses = new WeakMap<WebSocket, number>()
+/** 挂进每个 WS 连接：pong 到达即清零未应答计数（markAlive 在 /ws 与 /clients 两处接入）。 */
+function markAlive(ws: WebSocket): void {
+  wsMisses.set(ws, 0)
+  ws.on('pong', () => wsMisses.set(ws, 0))
+}
+function startSocketHeartbeat(): void {
+  if (heartbeatTimer) return
+  heartbeatTimer = setInterval(() => {
+    for (const c of [...sockets, ...cliClients.values()]) {
+      if (c.readyState !== WebSocket.OPEN) continue
+      const misses = wsMisses.get(c) ?? 0
+      if (misses >= HEARTBEAT_MAX_MISS) {
+        console.log(`[gateway] 心跳超时（${HEARTBEAT_MAX_MISS} 次无 pong），回收僵尸连接`)
+        try {
+          c.terminate()
+        } catch {
+          /* 已断忽略 */
+        }
+        continue
+      }
+      wsMisses.set(c, misses + 1)
+      try {
+        c.ping()
+      } catch {
+        /* 已断忽略，下轮 readyState 检查兜住 */
+      }
+    }
+  }, HEARTBEAT_INTERVAL_MS)
+  heartbeatTimer.unref?.()
+}
+function stopSocketHeartbeat(): void {
+  if (!heartbeatTimer) return
+  clearInterval(heartbeatTimer)
+  heartbeatTimer = null
 }
 
 // 2026-08-31 取证强化：网关日志逐行加 [MM-DD HH:MM:SS] 时间戳。落盘是 fd 重定向（server.ts
@@ -3206,8 +3363,10 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
     })
   })
   wss = new WebSocketServer({ noServer: true })
+  startSocketHeartbeat() // ① 心跳：/ws 与 /clients 的僵尸连接回收（stopLocalGateway 统一停）
   wss.on('connection', (ws) => {
     sockets.add(ws)
+    markAlive(ws) // 心跳接驳：/ws 断链检测（僵尸回收，见 startSocketHeartbeat）
     scheduleIdleShutdown()
     // 2026-08-27 移除「connected」状态广播：此前每次 WS 连接 broadcast {type:'status',state:'connected'}，
     // 前端把它渲染成 chat 区系统行「· connected」；该提示无消费价值（其它 status 状态保留），故根因删除。
@@ -3260,6 +3419,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
         return
       }
       wss?.handleUpgrade(req, socket, head, (ws) => {
+        markAlive(ws) // 心跳接驳：/clients 断链检测（僵尸回收，见 startSocketHeartbeat）
         const prev = cliClients.get(sid)
         if (prev && prev !== ws) {
           // 2026-08-31 取证（同步异常根修）：重复注册顶替旧连接此前零日志（盲区）——高频出现
@@ -3297,10 +3457,13 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             blockedPath?: string
             response?: unknown
             items?: unknown
+            /** 2026-09-10 任务清单快照（TodoV2 可见清单，见 task-state 分支） */
+            tasks?: unknown
             active?: unknown
             pid?: unknown
             seq?: unknown
-            base?: unknown
+            /** 2026-09-10 协议根修：delta 对齐键（旧数字坐标 base 已废弃，见 conversationDisplay.buildDisplayDelta） */
+            anchorSid?: unknown
             messages?: unknown
           }
           try {
@@ -3340,6 +3503,17 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             sessionQueues.set(sid, { items, updatedAt: Date.now() })
             sweepStaleMaps()
             const s = `data: ${JSON.stringify({ type: 'queue-state', session: sid, items })}\n\n`
+            sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          // 2026-09-10 底栏任务浮窗：CLI TodoV2 清单快照（useTasksV2 单源出口）→ 存 per-session +
+          // SSE 群发（事件体直接带 tasks，前端免拉 /gateway/session 即更新浮窗）。tasks 为全量
+          // 快照（空数组 = 清单清空/隐藏 → 前端整浮窗不出现），网关只镜像+转发，不做渲染语义。
+          if (m.type === 'task-state') {
+            const tasks = normalizeGatewayTasks(m.tasks)
+            sessionTasks.set(sid, { tasks, updatedAt: Date.now() })
+            sweepStaleMaps()
+            const s = `data: ${JSON.stringify({ type: 'task-state', session: sid, tasks })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
             return
           }
@@ -3403,11 +3577,14 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             const last = sessionDeltaSeq.get(sid) ?? 0
             if (seq <= last) return
             sessionDeltaSeq.set(sid, seq)
-            const base = typeof m.base === 'number' && Number.isInteger(m.base) && m.base >= 0 ? m.base : 0
+            // 2026-09-10 协议根修：数字坐标 base → 稳定键 anchorSid（见 buildDisplayDelta）。
+            // 无锚点 = 不可增量（CLI 侧无可靠基线），不群发，web 由对账链恢复。
+            const anchorSid = typeof m.anchorSid === 'string' ? m.anchorSid : ''
+            if (!anchorSid) return
             const msgs = Array.isArray(m.messages)
               ? m.messages.filter((x) => x && typeof x === 'object').slice(0, 220)
               : []
-            const s = `data: ${JSON.stringify({ type: 'session-delta', session: sid, seq, base, messages: msgs })}\n\n`
+            const s = `data: ${JSON.stringify({ type: 'session-delta', session: sid, seq, anchorSid, messages: msgs })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
             return
           }
@@ -3453,6 +3630,8 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           if (cliClients.get(sid) === ws) cliClients.delete(sid)
           // 2026-08-30 队列快照：队列态只属于在线 CLI 进程，断开即清（重连后 queue-state 补发对齐）
           sessionQueues.delete(sid)
+          // 2026-09-10 任务清单快照：同队列——清单态只属于在线 CLI 进程（重连由 task-state 补发对齐）
+          sessionTasks.delete(sid)
           // 2026-09-08 断连感知根修：detach 不再立即清 activity/beat + 群发 null——CLI /clients
           // WS 断开 ~1s 重连（RECONNECT_BASE_MS）是常态（网络抖动/睡眠恢复），立即群发会让 web
           // 把活回合误收口成「已处理」（未完成对话停止计时实证）。改 3s 复核窗：窗口内重连 →
@@ -3538,6 +3717,7 @@ export function stopLocalGateway(): boolean {
     clearInterval(reclaimTimer)
     reclaimTimer = null
   }
+  stopSocketHeartbeat() // ① 心跳定时器随网关关停（下一步即 close 全部 WS，无需再探测）
   for (const c of sockets) {
     try {
       c.close()

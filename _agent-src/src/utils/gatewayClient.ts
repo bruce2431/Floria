@@ -17,11 +17,13 @@ import WebSocket from 'ws'
 import { getSessionId } from '../bootstrap/state.js'
 import { invokeControlOverride } from '../bridge/controlOverrideHandle.js'
 import { invokeGatewayInterrupt } from '../bridge/gatewayInterruptHandle.js'
+import { invokeGatewayQueueNudge } from '../bridge/gatewayQueueNudgeHandle.js'
 import {
   setGatewayPermissionCallbacks,
 } from '../bridge/gatewayPermissionRelay.js'
 import type { BridgePermissionCallbacks, BridgePermissionResponse } from '../bridge/bridgePermissionCallbacks.js'
 import { getMainLoopModel } from './model/model.js'
+import { setSessionProviderOverride } from './credentials/pool.js'
 import { enqueue, getCommandQueueSnapshot, subscribeToCommandQueue } from './messageQueueManager.js'
 import { getGatewayToken, loadGatewayPortFromDisk, loadGatewayTokenFromDisk, setGatewayToken } from './gatewayToken.js'
 import { compressImageBuffer } from './imageResizer.js'
@@ -81,6 +83,53 @@ type PendingApprovalPayload = {
 }
 const pendingApprovalRequests = new Map<string, PendingApprovalPayload>()
 
+// 2026-09-11 审批中继常驻化（根治「网关重启断连窗口内弹出的审批永不中继」）：
+// 原实现把回调注册挂在 sock.on('open')、清除挂在 sock.on('close')——断连窗口内出现的交互权限
+// 弹窗在 useCanUseTool 处取到 null，interactiveHandler 直接跳过整个 bridge 分支（连 sendRequest
+// 都不调用）→ 请求既不上报也不进 pendingApprovalRequests，之后任何重连补发都无据可依
+// （09-11 实测：网关 09:53 重启，弹窗所在会话在 /gateway/diagnostics 里零条 cli-approval-request）。
+// 改为模块加载即常驻注册（闭包内读当前 ws）：不变量「审批请求一旦产生必入待发表」与 WS 连接状态
+// 彻底解耦——断连期照常入表，重连时由 open 的补发链送达。
+const permissionCallbacks: BridgePermissionCallbacks = {
+  sendRequest(requestId, toolName, input, toolUseId, description, permissionSuggestions, blockedPath) {
+    const payload: PendingApprovalPayload = {
+      requestId,
+      toolName,
+      input,
+      toolUseId,
+      description,
+      suggestions: permissionSuggestions,
+      blockedPath,
+    }
+    pendingApprovalRequests.set(requestId, payload) // 跨重启补发：无条件记入待重发表
+    sendApprovalRequest(payload)
+  },
+  sendResponse(requestId, response) {
+    pendingApprovalRequests.delete(requestId) // 本地已解决 → 不再补发
+    const sock = ws
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sock.send(JSON.stringify({ type: 'approval-local-resolved', requestId, response }))
+    }
+  },
+  cancelRequest(requestId) {
+    pendingApprovalRequests.delete(requestId) // 已解决/撤销 → 不再补发
+    pendingResponses.delete(requestId)
+    const sock = ws
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      sock.send(JSON.stringify({ type: 'approval-cancel', requestId }))
+    }
+  },
+  onResponse(requestId, handler) {
+    pendingResponses.set(requestId, handler)
+    return () => {
+      if (pendingResponses.get(requestId) === handler) pendingResponses.delete(requestId)
+      // 2026-08-31 abort 清理路径（turn 中止只退订不 cancelRequest）→ 一并撤出补发表
+      pendingApprovalRequests.delete(requestId)
+    }
+  },
+}
+setGatewayPermissionCallbacks(permissionCallbacks)
+
 // 2026-09-07 网关重启状态真空窗根治：activity 镜像只存网关内存（sessionActivity），重启/断连
 // 即清零——此前只靠「状态变化 + 60s 心跳」补报，真空窗内网关 state=null，web closeSeg 把活
 // 回合误收口成「已处理」冻结计时（Pj5 会话重启截图实证）。与 sendQueueState 重连补发同模式：
@@ -91,8 +140,9 @@ export function registerActivityResync(fn: (() => void) | null): void {
   activityResync = fn
 }
 
-function sendApprovalRequest(sock: WebSocket, p: PendingApprovalPayload): void {
-  if (sock.readyState !== WebSocket.OPEN) return
+function sendApprovalRequest(p: PendingApprovalPayload): void {
+  const sock = ws
+  if (!sock || sock.readyState !== WebSocket.OPEN) return
   try {
     sock.send(JSON.stringify({ type: 'approval-request', ...p }))
   } catch {
@@ -100,8 +150,8 @@ function sendApprovalRequest(sock: WebSocket, p: PendingApprovalPayload): void {
   }
 }
 
-function resendPendingApprovalRequests(sock: WebSocket): void {
-  for (const p of pendingApprovalRequests.values()) sendApprovalRequest(sock, p)
+function resendPendingApprovalRequests(): void {
+  for (const p of pendingApprovalRequests.values()) sendApprovalRequest(p)
 }
 
 /**
@@ -232,49 +282,10 @@ function openSocket(token: string): void {
     return
   }
   ws = sock
-  // 2026-08-24 审批双操作（web 与 CLI 均可）：/clients 上的权限请求中继。
-  // 交互权限弹窗出现时 handleInteractivePermission 经本对象把请求发给网关（→ floria 审批卡），
-  // floria 的 approve/deny 经网关回传 approval-response → 本地 onResponse handler 竞速生效；
-  // 本地先操作（onAllow/onReject/onAbort）→ sendResponse/cancelRequest 通知网关撤卡。
-  const permissionCallbacks: BridgePermissionCallbacks = {
-    sendRequest(requestId, toolName, input, toolUseId, description, permissionSuggestions, blockedPath) {
-      const payload: PendingApprovalPayload = {
-        requestId,
-        toolName,
-        input,
-        toolUseId,
-        description,
-        suggestions: permissionSuggestions,
-        blockedPath,
-      }
-      pendingApprovalRequests.set(requestId, payload) // 2026-08-31 跨重启补发：记入待重发表
-      sendApprovalRequest(sock, payload)
-    },
-    sendResponse(requestId, response) {
-      pendingApprovalRequests.delete(requestId) // 本地已解决 → 不再补发
-      if (sock.readyState === WebSocket.OPEN) {
-        sock.send(JSON.stringify({ type: 'approval-local-resolved', requestId, response }))
-      }
-    },
-    cancelRequest(requestId) {
-      pendingApprovalRequests.delete(requestId) // 已解决/撤销 → 不再补发
-      pendingResponses.delete(requestId)
-      if (sock.readyState === WebSocket.OPEN) {
-        sock.send(JSON.stringify({ type: 'approval-cancel', requestId }))
-      }
-    },
-    onResponse(requestId, handler) {
-      pendingResponses.set(requestId, handler)
-      return () => {
-        if (pendingResponses.get(requestId) === handler) pendingResponses.delete(requestId)
-        // 2026-08-31 abort 清理路径（turn 中止只退订不 cancelRequest）→ 一并撤出补发表
-        pendingApprovalRequests.delete(requestId)
-      }
-    },
-  }
+  // 2026-09-11 审批中继回调已提升为模块级常驻（见文件上方 permissionCallbacks 及其注释），
+  // 与 WS 连接生命周期解耦：连接建立/断开都不再增删回调，断连期弹窗照常入待发表待补发。
   sock.on('open', () => {
     attempt = 0
-    setGatewayPermissionCallbacks(permissionCallbacks)
     // 2026-08-24 中继握手：告知网关本 CLI 带审批/提问中继代码（网关 /gateway/diagnostics trail 记 cli-hello，
     // 用于判断「cliClients 有会话但不中继」是旧进程还是新代码 bug）。
     // 2026-09-07 spawn 链 wt 直并后网关拿不到 -PassThru pid：握手上报本进程 pid，
@@ -284,9 +295,11 @@ function openSocket(token: string): void {
     reportCurrentModel()
     // 2026-08-30 队列快照：重连后补发一次当前排队状态（订阅期间的断线窗口靠它对齐）
     sendQueueState()
+    // 2026-09-10 任务清单快照：同队列——重连补发当前可见清单，web 底栏任务浮窗对齐
+    sendTaskState()
     // 2026-08-31 跨网关重启 pending 补发：仍挂起的审批/提问逐条重发 → 网关重新暂存+broadcast，
     // web 补弹可交互卡（重启前弹的卡随网关内存清空丢失，此前只剩只读兜底卡无法作答）
-    resendPendingApprovalRequests(sock)
+    resendPendingApprovalRequests()
     // 2026-09-07 重连即重报当前活动状态：sessionActivity 是网关内存镜像，重启即空，
     // 等 60s 心跳的真空窗里 web 会把活回合误收口成「已处理」（见 registerActivityResync 注）
     activityResync?.()
@@ -297,6 +310,8 @@ function openSocket(token: string): void {
         type?: string
         text?: string
         value?: unknown
+        /** 2026-09-10 会话级供应商绑定：model 消息随带的模型归属供应商（本进程据此绑定 baseUrl/key） */
+        provider?: string | null
         requestId?: string
         response?: BridgePermissionResponse
         sessionId?: string
@@ -326,9 +341,17 @@ function openSocket(token: string): void {
         pendingResponses.delete(msg.requestId)
         return
       }
-      // 2026-08-22 模型/思考等级控制消息：网关 POST /gateway/model 后广播给在线 CLI，
+      // 2026-08-22 模型/思考等级控制消息：网关 POST /gateway/model 后按会话路由给在线 CLI，
       // 走 controlOverrideHandle → REPL 侧 setAppState（与官方 useReplBridge.onSetModel 同语义）。
-      if (msg.type === 'model' || msg.type === 'effort') {
+      // 2026-09-10 会话级供应商绑定：网关随 model 下发 provider（该模型归属供应商）→
+      // 本进程绑定其 baseUrl/key（进程内，见 credentials/pool.ts）。provider 缺失/null 时清除
+      // 绑定回落启动快照。跨供应商切换从此只影响本会话，不再借道全局凭据池。
+      if (msg.type === 'model') {
+        setSessionProviderOverride(typeof msg.provider === 'string' ? msg.provider : null)
+        invokeControlOverride(msg.type, msg.value)
+        return
+      }
+      if (msg.type === 'effort') {
         invokeControlOverride(msg.type, msg.value)
         return
       }
@@ -344,6 +367,14 @@ function openSocket(token: string): void {
       // 句柄由 REPL 注册（gatewayInterruptHandle），未挂载（headless 无 REPL）静默忽略。
       if (msg.type === 'interrupt') {
         invokeGatewayInterrupt()
+        return
+      }
+      // 2026-09-10 web 排队消息催办：点击排队气泡 → 网关按会话路由过来 → REPL 侧
+      // 判活后置位催办标记（messageQueueManager.requestQueueNudge），生成流随之
+      // 就地断流 + 本轮 drain 纳入。与 interrupt 的区别：不改回合边界、不撤回、
+      // 不产生新回合——排队消息织进当前折叠体。句柄未挂载（headless）静默忽略。
+      if (msg.type === 'queue-nudge') {
+        invokeGatewayQueueNudge()
         return
       }
       // 2026-09-08 web 关闭会话优雅退出：stopWebSession 先走本消息（树杀仅作 3s 兜底）。
@@ -377,7 +408,8 @@ function openSocket(token: string): void {
   sock.on('close', () => {
     if (ws === sock) {
       ws = null
-      setGatewayPermissionCallbacks(null)
+      // 2026-09-11 常驻化后断开不再清空审批回调（见 permissionCallbacks 注释）：断连窗口内
+      // 弹出的审批必须照常入待发表，才能在重连（open 的 resend）时补发到网关。
       // 2026-08-31 pendingResponses 提升模块级后断开不再 clear（原 per-connection 表断开即清）：
       // 重启前挂起弹窗的 handler 必须跨重连保留，approval-response 在新连接上才能命中。
       // 残留由 onResponse 退订 / approval-response 消费 / approval-cancel 逐点回收。
@@ -435,6 +467,42 @@ function sendQueueState(): void {
       /* 断开忽略 */
     }
   }
+}
+
+/**
+ * 2026-09-10 web 任务清单链（底栏任务浮窗数据源）：TodoV2 任务清单变化 → /clients WS
+ * {type:'task-state', tasks:[…]} → 网关存 per-session 并 SSE 群发 → web 底栏任务浮窗。
+ * 载荷 = 当前可见清单（useTasksV2 TasksV2Store 单源出口，与 CLI TaskListV2 同源）；空数组
+ * = 清单已清空/隐藏 → web 浮窗整体不出现（与 CLI「tasks.length === 0 → null」同一判定）。
+ * 与 sendQueueState 同通道同形态（WS（重）连 open 补发同款）；非关键路径，失败全静默。
+ * 去重：载荷不变不发——store 对未完成任务有 5s 兜底轮询，原样重发只会空刷 SSE。
+ */
+let latestTaskState: unknown[] | null = null
+let lastTaskStateJSON = ''
+
+function sendTaskState(): void {
+  if (latestTaskState === null) return
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'task-state', tasks: latestTaskState }))
+    } catch {
+      /* 断开忽略 */
+    }
+  }
+}
+
+export function notifyTaskState(tasks: unknown[]): void {
+  const list = Array.isArray(tasks) ? tasks : []
+  let payload: string
+  try {
+    payload = JSON.stringify(list)
+  } catch {
+    return
+  }
+  if (payload === lastTaskStateJSON) return
+  lastTaskStateJSON = payload
+  latestTaskState = list
+  sendTaskState()
 }
 
 /**
@@ -508,16 +576,17 @@ export function notifyInterruptRestored(text: string): void {
 /**
  * 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎投影 delta 即发——REPL messages 变化
  * （block 级，流式字符不入 messages）→ buildDisplayDelta（conversationDisplay.ts，过滤权威单源）
- * → {type:'session-delta', seq, base, messages} → 网关 seq 记账 + SSE 群发 → web 增量渲染。
- * 即发无防抖（block 级变化率 ~2.5/s 上限，方案 §3.1 定案不合帧）。sid 由 /clients 连接 query
- * 提供（queue-state 同款，载荷不带）。WS 断开时静默丢弃：seq 已在 CLI 侧消耗不回滚，web 端
- * gap 判定 → 全量对账重建（分布式流标准恢复语义，非兜底）。与 notifyCompactProgress 同通道
- * 同形态；非关键路径，失败全静默。
+ * → {type:'session-delta', seq, anchorSid, messages} → 网关 seq 记账 + SSE 群发 → web 增量渲染。
+ * 即发无防抖（block 级变化率 ~2.5/s 上限，方案 §3.1 定案不合帧）。会话 sid 由 /clients 连接
+ * query 提供（queue-state 同款，载荷不带）；anchorSid = 投影稳定键（2026-09-10 协议根修：
+ * 替代旧数字坐标 base，见 conversationDisplay.ts buildDisplayDelta）。WS 断开时静默丢弃：
+ * seq 已在 CLI 侧消耗不回滚，web 端 gap 判定 → 全量对账重建（分布式流标准恢复语义，非兜底）。
+ * 与 notifyCompactProgress 同通道同形态；非关键路径，失败全静默。
  */
-export function notifySessionDelta(seq: number, base: number, messages: unknown[]): void {
+export function notifySessionDelta(seq: number, anchorSid: string, messages: unknown[]): void {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try {
-      ws.send(JSON.stringify({ type: 'session-delta', seq, base, messages }))
+      ws.send(JSON.stringify({ type: 'session-delta', seq, anchorSid, messages }))
     } catch {
       /* 断开忽略 */
     }

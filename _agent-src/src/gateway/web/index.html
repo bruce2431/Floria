@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=287" />
+  <link rel="stylesheet" href="/styles.css?v=306" />
 </head>
 <body>
 <div id="app">
@@ -188,6 +188,16 @@
                  审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
                  隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
             <div id="composer-takeover" hidden></div>
+            <!-- 底栏任务浮窗（2026-09-10；几何 09-11 二轮定案）：CLI TodoV2 清单（源码 useTasksV2 单源出口
+                 → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位（bottom:100%）：
+                 收敛态露出 12px 把手条（#task-lip，白表面+1px 0.10 描边，与输入栏/面板同族材质），
+                 点击上展 .td-panel（宽=输入栏宽−48px 居中、
+                 底边与输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动），再点头部向下收敛。
+                 无清单整窗 hidden；审批/提问接管卡在场 → .blocked 收敛且禁点（.bar-takeover 规则本就 display:none 让位）。 -->
+            <div id="task-dock" hidden>
+              <button id="task-lip" class="td-lip" type="button" aria-expanded="false" aria-controls="task-panel" title="展开任务清单"></button>
+              <div id="task-panel" class="td-panel" role="region" aria-label="任务清单"></div>
+            </div>
           </div>
           <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]） -->
           <div id="cmd-pop" hidden></div>
@@ -237,6 +247,6 @@
 </div>
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=287"></script>
+<script src="/app.js?v=306"></script>
 </body>
 </html>

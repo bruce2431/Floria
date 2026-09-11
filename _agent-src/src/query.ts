@@ -74,6 +74,8 @@ import {
   remove as removeFromQueue,
   getCommandsByMaxPriority,
   isSlashCommand,
+  peekQueueNudge,
+  consumeQueueNudge,
 } from './utils/messageQueueManager.js'
 import { notifyCommandLifecycle } from './utils/commandLifecycle.js'
 import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
@@ -649,6 +651,11 @@ async function* queryLoop(
 
     let attemptWithFallback = true
 
+    // 主线程判定（中链 drain 与催办断流共用）：子代理的查询链不参与本进程
+    // 用户队列的 drain，也不该被催办断流。
+    const isMainThread =
+      querySource.startsWith('repl_main_thread') || querySource === 'sdk'
+
     queryCheckpoint('query_api_loop_start')
     try {
       while (attemptWithFallback) {
@@ -706,6 +713,18 @@ async function* queryLoop(
               }),
             },
           })) {
+            // 排队消息催办（2026-09-10）：用户点击排队气泡 → 本轮生成尚未产出完整
+            // 的 tool_use 块 → 就地断流收尾。断在这里不会留下孤儿 tool_use（tool_use
+            // 块只在 content_block_stop 才进 toolUseBlocks / 执行器，此处必为 0），
+            // 因而无需合成 tool_result；断流由生成器的 finally 释放 HTTP 流
+            // （claude.ts 生成器 finally：consumer break 是既定用法）。收尾后由下方
+            // consumeQueueNudge 强制走 follow-up，本轮 drain 把排队消息作为
+            // queued_command 附件纳入本轮——与「模型自然答完后被纳入」同一路径。
+            // 门控 toolUseBlocks.length === 0 即「只在模型思考时打断」：工具一旦落定
+            // （完整 tool_use 已产出）就不动它，排队消息自会被之后那次 drain 纳入。
+            if (isMainThread && toolUseBlocks.length === 0 && peekQueueNudge()) {
+              break
+            }
             // We won't use the tool_calls from the first attempt
             // We could.. but then we'd have to merge assistant messages
             // with different ids and double up on full the tool_results
@@ -1063,6 +1082,14 @@ async function* queryLoop(
       if (summary) {
         yield summary
       }
+    }
+
+    // 催办断流收口（2026-09-10）：本轮生成被用户催办打断（见上方 stream 循环的
+    // break）——不在回合边界收尾，改走 follow-up 路径（零工具，执行器空转即返）
+    // 把队列里的排队消息 drain 成 queued_command 附件，模型同一回合接着答它。
+    // 队列已在断流后清空时标记早已失效（notifySubscribers），不会误续跑。
+    if (!needsFollowUp && consumeQueueNudge()) {
+      needsFollowUp = true
     }
 
     if (!needsFollowUp) {
@@ -1581,8 +1608,6 @@ async function* queryLoop(
     // only; subagents never see the prompt stream.
     // eslint-disable-next-line custom-rules/require-tool-match-name -- ToolUseBlock.name has no aliases
     const sleepRan = toolUseBlocks.some(b => b.name === SLEEP_TOOL_NAME)
-    const isMainThread =
-      querySource.startsWith('repl_main_thread') || querySource === 'sdk'
     const currentAgentId = toolUseContext.agentId
     const queuedCommandsSnapshot = getCommandsByMaxPriority(
       sleepRan ? 'later' : 'next',

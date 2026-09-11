@@ -104,6 +104,10 @@ web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 h
 
 **发送即 resume（2026-08-25 定案，会话打开预览/发送才恢复窗口）**：点开 web 会话不再自动 resume（与 CLI 会话一致仅预览；进程停止时列表状态点由常驻红改透明无点——任何会话仅进程在跑时 busy 绿点、否则 null）；会话进程未在线时**发送消息才恢复**——网关 `handleWsMessage 'send'` 对 `cliClients` 未命中且非启动中的会话走 `resumeAndDeliver`（**web 与 CLI 一视同仁**：`sessionProjectRootOf(sessionId)` 按磁盘 `<项目根>/.claude/projects/<id>.jsonl` 定位项目/全局根 → 复用 `spawnWebSession --resume` 按定位项目选 cwd，注册完成后再经 `cliClients` 注入消息；同一会话 resume 在途复用同一 promise 防双 spawn 双写 jsonl；会话文件不在磁盘 → 拒绝「目标会话未在线」）。
 
+**账面活性统一判定（2026-09-10 根修，exe 134517）**：send 暂存分支原判定 `webSessions.has(sid)` 只查账面不查进程——pid 空记录（cli-hello 未上报，reclaim 原条件 `p.pid && !isPidAlive(p.pid)` 恒不清）或进程已死的残留记录会**挡住 resumeAndDeliver 恢复路径**：消息进 `pendingDeliveries` 暂存后无任何进程被拉起，web 恒显「无响应」且暂存零反馈；用户后来手动启动该会话 CLI（/clients 注册钩子 `flushPendingDeliveries`）才补投——即 09-10 实测「web 无响应 + 本地启动 CLI 后莫名接续」事故（消息不丢是暂存补投设计内行为，「恒无响应+零反馈」是缺口）。根治三处一判（`webSessionEntryAlive`：pid 已知 → isPidAlive；pid 空 → cliClients WS 在即进程在）：①send 暂存分支改按真实活性判定，死记录落空走 resumeAndDeliver 恢复；spawn 在途常态不弹回执，活进程断连重连间隙暂存回 status「会话连接恢复中，消息已暂存，CLI 重连后自动补投」（前端 `addSystem` 现成展示链零改动）；②`spawnWebSession` 幂等复用前验活，死记录清理后走正常 spawn（防双写不破：死进程不写盘，活进程重连窗口由 cliRegisterAt 近期痕迹保护兜住）；③`reclaimIdleWebSessions` 判活统一走同函数，pid 空孤儿注册 60s 步进可清（活进程 WS 重连间隙被清的边角由 cliRegisterAt 保护兜住，无双写风险）。守护的不变量：账面记录命中「存续」判定时，必有活进程或其活跃连接可承接消息。
+
+**WS 心跳回收僵尸连接 + spawn 在途登记 settle 即清（2026-09-11 四缺陷根治，exe `cli-dev-20260911102646`）**：症状「web 和 cli 通信总是显示中断」+「web 发送信息，cli 侧无法正常 resume 并运行，手动 resume 后发送的信息自动出现」。**② 根因 = `spawningPromises` 只 set 不 delete**（全文件 `.set`/`.get`/`.has` 三族、零 `delete`，3011-3014 注释自称「settle 即清」从未兑现）：某会话首次 `spawnWebSession` 后条目（含已 settle 的 promise）永久驻留 ⇒ ①顶部 `inflight = spawningPromises.get(sid)` 幂等短路恒命中旧 promise，该 sid **再也 spawn 不起来**；②send 路由 `spawningPromises.has(sid)` 恒真 → 消息全落 `pendingDeliveries` 等一个永不再来的注册。用户手动 resume（CLI 原生 `--resume`，不经此表）→ `/clients` 钩子 `flushPendingDeliveries(sid)` 一次补投 ⇒ 表现为「手动 resume 后消息自己出现」；新建会话 sid 每次新分配不经此表 ⇒「开启会话是正常的」；「偶发」= 只有该 sid 曾被 spawn 过才中。修 = `const tracked = p.finally(() => { spawningPromises.delete(sid) })` + `.set(sid, tracked)` + `return tracked`（与既有 `resumingSessions` 的 `.finally` 清理同构）；不变量「`spawningPromises` 里的条目恒为真在途、未 settle 的 spawn」——表本身即真值源，send 路由 park 判定与 spawn 幂等短路同时恢复正确，无新增状态、无兜底分支。**① 根因 = 应用层零心跳**（无 ping/pong、无活性探测；`cliClients.has(sid)` 对半开死链恒 true ⇒ web 显示「连接中断」且 `webSessionEntryAlive` 误判活进程，反过来给 ② 的 park 分支喂错判据）。修 = `HEARTBEAT_INTERVAL_MS=30_000` + `HEARTBEAT_MAX_MISS=2`（≈60s 判死）+ `wsMisses: WeakMap`；`markAlive(ws)` 接在 `wss.on('connection')` 与 `/clients` upgrade 回调两处；`startSocketHeartbeat()` 遍历 `[...sockets, ...cliClients.values()]`，非 OPEN 跳过、misses ≥ MAX 则 `terminate()`（→ close → `detach` 清 `cliClients` + 3s 复核窗，与既有收尸链同一路径），否则 misses+1 且 `ping()`；`unref()` 不阻进程退出；`stopSocketHeartbeat()` 在 `stopLocalGateway` 内调用。协议依据（非猜测）：RFC 6455 端点须自动回 pong，浏览器网络层自动应答（前端零改动）、CLI 侧 `ws` 客户端默认 `autoPong`——本机实测 4/4 次 ping 均收 pong；回收路径用 `node:net` 裸 socket 握手后从不回 pong 实测 `terminate@97427 → closed` 而正常连接 `open: true` 不受影响。不变量「sockets/cliClients 里的连接恒为最近一个心跳窗内可应答的活连接」。**③ 展示层**：审批接管在场（`takeover === 'approval'`）时抑制 150s「无响应」红标（读既有状态，不新增信号源），详见 [web-ui.md](web-ui.md) §4。
+
 **防双进程+exe 翻案（2026-08-31，新会话/同步异常根修 `20260830222122` 委派双会话实锤）**：①`webSessionExe` 废弃 08-24「笔=全局根/项目=项目根目录扫描 cli-dev*.exe」旧案，**一律用网关自身 exe**（process.execPath，协议必然匹配）——旧案在 `/gateway/*` 迁移后选中目录里的旧 exe（全局根仅 08-29 版），探测旧 `/api/health` 404 → 永不注册 → wsession 20s 超时=「远程端无法启动新会话」；②`spawnWebSession` resume 前查 `cliRegisterAt`（/clients 注册时间戳 Map，CLI_RECENT_REGISTER_MS=10s）：近期有痕迹 = 活进程断连重连中 → 复用 resolve 不 spawn（此前 miss 即 spawn，与重连中的原进程形成同会话双进程：网关对重复注册 `prev.close()` → 每秒互踢乒乓、消息路由 50% miss、审批回调每秒清、双写 jsonl，永不自愈——92bbd49b 事故）；`resumeAndDeliver` 注入改 400ms×5s 轮询等重连进程回来再注入（原单次 miss 即报「未注入」）。③取证日志三件：重复注册顶替落日志（乒乓从此可见）、`spawnWebSession` 全程日志（spawn 开始含 exe/cwd / 注册成功含耗时 / 注册超时含 exe）、网关日志逐行 `[MM-DD HH:MM:SS]` 时间戳（`stampGatewayConsole` 在 startLocalGateway 劫持 console，仅 --gateway 独立进程）。
 
 **网关关停不杀 web 会话窗口 + pid 注册表收养（2026-08-29 根修）**：web 启动的会话窗口里执行 `/server restart` 曾把自己杀掉——`doOff` → `/gateway/shutdown` → `stopLocalGateway` 内 `killAllWebSessions()` 把 `webSessions` 全部 CLI pid taskkill，包括正在执行 restart 的那个会话（CLI 死 → doRestart 后续 doOn 重拉网关永不执行，restart 断在半路、窗口退出）。定案：**web 会话与普通 CLI 会话同等权重，网关 off/restart/空闲退出/SIGINT 一律不杀存活窗口**（gatewayClient 自动重连新网关；与 backend 生命周期解耦同构）。代价是重启后内存 `webSessions` 丢失 → resume 幂等（防双进程写同一 jsonl）失效，故新增**运行 pid 注册表落盘** `.claude/gateway-websessions.json`（`[{sessionId,pid,startedAt}]`，变更即写防 kill -9 留脏；`persistWebSessions` 在 set/各 delete 点调用），网关启动 `adoptWebSessions()` 读表收养 isPidAlive 的条目（无 child 仅凭 pid 判活/killTree，同 backend 收养先例）。**注意与 2026-08-25 删除的旧 web-sessions.json 区别**：旧表是「web 创建来源标记」（resume 路由用，已由磁盘定位取代，勿复辟）；本表是「运行进程 pid 表」（生命周期管理用，与 backend-registry.json 同构），两者不冲突。`stopWebSession`（taskkill 窗口）仅剩显式关闭单会话端点与超时清理使用，网关关停路径不得调用。
@@ -114,15 +118,17 @@ web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 h
 
 ## 8. web 审批双操作中继（2026-08-24，web 与 CLI 均可操作同一会话）
 
-CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts`（模块级 set/get 回调）+ `src/utils/gatewayClient.ts`（`/clients` WS 上行 `approval-request`/`approval-local-resolved`/`approval-cancel`、下行 `approval-response`/`approval-cancel`，open 注册 BridgePermissionCallbacks/close 清除）+ `src/hooks/useCanUseTool.tsx`（非 BRIDGE_MODE 时 `bridgeCallbacks` 改读网关回调）→ 本地终端弹窗与 floria 审批卡**竞速（claim），先操作者生效**、另一端自动收起；网关 `/clients` 增 message 监听（审批请求→broadcast `{type:'approval'}` 卡片、本地已决→broadcast `{type:'approval-dismiss'}` 撤卡），`handleWsMessage` `'approve'` 路由 `cliClients` 回 `approval-response`（allow 带 `updatedInput:{}`、deny 带 message）；前端 app.js 处理 `approval-dismiss` 撤卡。
+CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts`（模块级 set/get 回调）+ `src/utils/gatewayClient.ts`（`/clients` WS 上行 `approval-request`/`approval-local-resolved`/`approval-cancel`、下行 `approval-response`/`approval-cancel`，回调**模块加载即常驻注册**、与连接生命周期无关——见本节 09-11 段）+ `src/hooks/useCanUseTool.tsx`（非 BRIDGE_MODE 时 `bridgeCallbacks` 改读网关回调）→ 本地终端弹窗与 floria 审批卡**竞速（claim），先操作者生效**、另一端自动收起；网关 `/clients` 增 message 监听（审批请求→broadcast `{type:'approval'}` 卡片、本地已决→broadcast `{type:'approval-dismiss'}` 撤卡），`handleWsMessage` `'approve'` 路由 `cliClients` 回 `approval-response`（allow 带 `updatedInput:{}`、deny 带 message）；前端 app.js 处理 `approval-dismiss` 撤卡。
 
 **floria 亦可答复提问（2026-08-24）**：AskUserQuestion 走同一中继——前端 `renderQuestionApproval` 渲染逐题单选交互表单，`sendApprove` 带 `{input, answers}`，网关 approve 路由对 `data.answers` 生成 `updatedInput={questions:数组, answers}`（questions 取数组本体勿嵌套），CLI 交互应答 `buildAllow(updatedInput)` 拿到 answers 执行工具。
 
-**调试**：`GET /gateway/diagnostics`（token 保护）返回审批轨迹 + cliClients/sockets/webSessions 概览；`cliClients` 有会话但 trail 无 `cli-approval-request` = CLI 为旧进程，需用新 exe 重启。
+**调试**：`GET /gateway/diagnostics`（token 保护）返回审批轨迹 + cliClients/sockets/webSessions 概览。`cliClients` 有会话但 trail 无 `cli-approval-request` 有两类含义：①该 CLI 是**旧 exe**（本次修复前，回调只在连接建立期存在，断连窗口内的弹窗不会上报）；②CLI 为新 exe 但弹窗**仍在网关断连窗口内出现**（09-11 常驻化后此类已可自愈：请求照常入 `pendingApprovalRequests`，重连即补发）。判据补充：查 trail 是否只有 `cli-register`/`cli-hello` 而无后续审批事件，并比对该进程的 exe 时间戳（`Get-CimInstance Win32_Process` 看 CommandLine）。
 
 **审批确认送达后才关卡（2026-08-26，Codex 意见 P0）**：CLI 消费 `approval-response` 后回执 `approval-processed`（仅本地消费才发，竞速输不发）→ 网关转发 `approval-confirmed`（session_id+requestId）、approve 路由 else 分支回 `approval-rejected` → 前端 `sendApprove` 不再立即清卡，设 `approvalPending` 等待确认（8s 超时 + 断连 `showApprovalError` 保留卡片+重试）；`approval-dismiss` 撤卡清理 pending。
 
 **pending 跨网关重启补发（2026-08-31，纯 CLI 侧 gatewayClient.ts）**：重放表 `pendingApprovals` 只在网关内存，网关重启清空后存活 CLI（注册表收养）重连却不重发仍挂起的请求 → web subscribe 重放查空，只剩 jsonl 只读兜底卡无法作答（08-31 实测「重启服务器选择题无法交互」）。修复：①模块级 `pendingApprovalRequests` 补发表——`sendRequest` 记入，`sendResponse`/`cancelRequest`/`approval-response` 消费（含 handler miss 死请求）/`onResponse` 退订（abort 清理路径）逐点移除；②WS `open`（含重连）`resendPendingApprovalRequests` 逐条重发 → 走网关现有暂存+broadcast 链路（网关零改动），web 先订阅收 broadcast、后订阅收重放，两序均补弹可交互卡；③`pendingResponses` 应答表提升模块级跨重连保留 + close 处 `clear()` 删除（原断开即清会杀掉重启前挂起弹窗的 handler），作答经新连接仍命中 handler 唤醒重启前弹窗。
+
+**审批中继常驻化（2026-09-11，根治「网关断连窗口内弹出的审批永不中继」，exe `cli-dev-20260911100248`）**：现场为 web 打开会话 `6983e5be` 时 CLI 侧弹窗、web 审批卡不弹——`/gateway/diagnostics` trail 只有 09:53:26 的 `cli-register`/`cli-hello(relay-on)` 8 条、**零条 `cli-approval-request`**，即请求从未离开 CLI 进程。根因：回调注册原挂在 `sock.on('open')`、清空挂在 `sock.on('close')`，而 `useCanUseTool.tsx` 在**弹窗创建瞬间**对 `appState.replBridgePermissionCallbacks ?? getGatewayPermissionCallbacks()` 取快照，`interactiveHandler` 又是 `if (bridgeCallbacks && bridgeRequestId) sendRequest(...)` —— 断连窗口内回调为 null ⇒ 整条 bridge 分支被跳过，**连 `sendRequest` 都不调用** ⇒ 请求既不上报也不进 `pendingApprovalRequests`，之后任何重连补发都无据可依（与 08-31 的补发机制是同一条链上的两段）。修法：`permissionCallbacks` 提升为 `gatewayClient.ts` 模块级常量、**模块加载即 `setGatewayPermissionCallbacks(...)` 常驻注册**（闭包内改读模块级 `ws`，`sendResponse`/`cancelRequest` 用局部 `const sock = ws` 收窄），open/close 两处注册与清空全部删除。不变量：**「审批请求一旦产生，必入待发表」与 WS 连接状态彻底解耦**——断连期照常入表，重连由 open 的 `resendPendingApprovalRequests` 链送达；`interactiveHandler`/`useCanUseTool` 零改动、无兜底分支，状态源变少（消除「回调是否存在」这一第二状态）。验收：探针 `_agent-src/probe-approval-relay-resident.ts` 6/6（判据同步不依赖网络，`startGatewayProbeAndConnect` 未调用 ⇒ `ws` 恒 null）；修前对照 `git show HEAD:_agent-src/src/utils/gatewayClient.ts` 仅 open/close 两处、无顶层注册 ⇒ 判据必败。
 
 ## 9. web 重命名 → CLI 实时同步（2026-08-25）
 
@@ -139,3 +145,35 @@ CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts
 - 响应 `{workspace, plugins:{personal,public}, skills:{personal,public}}`，每项 `{n,d,v,inst}`；`inst=1` = 已安装（市场条目按已装集合打标，前端显「已安装」徽标），列表已安装置顶 + 字母序。
 
 **定位 = 只读清单**（浏览/检索/已装标记）；装卸/启停/配置仍走 CLI `/plugin`（`ManagePlugins.tsx`），web 不做插件写操作。
+
+## 11. `/clients` 下行控制消息路由（按会话精确转发给在线 CLI）
+
+web 前端在 `/clients` WS 上行发控制帧，网关 `handleWsMessage` `switch (data.type)` 逐类处理；需要落到具体会话的走 `cliClients.get(sessionId)` 精确单发（未命中只回 `{type:'status'}` 提示，**不默认 resumeAndDeliver**——这类动作针对「正在运行的会话」，离线会话上做它没有意义；唯一例外是 `send`，它走 resume 全链）。当前成员：
+
+| type | 语义 | 未在线时 |
+| --- | --- | --- |
+| `send` | 投递用户消息（可带 `images`）→ CLI `enqueue`（与本地打字同路径） | 暂存/`resumeAndDeliver` 恢复（§7） |
+| `interrupt` | web 停止键 = CLI 一次 Ctrl+C（`onCancel` 全套） | status 提示 |
+| `queue-nudge` | **排队消息催办（2026-09-10）**：点击排队气泡 → CLI 侧判活置位催办标记，`query.ts` 生成流就地断流、本轮中链 drain 把该消息纳入当前回合（不等于 interrupt：不改回合边界、不撤回、不产生新回合） | status 提示 |
+| `shutdown` | 优雅退出该会话 CLI（exit 0 让 WT 自动收 tab，3s 后树杀兜底，§7） | status/树杀兜底 |
+| `approve` | 审批/提问应答回路由（§8） | status 提示 |
+
+CLI 侧接收口：`src/utils/gatewayClient.ts` 的 `msg.type` 分支 → 各 `bridge/*Handle.ts` 模块级句柄（REPL 挂载则生效，headless 无句柄静默忽略）。链路细节 → [web-ui.md](web-ui.md) §6/§13。
+
+## 12. CLI 上行信号族（`/clients` WS，网关按会话镜像 + SSE 群发）
+
+CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients` WS 送上网关，网关三类处置：**无状态转发**（原样 SSE 群发）、**按会话镜像 + 首载快照**（网关内存 Map + TTL + CLI `detach()` 清，`/gateway/session` 首次加载附全量，SSE 增量事件体直带全量快照供前端免拉）、**单调去重**（seq 账本）。
+
+| 信号 | 处置 | 首载字段 | 备注 |
+| --- | --- | --- | --- |
+| `turn-state` / `turn-beat` | 无状态转发 | — | 回合开始/结束（打断收口持久信号之一）+ 150s 活性心跳（web 端审批接管在场时抑制红标，2026-09-11） |
+| `stream-text` | 无状态转发 | — | 流式字符暂态（'' = 块边界/落盘/打断清除） |
+| `restored` | 无状态转发 | — | 撤回链（文本回填输入栏） |
+| `compact-state` | 无状态转发 | — | 压缩实时态起止（网关无状态，前端按 `live.compactFlags` Map + TTL 自管） |
+| `queue-state` | 镜像 `sessionQueues`（TTL 10min） | `.queued` | CLI `subscribeToCommandQueue` 订阅 + 重连补发 |
+| `task-state` | **镜像 `sessionTasks`（TTL 10min，2026-09-10）** | `.tasks` | CLI `useTasksV2.getSnapshot()` 单源上报 + 重连补发；形状边界 `normalizeGatewayTasks` 只此一处（非对象/缺 id/缺 subject 丢弃、未知 status→pending、subject 截 500、blockedBy 只留字符串） |
+| `activity` | 镜像 `sessionActivity`（TTL 10min + REPL 60s 心跳） | `.state`（`/gateway/sessions` 列表） | 会话状态点判定兼需 `isPidAlive(act.pid)`（busy 绿/idle 红/waiting 橘/停止无点，§7 恒绿根修） |
+| `session-delta` | 单调去重 `sessionDeltaSeq`（cli-hello 重置） | `.deltaSeq` | 展示增量（`{seq, anchorSid, messages}`），见 [web-ui.md](web-ui.md) §4 |
+| `cli-hello` | 注册 `cliClients` + 复位 seq 水位 | — | 握手（带 `process.pid` 供网关补填真实 pid，§7） |
+
+**新增信号的收编规范**：内容类通知优先并入 `session-delta` 流（web-ui.md §4 定案）；仅当信号语义不属于「展示序列内容」（如队列/任务清单/压缩态/活性）才单开一类，且一律照上表镜像三件套（Map + TTL + `detach()` 清 + `/gateway/session` 首载字段 + SSE 全量快照）落地。

@@ -45,4 +45,23 @@ export interface CredentialsFile {
   activeProvider: string
   /** All configured providers, keyed by name */
   providers: Record<string, ProviderConfig>
+  /**
+   * WebSearch tool backend configuration (global pool section).
+   * `undefined` = never configured → tool hidden unless a default applies.
+   */
+  webSearch?: WebSearchCredentials
+}
+
+/**
+ * Configuration for the local multi-backend WebSearch tool (port of Hermes'
+ * web_tools provider architecture). Lives in the same credentials.json as the
+ * LLM provider pool — one global source of truth for API keys.
+ */
+export interface WebSearchCredentials {
+  /** Explicit backend selection (searxng | brave | tavily | exa); autodetect when unset. */
+  backend?: string
+  /** Self-hosted SearXNG instance base URL (enables the searxng backend). */
+  searxngUrl?: string
+  /** Vendor API keys, keyed by backend name (brave | tavily | exa). */
+  keys?: Record<string, string>
 }

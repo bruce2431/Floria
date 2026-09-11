@@ -24,8 +24,8 @@ CRITICAL REQUIREMENT - You MUST follow this:
     - [Source Title 2](https://example.com/2)
 
 Usage notes:
-  - Domain filtering is supported to include or block specific websites
-  - Web search is only available in the US
+  - The query is passed through to the locally configured search backend, so operators such as site:example.com, filetype:pdf, intitle:word, -term, and "exact phrase" may work when the backend supports them
+  - Results come from the backend configured in the webSearch section of credentials.json (searxng, brave, tavily, or exa)
 
 IMPORTANT - Use the correct year in search queries:
   - The current month is ${currentMonthYear}. You MUST use this year when searching for recent information, documentation, or current events.

@@ -121,12 +121,12 @@ a { text-decoration: none; color: inherit; }
 #img-lightbox img { max-width: 92vw; max-height: 92vh; width: auto; height: auto; border-radius: 8px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5); }
 /* 两层消息流·层2（2026-09-08 定案）：静态占位块 .pin-stage——回合开启消息（web 乐观气泡/
    CLI 权威新 user 消息）唤出，挂 #messages 流末（后续内容插它前面），高度由 JS 内联控制
-   （2026-09-09 定案：max(0, 视口高 − 诞生内容脚印)，只补足贴顶视角下内容底到视口底的余量，
-   长会话不再加整屏空白；诞生锁定仅 resize 重算）。恒定不随内容收缩、回合结束不自动撤；
+   （2026-09-09 定案：max(0, 视口高 − 内容脚印)，只补足贴顶视角下内容底到视口底的余量，
+   长会话不再加整屏空白；2026-09-10 起脚印实时读取——内容增长/收起都不产生额外滚动余量，
+   未超一屏时滚动极限恒=开启气泡贴顶位）。占位块恒定在场、回合结束不自动撤；
    **用户滚动输入永不摘占位**（只让位跟随，09-09「释放链铲除」定案），拆收仅随视图退出。
    跟随吸底目标=真实内容底（占位起点贴视口底）：内容未满一屏停开启气泡贴顶位、超过一屏
-   转内容底跟随、气泡自然上滑出视口顶——无 sticky 驻留、无逐帧几何重算（旧 .pin-spacer
-   动态补差体系退役）。 */
+   转内容底跟随、气泡自然上滑出视口顶——无 sticky 驻留（旧 .pin-spacer 动态补差体系退役）。 */
 .pin-stage { flex: none; }
 .msg.assistant { align-items: flex-start; }
 /* LLM 消息采用隐藏格式（无气泡框），文本充满整个对话区域 */
@@ -272,9 +272,12 @@ a { text-decoration: none; color: inherit; }
 .tool-line .tl-text {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* 2026-08-21：工具步骤图标改 DSH 风格 SVG（16px leading 槽放 14px 图标，替代旧 ⚙ 齿轮） */
-.tool-line .t-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; }
-.tool-line .t-ico svg { width: 14px; height: 14px; display: block; }
+/* 2026-08-21：工具步骤图标改 DSH 风格 SVG（16px leading 槽放 14px 图标，替代旧 ⚙ 齿轮）。
+ * 2026-09-11 提为通用类（去掉 .tool-line 前缀）：状态显示行（正在思考/生成/压缩）复用同款行首槽
+ * ——两类状态共享同一文字左基准（16px 槽 + 5px gap，见 .tool-line/.think-state 的 gap），同一宿主行
+ * 在「正在运行：<工具>」⇄「正在思考/生成/压缩」间切换时文字左缘零位移（此前状态行无槽、文字回跳 21px）。 */
+.t-ico { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; }
+.t-ico svg { width: 14px; height: 14px; display: block; }
 /* 工具动作折叠：连续工具行合并的可展开折叠（默认收起省空间，点开看每条详情） */
 .tool-fold { margin: 2px 0; }
 .tool-fold summary {
@@ -306,46 +309,65 @@ a { text-decoration: none; color: inherit; }
 .d-chev svg { width: 14px; height: 14px; display: block; }
 /* 实时工具行运行态（2026-08-26 用户定案）：原灰色工具行 + 光泽扫动标识正在使用（去蓝点） */
 .tool-line.tool-running { position: relative; overflow: hidden; }
-.tool-line.tool-running::after {
+/* 扫光统一（2026-09-11 用户定案「换成透明扫光不要蓝色的，和其它扫光统一」）：工具运行行 /
+ * 工具折叠行 / 当前命令行 / 状态显示行四处同一配方——覆盖式透明扫光条（transparent → chat-bg
+ * 混色 → transparent，300px 宽自左往复扫过）。取代状态行旧「蓝字渐变扫光」。各宿主自备
+ * position:relative + overflow:hidden（见各自规则）。 */
+.tool-line.tool-running::after,
+.tool-fold[data-state='running'] summary::after,
+.tool-cur summary::after,
+.think-state:not(.ts-join)::after {
   content: '';
   position: absolute; inset-block: 0; left: 0; width: 300px;
   background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--chat-bg) 55%, transparent) 55%, transparent 100%);
   animation: think-row-sweep 2.6s ease-out infinite;
   pointer-events: none;
 }
-@media (prefers-reduced-motion: reduce) { .tool-line.tool-running::after { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .tool-line.tool-running::after,
+  .tool-fold[data-state='running'] summary::after,
+  .tool-cur summary::after,
+  .think-state:not(.ts-join)::after { animation: none; }
+}
 /* 暂态状态显示行（2026-09-09 二轮定案：工具调用行=折叠体，子 DOM 分两类——tf-label 工具概括留存；
  * .fold-state 状态显示行（正在思考/生成/压缩扫光、无响应/断连红标、流式预览）显示动画但不留存，回合
  * 收口即消失）。有工具组并入 tool-fold summary——四轮定案并入时折叠顶只留状态显示行、不带 tf-label
  * （「正在思考时不应再有『运行了命令（N）』」）；无工具组（纯思考真空）为段尾独立行。
  * 折叠顶 summary 恒「正在处理/已处理」不再轮转。 */
 .fold-state { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 0; }
+/* 状态槽独占（2026-09-11 用户定案「一次应该只有一个状态，现在是无响应，应该只有无响应」）：
+ * 宿主行带 .is-flagged（live.js tick 每秒按红标在场判定）时**只留红标**——隐去同行的状态文字
+ * .think-state（含并发尾缀「并思考」：引擎无产出/链路断时它已过期，留着与红标互相打脸）与流式预览
+ * .think-stream（同属引擎产出的暂态）。旧形态红标是与状态文字并排的注解，实测同屏出现
+ * 「正在思考 · 2m57s」+「· 无响应 2m51s」两个状态。豁免场景（审批等待/工具在飞）本就不产红标。 */
+.fold-state.is-flagged > .think-state,
+.fold-state.is-flagged > .think-stream { display: none; }
+/* 独占时红标即行首：去掉注解期与状态文字之间的 4px 让位（行内 flex gap 7px 已是唯一间距）。 */
+.fold-state.is-flagged .d-stale { margin-left: 0; }
 /* 实时思考/生成/压缩状态显示行（2026-08-26 用户定案；2026-08-27 二轮：去圆点仅文本 blink+icon；
  * 三轮：去写死 13px 字号——行内作为折叠行 label 与「正在运行/正在处理」同级须继承 14px。
  * 落位变迁：2026-09-08 v267 曾收敛至 done-fold summary 单行轮转，2026-09-09 用户定案
  * 「折叠顶只留正在处理/已处理，状态标识与工具调用行在一起」迁回 .fold-state（二轮澄清：并入
  * 工具折叠行 summary 同行，无工具组时段尾独立行）。
- * 2026-09-08 动画换 dsh 同款扫光（DSH ChatView turnStatus 的 ShimmerText 模式）：
- * 渐变高亮带自左向右扫过文字（background-clip:text），替代原 opacity blink。 */
+ * 2026-09-08 扫光曾用 dsh ShimmerText 模式（background-clip:text + blue 渐变文字）；
+ * 2026-09-11 ① 行首补图标槽（DSH IconThinkOutline14 原子图标，HTML 侧 messages.js:183 构造）：
+ * gap 6→5px 与 .tool-line/.tool-fold summary 同基准 = 状态行文字左缘与工具行一致（消除同行切换跳动）。
+ * ② 扫光重构（用户定案「换成透明扫光不要蓝色的，和其它扫光统一」）：改与工具行/折叠行同款
+ * **覆盖式透明扫光条**（统一规则见 .tool-line.tool-running::after 选择器组），文字恒 --text-3——
+ * 不再走 background-clip/text-fill 透明链（图标槽亦无需再单独脱透明）。 */
 .think-state {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-weight: 500;
-  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 40%, var(--blue) 50%, var(--text-3) 60%, var(--text-3) 100%);
-  background-position: 100% 0;
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  animation: think-state-shimmer 1.8s linear infinite;
+  display: inline-flex; align-items: center; gap: 5px;
+  position: relative; overflow: hidden;
+  color: var(--text-3); font-weight: 500;
+  /* 2026-09-11 根治：状态文案恒单行（不换行、不被压扁）——旧实现无 white-space 规则，
+   * 一旦同行有 nowrap 兄弟（工具运行行/流式预览）吃满宽度，本节点被压到 <1px 宽即逐字换行，
+   * 折成 N×22px 竖列把 summary 撑成空灰块（实测 summary 716×90、本节点 0.8×88）。nowrap 后
+   * 自身最小宽=文案整宽，压缩压力只能落到同行的 .tl-text/.think-stream 上（两者本就省略号/裁切）。 */
+  white-space: nowrap;
 }
-@keyframes think-state-shimmer { to { background-position: 0 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .think-state {
-    animation: none; background: none;
-    color: var(--text-3); -webkit-text-fill-color: var(--text-3);
-  }
-}
+/* 并发复合态尾缀（2026-09-11 用户定案「思考和搜索同时进行就显示正在搜索xxx并思考」）：状态作为
+ * 原子尾缀并进「正在运行」行，接在工具文本之后；flex:none 保证恒完整，工具文本先让位收省略号。 */
+.think-state.ts-join { flex: none; }
 /* 2026-09-08 流式字符通道（stream-text SSE）：状态显示行后流式预览（CLI 引擎流式 delta 的
  * 纯显示暂态，落盘即被权威 delta 接管清除）。JS 侧另截 200 字符上限防 DOM 膨胀。
  * 2026-09-09 定案「充满该行」：flex:1 1 0 基准 0 只吃 summary 剩余整行（v269 一度用
@@ -369,14 +391,6 @@ a { text-decoration: none; color: inherit; }
 }
 /* 工具折叠运行态（2026-08-21 移植 DSH ToolRow sweep）：扫光 + 蓝色脉冲点，只有流式尾组在跑 */
 .tool-fold[data-state='running'] summary { position: relative; overflow: hidden; }
-.tool-fold[data-state='running'] summary::after {
-  content: '';
-  position: absolute; inset-block: 0; left: 0; width: 300px;
-  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--chat-bg) 60%, transparent) 55%, transparent 100%);
-  animation: think-row-sweep 2.6s ease-out infinite;
-  pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) { .tool-fold[data-state='running'] summary::after { animation: none; } }
 .tf-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: floria-dot-pulse 1.2s ease-in-out infinite; }
 /* 「正在处理」折叠标题的脉冲点 */
 .df-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--blue); animation: floria-dot-pulse 1.2s ease-in-out infinite; }
@@ -390,44 +404,12 @@ a { text-decoration: none; color: inherit; }
   border-radius: 6px; position: relative; overflow: hidden; max-width: 100%;
 }
 .tool-cur summary::-webkit-details-marker { display: none; }
-.tool-cur summary::after {
-  content: ''; position: absolute; inset-block: 0; left: 0; width: 300px;
-  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--chat-bg) 60%, transparent) 55%, transparent 100%);
-  animation: think-row-sweep 2.6s ease-out infinite; pointer-events: none;
-}
 .tool-cur .tc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .tool-cur .tool-fold-body { margin: 2px 0; padding: 2px; display: flex; flex-direction: column; gap: 2px; }
-@media (prefers-reduced-motion: reduce) { .tool-cur summary::after { animation: none; } }
 
-/* ===== AskUserQuestion 提问卡（2026-08-21 移植 DSH QuestionComposer 视觉，只读展示）=====
-   eyebrow + 标题（15/22 500）+ 编号选项行（20px 编号块 / label 14/24 500 / 推荐徽标 / 描述）+ 答案注脚 */
-.question-card {
-  margin: 4px 0; max-width: 480px; overflow: hidden;
-  border: 1px solid var(--border); border-radius: 16px; background: #fff;
-  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
-}
-.q-head { padding: 14px 16px 0; color: var(--text-3); font-size: 11px; line-height: 16px; }
-.q-title { padding: 5px 16px 0; font-size: 15px; line-height: 22px; font-weight: 500; color: var(--text); }
-.q-options { display: flex; flex-direction: column; gap: 1px; margin: 10px 0 0; padding: 0 12px 4px; }
-.q-option {
-  display: flex; align-items: flex-start; gap: 8px; min-height: 40px;
-  padding: 8px 12px 8px 8px; border: 1px solid transparent; border-radius: 12px;
-}
-.q-option.sel { background: var(--hover); border-color: var(--border); }
-.q-num {
-  display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px;
-  margin-top: 2px; border-radius: 6px; background: #f5f6f7;
-  color: var(--text-2); font-size: 12px; font-weight: 500; line-height: 18px;
-}
-.q-copy { min-width: 0; flex: 1; }
-.q-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 6px; }
-.q-label { font-size: 14px; line-height: 24px; font-weight: 500; color: var(--text); }
-.q-badge { padding: 0 4px; border-radius: 6px; background: #eef2ff; color: #4176e6; font-size: 11px; line-height: 18px; font-weight: 600; }
-.q-desc { color: var(--text-2); font-size: 13px; line-height: 22px; }
-.q-check { flex: none; display: grid; place-items: center; width: 20px; height: 20px; margin-top: 2px; color: #4176e6; }
-.q-check svg { width: 16px; height: 16px; }
-.q-ans { margin: 0 12px 12px; padding: 8px 10px; border-radius: 10px; background: #f7f8fa; color: var(--text-2); font-size: 12px; line-height: 18px; word-break: break-word; }
-.q-ans.pending { color: var(--text-3); }
+/* ===== AskUserQuestion 只读提问卡样式（.question-card / .q-*）2026-09-11 ④ 随卡片整体移除
+   （用户定案「静态的提问卡不可交互的…直接移除就好」）：提问在消息流里只剩紧凑工具行 .tool-line。
+   web 可交互提问 = CLI 经审批链下发的 question 分支，样式见下方 .appr-card.qa-card。 */
 
 /* ===== composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁为 #input-bar 子元素，用户定案）=====
    提问/审批 UI 是输入栏的子元素，出现=输入栏自身大小变化：.bar-takeover 态输入内容组整组隐藏、
@@ -440,10 +422,81 @@ a { text-decoration: none; color: inherit; }
    +输入内容组隐藏；卡面铬一律不动 */
 #input-bar.bar-takeover { padding: 0; overflow: hidden; }
 #input-bar.bar-takeover > :not(#composer-takeover) { display: none !important; }
-/* takeover 内的提问卡 / 审批卡铺满输入栏宽度（去掉 chat 内的 480px 上限），且剥掉自身卡面铬
+/* takeover 内的审批卡铺满输入栏宽度（去掉 chat 内的宽度上限），且剥掉自身卡面铬
    （独立边框/底色/阴影/圆角全去）——黄条头保留为状态带，卡面即输入栏卡面（2026-09-09 根修） */
-#composer-takeover .question-card,
 #composer-takeover .appr-card { width: 100%; max-width: none; margin: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; }
+/* ===== 底栏任务浮窗（2026-09-10，几何 2026-09-11 二轮定案）=====
+   输入栏子元素、贴其上沿定位（bottom:100%）的生长式浮窗——「从底栏长出来」的几何：
+   #task-dock = 裁剪盒（padding 上留 18px 给展开态上移后的浮出阴影，overflow:hidden 裁掉下沿以外部分，
+   down 边界 = 输入栏上沿）；.td-panel 常态下移 100%（整块藏进输入栏后）
+   → 点击 .open 上滑并抬升 --td-gap：面板底边与输入栏上沿留出间距（用户 2026-09-11 定案：
+   「和底栏主体应该保留适当间距」），无内容穿越输入栏（裁剪即「藏在栏后」）。
+   .td-lip = 收敛态露出的把手条（绝对定位于盒底、贴输入栏上沿，open 后隐藏让位给 .td-head）；
+   高度 12px、白表面 + 1px 0.10 描边（用户 2026-09-11 定案：旧 2px「露出部分有点太小了」→ 12px；
+   旧实心灰「这个颜色不是很对」→ 改与 #input-bar/.td-panel 同族材质，读作面板露出的顶边）。 */
+#task-dock {
+  --td-gap: 10px; /* 展开态：面板底边与输入栏上沿的间距（唯一几何出口） */
+  position: absolute; left: 14px; right: 14px; bottom: 100%;
+  /* 上留 18px：展开态面板整体上移 --td-gap 后，顶部仍留出浮出阴影（blur 12 / y 4 → 上溢 8px）不被裁 */
+  padding: 18px 10px 0; overflow: hidden;
+  pointer-events: none; /* 盒内空白区不挡聊天区点击；可点件（lip/面板）各自开自动 */
+  animation: tdBorn 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+#task-dock[hidden] { display: none; }
+#task-dock.blocked { pointer-events: none; }
+@keyframes tdBorn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#task-dock .td-lip {
+  position: absolute; left: 10px; right: 10px; bottom: 0; z-index: 2;
+  height: 12px; padding: 0;
+  /* 材质与 #input-bar / .td-panel 同族（白表面 + 1px 0.10 描边 + 圆角），**不是**独立色条——
+     收敛态露出的就是面板自身的顶边，「藏在栏后」的意象在视觉上连续（2026-09-11 用户定案：
+     实心灰 rgba(38,49,72,0.16) 与白输入栏体系不搭）。下沿无边框：紧贴输入栏上沿不画第二道线。 */
+  border: 1px solid rgba(0, 0, 0, 0.1); border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: #fff; cursor: pointer; pointer-events: auto;
+  transition: height 0.14s ease, background-color 0.14s ease;
+}
+#task-dock .td-lip:hover:not(:disabled) { height: 14px; background: #f7f8fa; }
+#task-dock .td-lip:disabled { cursor: default; }
+/* 接管卡在场（.blocked）：把手显式弱化——白卡形态下不禁用会仍像可点 */
+#task-dock.blocked .td-lip { opacity: 0.55; }
+#task-dock.open .td-lip { opacity: 0; pointer-events: none; }
+#task-dock .td-panel {
+  margin: 0 10px; /* 面板宽 = 输入栏宽 −48px（14×2 盒内缩 + 10×2 面板缩），居中 */
+  max-height: min(40vh, 460px); overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 14px; background: #fff;
+  box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.04), 0 12px 32px 0 rgba(0, 0, 0, 0.12);
+  font-size: 13px; line-height: 20px; color: #0f1115;
+  transform: translateY(100%); /* 收敛：整块移出盒底（=藏进输入栏后），只留 .td-lip 可见 */
+  transition: transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+  pointer-events: none;
+}
+#task-dock.open .td-panel { transform: translateY(calc(-1 * var(--td-gap))); pointer-events: auto; }
+/* 头部=收起把手（点击向下收敛）：标题 + 计数 + 向下 chevron（CHEV 原形朝右，定角 90° 朝下） */
+#task-dock .td-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  position: sticky; top: 0; background: #fff; border-radius: 14px 14px 0 0;
+  cursor: pointer;
+}
+#task-dock .td-head:hover { background: #f7f8fa; }
+#task-dock .td-title { font-weight: 500; }
+#task-dock .td-counts { color: #adb2b8; font-size: 12px; font-variant-numeric: tabular-nums; }
+#task-dock .td-chev { margin-left: auto; display: inline-flex; color: #adb2b8; transform: rotate(90deg); }
+#task-dock .td-chev svg { width: 14px; height: 14px; display: block; }
+#task-dock .td-list { padding: 4px 0; }
+/* 清单行（CLI TaskListV2 同构语义：完成=删除线+变暗、进行中=加粗、阻塞=变暗） */
+#task-dock .td-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 12px; }
+#task-dock .td-item .td-ico { flex: none; width: 14px; color: #adb2b8; font-size: 11px; line-height: 20px; }
+#task-dock .td-item[data-st="in_progress"] .td-ico { color: #4176e6; }
+#task-dock .td-item[data-st="completed"] .td-ico { color: #16a34a; }
+#task-dock .td-item .td-sub { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+#task-dock .td-item[data-st="in_progress"] .td-sub { font-weight: 500; }
+#task-dock .td-item[data-st="completed"] .td-sub { text-decoration: line-through; }
+#task-dock .td-item.dim .td-sub,
+#task-dock .td-item.dim .td-ico { color: #adb2b8; }
+#task-dock .td-item .td-owner { flex: none; color: #81858c; font-size: 12px; }
+
 .tool-result {
   margin: 4px 0; padding: 8px 12px; background: var(--rail-bg); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text-2); font-family: var(--mono); font-size: 12px;
@@ -597,8 +650,30 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 /* 动画载体（2026-09-08 三轮）：#input-bar height 显式 px 起止过渡=「输入栏自身大小变化」
    （auto↔auto 不插值，多行增高等日常变化不触发）。2026-09-09 根修：显形/收合全部由 height 过渡
    +overflow 裁剪承担，composer-fade / composer-fade-out 淡入淡出机制整体删除——旧版 220ms 淡入与
-   320ms 长高同跑=出现首帧底部空白、收回后输入行再淡入=底部空窗；输入行回归=收合完成后原位瞬换。 */
+   320ms 长高同跑=出现首帧底部空白、收回后输入行再淡入=底部空窗。 */
 #input-bar { transition: height 0.32s cubic-bezier(0.22, 0.61, 0.36, 1); }
+/* 收起（2026-09-10 用户定案「收起时先从下到上渐隐审批栏 UI，然后复现一般输入栏 UI」→ 同日二轮修正
+   「收起时候的渐隐和折叠应该是并行发生的」；时序在 approval.js clearTakeover，本段只声明三态视觉）：
+   ① .appr-out 审批卡自下而上渐隐——clip-path 底边 0→100% 插值=可见区从底边往上削，配 opacity 收尾
+      （0.17s，须 ≤ HEIGHT_MS，卡在折叠收口前先淡尽）。
+   ② .bar-collapsing 输入内容组复现并贴底对齐——输入栏底边固定（docked 由 translateY(-100%) 锚定），
+      折叠期内容零位移，只有顶边下移收短。
+   ③ .bar-reveal 输入内容组淡入。
+   ①②③ 同帧起播（单一时间轴），卡与输入内容在底边处交叉过渡；旧版①→②③ 串行共 490ms。 */
+@keyframes apprOutUp { from { clip-path: inset(0 0 0 0); opacity: 1; } to { clip-path: inset(0 0 100% 0); opacity: 0; } }
+#composer-takeover.appr-out { animation: apprOutUp 0.17s cubic-bezier(0.4, 0, 1, 1) both; }
+@keyframes barRevealIn { from { opacity: 0; } to { opacity: 1; } }
+/* 入场（2026-09-10 用户实测「弹出有点生硬」）：旧版入场零过渡——输入内容组瞬间 display:none、
+   卡片底部（按钮行）以全不透明瞬间出现，只剩 height 长得把卡面往上展开=「内容硬切 + 盒子长高」。
+   新增 .appr-in：卡片内容自下方 10px 浮起 + 淡入（220ms ease-out），与高度长出（320ms）同帧起播。
+   卡面本体（白底/描边/圆角/阴影）在 .bar-takeover 态不退场 ⇒ 内容淡入不会露首帧空洞
+   （09-09 铲除的 composer-fade 是「整卡渐隐」，白底一起消失才出现空洞）。
+   10px 位移落在卡片底部内边距内（.appr-btns padding:14px 16px）⇒ 按钮行不被裁角。
+   只在「普通输入栏 → 卡片」那一次播放：换题/重渲染不重播（showTakeover firstShow 门）。 */
+@keyframes apprInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+#composer-takeover.appr-in { animation: apprInUp 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+#input-bar.bar-collapsing { justify-content: flex-end; overflow: hidden; }
+#input-bar.bar-reveal > :not(#composer-takeover) { animation: barRevealIn 0.17s ease-out both; }
 /* 空态：相对 stage 真定位（SubPj3 .inputbar 同款——bar 中心锚在趴栏台面中心 76.75%，
    translate(-50%,-50%) 让任意高度的高胶囊都精确居中于台面，任意窗口精确贴图） */
 #empty-hint #input-wrap {
@@ -621,6 +696,7 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 }
 /* dsh .card：白输入表面 + 22px 圆角 + 0.10 输入描边 + shadow-lv2 + 16/24 基础字 */
 #input-bar {
+  position: relative; /* 2026-09-10：任务浮窗（#task-dock）的定位上下文——bottom:100% 贴本栏上沿 */
   display: flex; flex-direction: column; gap: 12px;
   width: 100%; max-width: 780px; padding-top: 10px;
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -1688,7 +1764,8 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 矮屏桌面（≤779px 高，非手机）：stage = 100vh-160px 主导，输入栏在 stage 内相对定位自动适配（无需覆盖） */
 
 /* 置底排队区（2026-08-30 共同后端定案：排队中消息独立小气泡列表，消息流最末尾、
-   最后一个折叠体「正在思考/正在生成」状态显示行之下；注入后转入折叠体，dequeue 落盘后变开启气泡） */
+   最后一个折叠体「正在思考/正在生成」状态显示行之下；注入后转入折叠体，dequeue 落盘后变开启气泡）
+   2026-09-10 催办：可点击（点击 = 结束当前思考并立即并入本轮），hover 浮起同消息气泡口径 */
 .queue-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 4px 0 8px; }
 .queue-dock .q-item {
   display: flex; align-items: center; gap: 8px;
@@ -1696,10 +1773,14 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   padding: 7px 12px; border-radius: 12px;
   background: rgba(38, 49, 72, 0.05); border: 1px dashed rgba(38, 49, 72, 0.18);
   font-size: 13px; line-height: 20px; color: #43454a;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
+.queue-dock .q-item:hover { background: rgba(38, 49, 72, 0.09); border-color: rgba(38, 49, 72, 0.32); }
 .queue-dock .q-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .queue-dock .q-body p { margin: 0; }
 .queue-dock .q-tag { flex: none; font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
+.queue-dock .q-item:hover .q-tag { color: rgba(38, 49, 72, 0.68); }
 /* 排队项图片缩略图（2026-08-30）：48px 小图随文本行堆叠（q-body 内），object-fit cover 同输入栏胶囊 */
 .queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .queue-dock .q-imgs .q-img { display: block; width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); }

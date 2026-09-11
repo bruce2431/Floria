@@ -88,6 +88,7 @@ import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { CancelRequestHandler } from '../hooks/useCancelRequest.js';
 import { setGatewayInterruptHandle, consumeWebInterrupt } from '../bridge/gatewayInterruptHandle.js';
+import { setGatewayQueueNudgeHandle } from '../bridge/gatewayQueueNudgeHandle.js';
 import { useBackgroundTaskNavigation } from '../hooks/useBackgroundTaskNavigation.js';
 import { useSwarmInitialization } from '../hooks/useSwarmInitialization.js';
 import { useTeammateViewAutoExit } from '../hooks/useTeammateViewAutoExit.js';
@@ -208,7 +209,7 @@ import { useIDEIntegration } from '../hooks/useIDEIntegration.js';
 import exit from '../commands/exit/index.js';
 import { ExitFlow } from '../components/ExitFlow.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
-import { popAllEditable, enqueue, type SetAppState, getCommandQueue, getCommandQueueLength, removeByFilter } from '../utils/messageQueueManager.js';
+import { popAllEditable, enqueue, type SetAppState, getCommandQueue, getCommandQueueLength, getDrainableQueuedPrompt, requestQueueNudge, removeByFilter } from '../utils/messageQueueManager.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
@@ -1597,7 +1598,7 @@ export function REPL({
       const d = buildDisplayDelta(messages, exportSessionId, mode)
       if (d) {
         void import('../utils/gatewayClient.js')
-          .then((m) => m.notifySessionDelta(d.seq, d.base, d.messages))
+          .then((m) => m.notifySessionDelta(d.seq, d.anchorSid, d.messages))
           .catch(() => {})
       }
     }
@@ -2358,6 +2359,20 @@ export function REPL({
       if ((signal && !signal.aborted) || getCommandQueueLength() > 0) onCancelRef.current();
     });
     return () => setGatewayInterruptHandle(null);
+  }, []);
+  // 2026-09-10 web 排队消息催办：点击排队气泡（gatewayClient → gatewayQueueNudgeHandle）
+  // → 置位催办标记，query.ts 的生成流就地断流并让本轮 drain 把该消息纳入当前轮次。
+  // 判活两条（缺一不可）：①有在飞生成（abortController 存活）——没有生成流可断，
+  // 队列消息自会被常规投递处理，误置位会伤到下一轮生成；②队列里确有本轮 drain 能吃
+  // 下的用户消息——否则断流只是白丢一次生成（斜杠命令不进 drain）。
+  useEffect(() => {
+    setGatewayQueueNudgeHandle(() => {
+      const signal = abortControllerRef.current?.signal;
+      if (!signal || signal.aborted) return;
+      if (!getDrainableQueuedPrompt()) return;
+      requestQueueNudge();
+    });
+    return () => setGatewayQueueNudgeHandle(null);
   }, []);
   useEffect(() => {
     const totalCost = getTotalCost();

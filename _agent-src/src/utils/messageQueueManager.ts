@@ -55,8 +55,15 @@ const commandQueue: QueuedCommand[] = []
 let snapshot: readonly QueuedCommand[] = Object.freeze([])
 const queueChanged = createSignal()
 
+// ----------------------------------------------------------------------------
+// 排队消息催办标记。语义见下方 requestQueueNudge 段。
+// ----------------------------------------------------------------------------
+let queueNudgeRequested = false
+
 function notifySubscribers(): void {
   snapshot = Object.freeze([...commandQueue])
+  // 队列清空 = 催办对象已消失（被纳入 / 被移除），标记随之失效。
+  if (commandQueue.length === 0) queueNudgeRequested = false
   queueChanged.emit()
 }
 
@@ -114,6 +121,50 @@ export function recheckCommandQueue(): void {
   if (commandQueue.length > 0) {
     notifySubscribers()
   }
+}
+
+// ============================================================================
+// 排队消息催办（2026-09-10）
+//
+// 用户在 web 排队区点击某条排队气泡 = 「这条我等不及了」：要求当前正在飞的
+// 生成流提前收尾，好让本轮的 drain（query.ts 中链 drain）把它作为
+// queued_command 附件纳入当前轮次——与「模型自然答完后排队消息被纳入」走同
+// 一条路径、同一种渲染（injected 引导，织进当前折叠体）。不产生新回合、不
+// 产生新的乐观气泡、不是中断（无中断提示、无撤回链）。
+//
+// 生命周期锚定队列：一次性消费（引擎在生成流收尾处 consume 一次），且队列清
+// 空即失效（见 notifySubscribers）——标记只对「队列表里的那些消息」有意义，
+// 队伍空了它就无从落地，留着只会误伤下一轮生成。
+// ============================================================================
+
+/** 请求催办。REPL 侧判活后调用（有在飞生成 + 队列里有可 drain 的用户消息）。 */
+export function requestQueueNudge(): void {
+  queueNudgeRequested = true
+}
+
+/** 只读查看：生成流每个增量轮询用（不消费——断流判定要能反复看到）。 */
+export function peekQueueNudge(): boolean {
+  return queueNudgeRequested
+}
+
+/** 取走并清除：引擎在生成流收尾处调用一次，决定本轮是否续跑以纳入排队消息。 */
+export function consumeQueueNudge(): boolean {
+  const requested = queueNudgeRequested
+  queueNudgeRequested = false
+  return requested
+}
+
+/**
+ * 本轮 drain 能否把某条排队命令纳入当前轮次（= 可被催办的对象）。
+ * 与 query.ts 中链 drain 的过滤同语义：用户输入（mode 'prompt'）、非斜杠、
+ * 主线程（agentId 未标记）。返回 undefined = 催办无从落地（断流只会白丢一次
+ * 生成），REPL 侧据此拒绝置位。
+ */
+export function getDrainableQueuedPrompt(): QueuedCommand | undefined {
+  return getCommandsByMaxPriority('next').find(
+    cmd =>
+      cmd.mode === 'prompt' && cmd.agentId === undefined && !isSlashCommand(cmd),
+  )
 }
 
 // ============================================================================

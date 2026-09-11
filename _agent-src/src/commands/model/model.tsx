@@ -15,7 +15,7 @@ import { checkOpus1mAccess, checkSonnet1mAccess } from '../../utils/model/check1
 import { getDefaultMainLoopModelSetting, isOpus1mMergeEnabled, renderDefaultModelSetting } from '../../utils/model/model.js';
 import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { validateModel } from '../../utils/model/validateModel.js';
-import { ensureProviderForModel, findModelProvider, loadCredentials } from '../../utils/credentials/pool.js';
+import { findModelProvider, getSessionProviderName, setSessionProviderOverride } from '../../utils/credentials/pool.js';
 import { reportCurrentModel } from '../../utils/gatewayClient.js';
 function ModelPickerWrapper(t0) {
   const $ = _c(17);
@@ -52,8 +52,13 @@ function ModelPickerWrapper(t0) {
         from_model: mainLoopModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         to_model: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
       });
-      // 2026-08-29 直接切模型自动切供应商：选中的模型属其它供应商 → 全局切供应商（池外模型原样放行）
-      if (model) ensureProviderForModel(model);
+      // 2026-09-10 会话级供应商绑定：选中的模型属哪个供应商，就把本进程绑定到该供应商
+      // （进程内 baseUrl/key，credentials/pool.ts）——不再写全局凭据池，其它会话不受影响；
+      // 池外模型（无归属供应商）保持当前绑定原样放行。
+      if (model) {
+        const owner = findModelProvider(model);
+        if (owner) setSessionProviderOverride(owner);
+      }
       setAppState(prev => ({
         ...prev,
         mainLoopModel: model,
@@ -179,11 +184,11 @@ function SetModelAndClose({
       }
 
       // 2026-08-29 直接切模型自动切供应商：模型在凭据池内 → 池为权威（跳过 API 试呼验证）；
-      // 属其它供应商 → 全局切供应商（写 activeProvider + 该供应商 activeModel，key/baseUrl 随之生效）
+      // 2026-09-10 起改为会话级绑定（本进程 baseUrl/key），不写全局凭据池
       const poolOwner = findModelProvider(model);
       if (poolOwner) {
-        const prevProvider = loadCredentials().activeProvider;
-        ensureProviderForModel(model);
+        const prevProvider = getSessionProviderName();
+        setSessionProviderOverride(poolOwner);
         setModel(model, poolOwner !== prevProvider ? poolOwner : undefined);
         return;
       }

@@ -8,8 +8,10 @@
  * 统一 schema：缺字段 = NULL（标记丢失，非字段不存在）；时间进 id，无独立 time 列，
  * id_time() 从 id 解析（兼容 message_id 与 memory_id）。
  *
- * 活引擎 superset（2026-09-04 用户放行同步时定，2026-09-05 收口）：memories 在定案 6 列上
+ * 活引擎 superset（2026-09-04 用户放行同步时定，2026-09-05 收口）：memories 在定案 4 列上
  * 补 3 可空列承载 remember 工具活语义（core_file/supersedes/deprecated_by，均不可派生）。
+ * confidence/half_life 两列 2026-09-15 定案移除（写入侧只存不用、检索侧从不读取，
+ * Python 基线 _rank_mem 同样只取 ranking.fact 的 w_cos/w_kw——僵尸字段）。
  * pattern 定案移除（Pj11 CLAUDE.md「mem 字段：仅 revelant+blocks」延展）——不入库、不迁移、
  * 不返回。content/summary 按定案不落库：文本由 blocks 派生（deriveEntryText），blocks 缺省
  * 含 [content]（迁移与写入均保证）→ embeddings 索引零重建。
@@ -35,8 +37,6 @@ export interface MemEntry {
   revelant: string[]
   blocks: string[]
   source: string | null
-  confidence: number | null
-  half_life: number | null
   core_file: CoreFileItem[] | null
   supersedes: string | null
   deprecated_by: string | null
@@ -97,8 +97,6 @@ CREATE TABLE IF NOT EXISTS memories (
     revelant       TEXT,              -- JSON 数组（关联 message_id），无→'[]'
     blocks         TEXT,              -- JSON 数组（语义编码块，embedding 源），无→'[]'
     source         TEXT,
-    confidence     REAL,
-    half_life      REAL,
     core_file      TEXT,              -- JSON 数组（活引擎核心产物）
     supersedes     TEXT,              -- 活引擎纠错链：指向被修正旧条目
     deprecated_by  TEXT               -- 活引擎纠错链：被新条目废弃的标注
@@ -155,8 +153,6 @@ function rowToMemEntry(row: Record<string, unknown>): MemEntry {
     revelant: (jsonParse(row.revelant) as string[] | null) ?? [],
     blocks: (jsonParse(row.blocks) as string[] | null) ?? [],
     source: (row.source as string) ?? null,
-    confidence: (row.confidence as number) ?? null,
-    half_life: (row.half_life as number) ?? null,
     core_file: (jsonParse(row.core_file) as CoreFileItem[] | null) ?? null,
     supersedes: (row.supersedes as string) ?? null,
     deprecated_by: (row.deprecated_by as string) ?? null,
@@ -169,8 +165,6 @@ function memEntryRow(e: MemEntry): unknown[] {
     jsonCol(e.revelant ?? []),
     jsonCol(e.blocks ?? []),
     e.source,
-    e.confidence,
-    e.half_life,
     jsonCol(e.core_file),
     e.supersedes,
     e.deprecated_by,
@@ -178,7 +172,7 @@ function memEntryRow(e: MemEntry): unknown[] {
 }
 
 const MEM_COLS =
-  '(memory_id, revelant, blocks, source, confidence, half_life, core_file, supersedes, deprecated_by)'
+  '(memory_id, revelant, blocks, source, core_file, supersedes, deprecated_by)'
 
 export function readMemories(dbPath: string): MemEntry[] {
   if (!existsSync(dbPath)) return []
@@ -206,7 +200,7 @@ export function countMemories(dbPath: string): number {
 export function insertMemory(dbPath: string, entry: MemEntry): void {
   const db = openDb(dbPath)
   try {
-    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?)`, memEntryRow(entry))
+    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?)`, memEntryRow(entry))
   } finally {
     db.close()
   }
@@ -379,7 +373,7 @@ export function migrateMemJsonToDb(
   try {
     // OR REPLACE：源 mem.json 历史遗留重复 memory_id last-wins 折叠
     // （真身 LJJ 6 条重复 → 4397-6=4391 行，对照 SubPj7 实迁移行为）
-    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?,?)`)
+    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?)`)
     for (const e of entries) {
       const men = (e.men ?? {}) as Record<string, unknown>
       const sem = (e.sem ?? {}) as Record<string, unknown>
@@ -396,8 +390,6 @@ export function migrateMemJsonToDb(
         revelant,
         blocks,
         source: (men.source as string) ?? null,
-        confidence: (e.confidence as number) ?? null,
-        half_life: (e.half_life as number) ?? null,
         core_file: (men.core_file as CoreFileItem[] | undefined) ?? null,
         supersedes: (men.supersedes as string) ?? null,
         deprecated_by: (men.deprecated_by as string) ?? null,

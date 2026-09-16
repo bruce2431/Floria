@@ -1,6 +1,8 @@
 // 图片附件（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { toast } from '../core/state.js'
+import { toast, esc, state } from '../core/state.js'
+import { I } from '../core/icons.js'
+import { apiUrl } from '../core/gateway.js'
 import { syncGwSend } from './send.js'
   // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
   // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
@@ -12,16 +14,25 @@ import { syncGwSend } from './send.js'
     pendingImages = []
     renderImgPills()
   }
+  // pendingFiles: {name, abs, size}（落盘文件）。渲染与图片同胶囊行（#img-pills），发送时
+  // 文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行（CLI 端即普通文本，模型按路径 Read）。
+  let pendingFiles = []
+  function clearPendingFiles() {
+    pendingFiles = []
+    renderImgPills()
+  }
   function renderImgPills() {
     const box = $('img-pills')
     if (!box) return
-    if (!pendingImages.length) {
+    if (!pendingImages.length && !pendingFiles.length) {
       box.hidden = true
       box.innerHTML = ''
     } else {
       box.hidden = false
       box.innerHTML = pendingImages
         .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
+        .join('') + pendingFiles
+        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
     }
     syncGwSend()
@@ -65,11 +76,41 @@ import { syncGwSend } from './send.js'
     }
     renderImgPills()
   }
+  // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
+  // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
+  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=state.newProject
+  //（项目「+」初始化界面）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
+  // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
+  async function addUploadFiles(files) {
+    const ctx = state.currentHash
+      ? '&sid=' + encodeURIComponent(state.currentHash)
+      : (state.newProject ? '&project=' + encodeURIComponent(state.newProject) : '')
+    for (const f of files) {
+      toast('正在上传 ' + (f.name || '文件') + '…')
+      try {
+        const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(f.name || 'file') + ctx), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: f,
+        })
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok || !d.ok) { toast('上传失败：' + (d.error || r.status)); continue }
+        pendingFiles.push({ name: d.name || f.name || '文件', abs: String(d.abs || d.path || ''), size: d.size || 0 })
+        toast('已上传 ' + d.name)
+      } catch {
+        toast('上传失败：网络错误')
+      }
+    }
+    renderImgPills()
+  }
 
 export {
   addImageFiles,
+  addUploadFiles,
   clearPendingImages,
+  clearPendingFiles,
   encodeImg,
   pendingImages,
+  pendingFiles,
   renderImgPills,
 }

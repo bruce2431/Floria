@@ -16,10 +16,18 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   const MENTION_SESSION_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>'
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
 
+  // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
+  // 见 src/utils/sessionExposure.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  function splitSessionToken(v) {
+    const i = String(v).indexOf('|')
+    return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
+  }
+
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
   function mentionChipHtml(kind, name) {
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${name}</span>`
+    const label = kind === 'session' ? splitSessionToken(name).title : name
+    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -37,7 +45,11 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
         if (n.nodeType === 3) { out += n.nodeValue; continue }
         if (n.nodeType !== 1) continue
         if (n.classList && n.classList.contains('mention')) {
-          out += n.dataset.kind === 'session' ? `[会话:${n.dataset.name}]` : `[插件:${n.dataset.name}]`
+          // 会话 chip 带 sid → `[会话:标题|sid]`：sid 是会话的稳定键（改名免疫），CLI 侧会话暴露
+          // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
+          out += n.dataset.kind === 'session'
+            ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
+            : `[插件:${n.dataset.name}]`
         } else if (n.tagName === 'BR') {
           out += '\n'
         } else {
@@ -98,7 +110,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     }
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', desc: relTime(s.updatedAt) })
+      // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     return items
   }
@@ -126,7 +139,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     pop.querySelectorAll('.mp-item').forEach((b) =>
       b.addEventListener('click', () => {
         const it = mention.items[+b.dataset.idx]
-        if (it) insertMention(it.kind, it.name)
+        if (it) insertMention(it.kind, it.name, it.sid)
       }),
     )
   }
@@ -144,11 +157,12 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
 
   function selectMention() {
     const it = mention.items[mention.sel]
-    if (it) insertMention(it.kind, it.name)
+    if (it) insertMention(it.kind, it.name, it.sid)
   }
 
-  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后
-  function insertMention(kind, name) {
+  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后。sid 仅会话 chip 有（寻址键，
+  // 序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
+  function insertMention(kind, name, sid) {
     const sp = mention.sentinel
     if (sp && sp.isConnected) {
       const prev = sp.previousSibling
@@ -163,6 +177,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       chip.contentEditable = 'false'
       chip.dataset.kind = kind
       chip.dataset.name = name
+      if (kind === 'session' && sid) chip.dataset.sid = sid
       chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
       sp.replaceWith(chip)
       const space = document.createTextNode('\u00A0')

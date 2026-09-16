@@ -72,6 +72,11 @@ const getTeamDeleteTool = () =>
 const getSendMessageTool = () =>
   require('./tools/SendMessageTool/SendMessageTool.js')
     .SendMessageTool as typeof import('./tools/SendMessageTool/SendMessageTool.js').SendMessageTool
+// 2026-09-15 会话间协作（session_send）：与 SendMessageTool 同法懒加载（打破 tools.ts 循环依赖），
+// 生效判据在工具自身 isEnabled（feature('SESSION_LINK')）——此处无条件登记，同 getSendMessageTool。
+const getSessionSendTool = () =>
+  require('./tools/SessionSendTool/SessionSendTool.js')
+    .SessionSendTool as typeof import('./tools/SessionSendTool/SessionSendTool.js').SessionSendTool
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { AskUserQuestionTool } from './tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import { LSPTool } from './tools/LSPTool/LSPTool.js'
@@ -235,6 +240,7 @@ export function getAllBaseTools(): Tools {
     ...(isEnvTruthy(process.env.ENABLE_LSP_TOOL) ? [LSPTool] : []),
     ...(isWorktreeModeEnabled() ? [EnterWorktreeTool, ExitWorktreeTool] : []),
     getSendMessageTool(),
+    getSessionSendTool(),
     ...(ListPeersTool ? [ListPeersTool] : []),
     ...(isAgentSwarmsEnabled()
       ? [getTeamCreateTool(), getTeamDeleteTool()]

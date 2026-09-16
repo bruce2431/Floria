@@ -21,6 +21,9 @@
 | 内置网关 | `localGateway.ts` | exe 内置网关进程 | 网关 |
 | CLI 客户端注册表 | `cliClients` | 网关侧 CLI 会话进程路由表 | |
 | web 独立会话 | wsession | web 端「笔/项目+」新建的独立 CLI 进程会话 | |
+| 会话间通信 | `session_send` 工具 / `session-message` 帧 | 会话 A 的 agent 向会话 B 发一条消息，B 侧以与 user 消息同构的形态接收（空闲开回合/忙则排队/可催办），气泡外带来源灰字行；**暴露即授权**（用户在输入栏 `@` 提及或「+」菜单「引用会话」才获得该会话的发送权）。链路 → [core.md](core.md) 末节 + [gateway.md](gateway.md) §13 | 跨会话消息/会话互发 |
+| 暴露 | 提及令牌 `[会话:标题\|sid]` | 用户把某会话暴露给当前 agent 的手势产物；已暴露集合 = 转录里 `user` 记录令牌的并集（+ 反向来件），**永久有效**、无独立持久化状态 | |
+| 来源灰字行 | `.msg .who`（气泡外）/ `.q-who`（排队区） | 「来自 会话：X」小灰字；**在气泡容器内、`.body` 之前**（气泡上方，文档流占位，不影响几何）；**随其气泡一侧对齐**——用户气泡右对齐故来源行右对齐（`.msg.user .who { align-self: flex-end }`；CLI 侧同义的行盒 flex-end，2026-09-15 用户实测定案） | |
 
 ## 侧栏与会话管理
 
@@ -79,11 +82,12 @@
 | 项目选择器 | `#proj-seat` + `#proj-pop` | 空态选目标项目（「全局」默认）；会话态锁定只读（项目 chip） | |
 | 模型·推理座 | `#model-seat` + `#model-pop` | 模型与推理等级两级选择 | |
 | 上下文占用环 | `#ctx-meter` | 环形百分比 + 点击展开 breakdown 面板 | |
-| 图片胶囊 | `#img-pills`/`.img-pill` | 待发送图片缩略图行 | |
-| `+` 浮窗 | `#cmd-btn` 唤出 | **09-09 二轮定案：去顶层 tab，单页四组堆放**（上传=选图行+已选缩略图 / 技能=MGR.skills.personal / 引用会话=近 48h ALL / 指令=MOCK_COMMANDS；`.grp` 组标题 + `.rowIco` 行图标）；等宽=输入栏同宽（`left:0;right:0`，`#mention-pop` 同款锚定 `#input-wrap`），搜索框滤全部组 | |
-| 命令菜单 | `#cmd-pop` | 统一条目 `cmdEntries()` 平铺索引（键盘导航跨组）；选择分发：图片行=`img-file` 选图（选完关浮窗）/ 技能·会话=`appendMentionChip` 追加输入栏（serializeInput 序列化 `[插件:X]/[会话:X]` 令牌，与 @ 提及同链）/ 命令=原链（risk→确认门）；vision 入口门控随图片 tab 退役（粘贴/拖拽/发送链本无门控） | |
+| 附件胶囊 | `#img-pills`（`.img-pill` 图片 / `.file-pill` 文件） | 待发送附件行：图片缩略图（base64 内联）+ 文件卡片（09-12 新增，三轮改版抄 dsh AttachmentRail：64×64 方卡、灰底薄描边、dshFile 图标+文件名两行居中、× 收进卡内右上 hover 显形/触屏恒显；落盘 uploads/ 后按占位发送） | |
+| `+` 浮窗 | `#cmd-btn` 唤出 | **09-09 二轮定案：去顶层 tab，单页四组堆放**（上传=选图行+已选缩略图+文件上传行 / 技能=MGR.skills.personal / 引用会话=近 48h ALL / 指令=MOCK_COMMANDS；`.grp` 组标题 + `.rowIco` 行图标）；等宽=输入栏同宽（`left:0;right:0`，`#mention-pop` 同款锚定 `#input-wrap`），搜索框滤全部组 | |
+| 命令菜单 | `#cmd-pop` | 统一条目 `cmdEntries()` 平铺索引（键盘导航跨组）；选择分发：图片行=`img-file` 选图（选完关浮窗）/ 文件上传行=`file-upload` 选文件（09-12 新增，`addUploadFiles` 上传**落盘跟随会话**（09-12 四轮定案：带 sid/project 网关按会话根落 `<会话根>/uploads/`）→ 文件胶囊进附件行，发送时消息拼 `[文件:<会话 cwd 相对路径>]` 占位（09-12 三轮定案相对化，同会话恒 `uploads/<名>`）、web 渲染剥出文件卡片）/ 技能·会话=`appendMentionChip` 追加输入栏（serializeInput 序列化 `[插件:X]/[会话:X]` 令牌，与 @ 提及同链）/ 命令=原链（risk→确认门）；vision 入口门控随图片 tab 退役（粘贴/拖拽/发送链本无门控） | |
 | 风险确认门 | `#risk-modal` | 高危命令确认对话框 | |
 | @ 提及浮窗 | `#mention-pop` + `.mention` | 插件/技能 + 近 48h 会话提及选择 | |
+| 提及令牌 | `[会话:标题\|sid]` / `[插件:X]` | chip 随消息文本发出的字面令牌（`serializeInput` 单一序列化点）；**会话令牌恒带 sid**（精确寻址，免疫改名），chip 与 CLI 终端**只显示标题**（按 `\|` 切分）；sid 由 `hashOf(s)` 得出（与 web 消息路由同键）。两个暴露入口 = `@` 浮窗（`mention.js`）与「+」菜单「引用会话」（`commands.js`）——**两处都输出带 sid 形态** | |
 | 接管栏 | `#composer-takeover`（`#input-bar` 最后一个子元素，09-08 定案） | **仅审批/提问卡（`.appr-card`）**——web 自绘的**只读**提问卡（`.question-card`/`.q-*`，无交互入口）已于 2026-09-11 用户定案整体移除；可交互提问走 CLI 审批链 `renderQuestionApproval` 下发的 `.appr-card.qa-card`（选项点选/多选/自定义输入/跳过/上一题下一题，同样经本接管通路）；审批卡是输入栏的子元素而非兄弟节点；`.bar-takeover` 时输入栏仅 `padding:0 + overflow:hidden`（09-09 根修：**卡自身铬全剥离贴卡面——`.appr-card` 去边框/背景/圆角/阴影，黄条头贴顶，圆角由输入栏裁溢出裁出；输入栏自身边框/背景铬不动=表面连续**，不再是悬浮独立面板观感）+ 原内容组 `display:none` → 卡片即输入栏本体；出现/解决 = **单一时间轴：输入栏自身高度** h0→h1 过渡（0.32s cubic-bezier）+ overflow 裁切（09-09 根修：**整条 fade 淡入淡出机制已删**——opacity 过渡/composer-fade/animFadeIn 全链移除，杜绝淡入与高度动画双时间轴竞速、收回 0.3s 死窗）；动画期 `.composer-growing` 卡片 absolute bottom:0 底边锚定，`wrapAnimating` 期 `syncTakeoverPad` 首行直接 return（RO 守卫 09-09 落地）；聊天区 padding-bottom 一次性设终值 + `lastPad` 同值短路 | |
 | 任务浮窗 | `#task-dock` + `.td-panel`/`.td-lip`（`#input-bar` 子元素，2026-09-10 定案；几何 09-11 二轮） | 底栏上的生长式浮窗，渲 TodoV2 任务清单（CLI `task-state` 上报，与 CLI `TaskListV2` 同源同判定）；收敛态露出 **12px 把手条**（`.td-lip`，白表面 + 1px 0.10 描边＝与输入栏/面板同族材质），点击上展、再点 `.td-head` 向下收敛；宽=输入栏宽−48px 居中，展开底边与输入栏上沿留 `--td-gap`=10px 间距、最高 `min(40vh,460px)` 内部滚动；审批/提问接管在场 → `.blocked` 自动收敛 + 禁点 | 任务栏/任务清单窗 |
 | 拖放覆盖层 | `#drop-overlay` | 拖图上传全屏「松开以添加图片」 | |
@@ -103,6 +107,6 @@
 | `stream-text` | 流式字符通道（CLI 流式 delta 100ms 合帧全文快照 → 状态行后流式预览；'' = 块边界/落盘/打断清除。纯显示暂态不落盘，权威 delta 接管即让位） |
 | `compact-state` | 压缩实时态起止 |
 | `restored` | 撤回链（文本回填输入栏） |
-| `queue-state` | CLI 入队上报（排队 dock 数据源） |
+| `queue-state` | CLI 入队上报（排队 dock 数据源；每项可带 `from:{title,sid?}` = 会话间通信来源，CLI 上报前已剥包装，见 [gateway.md](gateway.md) §12/§13） |
 | `task-state` | CLI TodoV2 任务清单上报（任务浮窗数据源；空数组=清单清空 → 浮窗整体不出现） |
 | `ws-failed` | web 独立会话启动失败 |

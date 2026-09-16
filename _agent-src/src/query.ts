@@ -98,6 +98,11 @@ import { createDumpPromptsFetch } from './services/api/dumpPrompts.js'
 import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
 import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
+import {
+  createToolLoopBreakerState,
+  toolLoopBreakerCheck,
+  TOOL_LOOP_BREAKER_LIMIT,
+} from './utils/toolLoopBreaker.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks } from './query/stopHooks.js'
@@ -291,6 +296,12 @@ async function* queryLoop(
   // trigger point. Loop-local (not on State) to avoid touching the 7 continue
   // sites.
   let taskBudgetRemaining: number | undefined = undefined
+
+  // 工具循环熔断器状态（2026-09-12，跨迭代）：同名同参连续 TOOL_LOOP_BREAKER_LIMIT 次 →
+  // 判定模型复读死循环（事故原型 pj18：TaskUpdate(#5) 纯复读 754 次/2h41m，结果恒成功无
+  // 失败信号可打断）。扫描点在 runTools 前；触发即收口回合。Loop-local 而非 State 字段，
+  // 同 taskBudgetRemaining 理由——避免触碰 7 个 continue 站点。
+  const toolLoopBreaker = createToolLoopBreakerState()
 
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
   // for what's included and why feature() gates are intentionally excluded.
@@ -1421,9 +1432,35 @@ async function* queryLoop(
       })
     }
 
+    // 2026-09-12 工具循环熔断：执行前逐块喂状态机。达 TOOL_LOOP_BREAKER_LIMIT 的块连同其后缀
+    // 全部不执行（后缀由下方合成 error tool_result 保 1:1 映射防孤儿 tool_use），回合收口不再
+    // 回喂模型——复读态下回喂只会续读（pj18 实证）。不变量：「达阈值的逐字重发调用不产生执行，
+    // 本批每个 tool_use 都有 tool_result」。streamingToolExecutor 为 statsig 门控（本构建恒关，
+    // 工具执行只走 runTools 路径），不为死配置加分支。
+    const allowedToolUseBlocks: ToolUseBlock[] = []
+    let breakerTripped = false
+    let breakerToolName = ''
+    let breakerStreak = 0
+    for (const block of toolUseBlocks) {
+      const check = toolLoopBreakerCheck(toolLoopBreaker, block.name, block.input)
+      if (check.blocked) {
+        breakerTripped = true
+        breakerToolName = block.name
+        breakerStreak = check.streak
+        logEvent('tengu_tool_loop_breaker_tripped', {
+          tool: block.name,
+          streak: check.streak,
+          queryChainId: queryChainIdForAnalytics,
+          queryDepth: queryTracking.depth,
+        })
+        break
+      }
+      allowedToolUseBlocks.push(block)
+    }
+
     const toolUpdates = streamingToolExecutor
       ? streamingToolExecutor.getRemainingResults()
-      : runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)
+      : runTools(allowedToolUseBlocks, assistantMessages, canUseTool, toolUseContext)
 
     for await (const update of toolUpdates) {
       if (update.message) {
@@ -1451,6 +1488,46 @@ async function* queryLoop(
       }
     }
     queryCheckpoint('query_tool_execution_end')
+
+    if (breakerTripped) {
+      // 被熔断后缀逐块合成 error tool_result（与 yieldMissingToolResultBlocks 同构：保
+      // tool_use↔tool_result 1:1，防下一轮请求孤儿 tool_use 400），随后直接收口回合——
+      // 跳过工具摘要/附件/续跑，复读态下回喂只会续读（pj18 实证外部注入才可唤醒）。
+      const breakerNotice =
+        `[工具循环熔断] 调用 ${breakerToolName}（完全相同参数）已连续 ${breakerStreak} 次，` +
+        `判定为模型复读死循环，本批剩余调用未执行、本回合收口。请勿原样重试；` +
+        `如确需重做，请改变参数或先向用户说明。`
+      let seenBlocks = 0
+      for (const assistantMessage of assistantMessages) {
+        for (const content of assistantMessage.message.content) {
+          if (content.type !== 'tool_use') continue
+          seenBlocks++
+          if (seenBlocks <= allowedToolUseBlocks.length) continue
+          const msg = createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: breakerNotice,
+                is_error: true,
+                tool_use_id: content.id,
+              },
+            ],
+            toolUseResult: breakerNotice,
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          })
+          yield msg
+          toolResults.push(
+            ...normalizeMessagesForAPI([msg], toolUseContext.options.tools).filter(
+              _ => _.type === 'user',
+            ),
+          )
+        }
+      }
+      yield createAssistantAPIErrorMessage({
+        content: `⚠️ 工具循环熔断：${breakerToolName} 以完全相同参数连续调用 ${breakerStreak} 次，本回合已收口（详见上方工具错误结果）。`,
+      })
+      return { reason: 'tool_loop_breaker' }
+    }
 
     // Generate tool use summary after tool batch completes — passed to next recursive call
     let nextPendingToolUseSummary:

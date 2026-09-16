@@ -27,6 +27,8 @@ import { setSessionProviderOverride } from './credentials/pool.js'
 import { enqueue, getCommandQueueSnapshot, subscribeToCommandQueue } from './messageQueueManager.js'
 import { getGatewayToken, loadGatewayPortFromDisk, loadGatewayTokenFromDisk, setGatewayToken } from './gatewayToken.js'
 import { compressImageBuffer } from './imageResizer.js'
+import { parseSessionMessage, wrapSessionMessage, type SessionSource } from './sessionMessage.js'
+import type { KnownSession } from './sessionExposure.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
 import { feature } from 'bun:bundle'
 
@@ -38,15 +40,17 @@ const RECONNECT_MAX_MS = 60_000
 /**
  * 网关 HTTP 基地址：FLOIRA_GATEWAY env 优先；缺失（wt 直并入旧 WT 窗口时 env 不达子进程）
  * 读盘 .claude/gateway-port（网关启动写）；再缺失回退默认 8124。
+ * 2026-09-15 导出（gatewayBaseUrl）：会话目录查询（fetchSessionDirectory）共用本解析，
+ * 不再复制一份地址规则（env → 落盘端口 → 8124 的回退序是 wt spawn 会话能连上网关的关键）。
  */
-function baseUrl(): string {
+export function gatewayBaseUrl(): string {
   if (process.env.FLOIRA_GATEWAY) return process.env.FLOIRA_GATEWAY.replace(/\/+$/, '')
   const port = loadGatewayPortFromDisk() || 8124
   return `http://127.0.0.1:${port}`
 }
 
 function wsHostPort(): { host: string; port: number } {
-  const u = new URL(baseUrl())
+  const u = new URL(gatewayBaseUrl())
   return { host: u.hostname, port: Number(u.port || 8124) }
 }
 
@@ -82,6 +86,15 @@ type PendingApprovalPayload = {
   blockedPath?: string
 }
 const pendingApprovalRequests = new Map<string, PendingApprovalPayload>()
+
+// 2026-09-15 会话间协作 outgoing 表：session_send 工具发出的消息等网关投递回执
+// （session-message-result）。投递是异步三形态（在线直投 / spawn 在途暂存 / 离线冷启补投），
+// 工具必须拿到「已投递/失败原因」才能如实回报模型，故走 requestId 请求-应答而非单向 send。
+// 断线、超时、网关拒绝都收敛到 resolve（不 reject）——工具侧只需判 ok。
+const pendingSessionMessages = new Map<
+  string,
+  { resolve: (r: SessionMessageResult) => void; timer: NodeJS.Timeout }
+>()
 
 // 2026-09-11 审批中继常驻化（根治「网关重启断连窗口内弹出的审批永不中继」）：
 // 原实现把回调注册挂在 sock.on('open')、清除挂在 sock.on('close')——断连窗口内出现的交互权限
@@ -224,7 +237,7 @@ async function compressPastedContentsFromImages(
 
 async function isGatewayUp(): Promise<boolean> {
   try {
-    const res = await fetch(`${baseUrl()}/gateway/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
+    const res = await fetch(`${gatewayBaseUrl()}/gateway/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
     if (!res.ok) return false
     const d = (await res.json()) as { mode?: string }
     return d.mode === 'gateway'
@@ -317,6 +330,10 @@ function openSocket(token: string): void {
         sessionId?: string
         title?: string
         images?: unknown
+        /** 2026-09-15 会话间协作：来件来源会话（下行 session-message）/ 投递结果（下行 *-result） */
+        from?: { sid?: string; title?: string }
+        ok?: boolean
+        error?: string
       }
       // 2026-08-24 审批双操作：floria 的审批结果经网关回传 → 唤醒交互权限弹窗的 bridge 竞速分支
       if (msg.type === 'approval-response' && msg.requestId) {
@@ -375,6 +392,42 @@ function openSocket(token: string): void {
       // 不产生新回合——排队消息织进当前折叠体。句柄未挂载（headless）静默忽略。
       if (msg.type === 'queue-nudge') {
         invokeGatewayQueueNudge()
+        return
+      }
+      // 2026-09-15 会话间协作：别的会话的 agent 发来的消息（网关按 sid 精确路由）→ 与本地打字
+      // 同路径 enqueue(mode:'prompt')：空闲即开回合、忙时入队、可催办，全套行为自动获得。
+      // 来源内嵌在文本包装里（sessionMessage.ts）——模型直接读到来源，展示层由 conversationDisplay
+      // 抽取剥离走 DisplayMessage.fromSession（气泡外一行灰字）。
+      // 不设 bridgeOrigin：跨会话正文是「内容」不是「用户指令」，`/xxx` 应原样给模型看，
+      // 不能让一个会话的 agent 远端触发另一个会话的斜杠命令（bridgeOrigin 的语义是
+      // 「远端真人客户端的命令可执行」，见 QueuedCommand.bridgeOrigin）。
+      if (msg.type === 'session-message' && typeof msg.text === 'string' && msg.text.trim()) {
+        const from = msg.from
+        enqueue({
+          value: wrapSessionMessage(
+            {
+              sid: typeof from?.sid === 'string' ? from.sid : undefined,
+              title: typeof from?.title === 'string' && from.title ? from.title : '未命名会话',
+            },
+            msg.text,
+          ),
+          mode: 'prompt',
+          skipSlashCommands: true,
+        } as QueuedCommand)
+        return
+      }
+      // 2026-09-15 会话间协作：本会话发出消息的投递回执（tool 调用在等这个）
+      if (msg.type === 'session-message-result' && msg.requestId) {
+        const pending = pendingSessionMessages.get(msg.requestId)
+        if (pending) {
+          pendingSessionMessages.delete(msg.requestId)
+          clearTimeout(pending.timer)
+          pending.resolve(
+            msg.ok === false
+              ? { ok: false, error: typeof msg.error === 'string' ? msg.error : '投递失败' }
+              : { ok: true },
+          )
+        }
         return
       }
       // 2026-09-08 web 关闭会话优雅退出：stopWebSession 先走本消息（树杀仅作 3s 兜底）。
@@ -438,11 +491,15 @@ function schedule(ms: number): void {
 
 /**
  * 2026-08-30 共同后端队列快照（接力文档清单#2）：commandQueue 变化 → /clients WS 发
- * {type:'queue-state', items:[{content, ts}]} → 网关存 per-session 并 SSE 群发，web 置底
+ * {type:'queue-state', items:[{content, ts, from?}]} → 网关存 per-session 并 SSE 群发，web 置底
  * 排队区数据源。只报 mode==='prompt'（用户输入；task-notification/系统项不进排队区）。
  * content：string 直用；blocks 取 text join，纯图给占位。非关键路径，失败全静默。
+ *
+ * 2026-09-15 会话间协作：跨会话来件的队列值恒为整条包装（`<session-message from=…>`）——
+ * 与展示层同一条拆分（parseSessionMessage，唯一解析点），content 只报正文、来源另走 from，
+ * 排队区因此不会出现原始 XML 包装文本。from 的形态与 session-message 下行同款（sid 可选）。
  */
-function queueItemsFromSnapshot(): Array<{ content: string; ts: number }> {
+function queueItemsFromSnapshot(): Array<{ content: string; ts: number; from?: SessionSource }> {
   return getCommandQueueSnapshot()
     .filter(cmd => cmd.mode === 'prompt')
     .map(cmd => {
@@ -455,7 +512,9 @@ function queueItemsFromSnapshot(): Array<{ content: string; ts: number }> {
           .map(b => b.text)
         content = texts.join('\n') || '[图片]'
       }
-      return { content, ts: cmd.enqueuedAt ?? Date.now() }
+      const parsed = parseSessionMessage(content)
+      if (!parsed) return { content, ts: cmd.enqueuedAt ?? Date.now() }
+      return { content: parsed.body, from: parsed.source, ts: cmd.enqueuedAt ?? Date.now() }
     })
 }
 
@@ -610,6 +669,81 @@ export function notifyStreamText(text: string): void {
   }
 }
 
+/** 投递结果：ok=true 表示网关已把消息交给目标会话（在线直投 / 已暂存待投 / 已冷启补投）。 */
+export type SessionMessageResult = { ok: true } | { ok: false; error: string }
+
+let sessionMessageSeq = 0
+const SESSION_MESSAGE_TIMEOUT_MS = 20_000
+
+/**
+ * 会话间协作（2026-09-15）：把一条消息投给另一个会话（session_send 工具的出口）。
+ *
+ * 网关只做「按已解析 sid 路由」（在线直投 / spawn 在途暂存 / 离线冷启补投，与 web 发送同三形态），
+ * 会话名 → sid 的解析在工具侧完成（见 sessionExposure.ts）——网关不引入第二份标题索引。
+ * 回执语义 = 「网关已接手投递」而非「目标已消费」：离线目标冷启是异步的，网关无法同步等到
+ * 目标进程 ack，故不在协议层伪装成端到端确认。
+ */
+export function sendSessionMessage(
+  toSid: string,
+  text: string,
+  from: SessionSource,
+): Promise<SessionMessageResult> {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return Promise.resolve({ ok: false, error: '本地网关未连接：无法投递到其它会话' })
+  }
+  const requestId = `sm${Date.now().toString(36)}${(sessionMessageSeq++).toString(36)}`
+  return new Promise<SessionMessageResult>(resolve => {
+    const timer = setTimeout(() => {
+      pendingSessionMessages.delete(requestId)
+      resolve({ ok: false, error: `网关 ${SESSION_MESSAGE_TIMEOUT_MS}ms 内未回执，投递结果未知` })
+    }, SESSION_MESSAGE_TIMEOUT_MS)
+    pendingSessionMessages.set(requestId, { resolve, timer })
+    try {
+      ws!.send(
+        JSON.stringify({
+          type: 'session-message',
+          requestId,
+          toSessionId: toSid,
+          text,
+          from: { sid: from.sid, title: from.title },
+        }),
+      )
+    } catch {
+      clearTimeout(timer)
+      pendingSessionMessages.delete(requestId)
+      resolve({ ok: false, error: '发送失败：网关连接已断开' })
+    }
+  })
+}
+
+/**
+ * 会话目录（GET /gateway/sessions）→ 扁平 sid/标题表（2026-09-15）。
+ *
+ * sid 取转录文件名主干（与网关 /gateway/wsession 的 hash 同源，即消息路由用的那个键）；标题使用
+ * 网关已归一的值。网关未起 / 无 token / 形状异常 → 抛错（调用方回报模型，不猜不兜底）。
+ * 放在本模块是因为它是一次网关 HTTP 调用（与 health / model-report 同类），而 sessionExposure
+ * 保持纯函数模块（不 import 本文件，`feature()` 宏在 bun 直跑下不可用 → 纯模块才可被 probe 导入）。
+ */
+export async function fetchSessionDirectory(): Promise<KnownSession[]> {
+  const token = getGatewayToken()
+  const url = `${gatewayBaseUrl()}/gateway/sessions${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
+  if (!res.ok) throw new Error(`网关会话目录查询失败（HTTP ${res.status}）`)
+  const payload = (await res.json()) as { sessions?: unknown }
+  if (!Array.isArray(payload.sessions)) throw new Error('网关会话目录响应格式异常')
+  const out: KnownSession[] = []
+  for (const s of payload.sessions) {
+    const file = (s as { file?: unknown } | null)?.file
+    if (typeof file !== 'string' || !file.endsWith('.jsonl')) continue
+    const title = (s as { title?: unknown }).title
+    out.push({
+      sid: file.slice(0, -'.jsonl'.length),
+      title: typeof title === 'string' && title ? title : '未命名会话',
+    })
+  }
+  return out
+}
+
 let queueSubscriptionAttached = false
 
 /**
@@ -670,7 +804,7 @@ export function reportCurrentModel(): void {
     const model = getMainLoopModel()
     if (!model) return
     void fetch(
-      `${baseUrl()}/gateway/model-report?token=${encodeURIComponent(token)}`,
+      `${gatewayBaseUrl()}/gateway/model-report?token=${encodeURIComponent(token)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

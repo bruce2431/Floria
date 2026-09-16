@@ -298,9 +298,14 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
         if (firstSendHash !== hash && !txTakeover) stampMsgIn(new Set())
         const last = messages.length ? messages[messages.length - 1] : null
         live.curSig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
-        // 记录末尾真实用户消息基线：首屏默认不钉顶（只有实时同步新增用户消息才唤出）
+        // 记录末尾真实用户消息基线（=「回合开启消息」，与 live.js 同一条规则）：首屏默认不钉顶
+        // （只有实时同步新增用户消息才唤出）。**注入引导消息（injected:true）恒排除**——它们是段内
+        // 引导气泡（渲染为 data-t="g…"），不是回合开启消息；旧实现漏此过滤 → 末条 user 为引导消息
+        // 时 lastU 指向它、`[data-m=lastU][data-t="u"]` 恒落空 → pinned=false → 该会话视图从不
+        // 唤出占位（stage 全程未激活），发送时占位才首次创建 = 走旧拉伸动画首帧（跳到上一条消息）；
+        // 同时把引导消息当新回合基线 → 下帧 hasNewUser 误判为真。
         let lastU = -1
-        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastU = i; break }
+        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
         const baseU = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
         live.lastUserSig = baseU
         live.pinnedUserSig = baseU
@@ -314,7 +319,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
         if (lastU >= 0) {
           const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
           if (el) {
-            stageStart(el, baseU, false)
+            stageStart(el, baseU)
             pinned = true
           }
         }

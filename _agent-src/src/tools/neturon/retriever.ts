@@ -422,8 +422,6 @@ export class NeuronRetriever {
         id: node.id,
         query: node.query ?? '',
         keywords: node.keywords ?? [],
-        true_count: node.true_count ?? 0,
-        revelant_count: node.revelant_count ?? 0,
         true_memories: node.true_memories ?? [],
         revelant_memories: node.revelant_memories ?? [],
         hit_memories: cnt,
@@ -630,8 +628,6 @@ export class NeuronRetriever {
             id: node.id,
             query: node.query ?? '',
             keywords: node.keywords ?? [],
-            true_count: node.true_count ?? 0,
-            revelant_count: node.revelant_count ?? 0,
           })
         }
       }
@@ -685,8 +681,6 @@ export interface CognitionNode {
   id: string
   query: string
   keywords: string[]
-  true_count: number
-  revelant_count: number
   true_memories: string[]
   revelant_memories: string[]
   hit_memories: number
@@ -703,8 +697,6 @@ interface GraphNode {
   id: string
   query?: string
   keywords?: string[]
-  true_count?: number
-  revelant_count?: number
   true_memories?: string[]
   revelant_memories?: string[]
 }

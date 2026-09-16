@@ -2,7 +2,7 @@
 
 import { I } from '../core/icons.js'
 import { relTime } from '../core/markdown.js'
-import { findSession } from '../core/sessions.js'
+import { findSession, hashOf } from '../core/sessions.js'
 import { inputEl, state, ALL, esc, toast, isTouch } from '../core/state.js'
 import { pendingImages, renderImgPills } from './images.js'
 import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, mention, serializeInput, closeMentionPop } from './mention.js'
@@ -30,7 +30,7 @@ import { isArchived } from '../sidebar/recent.js'
     { name: 'plugins', desc: '查看插件清单', bare: true },
   ]
   // 浮窗单页分组（2026-09-09 二轮定案：去顶层 tab，四类堆放一页）组名映射
-  const CMD_GROUP = { imgpick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
+  const CMD_GROUP = { imgpick: '上传', filepick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
   // 推理等级（全局：Off/Low/High/Max，对齐 CLI effortValue 语义；Off=不发送 effort 参数。2026-08-22 由 per-model reasoning 改为全局）
   const EFFORT_LEVELS = [
     { id: 'low', name: 'Low' },
@@ -116,10 +116,14 @@ import { isArchived } from '../sidebar/recent.js'
     const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/4 · 自动压缩` : '一次最多 4 张，自动压缩' }]
+    // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
+    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 exe 目录 uploads/' })
     if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时（同 @ 提及）
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', desc: relTime(s.updatedAt) })
+      // sid 同 @ 提及链（会话间协作的寻址键）：两个入口是同一个「把会话暴露给 agent」手势，
+      // 授权凭据必须同强（否则同一次提及经菜单走就只有标题，重名时无法寻址）
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
     return items
@@ -168,7 +172,7 @@ import { isArchived } from '../sidebar/recent.js'
         const gh = grp !== lastGrp ? `<div class="grp">${grp}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${it.desc ? `<span class="detail">${esc(it.desc)}</span>` : ''}</button>`
       }).join('')}</div>`
@@ -249,20 +253,22 @@ import { isArchived } from '../sidebar/recent.js'
     const it = cmd.items[cmd.active]
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
+    if (it.kind === 'filepick') { $('file-upload').click(); return }
     if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
-    if (it.kind === 'session') { appendMentionChip('session', it.name); closeCmdPop(); return }
+    if (it.kind === 'session') { appendMentionChip('session', it.name, it.sid); closeCmdPop(); return }
     const o = it.ref
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
     cmdSettle(o)
   }
   // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
   // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
-  function appendMentionChip(kind, name) {
+  function appendMentionChip(kind, name, sid) {
     const chip = document.createElement('span')
     chip.className = 'mention'
     chip.contentEditable = 'false'
     chip.dataset.kind = kind
     chip.dataset.name = name
+    if (kind === 'session' && sid) chip.dataset.sid = sid
     chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
     inputEl.appendChild(chip)
     chip.after(document.createTextNode('\u00A0'))

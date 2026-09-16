@@ -14,9 +14,38 @@ import { renderList, renderProject } from './mgr.js'
   function setPanel(open) {
     state.panelOpen = open
     sidebar.classList.toggle('open', open)
+    // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
+    if (!open) document.documentElement.style.removeProperty('--panel-w')
     // 展开/折叠侧栏时关闭 rail 相关的弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
+  }
+
+  // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
+  // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联
+  // --panel-w——#sidebar/#panel 宽、主区避让 padding、输入栏 half-padding 补偿全消费同一变量，
+  // 天然联动；不持久化，setPanel(false) 清内联值。拖拽中 body.sb-resizing 关宽度过渡即时跟手。
+  {
+    const rz = $('panel-resizer')
+    const clampW = (x) => Math.max(232, Math.min(560, window.innerWidth - 120, x))
+    rz.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !sidebar.classList.contains('open')) return
+      rz.setPointerCapture(e.pointerId)
+      rz.classList.add('dragging')
+      document.body.classList.add('sb-resizing')
+      e.preventDefault()
+    })
+    rz.addEventListener('pointermove', (e) => {
+      if (!rz.classList.contains('dragging')) return
+      document.documentElement.style.setProperty('--panel-w', `${Math.round(clampW(e.clientX))}px`)
+    })
+    const release = () => {
+      if (!rz.classList.contains('dragging')) return
+      rz.classList.remove('dragging')
+      document.body.classList.remove('sb-resizing')
+    }
+    rz.addEventListener('pointerup', release)
+    rz.addEventListener('pointercancel', release)
   }
 
   // 项目编号提取（2026-08-25）：projectLabel 如 'Pj16-CodeAgent构建' → 短编号 'Pj16'；

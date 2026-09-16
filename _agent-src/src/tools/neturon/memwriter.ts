@@ -9,7 +9,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ConfigError, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
+import { ConfigError, cfgGet, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
 import { encode } from './embedder.js'
 import { readNpyF32, writeNpyF32 } from './npyio.js'
 import {
@@ -145,8 +145,6 @@ export interface RememberInput {
   content: string
   blocks?: string[]
   source?: string
-  confidence?: number
-  half_life?: number
   memory_id?: string
   revelant?: string[]
   core_file?: Array<{ name: string; path?: string; content?: string }>
@@ -183,26 +181,53 @@ function loadNeuron(neuronId: string, cwd?: string): { neuronPath: string; cfg: 
   try {
     cfgRequired(cfg, 'person.id', cfgContext)
     cfgRequired(cfg, 'memory.model_name', cfgContext)
-    cfgRequired(cfg, 'memory.default_confidence', cfgContext)
-    cfgRequired(cfg, 'memory.default_half_life', cfgContext)
   } catch (e) {
     return { error: (e as ConfigError).message }
   }
   return { neuronPath, cfg, modelCacheDir: join(getGlobalRoot(), 'cache', 'models') }
 }
 
-function buildEntry(
-  input: RememberInput,
-  mid: string,
-  cfg: Record<string, unknown>,
-): MemEntry {
+/** 块长上限：库在 config.yaml blocks.max_chars 声明（标准见 prompts.add_memory）。
+ *  缺省 300 字 ≈ 180 token，取自 bge-small-zh 位置上限 512 的安全余量。 */
+export function blockMaxChars(cfg: Record<string, unknown>): number {
+  const v = Number(cfgGet(cfg, 'blocks.max_chars', 300))
+  return Number.isFinite(v) && v > 0 ? v : 300
+}
+
+/** 超长块就近切分：优先句末标点/换行，窗口后半段找不到断点就硬切。
+ *  不变量——返回的每一段长度都 ≤ maxChars（BGE 512 token 上限的写入侧保证：
+ *  encode 对超长输入静默丢尾，尾部内容不进向量，故块长必须在落盘前封顶）。
+ *  导出供存量数据重切脚本复用（同一把尺子，不另起炉灶）。 */
+export function splitBlock(block: string, maxChars: number): string[] {
+  if (block.length <= maxChars) return [block]
+  const parts: string[] = []
+  let rest = block
+  while (rest.length > maxChars) {
+    const win = rest.slice(0, maxChars)
+    const cut = Math.max(
+      win.lastIndexOf('。'),
+      win.lastIndexOf('；'),
+      win.lastIndexOf('！'),
+      win.lastIndexOf('？'),
+      win.lastIndexOf('\n'),
+    )
+    const end = cut >= maxChars / 2 ? cut + 1 : maxChars
+    const head = rest.slice(0, end).trim()
+    if (head) parts.push(head)
+    rest = rest.slice(end).trim()
+  }
+  if (rest) parts.push(rest)
+  return parts
+}
+
+function buildEntry(input: RememberInput, mid: string, maxChars: number): MemEntry {
+  const raw = input.blocks?.length ? input.blocks : [input.content]
+  const blocks = raw.flatMap(b => splitBlock(String(b), maxChars))
   return {
     memory_id: mid,
     revelant: input.revelant ?? [],
-    blocks: input.blocks?.length ? input.blocks : [input.content],
+    blocks,
     source: input.source!,
-    confidence: input.confidence ?? Number(cfgRequired(cfg, 'memory.default_confidence', '')),
-    half_life: input.half_life ?? Number(cfgRequired(cfg, 'memory.default_half_life', '')),
     core_file: input.core_file ?? null,
     supersedes: null,
     deprecated_by: null,
@@ -251,7 +276,7 @@ export async function addMemory(input: RememberInput, cwd?: string): Promise<Rem
     mid = generateMemoryId(personId, new Set(entries.map(e => e.memory_id)), new Date())
   }
 
-  const entry = buildEntry(input, mid, cfg)
+  const entry = buildEntry(input, mid, blockMaxChars(cfg))
 
   // ── 自愈：mem/emb 不一致先全量重建 ──
   const aligned = await ensureIndexAligned(neuronPath, entries, modelCacheDir)
@@ -315,7 +340,7 @@ export async function updateMemory(
     new Date(),
   )
   const entry: MemEntry = {
-    ...buildEntry(input, mid, cfg),
+    ...buildEntry(input, mid, blockMaxChars(cfg)),
     supersedes: input.memory_id, // 纠错链：指向被修正的旧条目
   }
 

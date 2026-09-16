@@ -13,7 +13,7 @@
   - `bun run build:dev:full` — 开全部实验 feature（产物 `cli-dev-<ts>-<特性代号>`，时间戳不同不覆盖；注意 CHICAGO_MCP 仍会编入但外部二进制启动到缺失的 `@ant/computer-use-mcp` 运行时包无法干净引导，见 §4 broken 节）
   - `bun run compile` — 正式编译 → `./dist/cli-<YYYYMMDDHHMMSS>.exe`（发布流程用）
   - `bun run dev` — 源码直跑（入口 `src/entrypoints/cli.tsx`）
-- 产物命名（`scripts/build.ts`，2026-08-14 起）= `<前缀>-<YYYYMMDDHHMMSS>[-<显式 --feature 代号>]`，显式 feature 代号用 `+` 连接（如 `cli-dev-20260814114321-PRIVATE_GATEWAY.exe`）；前缀 dev=`cli-dev`、compile=`dist/cli`。默认四个 feature（VOICE_MODE + BUILTIN_EXPLORE_PLAN_AGENTS + PRIVATE_GATEWAY，2026-08-25 网关默认化；+ REACTIVE_COMPACT，2026-09-07 起：usage-policy 拒绝/媒体超限/PTL 自动恢复）与 `--feature-set=dev-full` 不进文件名。**2026-09-04 定案：构建一律 `bun run build:dev`（产物名不带 `-PRIVATE_GATEWAY` 代号，含发布），`build:dev:gateway`（= build.ts `--dev --feature=PRIVATE_GATEWAY`，与 build:dev 仅命名差异）废弃不再使用**；按特性构建仍用 `--feature=X`（如 `--feature=NEURON_RAG`，产物名带该特性代号）。
+- 产物命名（`scripts/build.ts`，2026-08-14 起）= `<前缀>-<YYYYMMDDHHMMSS>[-<显式 --feature 代号>]`，显式 feature 代号用 `+` 连接（如 `cli-dev-20260814114321-PRIVATE_GATEWAY.exe`）；前缀 dev=`cli-dev`、compile=`dist/cli`。默认五个 feature（VOICE_MODE + BUILTIN_EXPLORE_PLAN_AGENTS + PRIVATE_GATEWAY，2026-08-25 网关默认化；+ REACTIVE_COMPACT，2026-09-07 起：usage-policy 拒绝/媒体超限/PTL 自动恢复；+ SESSION_LINK，2026-09-15 起：会话间协作）与 `--feature-set=dev-full` 不进文件名。**2026-09-04 定案：构建一律 `bun run build:dev`（产物名不带 `-PRIVATE_GATEWAY` 代号，含发布），`build:dev:gateway`（= build.ts `--dev --feature=PRIVATE_GATEWAY`，与 build:dev 仅命名差异）废弃不再使用**；按特性构建仍用 `--feature=X`（如 `--feature=NEURON_RAG`，产物名带该特性代号）。
 - 产物是**自包含单文件二进制**（`bun build --compile --bytecode --packages bundle`），拷到任意项目目录即可用，运行时不需要 src/node_modules。**exe 产物带时间戳是强制规范，不允许覆盖**（禁止覆盖成固定名如 `cli-dev.exe`）；部署/换新 = 直接用新时间戳 exe 启动，旧产物原样保留。
 - codegraph 索引：`Pj16-CodeAgent构建/_agent-src/src/.codegraph/`（相对路径存储，随 src 迁移有效）；MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
 - dev 版本号从 git 派生（本目录 2026-08-15 起已 git init，sha 取自 git HEAD；仓库仅跟踪 `_agent-src/`、`README.md`、`docs/`，其余项目文件由 .gitignore 排除）。
@@ -45,6 +45,9 @@ Important: "bundle cleanly" does not always mean "runtime-safe". Some flags stil
   进 `defaultFeatures`：所有默认构建（build / build:dev / compile）均注册 `/server` 指令，内置网关随 exe 编入（--gateway 独立进程 + 内嵌 web 前端）。链路详情 → [gateway.md](gateway.md)。
 - `REACTIVE_COMPACT`
   2026-09-07 起进 `defaultFeatures` 默认编入——此前虽实现但特性从未进 build.ts 清单（官方 ant-only），整链编译裁剪从未实际生效；Pj14 违规图卡死会话取证确认后根修（构建 cli-dev-20260907143130.exe），PTL/媒体超限恢复一并生效。条目详情见 §2.5。
+- `SESSION_LINK`
+  【会话间协作，2026-09-15 起默认开，纯本地/TUI 无关】
+  进 `defaultFeatures`——门控点 = `tools.ts` 里 `feature('SESSION_LINK') ? getSessionSendTool() : null`（工具注册）+ `SessionSendTool.isEnabled()`（`feature('SESSION_LINK') ? true : false`）。启用 `session_send` 工具与跨会话投递（不门控接收侧——接收走既有 `enqueue`，无新代码）。链路 → [core.md](core.md) 末节 + [gateway.md](gateway.md) §13 + [web-ui.md](web-ui.md) §24。
 
 ### 2.2 Working Experimental Features
 

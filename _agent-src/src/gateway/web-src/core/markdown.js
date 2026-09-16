@@ -29,9 +29,38 @@ import { MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../input
     let para = []
     const flushPara = () => { if (para.length) { html += `<p>${para.join('<br>')}</p>`; para = [] } }
     let inCode = false, codeLang = '', codeBuf = []
-    const closeCode = () => {
+    // ---- 嵌入式图表（```chart 双段围栏，2026-09-12 定案）----
+    // 契约（全局根 CLAUDE.md）：模型输出 ```chart 围栏，内含 %%html / %%ascii 两个哨兵段（同一图表的两种等价表达）。
+    // web 取 %%html 段进 sandbox iframe（opaque origin，BOOT 上报高度），%%ascii 段弃用（「源码」按钮看全文）；
+    // CLI 反向过滤只留 ascii（src/components/Markdown.tsx stripChartHtml）。普通 ```html 围栏不受影响。
+    // srcdoc 安全链：mdHtml 入口已整体 esc（含引号）→ 属性不破出；浏览器解析 srcdoc 实体解码一次，
+    // iframe 文档恰好还原为模型原始 HTML（esc 链与属性解码互相抵消，语义透明）；BOOT 是自有串，esc 一次同理。
+    const CHART_BOOT = '<style>html,body{margin:0;padding:0;background:transparent}</style>' +
+      '<script>(function(){var p=function(){try{var b=document.body;parent.postMessage({__chartH:Math.max(b?b.scrollHeight:0,document.documentElement.scrollHeight)},"*")}catch(_){}};' +
+      'if(window.ResizeObserver)new ResizeObserver(p).observe(document.documentElement);addEventListener("load",p);p()})()</scr' + 'ipt>'
+    // 哨兵行（行首精确匹配 %%html / %%ascii）拆段；缺段由 closeCode 降级回代码块
+    function chartSplit(buf) {
+      let mode = null, hasHtml = false, hasAscii = false, html = [], ascii = []
+      for (const line of buf) {
+        const t = line.trim()
+        if (t === '%%html') { mode = 'html'; hasHtml = true; continue }
+        if (t === '%%ascii') { mode = 'ascii'; hasAscii = true; continue }
+        if (mode === 'html') html.push(line)
+        else if (mode === 'ascii') ascii.push(line)
+      }
+      return { html: html.join('\n'), ascii: ascii.join('\n'), hasHtml, hasAscii }
+    }
+    // closed=false（流式未闭合围栏的 EOF 收口）恒回退代码块：闭合那一帧才切 iframe，防流式每 delta 重建闪烁
+    const closeCode = (closed) => {
       if (!inCode) return
-      html += `<div class="code-block"><pre><code>${codeBuf.join('\n')}</code></pre>${codeLang ? `<span class="code-lang">${codeLang}</span>` : ''}</div>`
+      const raw = codeBuf.join('\n')
+      const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
+      const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
+      if (sec && sec.hasHtml && sec.html.trim()) {
+        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+      } else {
+        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+      }
       codeBuf = []; codeLang = ''; inCode = false
     }
     let list = null
@@ -44,7 +73,7 @@ import { MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../input
       const t = line.trim()
       if (!t) { flushPara(); closeList(); continue }
       if (/^```/.test(t)) {
-        if (inCode) { closeCode() } else { inCode = true; codeLang = t.slice(3).trim() }
+        if (inCode) { closeCode(true) } else { inCode = true; codeLang = t.slice(3).trim() }
         continue
       }
       if (inCode) { codeBuf.push(line); continue }
@@ -81,7 +110,7 @@ import { MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../input
       }
       para.push(mdInline(t))
     }
-    flushPara(); closeCode(); closeList()
+    flushPara(); closeCode(false); closeList()
     return html
   }
 

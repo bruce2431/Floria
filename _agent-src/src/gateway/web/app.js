@@ -28,6 +28,7 @@
     // ---- dsh 输入栏图标（2026-08-21 完全移植：deepseek-harness ui-primitives/icons 精确 path，fill=currentColor）----
     dshPlus: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8.64453 1.5V7.34961H14.5V8.65039H8.64453V14.5H7.34473V8.65039H1.5V7.34961H7.34473V1.5H8.64453Z"/></svg>',
     dshImage: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.9" y="2.9" width="12.2" height="10.2" rx="1.6"/><circle cx="5.7" cy="6.7" r="1.15" fill="currentColor" stroke="none"/><path d="M2.5 11.6l3.4-3.2a1 1 0 0 1 1.38 0l2.1 2 1.5-1.4a1 1 0 0 1 1.36-.02l3.26 2.9"/></svg>',
+    dshFile: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 1.9H4.6a1.2 1.2 0 0 0-1.2 1.2v9.8a1.2 1.2 0 0 0 1.2 1.2h6.8a1.2 1.2 0 0 0 1.2-1.2V4.9z"/><path d="M9.6 1.9v3h3"/></svg>',
     dshSend: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"/></svg>',
     dshStop: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"/><rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1" fill="currentColor"/></svg>', // 2026-09-04 圆形方孔停止键（回合进行中）
     dshChevDown: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z"/></svg>',
@@ -201,9 +202,38 @@
     let para = []
     const flushPara = () => { if (para.length) { html += `<p>${para.join('<br>')}</p>`; para = [] } }
     let inCode = false, codeLang = '', codeBuf = []
-    const closeCode = () => {
+    // ---- 嵌入式图表（```chart 双段围栏，2026-09-12 定案）----
+    // 契约（全局根 CLAUDE.md）：模型输出 ```chart 围栏，内含 %%html / %%ascii 两个哨兵段（同一图表的两种等价表达）。
+    // web 取 %%html 段进 sandbox iframe（opaque origin，BOOT 上报高度），%%ascii 段弃用（「源码」按钮看全文）；
+    // CLI 反向过滤只留 ascii（src/components/Markdown.tsx stripChartHtml）。普通 ```html 围栏不受影响。
+    // srcdoc 安全链：mdHtml 入口已整体 esc（含引号）→ 属性不破出；浏览器解析 srcdoc 实体解码一次，
+    // iframe 文档恰好还原为模型原始 HTML（esc 链与属性解码互相抵消，语义透明）；BOOT 是自有串，esc 一次同理。
+    const CHART_BOOT = '<style>html,body{margin:0;padding:0;background:transparent}</style>' +
+      '<script>(function(){var p=function(){try{var b=document.body;parent.postMessage({__chartH:Math.max(b?b.scrollHeight:0,document.documentElement.scrollHeight)},"*")}catch(_){}};' +
+      'if(window.ResizeObserver)new ResizeObserver(p).observe(document.documentElement);addEventListener("load",p);p()})()</scr' + 'ipt>'
+    // 哨兵行（行首精确匹配 %%html / %%ascii）拆段；缺段由 closeCode 降级回代码块
+    function chartSplit(buf) {
+      let mode = null, hasHtml = false, hasAscii = false, html = [], ascii = []
+      for (const line of buf) {
+        const t = line.trim()
+        if (t === '%%html') { mode = 'html'; hasHtml = true; continue }
+        if (t === '%%ascii') { mode = 'ascii'; hasAscii = true; continue }
+        if (mode === 'html') html.push(line)
+        else if (mode === 'ascii') ascii.push(line)
+      }
+      return { html: html.join('\n'), ascii: ascii.join('\n'), hasHtml, hasAscii }
+    }
+    // closed=false（流式未闭合围栏的 EOF 收口）恒回退代码块：闭合那一帧才切 iframe，防流式每 delta 重建闪烁
+    const closeCode = (closed) => {
       if (!inCode) return
-      html += `<div class="code-block"><pre><code>${codeBuf.join('\n')}</code></pre>${codeLang ? `<span class="code-lang">${codeLang}</span>` : ''}</div>`
+      const raw = codeBuf.join('\n')
+      const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
+      const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
+      if (sec && sec.hasHtml && sec.html.trim()) {
+        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+      } else {
+        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+      }
       codeBuf = []; codeLang = ''; inCode = false
     }
     let list = null
@@ -216,7 +246,7 @@
       const t = line.trim()
       if (!t) { flushPara(); closeList(); continue }
       if (/^```/.test(t)) {
-        if (inCode) { closeCode() } else { inCode = true; codeLang = t.slice(3).trim() }
+        if (inCode) { closeCode(true) } else { inCode = true; codeLang = t.slice(3).trim() }
         continue
       }
       if (inCode) { codeBuf.push(line); continue }
@@ -253,7 +283,7 @@
       }
       para.push(mdInline(t))
     }
-    flushPara(); closeCode(); closeList()
+    flushPara(); closeCode(false); closeList()
     return html
   }
 
@@ -599,6 +629,32 @@ function setSessionCwd(v) { sessionCwd = v }
     return false
   }
 
+  // 回退快照防御（2026-09-11 三诊根治「发送瞬间跳到上一条消息」真主链）：全量快照必须单调
+  // 前进。网关 /gateway/session = 磁盘 jsonl 全量 + CLI 异步上报窗口合并（localGateway.ts
+  // mergeDisplayMessages），回合开启时序窗内两源都可能短暂落后（dequeue 落盘前 / display 缓冲
+  // 重建期）→ 同一会话先后两次 fetch 可能拿到「已渲染内容消失」的回退快照（20260911203904
+  // 录像三态实证：回合4权威渲染在屏 → 0.1s 后被旧快照整页重建洗掉 → hasNewUser 在回退数据上
+  // 把上一回合误判为「新用户消息」stageStart 重钉 =「跳到上一条消息」；随后 delta gap 强制对账
+  // 撞上空窗，force 绕过下方空 fetch 守卫整页清空 = 空白窗口）。回退快照一律整帧丢弃：不渲染、
+  // 不重写 localMessages/deltaSeq 基线、不碰 cwd/模型/队列/任务槽，等下一条 SSE/落盘触发的新
+  // 快照自然恢复。合法重渲（撤回/turn-state 收口）ts 持平放行；压缩收口 summary ts 前进放行；
+  // 首载/切会话基线为 null 无从回退放行。
+  function snapshotStale(local, incoming) {
+    if (!Array.isArray(local) || !local.length) return false
+    if (!Array.isArray(incoming) || !incoming.length) return true
+    const maxTs = (msgs) => {
+      let t = 0
+      for (const m of msgs) {
+        const ts = m && m.timestamp
+        if (typeof ts === 'number' && ts > t) t = ts
+      }
+      return t
+    }
+    const cur = maxTs(local)
+    const next = maxTs(incoming)
+    return next > 0 && cur > 0 && next < cur
+  }
+
   function refreshSession(force) {
     const hash = state.currentHash
     if (!hash) return
@@ -615,6 +671,10 @@ function setSessionCwd(v) { sessionCwd = v }
         // 历史 innerHTML 整页渲染进新会话 DOM（CLI 单进程单会话无此异步边界，web 必须在每个
         // 异步边界重验身份）。await 后已切走 → 本响应整体作废。
         if (state.currentHash !== hash) return
+        // 回退快照防御（snapshotStale）：必须先于一切副作用与基线赋值——旧快照哪怕被下方
+        // 空 fetch 守卫挡住不渲染，基线（localMessages/deltaSeq）也已被静默回写，后续 delta
+        // 判 gap 反复触发强制对账（回退风暴）。丢弃 = 本响应整体作废。
+        if (snapshotStale(live.localMessages, messages)) return
         setSessionCwd(cwd)
         // 2026-08-30 队列快照：jsonl 文件名（uuid）供 SSE queue-state 会话匹配；queued 交排队区
         live.curUuid = file ? file.replace(/\.jsonl$/, '') : live.curUuid
@@ -765,23 +825,17 @@ function setSessionCwd(v) { sessionCwd = v }
     applyStreamPreview() // 2026-09-08 流式字符通道：重渲洗 DOM 后重挂流式预览暂态（streamText 内存态恢复）
     syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
     if (hasNewUser && uSig !== live.pinnedUserSig) {
-      // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位+平滑上划贴顶。
+      // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位按跟随几何同帧就位。
       // pinnedUserSig 防重复：迟到的刷新不会再重钉上一回合。
       // 命中才推进 lastUserSig/pinnedUserSig（配合上方基线推进规则=真实可重试）。
       const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
       if (el) {
         live.lastUserSig = uSig // 命中才推进（配合上方基线推进规则=真实可重试）
         live.pinnedUserSig = uSig
-        if (stage.active && stage.key === 'optimistic') {
-          // 乐观气泡唤出的占位在场 → 接管帧同回合延续。必须走 stageStart 直终态（2026-09-09
-          // 「新消息跳动」根修）：乐观期开启的 750ms 平滑窗目标基于接管前几何，接管重建
-          // （live-zone 摘除 → innerHTML 重建）已改几何，沿用旧窗=到点瞬跳；且换 key 帧须
-          // 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照，换气泡即换几何）。
-          // smooth=false：不重播上划动画，作废动画窗并按跟随几何同帧归位。
-          stageStart(el, uSig, false)
-        } else {
-          stageStart(el, uSig, true) // CLI 端发起的新回合（web 观察）同样唤出+动画（体验对齐）
-        }
+        // 换 key 帧必须走 stageStart 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照）：
+        // 乐观气泡唤出的占位在场 → 接管帧同回合延续；CLI 端发起的新回合（web 观察）同样在此
+        // 唤出。2026-09-11 起无动画窗（smooth 分支退役）——两条路径同一落点，不再分叉。
+        stageStart(el, uSig)
       }
     } else {
       renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
@@ -1252,9 +1306,14 @@ function setSessionCwd(v) { sessionCwd = v }
         if (firstSendHash !== hash && !txTakeover) stampMsgIn(new Set())
         const last = messages.length ? messages[messages.length - 1] : null
         live.curSig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
-        // 记录末尾真实用户消息基线：首屏默认不钉顶（只有实时同步新增用户消息才唤出）
+        // 记录末尾真实用户消息基线（=「回合开启消息」，与 live.js 同一条规则）：首屏默认不钉顶
+        // （只有实时同步新增用户消息才唤出）。**注入引导消息（injected:true）恒排除**——它们是段内
+        // 引导气泡（渲染为 data-t="g…"），不是回合开启消息；旧实现漏此过滤 → 末条 user 为引导消息
+        // 时 lastU 指向它、`[data-m=lastU][data-t="u"]` 恒落空 → pinned=false → 该会话视图从不
+        // 唤出占位（stage 全程未激活），发送时占位才首次创建 = 走旧拉伸动画首帧（跳到上一条消息）；
+        // 同时把引导消息当新回合基线 → 下帧 hasNewUser 误判为真。
         let lastU = -1
-        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastU = i; break }
+        for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
         const baseU = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
         live.lastUserSig = baseU
         live.pinnedUserSig = baseU
@@ -1268,7 +1327,7 @@ function setSessionCwd(v) { sessionCwd = v }
         if (lastU >= 0) {
           const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
           if (el) {
-            stageStart(el, baseU, false)
+            stageStart(el, baseU)
             pinned = true
           }
         }
@@ -1603,7 +1662,7 @@ function setLastNavHash(v) { lastNavHash = v }
   // writeClipboard 成功 → 图标换 check 1s（DSH 同款反馈窗口），失败 toast
   function messageCopyText(msgEl) {
     const clone = msgEl.cloneNode(true)
-    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, script, style').forEach((el) => el.remove())
+    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, .chart-bar, .chart-raw, script, style').forEach((el) => el.remove())
     return (clone.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
   }
   document.addEventListener('click', (e) => {
@@ -1629,6 +1688,30 @@ function setLastNavHash(v) { lastNavHash = v }
     })
   })
 
+  // ---- 嵌入式图表（```chart 围栏，渲染链见 core/markdown.js）----
+  // 「源码」切换（事件委托，innerHTML 重建不受影响）：.chart-embed.as-src 切 iframe ↔ 原文
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('.chart-src') : null
+    if (!btn || !messagesEl.contains(btn)) return
+    const box = btn.closest('.chart-embed')
+    if (!box) return
+    btn.textContent = box.classList.toggle('as-src') ? '图表' : '源码'
+  })
+
+  // 高度自适应：sandbox iframe（opaque origin）内 BOOT 量 body/documentElement scrollHeight 上报
+  // __chartH；按 e.source 精确匹配本页 .chart-frame 才采纳（其它窗口/preview iframe 伪造不进来），
+  // 高度上限交给 CSS max-height，超出内部滚动。宽度变化（如侧栏拖宽）→ 内容高变 → 内部 ResizeObserver 重报，闭环。
+  addEventListener('message', (e) => {
+    const h = e.data && e.data.__chartH
+    if (typeof h !== 'number' || !isFinite(h) || h <= 0) return
+    for (const f of document.querySelectorAll('iframe.chart-frame')) {
+      if (f.contentWindow !== e.source) continue
+      const nh = Math.round(h)
+      if (Math.abs((parseFloat(f.style.height) || 0) - nh) > 1) f.style.height = nh + 'px'
+      return
+    }
+  })
+
   // 压缩/自动摘要标记：转录里压缩会把「会话续接」记成 user|text（后端已映射 role:'system'，
   // 标签「会话续接（自动摘要）」）。命中它 = 当前回合被压缩打断，但 agent 仍在干活——
   // 不应把它当成回合结束，否则「正在处理」被强收成「已处理」、后续思考/工具拆成断开的新段。
@@ -1646,6 +1729,18 @@ function setLastNavHash(v) { lastNavHash = v }
   // 合成 user（后台任务通知/对话中断等）已由源码 shouldShowUserMessage 剔除（A/B 路径）、
   // 离线路径由 server.mjs readSession 映射为 role:'system'（C 路径）——前端无需再判系统注入
   // 文本（isSynthText/SYNTH_RE 已于 2026-08-23 删除，见交接文档任务 1）。
+  // 跨会话来件的来源行（2026-09-15 会话间协作）：气泡外一行灰字标识来自哪个会话。
+  // 来源由 CLI 投影给定（DisplayMessage.fromSession，正文里的 `<session-message from=…>` 包装
+  // 已在 conversationDisplay 剥离）——前端不解析包装、不复刻判据。无该字段 = 本地用户输入，
+  // 渲染与本地消息完全一致（用户定案：气泡本体形态不变，只有气泡外多一行小字）。
+  // 位置：插在 .body 之前（DOM 序 = 视觉上方），.msg 是列向 flex → 在文档流里占位（不做绝对定位，
+  // 不参与气泡高度计算），故对既有高度/滚动占位（stageSync 贴顶位）零影响。
+  function whoHtml(m) {
+    const f = m && m.fromSession
+    if (!f || !f.title) return ''
+    return `<div class="who">来自 会话：${esc(String(f.title))}</div>`
+  }
+
   function isRealUser(m) {
     if (m.role !== 'user') return false
     return m.blocks.some((b) => (b.kind === 'text' && b.text && b.text.trim()) || b.kind === 'image')
@@ -1668,13 +1763,14 @@ function setLastNavHash(v) { lastNavHash = v }
   function userBodyHtml(m) {
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
-    const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
+    let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
     if (ids.length) {
-      const stripped = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
-      return mdHtml(stripped)
+      txt = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
     }
+    // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
+    txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     const hasImg = m.blocks.some((b) => b.kind === 'image')
-    return mdHtml(hasImg && !txt ? '[图片]' : txt)
+    return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
 
   // 图片容器（用户 2026-08-30 定案：渲染在气泡外）：.msg 内、.body 后——.msg 无背景，
@@ -1687,6 +1783,29 @@ function setLastNavHash(v) { lastNavHash = v }
     const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/image-cache/${live.curUuid || ''}/${id}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
+
+  // 文件卡片（2026-09-12 文件上传，用户定案「像图片一样有对应的 UI」）：与图片同构——消息文本里
+  // 的 [文件:<落盘绝对路径>] 占位剥出渲染成气泡外下方文件卡片（图标+文件名，title=完整路径，
+  // 点击复制路径供粘贴他用）。文件已落盘（uploads/ 不随会话清理），无图片的 404/裸文本回落问题。
+  function fileCardsHtml(paths) {
+    const cards = paths.map((p) => {
+      const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
+      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${I.dshFile}<span class="mf-name">${esc(name)}</span></span>`
+    }).join('')
+    return `<div class="msg-files">${cards}</div>`
+  }
+  function userFilesHtml(m) {
+    const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
+    const paths = []
+    txt.replace(/\[文件:([^\]]+)\]/g, (_, p) => { paths.push(p.trim()); return '' })
+    return paths.length ? fileCardsHtml(paths) : ''
+  }
+  // 文件卡片点击 = 复制落盘路径（事件委托，innerHTML 重建不受影响）
+  document.addEventListener('click', (e) => {
+    const c = e.target && e.target.closest ? e.target.closest('.msg-file') : null
+    if (!c || !messagesEl.contains(c)) return
+    writeClipboard(c.dataset.path || '').then((ok) => toast(ok ? '已复制路径' : '复制失败'))
+  })
 
   // 大图预览 lightbox（2026-08-30 用户定案：单击缩略图看大图）：单例覆盖层，
   // src 复用缩略图同 URL（网关 Cache-Control private 1d，字节已缓存零请求）；
@@ -1833,7 +1952,7 @@ function setLastNavHash(v) { lastNavHash = v }
         const gbody = userBodyHtml(g.m)
         out.splice(Math.min(g.pos, out.length), 0, {
           kind: 'guide', gi,
-          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}>${gbody ? `<div class="body">${gbody}</div>` : ''}${userImgsHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）；纯图无文本不出空气泡（2026-09-07 空气炮根修）
+          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}>${whoHtml(g.m)}${gbody ? `<div class="body">${gbody}</div>` : ''}${userImgsHtml(g.m)}${userFilesHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）；纯图无文本不出空气泡（2026-09-07 空气炮根修）
         })
       }
       return out
@@ -1875,7 +1994,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // 纯图消息（文本剥 [Image #N] 占位后为空）不出 .body 空气泡，复制按钮同去（无文本可复制；
         // 乐观气泡同构同去防接管帧形态跳变）——2026-09-07 空气炮根修
         const ubody = userBodyHtml(m)
-        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u">${ubody ? `<div class="body">${ubody}</div>` : ''}${userImgsHtml(m)}${ubody ? `<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div>` : ''}</div>`
+        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u">${whoHtml(m)}${ubody ? `<div class="body">${ubody}</div>` : ''}${userImgsHtml(m)}${userFilesHtml(m)}${ubody ? `<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div>` : ''}</div>`
         lastNode = { key: s.key, type: 'u' }
       }
 
@@ -2072,9 +2191,38 @@ function setLastNavHash(v) { lastNavHash = v }
   function setPanel(open) {
     state.panelOpen = open
     sidebar.classList.toggle('open', open)
+    // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
+    if (!open) document.documentElement.style.removeProperty('--panel-w')
     // 展开/折叠侧栏时关闭 rail 相关的弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
+  }
+
+  // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
+  // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联
+  // --panel-w——#sidebar/#panel 宽、主区避让 padding、输入栏 half-padding 补偿全消费同一变量，
+  // 天然联动；不持久化，setPanel(false) 清内联值。拖拽中 body.sb-resizing 关宽度过渡即时跟手。
+  {
+    const rz = $('panel-resizer')
+    const clampW = (x) => Math.max(232, Math.min(560, window.innerWidth - 120, x))
+    rz.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !sidebar.classList.contains('open')) return
+      rz.setPointerCapture(e.pointerId)
+      rz.classList.add('dragging')
+      document.body.classList.add('sb-resizing')
+      e.preventDefault()
+    })
+    rz.addEventListener('pointermove', (e) => {
+      if (!rz.classList.contains('dragging')) return
+      document.documentElement.style.setProperty('--panel-w', `${Math.round(clampW(e.clientX))}px`)
+    })
+    const release = () => {
+      if (!rz.classList.contains('dragging')) return
+      rz.classList.remove('dragging')
+      document.body.classList.remove('sb-resizing')
+    }
+    rz.addEventListener('pointerup', release)
+    rz.addEventListener('pointercancel', release)
   }
 
   // 项目编号提取（2026-08-25）：projectLabel 如 'Pj16-CodeAgent构建' → 短编号 'Pj16'；
@@ -3244,10 +3392,17 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('img-file').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
+  // 文件上传（2026-09-12）：+ 浮窗「上传文件」行选完 → addUploadFiles 顺序上传落盘，路径回填输入栏
+  $('file-upload').addEventListener('change', () => {
+    addUploadFiles(Array.from($('file-upload').files || []))
+    $('file-upload').value = '' // 允许重复选同一文件
+    closeCmdPop()
+  })
   $('img-pills').addEventListener('click', (e) => {
     const x = e.target.closest('.img-x')
     if (!x) return
-    pendingImages.splice(+x.dataset.i, 1)
+    if (x.dataset.f != null) pendingFiles.splice(+x.dataset.f, 1) // 文件胶囊
+    else pendingImages.splice(+x.dataset.i, 1)
     renderImgPills()
   })
   inputEl.addEventListener('paste', (e) => {
@@ -3419,7 +3574,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       return // 手势中的 scroll 不构成滚动输入信号（与触摸无法从事件本身区分，靠持有窗屏蔽）
     }
     // 非程序滚动（progScrollUntil 窗外）= 用户拖滚动条/键盘滚动 → 只让位，永不摘占位
-    if (stage.active && !stage.animT && Date.now() >= progScrollUntil) stage.yielded = true
+    if (stage.active && Date.now() >= progScrollUntil) stage.yielded = true
   })
   // 旧体系三类内容几何监听（折叠 toggle 重算/收起 click 接管/图片 load 重算）随动态占位退役：
   // 占位恒定 → 内容收起不再令 scrollTop 越出 maxScroll（无 clamp 闪动），图片异步撑高只改变
@@ -3571,10 +3726,18 @@ function setFirstSendHash(v) { firstSendHash = v }
   const MENTION_SESSION_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>'
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
 
+  // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
+  // 见 src/utils/sessionExposure.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  function splitSessionToken(v) {
+    const i = String(v).indexOf('|')
+    return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
+  }
+
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
   function mentionChipHtml(kind, name) {
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${name}</span>`
+    const label = kind === 'session' ? splitSessionToken(name).title : name
+    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -3592,7 +3755,11 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (n.nodeType === 3) { out += n.nodeValue; continue }
         if (n.nodeType !== 1) continue
         if (n.classList && n.classList.contains('mention')) {
-          out += n.dataset.kind === 'session' ? `[会话:${n.dataset.name}]` : `[插件:${n.dataset.name}]`
+          // 会话 chip 带 sid → `[会话:标题|sid]`：sid 是会话的稳定键（改名免疫），CLI 侧会话暴露
+          // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
+          out += n.dataset.kind === 'session'
+            ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
+            : `[插件:${n.dataset.name}]`
         } else if (n.tagName === 'BR') {
           out += '\n'
         } else {
@@ -3653,7 +3820,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', desc: relTime(s.updatedAt) })
+      // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     return items
   }
@@ -3681,7 +3849,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     pop.querySelectorAll('.mp-item').forEach((b) =>
       b.addEventListener('click', () => {
         const it = mention.items[+b.dataset.idx]
-        if (it) insertMention(it.kind, it.name)
+        if (it) insertMention(it.kind, it.name, it.sid)
       }),
     )
   }
@@ -3699,11 +3867,12 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   function selectMention() {
     const it = mention.items[mention.sel]
-    if (it) insertMention(it.kind, it.name)
+    if (it) insertMention(it.kind, it.name, it.sid)
   }
 
-  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后
-  function insertMention(kind, name) {
+  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后。sid 仅会话 chip 有（寻址键，
+  // 序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
+  function insertMention(kind, name, sid) {
     const sp = mention.sentinel
     if (sp && sp.isConnected) {
       const prev = sp.previousSibling
@@ -3718,6 +3887,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       chip.contentEditable = 'false'
       chip.dataset.kind = kind
       chip.dataset.name = name
+      if (kind === 'session' && sid) chip.dataset.sid = sid
       chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
       sp.replaceWith(chip)
       const space = document.createTextNode('\u00A0')
@@ -3805,7 +3975,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     { name: 'plugins', desc: '查看插件清单', bare: true },
   ]
   // 浮窗单页分组（2026-09-09 二轮定案：去顶层 tab，四类堆放一页）组名映射
-  const CMD_GROUP = { imgpick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
+  const CMD_GROUP = { imgpick: '上传', filepick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
   // 推理等级（全局：Off/Low/High/Max，对齐 CLI effortValue 语义；Off=不发送 effort 参数。2026-08-22 由 per-model reasoning 改为全局）
   const EFFORT_LEVELS = [
     { id: 'low', name: 'Low' },
@@ -3933,10 +4103,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/4 · 自动压缩` : '一次最多 4 张，自动压缩' }]
+    // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
+    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 exe 目录 uploads/' })
     if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时（同 @ 提及）
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', desc: relTime(s.updatedAt) })
+      // sid 同 @ 提及链（会话间协作的寻址键）：两个入口是同一个「把会话暴露给 agent」手势，
+      // 授权凭据必须同强（否则同一次提及经菜单走就只有标题，重名时无法寻址）
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
     return items
@@ -3985,7 +4159,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         const gh = grp !== lastGrp ? `<div class="grp">${grp}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${it.desc ? `<span class="detail">${esc(it.desc)}</span>` : ''}</button>`
       }).join('')}</div>`
@@ -4066,20 +4240,22 @@ function setFirstSendHash(v) { firstSendHash = v }
     const it = cmd.items[cmd.active]
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
+    if (it.kind === 'filepick') { $('file-upload').click(); return }
     if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
-    if (it.kind === 'session') { appendMentionChip('session', it.name); closeCmdPop(); return }
+    if (it.kind === 'session') { appendMentionChip('session', it.name, it.sid); closeCmdPop(); return }
     const o = it.ref
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
     cmdSettle(o)
   }
   // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
   // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
-  function appendMentionChip(kind, name) {
+  function appendMentionChip(kind, name, sid) {
     const chip = document.createElement('span')
     chip.className = 'mention'
     chip.contentEditable = 'false'
     chip.dataset.kind = kind
     chip.dataset.name = name
+    if (kind === 'session' && sid) chip.dataset.sid = sid
     chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
     inputEl.appendChild(chip)
     chip.after(document.createTextNode('\u00A0'))
@@ -4310,7 +4486,7 @@ function setModelUserPicked(v) { modelUserPicked = v }
   }
 
   function scrollBottom() {
-    // 占位在场（回合展示期）→ 两层跟随接管（动画期 animT 内不抢）；否则普通吸底
+    // 占位在场（回合展示期）→ 两层跟随接管（让位/手势中由 stageFollow 自判）；否则普通吸底
     if (stage.active) { stageFollow(); return }
     const sc = messagesEl.closest('#chat-scroll')
     progScroll()
@@ -4346,7 +4522,7 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // touchHold=触摸手势持有中（含惯性）：手势进行中程序滚动/删除占位 = scrollHeight 骤减 =
   // WebKit 触摸滚动基准断裂（2026-09-08 用户实测「iPad 滑动就死」）→ 持有期冻结程序跟随。
   // yielded=用户滚动输入（滚轮/触摸/滚动条/键盘）后跟随永久让位（用户已接管视口；stageStart 复位）。
-  const stage = { active: false, key: null, el: null, bubble: null, animT: null, touchHold: false, releaseT: null, yielded: false }
+  const stage = { active: false, key: null, el: null, bubble: null, touchHold: false, releaseT: null, yielded: false }
   // 程序滚动窗口：此时刻前的 scroll 事件不算用户操作（跟随/动画自身写入 scrollTop 会触发 scroll）
   let progScrollUntil = 0
   function progScroll() { progScrollUntil = Date.now() + 80 }
@@ -4364,7 +4540,6 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // 释放链铲除定案，滚动输入只让位）。remove 瞬间 scrollHeight 骤减一屏，浏览器 clamp 把
   // scrollTop 拉回合法值——视口在内容区则纹丝不动，内容连续零跳动（无需手动补偿）。
   function stageRelease() {
-    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
     if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
     stage.touchHold = false
     stage.yielded = false
@@ -4380,8 +4555,7 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // 内容超过一屏后内容底位反超 → 平滑转入内容底跟随（最新内容贴视口底），气泡自然上滑出视口顶。
   // 两视角在贴顶位处无缝衔接，无需 sticky（占位高度随内容实时对冲，贴顶位即滚动极限）。
   // bubble 失联（换皮窗口）时退化为纯内容底。
-  // 拉伸动画期（animT 在场）跟随照常执行：rAF 每帧调本函数驱动视口上浮（落点随占位生长的
-  // maxScroll 增长连续升到贴顶位）；渲染出口偶发并发写入与 rAF 帧同落点幂等，无需互斥。
+  // 无动画窗：跟随是几何的纯函数，谁写 scrollTop 都落在同一落点（幂等），无需互斥。
   function stageFollow() {
     // touchHold：手势中程序滚动=基准断裂；yielded：用户滚动输入后已接管视口，跟随永久让位
     if (!stage.active || stage.touchHold || stage.yielded) return
@@ -4398,69 +4572,77 @@ function setModelUserPicked(v) { modelUserPicked = v }
     sc.style.scrollBehavior = ''
   }
 
-  // 唤出（回合开启）：占位块挂/复用（stageSync）+ 乐观唤出（smooth=true）播占位拉伸动画
-  // （2026-09-09 用户定案：占位初始高=乐观气泡同高，rAF 750ms easeOutCubic 流畅拉伸到目标
-  // 高；旧「气泡平滑上划贴顶」独立滚动动画铲除——视口上浮由拉伸驱动：每帧 stageFollow 的
-  // 落点随占位生长的 maxScroll 被压在内容底、连续升到贴顶位，与空白生长合成单一动效）。
-  // smooth=false 直接按跟随几何就位（刷新恢复/接管帧等无动画路径）。
-  // 不变量：占位块至多一个（#messages 流末），由 stageSync 独占维护；拉伸期占位高度唯一
-  // 写入者=本 rAF（stageSync 检测 animT 在场跳过设高），重入/终止经 stageSync 收口终态。
-  function stageStart(bubbleEl, key, smooth) {
+  // 唤出（回合开启）：占位块挂/复用（stageSync）+ 按跟随几何同帧就位（stageFollow）。
+  // 2026-09-11「发送新消息界面短暂跳到上一条消息」根治——09-09「占位初始高=乐观气泡同高，
+  // rAF 750ms 拉伸到目标高」的动画窗铲除：初值取气泡高 = 占位先缩后长，scrollHeight 在同一
+  // 事务内先塌，浏览器按缩后的 max 钳 scrollTop（首帧就画在内容底 = 上一回合尾部），再由
+  // rAF 逐帧抬到贴顶位——用户看到的就是「跳到上一条消息」再滑回。占位高度是几何的纯函数
+  // （参照气泡定了，终态就定了），没有中间态可言：写终态 + 同帧归位，浏览器只绘一帧、那一帧
+  // 即终态。不变量：占位块至多一个（#messages 流末）、占位高度唯一写入者=stageSync。
+  function stageStart(bubbleEl, key) {
     stage.active = true
     stage.key = key
     stage.bubble = bubbleEl
-    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
     if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
     stage.touchHold = false
     stage.yielded = false
     // 脚印无需重置：实时读取（stageSync 每趟按当前几何量），换参照气泡即自动跟随新几何
-    const fresh = stageSync()
-    if (smooth && stage.bubble && stage.el) {
-      const pStar = parseFloat(stage.el.style.height) || 0
-      const p0 = fresh ? Math.min(stage.bubble.offsetHeight, pStar) : (parseFloat(stage.el.style.height) || 0)
-      const t0ms = performance.now()
-      stage.el.style.height = p0 + 'px'
-      const step = (now) => {
-        const k = Math.min(1, (now - t0ms) / 750)
-        const e = 1 - Math.pow(1 - k, 3) // easeOutCubic
-        if (stage.el) stage.el.style.height = (p0 + (pStar - p0) * e) + 'px'
-        if (!stage.yielded && !stage.touchHold) stageFollow() // 让位/手势中：高度照常长满，视口停写
-        if (k < 1) { stage.animT = requestAnimationFrame(step) }
-        else { stage.animT = null; stageSync() } // 终帧经 stageSync 收口（校准高度+跟随归位）
-      }
-      stage.animT = requestAnimationFrame(step)
-    } else {
-      stageFollow()
+    stageSync()
+  }
+
+  // 回合权威锚解析（2026-09-11「发送后短暂跳到上一条消息」二轮根修）：注入开段回合
+  // （injected user → user:null 切段，messagesHtml 切段定案）在 DOM 无 data-t="u" 开启气泡
+  // ——注入气泡以 data-t="g…" 织在段折叠体 done-body 内（data-g=自身消息索引）。因此凡以
+  // 「末条 data-t="u"」为参照的回落，在注入开段回合命中的必是**上一回合**气泡。锚=引导气泡
+  // 所属段折叠（details.done-fold[data-m]）：user:null 段的段首元素即折叠体，折叠顶=回合顶=
+  // 乐观气泡原位；段内若另有 data-t="u"（回合由真实 user 开段、引导系中途织入）则仍取开启
+  // 气泡（段顶=气泡顶）。
+  function guideTurnAnchor(guideEl) {
+    const fold = guideEl.closest('details.done-fold[data-m]')
+    if (!fold) return null
+    return messagesEl.querySelector(`[data-m="${fold.dataset.m}"][data-t="u"]`) || fold
+  }
+
+  // 乐观吸收后的同回合锚：最新回合由注入开启还是真实 user 开启，以文档序判——最新引导气泡
+  // 在末条开启气泡之后 ⇔ 注入开段（该回合没有 data-t="u"）→ 取其折叠锚；否则（无引导/
+  // dequeue 落盘开段/引导织在更早回合）→ 末条开启气泡（dequeue 接管帧原行为）。禁止回落
+  // 上一回合参照（=本缺陷：吸收帧参照回退上一回合 → 重钉上一条消息）。
+  function absorbTurnAnchor() {
+    const users = messagesEl.querySelectorAll('[data-t="u"]')
+    const lastUser = users.length ? users[users.length - 1] : null
+    const guides = messagesEl.querySelectorAll('.msg.user[data-t^="g"]')
+    const lastGuide = guides.length ? guides[guides.length - 1] : null
+    if (lastGuide && (!lastUser || (lastUser.compareDocumentPosition(lastGuide) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+      return guideTurnAnchor(lastGuide) || lastUser
     }
+    return lastUser
   }
 
   // 渲染权威出口对账：整页重建洗掉占位块/气泡失联 → 重挂（流末）+ 气泡重定位 + 高度校准，
   // 然后按跟随几何归位。占位高度 = max(0, clientHeight − paddingBottom − 当前脚印)
   // （脚印 = 占位块顶 − 气泡贴顶位，**实时读取**；clientHeight 含常驻 padding-bottom 142px
   // （docked 输入栏悬浮预留），不扣则占位铺到输入栏底下；扣除后空白恰铺到输入栏上沿，
-  // 未超一屏时 maxScroll ≡ 贴顶位）。
+  // 未超一屏时 maxScroll ≡ 贴顶位）。高度唯一写入者=本函数（几何纯函数，无动画窗/无第二写入者）。
   function stageSync() {
-    if (!stage.active) return false
+    if (!stage.active) return
     const sc = $('chat-scroll')
     let el = stage.el && stage.el.isConnected ? stage.el : messagesEl.querySelector('.pin-stage')
-    let created = false
     if (!el) {
       el = document.createElement('div')
       el.className = 'pin-stage'
       messagesEl.appendChild(el)
-      created = true
     }
     stage.el = el
     // 气泡参照找回——必须在脚印/高度计算之前（实时脚印 = 占位块顶 − 气泡顶，参照物缺席则
     // 无法量）。参照物定义=本回合开启用户消息，按精度递降定位：乐观期=暂态区最后一条
-    // .msg.user；乐观项已被吸收/降级（authLive 在场 → 气泡项不渲染）、暂态区已无气泡时，
-    // 开启气泡此刻由权威渲染在数据区 → 回落最后一条 user 气泡（引导消息 data-t="g…" 天然排除）。
+    // .msg.user；乐观项已被吸收（注入落盘/落盘接管，暂态区气泡移除）→ absorbTurnAnchor
+    // 移交**同一回合**的权威锚（注入开段=段折叠顶，落盘开段=数据区开启气泡），禁止回落
+    // 上一回合。
     if (!stage.bubble || !stage.bubble.isConnected) {
       if (stage.key === 'optimistic') {
         const zone = document.getElementById('live-zone')
         const els = zone ? zone.querySelectorAll('.msg.user') : []
-        const users = messagesEl.querySelectorAll('[data-t="u"]')
-        stage.bubble = (els.length ? els[els.length - 1] : null) || (users.length ? users[users.length - 1] : null)
+        stage.bubble = (els.length ? els[els.length - 1] : null) || absorbTurnAnchor()
       } else {
         // 2026-09-09 跳动主根根修：stage.key 存 sig（"idx:ts"，防索引复用错位），但渲染权威
         // 气泡 data-m=段起始索引（纯数字）——整页重建后按 sig 原样匹配 data-m 恒落空 → bubble
@@ -4472,14 +4654,12 @@ function setModelUserPicked(v) { modelUserPicked = v }
     }
     const padBot = parseFloat(getComputedStyle(sc).paddingBottom) || 0
     const t0 = stage.bubble ? topInScroll(stage.bubble) : null
-    // 拉伸动画期（animT 在场）占位高度唯一写入者=rAF step：此处跳过防中间态被拉到终态；
-    // 动画重入/终止路径先清 animT 再进本函数，自然走下方公式收口终态。参照气泡两端皆缺
-    // （重建窗口内）不写高——占位高度连续性优先（写 0 = scrollHeight 骤减 = 视口钳制跳变）。
-    if (stage.animT == null && t0 != null) {
+    // 参照气泡两端皆缺（重建窗口内）不写高——占位高度连续性优先（写 0 = scrollHeight 骤减
+    // = 视口钳制跳变）。
+    if (t0 != null) {
       el.style.height = Math.max(0, sc.clientHeight - padBot - Math.max(0, topInScroll(el) - t0)) + 'px'
     }
     stageFollow()
-    return created
   }
 
   // 追加到 #messages 末尾；插入点取暂态区 #live-zone（其子元素恒为消息流最末尾段）或两层占位
@@ -4507,12 +4687,12 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // → absorbPending 文本吸收移除（渲染权威接管）；权威 done-live[data-m] 在场 → 主张降级
   // （renderTransient 同趟：主张折叠不渲染、气泡项按排队成员渲染）。
   let pendingUserMsgs = []
-  function addUser(text, imgs) {
+  function addUser(text, imgs, files) {
     clearTakeover() // 清掉残留的提问/审批 takeover
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
     // 「新回合开启主张」。主张至多一个：主张折叠在场时后续发送恒为 dock 成员。
     const hasLive = !!messagesEl.querySelector('details.done-fold.done-live')
-    pendingUserMsgs.push({ hash: state.currentHash, text, imgs: imgs || [], baseTs: live.lastDataTs || 0, form: hasLive ? 'dock' : 'bubble', claimTs: Date.now() })
+    pendingUserMsgs.push({ hash: state.currentHash, text, imgs: imgs || [], files: files || [], baseTs: live.lastDataTs || 0, form: hasLive ? 'dock' : 'bubble', claimTs: Date.now() })
     renderTransient()
     // 两层消息流：乐观开启气泡唤出占位（排队成员/dock 不唤——会话处理中发送不打断当前展示，
     // 2026-09-08 定案「只有处于结束状态的会话发送乐观气泡才唤出占位」）。气泡取暂态区最后
@@ -4520,7 +4700,7 @@ function setModelUserPicked(v) { modelUserPicked = v }
     if (!hasLive) {
       const zone = document.getElementById('live-zone')
       const els = zone ? zone.querySelectorAll('.msg.user') : []
-      if (els.length) stageStart(els[els.length - 1], 'optimistic', true)
+      if (els.length) stageStart(els[els.length - 1], 'optimistic')
     }
     scrollBottom() // 发送后跟随下滑（占位在场=两层跟随，动画期不抢）
   }
@@ -4603,7 +4783,9 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     for (const q of remote) {
       if (q && typeof q.content === 'string' && q.content && !seen.has(q.content)) {
         seen.add(q.content)
-        dockItems.push({ content: q.content, ts: typeof q.ts === 'number' ? q.ts : 0 })
+        // 跨会话来件在队列里同样标来源（CLI 侧 queue-state 已把 wrapper 剥成 content+from，
+        // 见 gatewayClient.queueItemsFromSnapshot）——排队区不出现原始 XML 包装文本
+        dockItems.push({ content: q.content, from: q.from || null, ts: typeof q.ts === 'number' ? q.ts : 0 })
       }
     }
     dockItems.sort((a, b) => (a.ts || 0) - (b.ts || 0))
@@ -4617,7 +4799,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     }
     // 签名跳过：区内容无变化的重复调用（400ms 防抖刷新/逐条 SSE）不重建 DOM——重建会重播
     // msg-in 入场动画（跳字/滚动路径上的闪烁根源）
-    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => q.content)])
+    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => [(q.from && q.from.title) || '', q.content])])
     let zone = document.getElementById('live-zone')
     if (zone && zone.dataset.sig === sig) {
       claimTimerSet(bubble.length > 0)
@@ -4645,10 +4827,17 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         const imgsHtml = imgs.length
           ? '<div class="msg-imgs">' + imgs.map((im) => '<img class="msg-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
           : ''
-        const bodyText = imgs.length ? String(p.text).replace(/\s*\[Image #\d+\]/g, '') : p.text
-        const bodyInner = renderUserText(bodyText)
-        // 纯图消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
-        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
+        // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
+        const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
+        const filesHtml = files.length ? fileCardsHtml(files) : ''
+        const bodyText = String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+        // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
+        // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
+        // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
+        // 同构不变量见下（乐观开启气泡与落盘气泡同构，2026-09-07 定案）——body 渲染是它此前漏网的一环。
+        const bodyInner = mdHtml(bodyText)
+        // 纯图/纯文件消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
+        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + filesHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
       }).join('') +
       (bubble.length
         ? '<details class="done-fold done-live msg-in" id="claim-fold" open><summary>' + procLabel('正在处理', '0s') + '</summary><div class="done-body"></div></details>'
@@ -4658,8 +4847,10 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = imgs ? String(q.content).replace(/\s*\[Image #\d+\]/g, '') : q.content
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body"><p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+            const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+            // 来源行在 q-body 首行（排队项是单行 flex，标签塞同一行会挤压正文；行内首行即视觉上方）
+            const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)
@@ -5574,16 +5765,25 @@ function setApprovalPending(v) { approvalPending = v }
     pendingImages = []
     renderImgPills()
   }
+  // pendingFiles: {name, abs, size}（落盘文件）。渲染与图片同胶囊行（#img-pills），发送时
+  // 文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行（CLI 端即普通文本，模型按路径 Read）。
+  let pendingFiles = []
+  function clearPendingFiles() {
+    pendingFiles = []
+    renderImgPills()
+  }
   function renderImgPills() {
     const box = $('img-pills')
     if (!box) return
-    if (!pendingImages.length) {
+    if (!pendingImages.length && !pendingFiles.length) {
       box.hidden = true
       box.innerHTML = ''
     } else {
       box.hidden = false
       box.innerHTML = pendingImages
         .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
+        .join('') + pendingFiles
+        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
     }
     syncGwSend()
@@ -5627,13 +5827,41 @@ function setApprovalPending(v) { approvalPending = v }
     }
     renderImgPills()
   }
+  // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
+  // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
+  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=state.newProject
+  //（项目「+」初始化界面）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
+  // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
+  async function addUploadFiles(files) {
+    const ctx = state.currentHash
+      ? '&sid=' + encodeURIComponent(state.currentHash)
+      : (state.newProject ? '&project=' + encodeURIComponent(state.newProject) : '')
+    for (const f of files) {
+      toast('正在上传 ' + (f.name || '文件') + '…')
+      try {
+        const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(f.name || 'file') + ctx), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: f,
+        })
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok || !d.ok) { toast('上传失败：' + (d.error || r.status)); continue }
+        pendingFiles.push({ name: d.name || f.name || '文件', abs: String(d.abs || d.path || ''), size: d.size || 0 })
+        toast('已上传 ' + d.name)
+      } catch {
+        toast('上传失败：网络错误')
+      }
+    }
+    renderImgPills()
+  }
 
   async function gwSend() {
     if (!GATEWAY) return false
     closeMentionPop()
     let text = serializeInput().trim()
     const imgs = pendingImages.slice()
-    if (!text && !imgs.length) { inputEl.focus(); return true }
+    const files = pendingFiles.slice()
+    if (!text && !imgs.length && !files.length) { inputEl.focus(); return true }
     if (!gws || gws.readyState !== 1) { toast('未连接，无法发送'); return true }
     // 2026-08-28 图片占位：[Image #N] 与 pastedContents id 一一对应。
     // 2026-09-02 防撞根修：id 由本端分配全会话唯一（从已用最大 imageId+1 起，对齐 CLI
@@ -5669,7 +5897,7 @@ function setApprovalPending(v) { approvalPending = v }
       // 乐观上屏（气泡+正在处理折叠）。首条消息事务（firstSendHash）由 newWebSession 在
       // navigate 之前回填，创建失败回滚空态（还原输入文本与图片胶囊）。
       flipInput(false)
-      addUser(text, imgs)
+      addUser(text, imgs, files)
       inputEl.textContent = ''
       syncGwSend()
       const d = await newWebSession(tgt || undefined)
@@ -5686,10 +5914,17 @@ function setApprovalPending(v) { approvalPending = v }
         return true
       }
       clearPendingImages()
+      clearPendingFiles()
       // newWebSession 已回填 firstSendHash（navigate 之前）并 navigate 进会话（renderSession
       // 设置 currentHash + 拉历史）：首条消息事务生效——乐观开启气泡/主张折叠是权威 DOM，等真实
       // 数据落盘接管；期间队列快照不渲、空 fetch 不洗盘（守卫见 renderSession/refreshSession）。
-      gws.send(JSON.stringify({ type: 'send', text, sessionId: d.hash, ...imgPayload }))
+      // 2026-09-12 相对占位：新会话 cwd 由 wsession 响应带回（与 spawn cwd 同源
+      // webSessionProjectRoot）——jsonl 落盘前会话记录尚不存在，响应带回是首条消息唯一 cwd 源。
+      // 乐观文本不含文件占位（absorb 为 includes 子串匹配仍命中）；落盘文本带相对占位。
+      if (d.cwd) setSessionCwd(d.cwd)
+      const fph = files.map((f) => `[文件:${relUploadPath(f.abs)}]`).join(' ')
+      const sendText = fph ? (text ? text + ' ' + fph : fph) : text
+      gws.send(JSON.stringify({ type: 'send', text: sendText, sessionId: d.hash, ...imgPayload }))
       // 主张折叠已由 addUser → renderTransient 上屏（事务期乐观 DOM 是权威），此处无需再挂
       return true
     }
@@ -5699,7 +5934,13 @@ function setApprovalPending(v) { approvalPending = v }
       inputWrap.classList.add('docked')
       chatArea.classList.add('in-session')
     }
-    addUser(text, imgs)
+    // 2026-09-12 文件占位：[文件:<会话 cwd 相对路径>]，与图片占位同模式——消息文本原样上行
+    // （CLI/模型端按 cwd 解析读文件），web 渲染层剥占位出文件卡片（userFilesHtml）。
+    if (files.length) {
+      const fph = files.map((f) => `[文件:${relUploadPath(f.abs)}]`).join(' ')
+      text = text ? text + ' ' + fph : fph
+    }
+    addUser(text, imgs, files)
     // 2026-08-17 网关独立化：带当前会话 hash，网关按 sessionId 精确路由给对应 CLI 进程
     // （未在具体会话时 currentHash 为 null → 字段省略，网关广播兜底）
     gws.send(JSON.stringify({ type: 'send', text, sessionId: state.currentHash || undefined, ...imgPayload }))
@@ -5708,17 +5949,36 @@ function setApprovalPending(v) { approvalPending = v }
     // 原 procOpen 直挂 DOM 链退役（幻影折叠根源：proc 变量跨整页重建悬挂，收养/幂等皆失灵）。
     inputEl.textContent = ''
     clearPendingImages()
+    clearPendingFiles()
     syncGwSend()
     return true
   }
 
   function syncGwSend() {
-    // 2026-09-05 定案：回合进行中输入栏有内容（文本/图）→ 显示发送键（点击=排队续发不打断）；
+    // 2026-09-05 定案：回合进行中输入栏有内容（文本/图/文件）→ 显示发送键（点击=排队续发不打断）；
     // 输入栏为空才显示停止键（打断）。空闲态恒发送键、按输入内容点亮。
-    const hasContent = serializeInput().trim().length > 0 || pendingImages.length > 0
+    const hasContent = serializeInput().trim().length > 0 || pendingImages.length > 0 || pendingFiles.length > 0
     setBtnMode(turnLive && !hasContent ? 'stop' : 'send')
     const on = turnLive || (GATEWAY && gws && gws.readyState === 1 && hasContent)
     sendBtn.classList.toggle('enabled', on)
+  }
+
+  // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型
+  // Read 按会话启动根解析即得文件；落盘同轮定案改跟随会话（上传带 sid/project，网关按会话根落盘）
+  // → 同会话上传+发送恒为 uploads/<名>；跨会话补发（A 会话上传、B 会话发送）按 B 的 cwd 相对化
+  // （../<A>/uploads/x）。Windows 大小写不敏感、\ / 通用；跨盘符无法相对 → 原样绝对路径
+  // （物理上唯一正确表示）。cwd 未知（异常旧记录）同退绝对路径——不是兜底分支，是「无 cwd 就无法相对化」的诚实表示。
+  function relPath(fromDir, toPath) {
+    const seg = (p) => String(p).replace(/\//g, '\\').split('\\').filter((s) => s.length > 0)
+    const a = seg(fromDir)
+    const b = seg(toPath)
+    if (a[0] && b[0] && /^[a-z]:$/i.test(a[0]) && /^[a-z]:$/i.test(b[0]) && a[0].toLowerCase() !== b[0].toLowerCase()) return toPath
+    let i = 0
+    while (i < a.length && i < b.length && a[i].toLowerCase() === b[i].toLowerCase()) i++
+    return '../'.repeat(Math.max(0, a.length - i)) + b.slice(i).join('/')
+  }
+  function relUploadPath(abs) {
+    return sessionCwd ? relPath(sessionCwd, abs) : abs
   }
 
   function initGateway() {

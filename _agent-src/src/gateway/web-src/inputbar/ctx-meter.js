@@ -8,7 +8,7 @@ import { I } from '../core/icons.js'
 import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state, toast, isMobile } from '../core/state.js'
 import { renderSettle, btnMode } from './approval.js'
 import { cmd, msel, cmdPop, modelPop, modelSeatEl, psel, projPop, projSeatEl, closeProjPop, toggleCmdPop, closeCmdPop, closeRiskModal, cmdMove, cmdSelect } from './commands.js'
-import { pendingImages, renderImgPills, addImageFiles } from './images.js'
+import { pendingImages, pendingFiles, renderImgPills, addImageFiles, addUploadFiles } from './images.js'
 import { mention, closeMentionPop, moveMentionSel, selectMention, removeChip, mentionBeforeCaret } from './mention.js'
 import { toggleModelPop, closeModelPop, modelEscape, mselMove } from './model-select.js'
 import { gwSend } from './send.js'
@@ -124,10 +124,17 @@ import { setPanel } from '../sidebar/recent.js'
     $('img-file').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
+  // 文件上传（2026-09-12）：+ 浮窗「上传文件」行选完 → addUploadFiles 顺序上传落盘，路径回填输入栏
+  $('file-upload').addEventListener('change', () => {
+    addUploadFiles(Array.from($('file-upload').files || []))
+    $('file-upload').value = '' // 允许重复选同一文件
+    closeCmdPop()
+  })
   $('img-pills').addEventListener('click', (e) => {
     const x = e.target.closest('.img-x')
     if (!x) return
-    pendingImages.splice(+x.dataset.i, 1)
+    if (x.dataset.f != null) pendingFiles.splice(+x.dataset.f, 1) // 文件胶囊
+    else pendingImages.splice(+x.dataset.i, 1)
     renderImgPills()
   })
   inputEl.addEventListener('paste', (e) => {
@@ -299,7 +306,7 @@ import { setPanel } from '../sidebar/recent.js'
       return // 手势中的 scroll 不构成滚动输入信号（与触摸无法从事件本身区分，靠持有窗屏蔽）
     }
     // 非程序滚动（progScrollUntil 窗外）= 用户拖滚动条/键盘滚动 → 只让位，永不摘占位
-    if (stage.active && !stage.animT && Date.now() >= progScrollUntil) stage.yielded = true
+    if (stage.active && Date.now() >= progScrollUntil) stage.yielded = true
   })
   // 旧体系三类内容几何监听（折叠 toggle 重算/收起 click 接管/图片 load 重算）随动态占位退役：
   // 占位恒定 → 内容收起不再令 scrollTop 越出 maxScroll（无 clamp 闪动），图片异步撑高只改变

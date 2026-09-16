@@ -21,7 +21,7 @@
  * HTTP/WS 用 node:http + ws（已验证可打包进 bun 编译产物），不依赖 Bun.serve。
  */
 import { createServer, request as httpRequest, type Server } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, type FSWatcher } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join, resolve, extname, basename, sep, isAbsolute } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -299,11 +299,16 @@ const sessionActivity = new Map<string, { status: string; pid: number; cwd?: str
 const sessionModels = new Map<string, { model: string; updatedAt: number }>()
 // 2026-08-30 共同后端队列快照（接力文档清单#2）：CLI 侧 /clients WS queue-state 上报的当前
 // 排队项（仅用户 prompt）。web 排队区置底数据源：/gateway/session.queued 首载 + SSE queue-state 增量。
-// 纯引擎内存态镜像，CLI 断开即随 detach 删除。
-const sessionQueues = new Map<string, { items: Array<{ content: string; ts: number }>; updatedAt: number }>()
+// 纯引擎内存态镜像，CLI 断开即随 detach 删除。无时间 TTL（09-12：与 CLI「载荷不变不发」矛盾，
+// 见 sweepStaleMaps 注）。
+const sessionQueues = new Map<
+  string,
+  { items: Array<{ content: string; ts: number; from?: { title: string; sid?: string } }>; updatedAt: number }
+>()
 // 2026-09-10 web 底栏任务浮窗数据源：CLI 侧 /clients WS task-state 上报的当前可见任务清单
 //（TodoV2 TasksV2Store 单源出口快照，与 CLI TaskListV2 同源）。首载 = /gateway/session.tasks，
 // 增量 = SSE task-state。纯引擎内存态镜像，CLI 断开随 detach 删除（重连由 task-state 补发对齐）。
+// 无时间 TTL（09-12：与 CLI「载荷不变不发」矛盾，见 sweepStaleMaps 注）。
 // 字段对齐 CLI 源码 TaskSchema（utils/tasks.ts）+ TaskListV2 实际渲染列：状态图标/subject/
 // owner/进行中活动/阻塞计数。description 等长文本不透传（web 浮窗只显示清单行）。
 type GatewayTaskItem = {
@@ -378,12 +383,16 @@ const sessionDeltaSeq = new Map<string, number>()
 // 窗口内重连即静默跳过；同 sid 重复 detach 由 clearTimeout 去重。兜底语义与 session-down 一致：
 // 进程失联确认才收口，重连窗内 web 保持最后快照不感知。
 const detachTimers = new Map<string, ReturnType<typeof setTimeout>>()
-// C1 修复：两个内存 Map 无上限（只增不删）→ 长跑泄漏。加 TTL + 死进程惰性清扫。
+// C1 修复：内存 Map 无上限（只增不删）→ 长跑泄漏。加 TTL + 死进程惰性清扫。
+// 2026-09-12：sessionQueues/sessionTasks 退出时间 TTL（原 SESSION_QUEUE_TTL_MS/SESSION_TASK_TTL_MS
+// 删除）——CLI 上行契约「载荷不变不发」（notifyTaskState 去重 / queue-state 事件驱动）与时间 TTL
+// 直接矛盾：活跃会话里清单 10 分钟不变即被 sweepStaleMaps 清仓 → /gateway/session 首载/刷新拉到
+// [] 当权威 → web 任务浮窗/排队区消失（09-12「任务浮窗不刷新」实证：回合 2h4m 长工具期清单未变
+// 被清）。生命周期不变量收敛为「清单态只属于在线 CLI 进程」：上报 upsert + detach 删除 + 重连
+// open 补发 + 网关重启空表由 CLI 重连补发对齐（gatewayClient openSocket sendQueueState/sendTaskState）。
 const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新视为过期
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
 const SESSION_MODEL_TTL_MS = 10 * 60 * 1000 // sessionModels 10 分钟无上报视为过期
-const SESSION_QUEUE_TTL_MS = 10 * 60 * 1000 // sessionQueues 10 分钟无上报视为过期
-const SESSION_TASK_TTL_MS = 10 * 60 * 1000 // sessionTasks 10 分钟无上报视为过期
 const MAX_REPORT_BODY_BYTES = 1024 * 1024
 
 // ============================================================================
@@ -403,16 +412,21 @@ function isPathInside(parent: string, candidate: string): boolean {
 
 class ReportBodyTooLargeError extends Error {}
 
-async function readReportBody(req: import('node:http').IncomingMessage): Promise<Record<string, unknown>> {
+/** 限流读原始 body（JSON 上报与文件上传共用；超限抛 ReportBodyTooLargeError → 413） */
+async function readBodyWithLimit(req: import('node:http').IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of req) {
     const part = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += part.length
-    if (size > MAX_REPORT_BODY_BYTES) throw new ReportBodyTooLargeError()
+    if (size > maxBytes) throw new ReportBodyTooLargeError()
     chunks.push(part)
   }
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
+  return Buffer.concat(chunks)
+}
+
+async function readReportBody(req: import('node:http').IncomingMessage): Promise<Record<string, unknown>> {
+  const parsed: unknown = JSON.parse((await readBodyWithLimit(req, MAX_REPORT_BODY_BYTES)).toString('utf8') || '{}')
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new TypeError('request body must be a JSON object')
   }
@@ -1072,12 +1086,9 @@ function sweepStaleMaps(now = Date.now()): void {
   for (const [sid, v] of sessionModels) {
     if (now - v.updatedAt > SESSION_MODEL_TTL_MS) sessionModels.delete(sid)
   }
-  for (const [sid, v] of sessionQueues) {
-    if (now - v.updatedAt > SESSION_QUEUE_TTL_MS) sessionQueues.delete(sid)
-  }
-  for (const [sid, v] of sessionTasks) {
-    if (now - v.updatedAt > SESSION_TASK_TTL_MS) sessionTasks.delete(sid)
-  }
+  // sessionQueues/sessionTasks 不入时间清扫（09-12 定案，见上方常量区注）：CLI「载荷不变不发」
+  // 契约下时间 TTL 会清仓长不变期的活跃清单 → web 浮窗/排队区消失。生命周期 = detach 清 +
+  // 重连 open 补发 + 网关重启对齐，「清单态只属于在线 CLI 进程」由这三者直接持有。
 }
 
 async function listSessions(root: string) {
@@ -1160,8 +1171,15 @@ function extractContextUsage(records: Record<string, unknown>[]): Record<string,
 
 function readSession(id: string, root: string) {
   const { path: p } = decodeSessionPath(id, root)
-  // 2026-08-23 web 独立会话：新会话进程刚 spawn 时 jsonl 可能尚未落盘 → 返回空消息而非 500
-  if (!existsSync(p) || !statSync(p).isFile()) return { file: basename(p), path: p, messages: [], context: null, cwd: undefined }
+  // 2026-08-23 web 独立会话：新会话进程刚 spawn 时 jsonl 可能尚未落盘 → 返回空消息而非 500。
+  // 2026-09-12 文件占位相对化配套：cwd 从会话路径自带的项目根推出（id = base64url(
+  // <启动根>/.claude/projects/<sid>.jsonl)）——首条消息落盘前前端 fetch 回程也拿到 cwd，
+  // 不然 setSessionCwd(null) 会冲掉 wsession 响应带回值；路径形不符（异常 id）则 cwd 缺省。
+  if (!existsSync(p) || !statSync(p).isFile()) {
+    const marker = sep + '.claude' + sep + 'projects'
+    const k = p.toLowerCase().lastIndexOf(marker.toLowerCase())
+    return { file: basename(p), path: p, messages: [], context: null, cwd: k > 0 ? p.slice(0, k) : undefined }
+  }
   const raw = readFileSync(p, 'utf8')
   const records: Record<string, unknown>[] = []
   let cwd: string | undefined
@@ -1855,7 +1873,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       if (resume && !projLabel) projLabel = sessionProjectRootOf(resume)?.projectLabel
       const projRoot = webSessionProjectRoot(projLabel)
       const id = Buffer.from(join(projRoot, '.claude', 'projects', `${sid}.jsonl`)).toString('base64url')
-      sendJson(res, 200, { id, hash: sid, resumed: !!resume, project: project ?? null })
+      // 2026-09-12 文件占位相对化配套：cwd = 本会话启动根（与 spawnWebSession 的 cwd 同源），
+      // 前端首条消息发送前即知会话 cwd，[文件:<相对路径>] 占位按它相对化（新会话 jsonl 落盘前 cwd 不存在）。
+      sendJson(res, 200, { id, hash: sid, resumed: !!resume, project: project ?? null, cwd: projRoot })
     } catch (e) {
       sendError(res, e)
     }
@@ -2037,6 +2057,60 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     const fType = MIME[extname(fAbs)] ?? 'application/octet-stream'
     res.writeHead(200, { 'Content-Type': fType, 'Cache-Control': 'no-cache' })
     res.end(readFileSync(fAbs))
+    return
+  }
+
+  // 2026-09-12 web 文件上传（+ 浮窗「上传文件」行）：POST /gateway/upload?name=<文件名>&sid=<会话hash>|&project=<项目>，body=原始字节。
+  // 落盘跟随会话（2026-09-12 四轮用户定案）：sid 解码（=base64url(<启动根>/.claude/projects/<uuid>.jsonl)，
+  // decodeSessionPath 内强制限便携根内）剥 marker 得会话启动根——全局笔=全局根/项目会话=项目根/桥接
+  // CLI=其 cwd，与消息占位相对化（relPath）同根同源；解码失败 → 磁盘扫描 sessionProjectRootOf 兜一层；
+  // 新会话（首页首送前上传，尚无 sid）带 project → webSessionProjectRoot 同源解析（与 wsession 同语义，
+  // label 不命中回落全局根）；无任何会话上下文 → exe 目录（getProjectRoot，旧案位置）。
+  // 同名不覆盖 → -1/-2 序号。受上方 /gateway/* token/cookie 校验保护；文件名 basename 化 +
+  // Windows 非法字符/保留名清洗；单文件上限 20MB。
+  if (req.method === 'POST' && url.pathname === '/gateway/upload') {
+    try {
+      let name = basename((url.searchParams.get('name') || '').trim())
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+        .trim()
+      if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)) name = '_' + name
+      if (!name || name === '.' || name === '..') name = 'file'
+      const nameExt = extname(name)
+      if (name.length > 120) name = name.slice(0, 120 - nameExt.length) + nameExt
+      let upRoot: string | null = null
+      const upSid = (url.searchParams.get('sid') || '').trim()
+      const upProj = (url.searchParams.get('project') || '').trim()
+      if (upSid) {
+        try {
+          const p = decodeSessionPath(upSid, root).path
+          const marker = sep + '.claude' + sep + 'projects'
+          const k = p.toLowerCase().lastIndexOf(marker.toLowerCase())
+          if (k > 0) upRoot = p.slice(0, k)
+        } catch { /* 越界/非法 id → 磁盘扫描 */ }
+        if (!upRoot) {
+          const g = sessionProjectRootOf(upSid)
+          if (g) upRoot = g.projectLabel ? webSessionProjectRoot(g.projectLabel) : getPortableRoot()
+        }
+      } else if (upProj) {
+        upRoot = webSessionProjectRoot(upProj)
+      }
+      if (!upRoot) upRoot = getProjectRoot()
+      const upDir = join(upRoot, 'uploads')
+      mkdirSync(upDir, { recursive: true })
+      let target = join(upDir, name)
+      if (existsSync(target)) {
+        const stem = name.slice(0, name.length - nameExt.length)
+        let i = 1
+        while (existsSync(join(upDir, `${stem}-${i}${nameExt}`))) i++
+        target = join(upDir, `${stem}-${i}${nameExt}`)
+      }
+      const buf = await readBodyWithLimit(req, 20 * 1024 * 1024)
+      writeFileSync(target, buf)
+      sendJson(res, 200, { ok: true, name: basename(target), path: `uploads/${basename(target)}`, abs: target, size: buf.length })
+    } catch (e) {
+      if (e instanceof ReportBodyTooLargeError) sendReportBodyError(res, e)
+      else sendError(res, e)
+    }
     return
   }
 
@@ -2419,18 +2493,60 @@ function approvalTrailSnapshot(): unknown[] {
 // 注册完成后再把消息注入 REPL（cliClients 精确路由，与本地打字同路径）。会话文件不在磁盘 → 拒绝。
 // 同一会话 resume 在途（spawn 最长 20s）→ 复用同一 promise，多消息串行投递，杜绝双 spawn 双写 jsonl。
 const resumingSessions = new Map<string, Promise<void>>()
-function resumeAndDeliver(
-  sessionId: string,
-  text: string,
-  images: ReturnType<typeof sanitizeInboundImages>,
-  ws: WebSocket,
-): void {
-  const loc = sessionProjectRootOf(sessionId)
-  if (!loc) {
-    ws.send(JSON.stringify({ type: 'status', state: '目标会话未在线，消息未注入' }))
+
+/**
+ * 投递反馈（2026-09-15 抽取）：三形态路由对发起端的回报口径由调用方决定——web 发送 = status
+ * 提示行（纯展示），会话间消息 = session-message-result 回执（调用方的工具在等结果）。
+ * done 恒被调用且只调一次；staged/resuming 是过程提示，纯展示侧使用。
+ */
+type DeliveryFeedback = {
+  /** ② 已暂存待投。spawning=true：会话进程正在冷启，注册钩子会补投；false：活进程断连重连间隙 */
+  staged: (spawning: boolean) => void
+  /** ③ 目标离线且磁盘有会话文件，正在冷启恢复窗口 */
+  resuming: () => void
+  /** 终局。ok=false 时 error 为面向用户/模型的可读原因 */
+  done: (ok: boolean, error?: string) => void
+}
+
+/**
+ * 目标会话投递三形态统一路由（2026-09-15 抽取，web 发送 `send` 与会话间 `session-message` 共用
+ * ——寻址语义只此一处，避免两路各自漂移）：
+ *   ① 目标进程在线 → cliClients 直投
+ *   ② spawn/注册在途（含活进程断连重连间隙）→ pendingDeliveries 暂存，/clients 注册钩子按序补投
+ *   ③ 未在线 → resumeAndDeliver 按磁盘会话文件冷启恢复后补投
+ * frame = 投给目标 CLI 的 /clients 帧（两路帧型不同，由调用方构造）。
+ */
+function deliverToSession(sessionId: string, frame: Record<string, unknown>, fb: DeliveryFeedback): void {
+  const target = cliClients.get(sessionId)
+  if (target && target.readyState === WebSocket.OPEN) {
+    try {
+      target.send(JSON.stringify(frame))
+      fb.done(true)
+    } catch (e) {
+      fb.done(false, '投递失败：' + ((e as Error)?.message ?? String(e)))
+    }
     return
   }
-  ws.send(JSON.stringify({ type: 'status', state: '正在恢复会话窗口…' }))
+  const spawning = spawningPromises.has(sessionId)
+  if (spawning || webSessionEntryAlive(sessionId)) {
+    const q = pendingDeliveries.get(sessionId) ?? []
+    q.push(frame)
+    pendingDeliveries.set(sessionId, q)
+    fb.staged(spawning)
+    // 暂存即投递成立（不丢消息由 /clients 注册钩子的补投保证）→ 此处即终局 ok
+    fb.done(true)
+    return
+  }
+  resumeAndDeliver(sessionId, frame, fb)
+}
+
+function resumeAndDeliver(sessionId: string, frame: Record<string, unknown>, fb: DeliveryFeedback): void {
+  const loc = sessionProjectRootOf(sessionId)
+  if (!loc) {
+    fb.done(false, '目标会话未在线，且磁盘上找不到该会话文件')
+    return
+  }
+  fb.resuming()
   let p = resumingSessions.get(sessionId)
   if (!p) {
     p = spawnWebSession(sessionId, loc.projectLabel).finally(() => resumingSessions.delete(sessionId))
@@ -2443,16 +2559,21 @@ function resumeAndDeliver(
     const tryInject = (): void => {
       const t = cliClients.get(sessionId)
       if (t && t.readyState === WebSocket.OPEN) {
-        t.send(JSON.stringify(images.length ? { type: 'send', text, images } : { type: 'send', text }))
+        try {
+          t.send(JSON.stringify(frame))
+          fb.done(true)
+        } catch (e) {
+          fb.done(false, '投递失败：' + ((e as Error)?.message ?? String(e)))
+        }
       } else if (Date.now() - t0 < 5000) {
         setTimeout(tryInject, 400)
       } else {
-        ws.send(JSON.stringify({ type: 'status', state: '会话恢复后仍未连接，消息未注入' }))
+        fb.done(false, '会话恢复后仍未连接，消息未投递')
       }
     }
     tryInject()
   }).catch((e) => {
-    ws.send(JSON.stringify({ type: 'status', state: '恢复会话失败：' + (e.message || e) }))
+    fb.done(false, '恢复会话失败：' + (e.message || e))
   })
 }
 
@@ -2501,29 +2622,26 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
       const images = sanitizeInboundImages(data.images)
       const sendPayload = images.length ? { type: 'send', text, images } : { type: 'send', text }
       if (data.sessionId) {
-        const target = cliClients.get(data.sessionId)
-        if (target && target.readyState === WebSocket.OPEN) {
-          target.send(JSON.stringify(sendPayload))
-        } else if (spawningPromises.has(data.sessionId) || webSessionEntryAlive(data.sessionId)) {
-          // 2026-09-06 wsession 异步化配套：spawn/注册完成前到达的消息暂存，CLI 注册钩子
-          // flushPendingDeliveries 按序补投——原「web 会话启动中，请稍后再发送」= 用户消息
-          // 无声丢失（异步化后 spawn 在途是常态窗口），根除。
-          // 2026-09-10 判活收紧：webSessions 账面记录 ≠ 进程活性（pid 由 cli-hello 上报，缺失则
-          // pid 空），死记录命中此分支 = 消息暂存后无人消费（挡住下方 resumeAndDeliver 恢复路径）
-          // → web 恒显无响应（09-10「无响应+CLI 启动后接续」实测事故根因）。改按真实活性判定，
-          // 死记录落空走 resumeAndDeliver 恢复。
-          const q = pendingDeliveries.get(data.sessionId) ?? []
-          q.push({ text, images })
-          pendingDeliveries.set(data.sessionId, q)
+        // 2026-09-15 三形态路由抽为 deliverToSession（web 发送与会话间消息共用，见该函数注）。
+        // web 侧反馈口径：恢复中/暂存/失败都走 status 提示行；成功不提示（前端会话态自明）。
+        const status = (state: string): void => {
+          try {
+            ws.send(JSON.stringify({ type: 'status', state }))
+          } catch {
+            /* 断开忽略 */
+          }
+        }
+        deliverToSession(data.sessionId, sendPayload, {
           // 2026-09-10 暂存回执：spawn 在途是 wsession 异步化常态（前端会话态自明，不弹）；
           // 活进程断连重连间隙的暂存须可见——否则 web 无响应而消息去向成谜。
-          if (!spawningPromises.has(data.sessionId)) {
-            ws.send(JSON.stringify({ type: 'status', state: '会话连接恢复中，消息已暂存，CLI 重连后自动补投' }))
-          }
-        } else {
-          // 2026-08-25 发送即 resume：进程未在线 → 按磁盘会话文件定位并先恢复本地 CLI 窗口再投递（web/CLI 一视同仁）
-          resumeAndDeliver(data.sessionId, text, images, ws)
-        }
+          staged: (spawning) => {
+            if (!spawning) status('会话连接恢复中，消息已暂存，CLI 重连后自动补投')
+          },
+          resuming: () => status('正在恢复会话窗口…'),
+          done: (ok, error) => {
+            if (!ok) status(error ?? '消息未注入')
+          },
+        })
         break
       }
       // 无 sessionId → 广播全部在线 CLI 客户端；无在线 CLI → status 提示
@@ -3017,19 +3135,19 @@ const spawningPromises = new Map<string, Promise<string>>()
 // webSessions 尚无该 sid）。spawnWebSession 注册成功时取走填入；仅 spawn 在途（spawningPromises
 // 命中）才暂存，普通 CLI 主进程的 cli-hello 不入此表防泄漏。
 const cliHelloPids = new Map<string, number>()
-const pendingDeliveries = new Map<string, { text: string; images: ReturnType<typeof sanitizeInboundImages> }[]>()
+// 2026-09-15 存整帧而非 {text, images}：send 与会话间 session-message 帧型不同，暂存层不该只认一种
+// （投递三形态路由共同维护，见 deliverToSession）。
+const pendingDeliveries = new Map<string, Record<string, unknown>[]>()
 
 // CLI /clients 注册钩子调用：spawn 期间暂存的消息按序补投。cliClients 刚 set（注册即 OPEN），
-// 不 OPEN 则保留等下次注册再投（断连重连同钩子触发）——不丢消息。投递形态与 send 路由直投一致。
+// 不 OPEN 则保留等下次注册再投（断连重连同钩子触发）——不丢消息。投递形态与路由直投一致（整帧原样）。
 function flushPendingDeliveries(sessionId: string): void {
   const q = pendingDeliveries.get(sessionId)
   if (!q?.length) return
   const t = cliClients.get(sessionId)
   if (!t || t.readyState !== WebSocket.OPEN) return
   pendingDeliveries.delete(sessionId)
-  for (const m of q) {
-    t.send(JSON.stringify(m.images.length ? { type: 'send', text: m.text, images: m.images } : { type: 'send', text: m.text }))
-  }
+  for (const frame of q) t.send(JSON.stringify(frame))
 }
 
 function spawnWebSession(resume: string | undefined, project: string | undefined, sidForNew?: string): Promise<string> {
@@ -3465,6 +3583,9 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             /** 2026-09-10 协议根修：delta 对齐键（旧数字坐标 base 已废弃，见 conversationDisplay.buildDisplayDelta） */
             anchorSid?: unknown
             messages?: unknown
+            /** 2026-09-15 会话间协作：跨会话消息的收发（发送端已解析好的目标 sid + 来源会话标识） */
+            toSessionId?: unknown
+            from?: unknown
           }
           try {
             m = JSON.parse(data.toString())
@@ -3495,10 +3616,22 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           // SSE 群发（事件体直接带 items，前端免拉 /gateway/session 即更新置底排队区）。
           // items 为全量快照（CLI 侧 enqueue/dequeue 后都重发），网关只做镜像存储+转发。
           if (m.type === 'queue-state') {
+            // from（2026-09-15 会话间协作）：跨会话来件的来源，形状与 session-message 下行同款
+            // （title 必有、sid 可选）；网关只做形状边界（长截断），标题的 HTML 转义归渲染端
             const items = Array.isArray(m.items)
-              ? (m.items as Array<{ content?: unknown; ts?: unknown }>)
+              ? (m.items as Array<{ content?: unknown; ts?: unknown; from?: unknown }>)
                   .filter(it => it && typeof it === 'object' && typeof it.content === 'string')
-                  .map(it => ({ content: (it.content as string).slice(0, 2000), ts: typeof it.ts === 'number' ? it.ts : Date.now() }))
+                  .map(it => {
+                    const f = it.from as { sid?: unknown; title?: unknown } | undefined
+                    const from = f && typeof f === 'object' && typeof f.title === 'string' && f.title
+                      ? { title: f.title.slice(0, 200), ...(typeof f.sid === 'string' && f.sid ? { sid: f.sid.slice(0, 200) } : {}) }
+                      : undefined
+                    return {
+                      content: (it.content as string).slice(0, 2000),
+                      ts: typeof it.ts === 'number' ? it.ts : Date.now(),
+                      ...(from ? { from } : {}),
+                    }
+                  })
               : []
             sessionQueues.set(sid, { items, updatedAt: Date.now() })
             sweepStaleMaps()
@@ -3564,6 +3697,34 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             const text = typeof m.text === 'string' ? m.text : ''
             const s = `data: ${JSON.stringify({ type: 'restored', session: sid, text })}\n\n`
             sendAll(sseClients, (c) => { c.res.write(s) })
+            return
+          }
+          // 2026-09-15 会话间协作：本会话的 agent 发消息给另一个会话（session_send 工具出口）。
+          // 网关只做「按已解析 sid 路由」——会话名 → sid 的解析在发送端 CLI 完成（sessionExposure.ts），
+          // 网关不引入第二份标题索引；from（来源会话标识）原样透传，由接收端包进消息文本
+          // （sessionMessage.ts）。投递帧走 /clients → 接收端 gatewayClient 与本地打字同路径 enqueue。
+          // 回执语义 =「网关已接手投递」（在线直投/已暂存/已冷启），非端到端消费确认（离线冷启异步，见 sendSessionMessage）。
+          if (m.type === 'session-message') {
+            const requestId = typeof m.requestId === 'string' ? m.requestId : ''
+            const toSid = typeof m.toSessionId === 'string' ? m.toSessionId : ''
+            const text = typeof m.text === 'string' ? m.text : ''
+            const reply = (ok: boolean, error?: string): void => {
+              if (!requestId) return
+              try {
+                ws.send(JSON.stringify({ type: 'session-message-result', requestId, ok, ...(error ? { error } : {}) }))
+              } catch {
+                /* 断开忽略 */
+              }
+            }
+            if (!toSid) reply(false, '缺少目标会话标识')
+            else if (!text.trim()) reply(false, '消息内容为空')
+            else if (toSid === sid) reply(false, '目标会话就是本会话，未发送')
+            else
+              deliverToSession(toSid, { type: 'session-message', text, from: m.from ?? {} }, {
+                staged: () => {},
+                resuming: () => {},
+                done: reply,
+              })
             return
           }
           if (m.type === 'session-delta') {

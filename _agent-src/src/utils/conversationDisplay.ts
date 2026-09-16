@@ -27,6 +27,7 @@ import {
 } from './messages.js'
 import { RATE_LIMIT_FALLBACK_NOTICE_PREFIX } from '../services/api/errors.js'
 import { getGatewayToken } from './gatewayToken.js'
+import { parseSessionMessage, type SessionSource } from './sessionMessage.js'
 
 /** 文件变更结构化数据（Edit/Write 工具的真实增删行数，权威数字 = diff.ts sumLinesChanged） */
 export type DisplayFileChange = {
@@ -79,6 +80,12 @@ export type DisplayMessage = {
    * 网关/web 消费端忽略未知字段，无兼容影响。
    */
   uuid?: string
+  /**
+   * 来源会话（2026-09-15 会话间协作）：仅「跨会话收到的消息」携带，undefined = 本地用户输入。
+   * 正文文本里的包装已被本模块剥离（`<session-message from=… sid=…>`，见 utils/sessionMessage.ts），
+   * 来源单独走本字段 → 消费端渲染为气泡外一行灰字（来自 会话：X）。留空则渲染与本地用户消息无异。
+   */
+  fromSession?: SessionSource
 }
 
 export type DisplayMode = 'prompt' | 'transcript' | 'prompt-tail-think'
@@ -122,6 +129,33 @@ type SourceMessage = {
 function extractXmlTag(xml: string, tag: string): string | null {
   const m = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(xml)
   return m ? m[1] : null
+}
+
+/** 消息文本形态（attachment.prompt 字符串 / 数组两形态；user 记录 content 里的 text 块复用同一处理） */
+type SessionPromptValue = string | Array<{ type?: string; text?: string }>
+
+/**
+ * 跨会话消息包装剥离（2026-09-15 会话间协作）：`<session-message from="会话：X" sid="…">正文</session-message>`
+ * 由 wrapSessionMessage 独占产出（网关下行 → gatewayClient）。命中则返回剥离后的正文 + 来源；
+ * 未命中原样返回（本地用户输入恒走此路）。数组形态（带图消息，attachments.ts 拼 text+image）里
+ * 只可能是首个 text 块承载包装（getQueuedCommandAttachments 的拼接契约）。
+ */
+function stripSessionPrompt(prompt: SessionPromptValue): {
+  prompt: SessionPromptValue
+  source?: SessionSource
+} {
+  if (typeof prompt === 'string') {
+    const px = parseSessionMessage(prompt)
+    return px ? { prompt: px.body, source: px.source } : { prompt }
+  }
+  if (!Array.isArray(prompt)) return { prompt }
+  const i = prompt.findIndex(b => b?.type === 'text' && typeof b.text === 'string')
+  if (i < 0) return { prompt }
+  const px = parseSessionMessage(prompt[i]!.text!)
+  if (!px) return { prompt }
+  const next = prompt.slice()
+  next[i] = { ...next[i], text: px.body }
+  return { prompt: next, source: px.source }
 }
 
 /**
@@ -365,16 +399,18 @@ export function filterConversationForDisplay(
           att.origin ??
           (att.commandMode === 'task-notification' ? { kind: 'task-notification' } : undefined)
         if (origin === undefined && !att.isMeta) {
+          // 跨会话消息（2026-09-15 会话间协作）：正文包在包装里，先剥离（来源走 fromSession）
+          const sx = stripSessionPrompt(att.prompt ?? '')
           const blocks: DisplayBlock[] = []
-          if (typeof att.prompt === 'string') {
-            if (att.prompt.trim()) blocks.push({ kind: 'text', text: att.prompt })
-          } else if (Array.isArray(att.prompt)) {
+          if (typeof sx.prompt === 'string') {
+            if (sx.prompt.trim()) blocks.push({ kind: 'text', text: sx.prompt })
+          } else if (Array.isArray(sx.prompt)) {
             // imagePasteIds 按 content 内 image 块序对位（getImagePasteIds 契约）；imgIdx 只对
             // image 块递增——原实现逐块递增，数组形态（text+image）下 text 块抢走 ids[0] 使全部
             // 图错位丢 id（user 分支因 normalizeMessages 拆出 image-only 单条、image 恒为首块而
             // 无此问题；attachment 数组 prompt 无拆分工序，此处自对位）。2026-08-30 引导消息带图。
             let imgIdx = 0
-            for (const b of att.prompt) {
+            for (const b of sx.prompt) {
               if (b?.type === 'image') {
                 blocks.push({ kind: 'image', imageId: att.imagePasteIds?.[imgIdx++] })
               } else {
@@ -383,7 +419,16 @@ export function filterConversationForDisplay(
               }
             }
           }
-          if (blocks.length) out.push({ role: 'user', blocks, timestamp, injected: true, uuid: msg.uuid })
+          if (blocks.length) {
+            out.push({
+              role: 'user',
+              blocks,
+              timestamp,
+              injected: true,
+              uuid: msg.uuid,
+              ...(sx.source ? { fromSession: sx.source } : {}),
+            })
+          }
         }
       }
       continue
@@ -417,8 +462,18 @@ export function filterConversationForDisplay(
       if (!shouldShowUserMessage(msg, isTranscript)) continue
       const blocks: DisplayBlock[] = []
       let imgIdx = 0
+      // 跨会话消息（2026-09-15 会话间协作）：user 记录里正文同样带包装（落盘即包装文本），
+      // 剥离后来源走 fromSession（attachment 与 user 两形态共用 stripSessionPrompt）
+      let fromSession: SessionSource | undefined
       for (const b of content) {
         const db = toDisplayBlock(b, msg.imagePasteIds?.[imgIdx++])
+        if (db?.kind === 'text' && typeof db.text === 'string') {
+          const px = parseSessionMessage(db.text)
+          if (px) {
+            fromSession = px.source
+            db.text = px.body
+          }
+        }
         // 指令输入的 user XML echo 形态（2026-08-27 定案转居中提示行；原为静默剔除）：
         // immediateCommand（如 /server）只走此形态；非 immediate（如 /rename）另写 system/local_command
         // 双记录（见 system 分支），两形态互补不重复。<bash-input> = !bash 命令行。
@@ -459,7 +514,13 @@ export function filterConversationForDisplay(
         if (isImageOnly && prevText && ids.every(id => prevText.includes(`[Image #${id}]`))) {
           prev.blocks.push(...blocks)
         } else {
-          out.push({ role: 'user', blocks, timestamp, uuid: msg.uuid })
+          out.push({
+            role: 'user',
+            blocks,
+            timestamp,
+            uuid: msg.uuid,
+            ...(fromSession ? { fromSession } : {}),
+          })
         }
       }
       continue

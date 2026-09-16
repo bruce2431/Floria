@@ -34,6 +34,45 @@ function hasMarkdownSyntax(s: string): boolean {
   // code fence, list). Long tool outputs are mostly plain text tails.
   return MD_SYNTAX_RE.test(s.length > 500 ? s.slice(0, 500) : s);
 }
+// ```chart 双段围栏过滤（2026-09-12 定案，契约见全局根 CLAUDE.md）：CLI 只显示 %%ascii 段——
+// 在围栏语言精确为 'chart' 的围栏内删 %%html 段与哨兵行，ascii 段原样保留给 marked 当普通代码块。
+// web 侧反向过滤渲染 %%html 段（gateway/web-src/core/markdown.js）。普通 ```html 围栏原样透传不受影响；
+// 缺哨兵/未闭合围栏（流式中间态）安全：无 %%html 哨兵时整块透传，仅 %%html 段在流则暂为空块过渡。
+function stripChartHtml(src: string): string {
+  const lines = src.split('\n');
+  const out: string[] = [];
+  let inFence = false;
+  let chart = false;
+  let mode: 'html' | 'ascii' | null = null;
+  for (const line of lines) {
+    if (/^```/.test(line.trim())) {
+      if (inFence) {
+        inFence = false;
+        chart = false;
+        mode = null;
+      } else {
+        inFence = true;
+        chart = line.trim().slice(3).trim() === 'chart';
+      }
+      out.push(line);
+      continue;
+    }
+    if (inFence && chart) {
+      const t = line.trim();
+      if (t === '%%html') {
+        mode = 'html';
+        continue;
+      }
+      if (t === '%%ascii') {
+        mode = 'ascii';
+        continue;
+      }
+      if (mode === 'html') continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
 function cachedLexer(content: string): Token[] {
   // Fast path: plain text with no markdown syntax → single paragraph token.
   // Skips marked.lexer's full GFM parse (~3ms on long content). Not cached —
@@ -131,7 +170,7 @@ function MarkdownBody(t0) {
   configureMarked();
   let elements;
   if ($[0] !== children || $[1] !== dimColor || $[2] !== highlight || $[3] !== theme) {
-    const tokens = cachedLexer(stripPromptXMLTags(children));
+    const tokens = cachedLexer(stripPromptXMLTags(stripChartHtml(children)));
     elements = [];
     let nonTableContent = "";
     const flushNonTableContent = function flushNonTableContent() {

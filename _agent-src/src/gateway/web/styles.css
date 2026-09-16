@@ -105,7 +105,9 @@ a { text-decoration: none; color: inherit; }
 .item-in { animation: fadeup 0.3s ease backwards; }
 .msg .who { font-size: 12px; color: var(--text-3); }
 .msg.user { align-items: flex-end; }
-.msg.user .who { align-self: flex-start; }
+/* 来源灰字行（会话间通信）随其气泡一侧对齐：用户气泡右对齐 → 来源行右对齐
+   （原 `align-self: flex-start` 是 `.who` 尚无消费方时的遗留值，2026-09-15 用户实测提出改右） */
+.msg.user .who { align-self: flex-end; }
 .msg .body { max-width: 85%; padding: 10px 14px; font-size: 14px; line-height: 1.7; white-space: normal; word-break: break-word; }
 .msg.user .body { background: #f2f2f3; color: var(--text); border-radius: 16px 16px 4px 16px; }
 /* 用户消息图片（2026-08-30 定案：渲染在气泡外）——.msg-imgs 在 .body 之后，
@@ -115,6 +117,18 @@ a { text-decoration: none; color: inherit; }
    图未落盘（404）→ onerror 替换为 [Image #N] 裸文本节点（淡色小字），不出破图 */
 .msg .msg-imgs { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-top: 5px; font-size: 12px; color: var(--text-3); }
 .msg .msg-imgs .msg-img { display: block; max-width: min(160px, 100%); max-height: 160px; width: auto; height: auto; border-radius: 10px; margin: 0; cursor: zoom-in; }
+/* 用户消息文件卡片（2026-09-12 文件上传定案：像图片一样有 UI）——.msg-files 在 .body/.msg-imgs
+   之后，气泡外下方右对齐；点击复制落盘路径（title=完整路径悬停可看） */
+.msg .msg-files { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 5px; }
+.msg .msg-files .msg-file {
+  display: inline-flex; align-items: center; gap: 7px;
+  max-width: min(320px, 100%); padding: 7px 12px;
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 12px;
+  cursor: pointer; font-size: 12px; color: var(--text-2);
+}
+.msg .msg-files .msg-file svg { flex: none; width: 16px; height: 16px; color: #4a5568; }
+.msg .msg-files .msg-file:hover { border-color: rgba(0, 0, 0, 0.18); }
+.msg .msg-files .mf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 大图预览 lightbox：全屏黑底居中原图（92vw/92vh 上限），点击任意处/Esc 关闭 */
 #img-lightbox { position: fixed; inset: 0; z-index: 1200; background: rgba(0, 0, 0, 0.72); display: none; align-items: center; justify-content: center; cursor: zoom-out; }
 #img-lightbox.on { display: flex; }
@@ -591,6 +605,18 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
 .msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code { background: transparent; padding: 0; font-size: inherit; }
 .msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+/* 2026-09-12：嵌入式图表（```chart 双段围栏）——web 渲染 %%html 段进 sandbox iframe（opaque origin，
+   高度由 iframe 内 BOOT postMessage 上报、messages.js 按 e.source 设高；上限 60vh 超出内部滚动），
+   「源码」按钮切原文（.as-src）。%%ascii 段仅供 CLI，web 弃用。普通 ```html 围栏不受影响 */
+.msg .body .chart-embed, .done-think .chart-embed, .tr-body .chart-embed { margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #fff; }
+.chart-embed .chart-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--border); background: #f7f8fa; }
+.chart-embed .chart-tag { font-size: 10px; color: var(--text-3); font-family: var(--mono); letter-spacing: .06em; }
+.chart-embed .chart-src { border: 0; background: transparent; color: var(--text-3); font-size: 11px; font-family: inherit; cursor: pointer; padding: 2px 8px; border-radius: 6px; }
+.chart-embed .chart-src:hover { background: rgba(0,0,0,0.05); color: var(--text); }
+.chart-embed .chart-frame { display: block; width: 100%; border: 0; max-height: 60vh; }
+.chart-embed .chart-raw { display: none; margin: 0; padding: 10px 12px; overflow: auto; max-height: 60vh; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
+.chart-embed.as-src .chart-frame { display: none; }
+.chart-embed.as-src .chart-raw { display: block; }
 /* 2026-09-04：md-table 作用域同步扩展到 .done-think/.tr-body（08-31 code 对齐漏了表格，
    旁白/思考正文里的表格此前以裸 table 渲染=无边框无内距，视觉等同未渲染） */
 .msg .body .md-table, .done-think .md-table, .tr-body .md-table { margin: 6px 0; overflow-x: auto; }
@@ -779,6 +805,43 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
   cursor: pointer; display: grid; place-items: center;
 }
 #img-pills .img-pill .img-x:hover { background: #2c3138; }
+/* 文件胶囊（2026-09-12 三轮改版：抄 dsh AttachmentRail 附件卡形态）——64×64 方卡与图片缩略图
+   同轨等高，灰底薄描边（dsw interactive-bg-hover rgba(38,49,72,.06) / border-l2-thin rgba(0,0,0,.1)），
+   dshFile 图标+文件名居中两行截断；× 收进卡内右上 4px（dsh .remove 语义：hover 显形、
+   触屏 pointer:coarse 恒显）——替换一轮「白长条+角外黑圆」形态（黑圆真因：.img-x 定位/形状
+   规则全在 .img-pill 作用域，file-pill 的 × 只分到 background/color = 裸 button 黑块） */
+#img-pills .file-pill {
+  position: relative; flex: none;
+  width: 64px; height: 64px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 5px; padding: 6px 5px;
+  background: rgba(38, 49, 72, 0.06); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 12px;
+  box-sizing: border-box;
+}
+#img-pills .file-pill .fp-ico { flex: none; width: 20px; height: 20px; color: #61666b; }
+#img-pills .file-pill .fp-ico svg { width: 100%; height: 100%; display: block; }
+#img-pills .file-pill .fp-name {
+  max-width: 100%; font-size: 10px; line-height: 1.25; color: var(--text-2);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  word-break: break-all; text-align: center;
+}
+#img-pills .file-pill .img-x {
+  position: absolute; top: 4px; right: 4px;
+  width: 18px; height: 18px;
+  border: none; border-radius: 999px;
+  background: #61666b; color: #f9fafb;
+  font-size: 12px; line-height: 18px; padding: 0;
+  cursor: pointer; display: grid; place-items: center;
+  opacity: 0; transition: opacity 0.2s ease-in-out;
+}
+#img-pills .file-pill:hover .img-x,
+#img-pills .file-pill .img-x:focus-visible { opacity: 1; }
+@media (pointer: coarse) {
+  #img-pills .file-pill .img-x { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #img-pills .file-pill .img-x { transition: none; }
+}
 /* 2026-09-06 拖拽上传浮层：全屏提示「松开以添加图片」。display:none 默认态 +
    :not([hidden]) 才 flex（同 #img-pills 写法，防作者 display 覆盖 UA [hidden]）；
    pointer-events:none 拖拽事件穿透到 document，计数不被浮层自身干扰 */
@@ -1311,6 +1374,31 @@ body.token-gate #input-wrap { display: none; }
   #sidebar:not(.open) #panel { opacity: 0; visibility: hidden; }
 }
 
+/* ---------- 拖拽调宽把手（2026-09-12）：仅桌面展开态（#sidebar.open + ≥721px）可见 ----------
+   贴 #sidebar 右缘 8px 热区，hover 显 3px 竖线；手指交互 = grab/grabbing 光标。
+   拖动由 JS 改 :root 内联 --panel-w（#sidebar/#panel 宽、主区避让 padding、输入栏 half-padding
+   补偿全消费同一变量，天然联动）；拖拽中 body.sb-resizing 关全部相关宽度过渡即时跟手；
+   不持久化——setPanel(false) 移除内联值，每次折叠→再展开回默认 280px。手机抽屉（≤720px）恒无。 */
+#panel-resizer { display: none; }
+@media (min-width: 721px) {
+  #panel-resizer {
+    display: block; position: absolute; top: 0; bottom: 0; right: -4px; width: 8px;
+    z-index: 5; cursor: grab; touch-action: none;
+  }
+  #panel-resizer::after {
+    content: ''; position: absolute; top: 0; bottom: 0; right: 0; width: 3px;
+    border-radius: 2px; background: transparent; transition: background 0.15s ease;
+  }
+  #panel-resizer:hover::after, #panel-resizer.dragging::after { background: rgba(0, 0, 0, 0.14); }
+}
+body.sb-resizing #sidebar,
+body.sb-resizing #panel,
+body.sb-resizing #chat-area,
+body.sb-resizing #messages,
+body.sb-resizing #empty-hint,
+body.sb-resizing #input-wrap.docked { transition: none !important; }
+body.sb-resizing { cursor: grabbing !important; user-select: none; }
+
 .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 10px 16px; }
 .floria-logo { display: flex; align-items: center; gap: 7px; font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
 #floria-conn { margin-left: 2px; font-size: 12px; font-weight: 400; letter-spacing: 0.2px; color: var(--text-3); }
@@ -1779,6 +1867,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .queue-dock .q-item:hover { background: rgba(38, 49, 72, 0.09); border-color: rgba(38, 49, 72, 0.32); }
 .queue-dock .q-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .queue-dock .q-body p { margin: 0; }
+/* 跨会话来件的来源行（2026-09-15 会话间协作）：排队项里同样标出来源（正文首行，灰字同 .q-tag 口径）。
+   与 .msg .who 同一语义、同一视觉体系（12px→11px 随排队项字号收一档），不做绝对定位 */
+.queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
+.queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
 .queue-dock .q-tag { flex: none; font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
 .queue-dock .q-item:hover .q-tag { color: rgba(38, 49, 72, 0.68); }
 /* 排队项图片缩略图（2026-08-30）：48px 小图随文本行堆叠（q-body 内），object-fit cover 同输入栏胶囊 */

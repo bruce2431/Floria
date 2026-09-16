@@ -6,7 +6,7 @@ import { messagesEl, live } from '../core/state.js'
 import { renderTransient } from '../inputbar/approval.js'
 import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
   function scrollBottom() {
-    // 占位在场（回合展示期）→ 两层跟随接管（动画期 animT 内不抢）；否则普通吸底
+    // 占位在场（回合展示期）→ 两层跟随接管（让位/手势中由 stageFollow 自判）；否则普通吸底
     if (stage.active) { stageFollow(); return }
     const sc = messagesEl.closest('#chat-scroll')
     progScroll()
@@ -42,7 +42,7 @@ import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
   // touchHold=触摸手势持有中（含惯性）：手势进行中程序滚动/删除占位 = scrollHeight 骤减 =
   // WebKit 触摸滚动基准断裂（2026-09-08 用户实测「iPad 滑动就死」）→ 持有期冻结程序跟随。
   // yielded=用户滚动输入（滚轮/触摸/滚动条/键盘）后跟随永久让位（用户已接管视口；stageStart 复位）。
-  const stage = { active: false, key: null, el: null, bubble: null, animT: null, touchHold: false, releaseT: null, yielded: false }
+  const stage = { active: false, key: null, el: null, bubble: null, touchHold: false, releaseT: null, yielded: false }
   // 程序滚动窗口：此时刻前的 scroll 事件不算用户操作（跟随/动画自身写入 scrollTop 会触发 scroll）
   let progScrollUntil = 0
   function progScroll() { progScrollUntil = Date.now() + 80 }
@@ -60,7 +60,6 @@ import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
   // 释放链铲除定案，滚动输入只让位）。remove 瞬间 scrollHeight 骤减一屏，浏览器 clamp 把
   // scrollTop 拉回合法值——视口在内容区则纹丝不动，内容连续零跳动（无需手动补偿）。
   function stageRelease() {
-    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
     if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
     stage.touchHold = false
     stage.yielded = false
@@ -76,8 +75,7 @@ import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
   // 内容超过一屏后内容底位反超 → 平滑转入内容底跟随（最新内容贴视口底），气泡自然上滑出视口顶。
   // 两视角在贴顶位处无缝衔接，无需 sticky（占位高度随内容实时对冲，贴顶位即滚动极限）。
   // bubble 失联（换皮窗口）时退化为纯内容底。
-  // 拉伸动画期（animT 在场）跟随照常执行：rAF 每帧调本函数驱动视口上浮（落点随占位生长的
-  // maxScroll 增长连续升到贴顶位）；渲染出口偶发并发写入与 rAF 帧同落点幂等，无需互斥。
+  // 无动画窗：跟随是几何的纯函数，谁写 scrollTop 都落在同一落点（幂等），无需互斥。
   function stageFollow() {
     // touchHold：手势中程序滚动=基准断裂；yielded：用户滚动输入后已接管视口，跟随永久让位
     if (!stage.active || stage.touchHold || stage.yielded) return
@@ -94,69 +92,77 @@ import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
     sc.style.scrollBehavior = ''
   }
 
-  // 唤出（回合开启）：占位块挂/复用（stageSync）+ 乐观唤出（smooth=true）播占位拉伸动画
-  // （2026-09-09 用户定案：占位初始高=乐观气泡同高，rAF 750ms easeOutCubic 流畅拉伸到目标
-  // 高；旧「气泡平滑上划贴顶」独立滚动动画铲除——视口上浮由拉伸驱动：每帧 stageFollow 的
-  // 落点随占位生长的 maxScroll 被压在内容底、连续升到贴顶位，与空白生长合成单一动效）。
-  // smooth=false 直接按跟随几何就位（刷新恢复/接管帧等无动画路径）。
-  // 不变量：占位块至多一个（#messages 流末），由 stageSync 独占维护；拉伸期占位高度唯一
-  // 写入者=本 rAF（stageSync 检测 animT 在场跳过设高），重入/终止经 stageSync 收口终态。
-  function stageStart(bubbleEl, key, smooth) {
+  // 唤出（回合开启）：占位块挂/复用（stageSync）+ 按跟随几何同帧就位（stageFollow）。
+  // 2026-09-11「发送新消息界面短暂跳到上一条消息」根治——09-09「占位初始高=乐观气泡同高，
+  // rAF 750ms 拉伸到目标高」的动画窗铲除：初值取气泡高 = 占位先缩后长，scrollHeight 在同一
+  // 事务内先塌，浏览器按缩后的 max 钳 scrollTop（首帧就画在内容底 = 上一回合尾部），再由
+  // rAF 逐帧抬到贴顶位——用户看到的就是「跳到上一条消息」再滑回。占位高度是几何的纯函数
+  // （参照气泡定了，终态就定了），没有中间态可言：写终态 + 同帧归位，浏览器只绘一帧、那一帧
+  // 即终态。不变量：占位块至多一个（#messages 流末）、占位高度唯一写入者=stageSync。
+  function stageStart(bubbleEl, key) {
     stage.active = true
     stage.key = key
     stage.bubble = bubbleEl
-    if (stage.animT) { cancelAnimationFrame(stage.animT); stage.animT = null }
     if (stage.releaseT) { clearTimeout(stage.releaseT); stage.releaseT = null }
     stage.touchHold = false
     stage.yielded = false
     // 脚印无需重置：实时读取（stageSync 每趟按当前几何量），换参照气泡即自动跟随新几何
-    const fresh = stageSync()
-    if (smooth && stage.bubble && stage.el) {
-      const pStar = parseFloat(stage.el.style.height) || 0
-      const p0 = fresh ? Math.min(stage.bubble.offsetHeight, pStar) : (parseFloat(stage.el.style.height) || 0)
-      const t0ms = performance.now()
-      stage.el.style.height = p0 + 'px'
-      const step = (now) => {
-        const k = Math.min(1, (now - t0ms) / 750)
-        const e = 1 - Math.pow(1 - k, 3) // easeOutCubic
-        if (stage.el) stage.el.style.height = (p0 + (pStar - p0) * e) + 'px'
-        if (!stage.yielded && !stage.touchHold) stageFollow() // 让位/手势中：高度照常长满，视口停写
-        if (k < 1) { stage.animT = requestAnimationFrame(step) }
-        else { stage.animT = null; stageSync() } // 终帧经 stageSync 收口（校准高度+跟随归位）
-      }
-      stage.animT = requestAnimationFrame(step)
-    } else {
-      stageFollow()
+    stageSync()
+  }
+
+  // 回合权威锚解析（2026-09-11「发送后短暂跳到上一条消息」二轮根修）：注入开段回合
+  // （injected user → user:null 切段，messagesHtml 切段定案）在 DOM 无 data-t="u" 开启气泡
+  // ——注入气泡以 data-t="g…" 织在段折叠体 done-body 内（data-g=自身消息索引）。因此凡以
+  // 「末条 data-t="u"」为参照的回落，在注入开段回合命中的必是**上一回合**气泡。锚=引导气泡
+  // 所属段折叠（details.done-fold[data-m]）：user:null 段的段首元素即折叠体，折叠顶=回合顶=
+  // 乐观气泡原位；段内若另有 data-t="u"（回合由真实 user 开段、引导系中途织入）则仍取开启
+  // 气泡（段顶=气泡顶）。
+  function guideTurnAnchor(guideEl) {
+    const fold = guideEl.closest('details.done-fold[data-m]')
+    if (!fold) return null
+    return messagesEl.querySelector(`[data-m="${fold.dataset.m}"][data-t="u"]`) || fold
+  }
+
+  // 乐观吸收后的同回合锚：最新回合由注入开启还是真实 user 开启，以文档序判——最新引导气泡
+  // 在末条开启气泡之后 ⇔ 注入开段（该回合没有 data-t="u"）→ 取其折叠锚；否则（无引导/
+  // dequeue 落盘开段/引导织在更早回合）→ 末条开启气泡（dequeue 接管帧原行为）。禁止回落
+  // 上一回合参照（=本缺陷：吸收帧参照回退上一回合 → 重钉上一条消息）。
+  function absorbTurnAnchor() {
+    const users = messagesEl.querySelectorAll('[data-t="u"]')
+    const lastUser = users.length ? users[users.length - 1] : null
+    const guides = messagesEl.querySelectorAll('.msg.user[data-t^="g"]')
+    const lastGuide = guides.length ? guides[guides.length - 1] : null
+    if (lastGuide && (!lastUser || (lastUser.compareDocumentPosition(lastGuide) & Node.DOCUMENT_POSITION_FOLLOWING))) {
+      return guideTurnAnchor(lastGuide) || lastUser
     }
+    return lastUser
   }
 
   // 渲染权威出口对账：整页重建洗掉占位块/气泡失联 → 重挂（流末）+ 气泡重定位 + 高度校准，
   // 然后按跟随几何归位。占位高度 = max(0, clientHeight − paddingBottom − 当前脚印)
   // （脚印 = 占位块顶 − 气泡贴顶位，**实时读取**；clientHeight 含常驻 padding-bottom 142px
   // （docked 输入栏悬浮预留），不扣则占位铺到输入栏底下；扣除后空白恰铺到输入栏上沿，
-  // 未超一屏时 maxScroll ≡ 贴顶位）。
+  // 未超一屏时 maxScroll ≡ 贴顶位）。高度唯一写入者=本函数（几何纯函数，无动画窗/无第二写入者）。
   function stageSync() {
-    if (!stage.active) return false
+    if (!stage.active) return
     const sc = $('chat-scroll')
     let el = stage.el && stage.el.isConnected ? stage.el : messagesEl.querySelector('.pin-stage')
-    let created = false
     if (!el) {
       el = document.createElement('div')
       el.className = 'pin-stage'
       messagesEl.appendChild(el)
-      created = true
     }
     stage.el = el
     // 气泡参照找回——必须在脚印/高度计算之前（实时脚印 = 占位块顶 − 气泡顶，参照物缺席则
     // 无法量）。参照物定义=本回合开启用户消息，按精度递降定位：乐观期=暂态区最后一条
-    // .msg.user；乐观项已被吸收/降级（authLive 在场 → 气泡项不渲染）、暂态区已无气泡时，
-    // 开启气泡此刻由权威渲染在数据区 → 回落最后一条 user 气泡（引导消息 data-t="g…" 天然排除）。
+    // .msg.user；乐观项已被吸收（注入落盘/落盘接管，暂态区气泡移除）→ absorbTurnAnchor
+    // 移交**同一回合**的权威锚（注入开段=段折叠顶，落盘开段=数据区开启气泡），禁止回落
+    // 上一回合。
     if (!stage.bubble || !stage.bubble.isConnected) {
       if (stage.key === 'optimistic') {
         const zone = document.getElementById('live-zone')
         const els = zone ? zone.querySelectorAll('.msg.user') : []
-        const users = messagesEl.querySelectorAll('[data-t="u"]')
-        stage.bubble = (els.length ? els[els.length - 1] : null) || (users.length ? users[users.length - 1] : null)
+        stage.bubble = (els.length ? els[els.length - 1] : null) || absorbTurnAnchor()
       } else {
         // 2026-09-09 跳动主根根修：stage.key 存 sig（"idx:ts"，防索引复用错位），但渲染权威
         // 气泡 data-m=段起始索引（纯数字）——整页重建后按 sig 原样匹配 data-m 恒落空 → bubble
@@ -168,14 +174,12 @@ import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
     }
     const padBot = parseFloat(getComputedStyle(sc).paddingBottom) || 0
     const t0 = stage.bubble ? topInScroll(stage.bubble) : null
-    // 拉伸动画期（animT 在场）占位高度唯一写入者=rAF step：此处跳过防中间态被拉到终态；
-    // 动画重入/终止路径先清 animT 再进本函数，自然走下方公式收口终态。参照气泡两端皆缺
-    // （重建窗口内）不写高——占位高度连续性优先（写 0 = scrollHeight 骤减 = 视口钳制跳变）。
-    if (stage.animT == null && t0 != null) {
+    // 参照气泡两端皆缺（重建窗口内）不写高——占位高度连续性优先（写 0 = scrollHeight 骤减
+    // = 视口钳制跳变）。
+    if (t0 != null) {
       el.style.height = Math.max(0, sc.clientHeight - padBot - Math.max(0, topInScroll(el) - t0)) + 'px'
     }
     stageFollow()
-    return created
   }
 
   // 追加到 #messages 末尾；插入点取暂态区 #live-zone（其子元素恒为消息流最末尾段）或两层占位

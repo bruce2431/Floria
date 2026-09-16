@@ -63,6 +63,8 @@ web 读取路径从「jsonl watch 通知 + display 快照拼合」升级为**订
 
 **SSE 半开死亡探测自愈（2026-09-10，sw v289，exe 134707）**：用户实测「CLI 一直跑 Bash，web 冻结旁白帧 1m18s」（776169a6）——三层取证链（jsonl 落盘正常 → 网关 deltaSeq=29/投影 103 条完整 → 断点=web SSE 接收链）定性 **TCP 半开**（改网/睡眠唤醒/网络抖动，无 FIN/RST）不触发 `es.onerror`：delta 全丢且无重连，页面冻结最后帧而计时行照跳（setInterval 不依赖数据）。根修（web-src/core/live.js）：`initLive` 建连+`onmessage` 记 `live.lastSseAt` 活性时刻（任何 SSE 事件到达=链活，parse 失败同样是活性证明）；`bindLiveFoldTimer` tick 加 **90s 无任何 SSE 事件 → `refreshSession(true)` 全量对账自愈**（fetch 走新 TCP=既是探测也是恢复，幂等；重置基点防每秒重入）。不变量：处理中段 SSE 事件停达 90s=链死亡（处理中段引擎有增量即 4s 一发 beat、纯工具期亦有输出流，90s 上界覆盖引擎真静默）；明确断开形态已有 es.onerror 的 close+3s 重连+hello 对账覆盖，本探测只补半开盲区，非双轨。
 
+**回退快照防御·「发送瞬间跳到上一条消息」真主链根治（2026-09-11 三诊录像逐帧定性，sw v309，exe 214020）**：v307/v308 两轮修的「注入开段锚点移交」是真缺陷但非主链（实测场景=空闲期 dequeue 发送，走真实 user 开段）。用户屏录 20260911203904 逐帧（30fps 全帧+全高帧）还原三态时间线——f26 权威回合4已在屏正确钉顶 → f30-f41 **回合4 从 DOM 整体消失、视口钉回上一回合**（跳变本体）→ f42-f51 **消息区整页空白**（连历史都没有）→ f52 恢复帧全员重播 fadeup（反证前一帧 DOM 为空）。根因=**web 对全量快照无单调性防御**：`/gateway/session` = 磁盘 jsonl 全量 + CLI 异步上报窗口合并（`mergeDisplayMessages`），回合开启时序窗内两源都可能短暂落后（dequeue 落盘前 / display 缓冲重建期）→ 同一会话先后两次 fetch 拿到「已渲染内容消失」的回退快照；`refreshSession` 把它当权威——①整页重建洗掉在屏新回合 ②`live.localMessages`/`deltaSeq` 基线被静默回写 ③**`hasNewUser` 在回退数据上把上一回合误判为「新用户消息」→ `stageStart(上一回合气泡)` 主动重钉 = 「跳到上一条消息」** ④基线回退致后续 delta 判 gap → `refreshSession(true)` 撞上空窗，force 绕过「空 fetch 不洗盘」守卫 → `innerHTML=''` 整页空白。根修=渲染统一出口前加快照单调性门 `snapshotStale`（live.js，纯函数）：本地基线非空而快照为空，或快照最大落盘 ts 严格早于基线 = 回退快照，**整帧丢弃**——不渲染、不重写基线、不碰 cwd/模型/队列/任务槽（置于会话身份复验之后、一切副作用之前），等下一条 SSE/落盘触发的快照自然恢复；基线不回退 ⇒ delta seq 保持连续 ⇒ gap 对账链不再被触发，跳变与空白同一扇门封死。合法重渲不受影响：撤回/turn-state 同数据 ts 持平放行、压缩收口 summary ts 前进放行、首载/切会话基线 null 放行。探针 `probe-snapshot-stale.ts`（跑 live.js 真实函数体 24 断言 + 门位置源码结构断言 + 录像三态时序重放）24/0；`probe-stage-pin.ts` 回归 22/0。
+
 ## 5. web 模型/思考等级切换（2026-08-22，实时+持久双轨；模型源=凭据池）
 
 AppState store 是 React Provider 内 useState 创建**非模块单例**，React 树外代码走**全局 handler 模式**（同 replBridgeHandle）——`src/bridge/controlOverrideHandle.ts` 模块级 handler + `src/components/GatewayControlBridge.tsx`（replLauncher 在 `<App>` 内挂 `<REPL>` 旁，Provider 内注册：model → **每会话覆盖（官方 onSetModel 语义）：`setMainLoopModelOverride(resolved ?? undefined)` + `setAppState({mainLoopModelForSession: resolved})`**（'default'/null → undefined 清除覆盖回落读盘凭据池，只影响本会话）、effort → `setAppState({effortValue})`）。
@@ -113,7 +115,7 @@ AppState store 是 React Provider 内 useState 创建**非模块单例**，React
 
 ## 8. 两层消息流重构与渲染定案链（2026-09-08 用户定案起，sw v265）
 
-**两层模型（用户定案）**：上层=各种气泡和 AI 消息，第二层=乐观气泡生成的占位，占位大小按屏幕计算，两层合并作为滑条依据。**病根诊断**：旧钉顶=持续吸附状态机（`pin` 11 字段 + `pinReserveApply` 逐帧动态几何：占位高=视口−内容、随回复增长收缩）+ 三类内容几何监听（toggle/img load/resize）+ 临时让位（temp/roundFoldOpen）+ settleCheck 轮询 + 劈开×2/骤缩/收起闪动等十几轮补丁——全部补丁都在伺候「占位跟着内容算」这一动态几何。**新模型（占位一诞生即永恒）**：①`.pin-stage` 静态占位块挂 `#messages` 流末（暂态区之后），高度=滚动容器 `clientHeight`（诞生锁定，仅 resize/对账校准），**不随内容收缩、回合结束不自动撤**；②唯一释放出口=用户滚轮/触摸/拖滚动条（`stageRelease`：remove + 浏览器 clamp 自动保持内容连续，零跳动；程序滚动经 `progScrollUntil` 窗口与动画期 `animT` 排除）；③跟随吸底目标=**真实内容底**（`stageFollow`：scrollTop=max(开启气泡贴顶位, 占位起点−视口高)——内容未满一屏时视口停在开启气泡贴顶处、折叠体/回复在下方生长，超过一屏后平滑转内容底跟随、气泡自然上滑出视口顶，两视角在贴顶位无缝衔接，无 sticky 驻留）；④唤出条件（用户定案）：仅新回合开启消息（web 乐观气泡 `addUser` form='bubble' / CLI 端权威新 user 经 hasNewUser 链）唤出，**会话处理中发送=排队成员不唤出**（不打断当前展示）；乐观气泡唤出 key='optimistic'，落盘接管帧 `stageStart(el, 权威key, false)` 直终态（2026-09-09「新消息跳动」根修：接管重建——live-zone 摘除→innerHTML 重建——已改几何，乐观期开启的 750ms 平滑窗目标过期、沿用旧窗=到点瞬跳；换 key 帧作废动画窗+重量脚印（lockFoot=null 按接管后真实几何补算，弃乐观期旧脚印）+同帧归位；smooth=false 保留「不重播上划动画」语义）；刷新/首屏恢复=末段处理中（done-live 在场）才无动画就位，已结束回合吸底。**连带退役**：`msg-pin` sticky（offsetTop 恒自然流位）、`pinReserveApply`/`roundFoldOpen`/`pinSettleCheck`/`pinMaybeRelease`/`smoothDismissPending`/img load 捕获重算/折叠 toggle 重算/**折叠收起 click 接管**（占位恒定使内容收起不再令 scrollTop 越出 maxScroll=收起闪动结构性消失）约 -200 行；`renderSettle` 保留为渲染权威出口对账（stageSync：块失联重挂/高度校准/气泡重定位/跟随归位），`msgAppend`/`applySegDelta`/`renderTransient` 插入锚点 `.pin-spacer`→`.pin-stage`。不变量：占位块至多一个恒居流末；占位高度只随屏幕不随内容；用户滚动=让位。
+**两层模型（用户定案）**：上层=各种气泡和 AI 消息，第二层=乐观气泡生成的占位，占位大小按屏幕计算，两层合并作为滑条依据。**病根诊断**：旧钉顶=持续吸附状态机（`pin` 11 字段 + `pinReserveApply` 逐帧动态几何：占位高=视口−内容、随回复增长收缩）+ 三类内容几何监听（toggle/img load/resize）+ 临时让位（temp/roundFoldOpen）+ settleCheck 轮询 + 劈开×2/骤缩/收起闪动等十几轮补丁——全部补丁都在伺候「占位跟着内容算」这一动态几何。**新模型（占位一诞生即永恒）**：①`.pin-stage` 静态占位块挂 `#messages` 流末（暂态区之后），高度=滚动容器 `clientHeight`（诞生锁定，仅 resize/对账校准），**不随内容收缩、回合结束不自动撤**；②唯一释放出口=用户滚轮/触摸/拖滚动条（`stageRelease`：remove + 浏览器 clamp 自动保持内容连续，零跳动；程序滚动经 `progScrollUntil` 窗口与动画期 `animT` 排除）；③跟随吸底目标=**真实内容底**（`stageFollow`：scrollTop=max(开启气泡贴顶位, 占位起点−视口高)——内容未满一屏时视口停在开启气泡贴顶处、折叠体/回复在下方生长，超过一屏后平滑转内容底跟随、气泡自然上滑出视口顶，两视角在贴顶位无缝衔接，无 sticky 驻留）；④唤出条件（用户定案）：仅新回合开启消息（web 乐观气泡 `addUser` form='bubble' / CLI 端权威新 user 经 hasNewUser 链）唤出，**会话处理中发送=排队成员不唤出**（不打断当前展示）；乐观气泡唤出 key='optimistic'，落盘接管帧 `stageStart(el, 权威key, false)` 直终态（2026-09-09「新消息跳动」根修：接管重建——live-zone 摘除→innerHTML 重建——已改几何，乐观期开启的 750ms 平滑窗目标过期、沿用旧窗=到点瞬跳；换 key 帧作废动画窗+重量脚印（lockFoot=null 按接管后真实几何补算，弃乐观期旧脚印）+同帧归位；smooth=false 保留「不重播上划动画」语义；**2026-09-11 再收窄：smooth 形参/750ms 动画窗整体退役——占位高度改「几何纯函数、唤出即终态」，见本节「发送瞬间『跳到上一条消息』根治」条**）；刷新/首屏恢复=末段处理中（done-live 在场）才无动画就位，已结束回合吸底。**连带退役**：`msg-pin` sticky（offsetTop 恒自然流位）、`pinReserveApply`/`roundFoldOpen`/`pinSettleCheck`/`pinMaybeRelease`/`smoothDismissPending`/img load 捕获重算/折叠 toggle 重算/**折叠收起 click 接管**（占位恒定使内容收起不再令 scrollTop 越出 maxScroll=收起闪动结构性消失）约 -200 行；`renderSettle` 保留为渲染权威出口对账（stageSync：块失联重挂/高度校准/气泡重定位/跟随归位），`msgAppend`/`applySegDelta`/`renderTransient` 插入锚点 `.pin-spacer`→`.pin-stage`。不变量：占位块至多一个恒居流末；占位高度只随屏幕不随内容；用户滚动=让位。
 
 **bubble 失联链根修（2026-09-09 二轮「跳动」根修，sw v273，exe 130240）**：用户实测 v272 仍跳且「转变太快」——实锤主根=**stage.key 存 sig（"idx:ts"，基线防索引复用错位）而渲染权威气泡 data-m=段起始索引（纯数字，messagesHtml `seg.key=i`）**，stageSync 整页重建后的气泡重找（`[data-m="${stage.key}"]`）恒落空 → bubble 永久失联 → stageFollow 的 t0 退化 0（「bubble 失联退化纯内容底」分支被永久命中）→ 落点从贴顶位瞬移内容底（差近一屏）=每回合首帧 SSE 刷新必跳；接管帧根修（124320）只覆盖换 key 瞬间，失联链为修复前后共有跳源。修=stageSync 重查找取 sig 索引部分（":" 前）匹配 data-m，sig 防错位语义保留在 key 本体；连带修复刷新恢复链（baseU 同 sig 格式此前同样失联）。stageFollow 不变量补全：t0 恒取真实贴顶位，失联退化仅允许存在于换皮单帧窗口。
 
@@ -122,6 +124,10 @@ AppState store 是 React Provider 内 useState 创建**非模块单例**，React
 **释放链铲除 + 流式预览充满整行 + 占位尺寸公式（2026-09-09 用户定案，sw v268–v270，exe 101530/104843/113251）**：①**用户滚动输入永不摘占位**——v267 仍留「释放出口=滚轮+鼠标拖滚动条」（旧钉顶「钉顶非强制」语义残留），用户实测「鼠标一滑动就死掉」「为什么还会有释放链这种东西」定性：占位=真实 DOM 实体与回合绑定，用户输入不在其生命周期内，任何一处 remove 都被定性为「死掉」。修=wheel/scroll（拖滚动条/键盘）监听器全部改为只置 `stage.yielded=true`（跟随永久让位到下一回合 stageStart 复位），`stageRelease` 仅剩视图级退出 4 调用点（renderSession 切会话/renderHome 回首页/renderMgr 管理视图/openProjectPreview 项目预览）；触摸链 touchHold/touchYield 语义不变。占位生命周期=**会话视图生命周期**。②**`.think-stream` 充满整行**（用户截图「思考过程行没有充满该行」）：删 `max-width: min(56ch, 62vw)` 封顶（行内死空根因）改 flex 子项 `min-width: 0` 收缩充满 summary 剩余整行；删 `unicode-bidi: plaintext`（内容以拉丁字符开头时基方向解析成 LTR → rtl 保尾的裁切边反转、保尾失效），保尾照抄 `.ch-file` 实证配方 `direction: rtl + text-align: left`；左缘渐隐 2.5em→1.5em。③**占位尺寸公式**（用户实测「计算得到的占位似乎有点过于大了」——原高度无脑=clientHeight 恒多整屏空白）：高度=`max(0, 视口高 − 内容脚印)`，脚印 `lockFoot`=「内容底−气泡贴顶位」（v268 版在诞生时刻缓存、绝不随内容变化；**2026-09-10 改实时读取，见下条「占位脚印实时化」根修**）——只补足贴顶视角下内容底到视口底的余量：短会话≈满屏新页感不变，长会话（脚印>一屏）高度 0 不再加空白；公式自洽（恰好保证贴顶位可达 `maxScroll=贴顶位+padBot`，空白永不超出补足量）。**v270 终版（exe 113251）**：④公式加扣滚动容器常驻 `padding-bottom`——用户猜测「算的是屏幕高度没考虑浏览器顶栏」证伪（clientHeight 本不含浏览器 chrome），真凶=clientHeight 含 docked 输入栏 142px 悬浮预留（`#chat-area.in-session #chat-scroll`），终版 `max(0, clientHeight − paddingBottom − lockFoot)`，空白恰铺到输入栏上沿；⑤`.think-stream` 折行回归根修——v269 的 `flex:0 1 auto` 基准=max-content 撑溢出 summary 行，flex 收缩把 `.think-state`（min-width:auto=CJK 单字宽）压成逐字换行（「正在思考怎么不是一行了」），改 `flex:1 1 0` 基准 0 只吃剩余空间，单行恢复且仍充满整行。
 
 **占位脚印实时化根修（2026-09-10 用户实测「乐观气泡被滑到屏幕外」，sw v296，exe 205100）**：用户报「乐观气泡携带图片时直接跑出屏幕外；折叠体高度增加（尚未超出理论占位）气泡依旧能被滑出屏」，并推测「占位没有和乐观气泡的位置绑定」——推测正中。根因=`lockFoot` **诞生快照**：占位高度只按回合诞生瞬间的脚印补足，诞生后任何内容增长（乐观气泡图片 `data:` URL 异步解码撑高至 160px、折叠体变高、回复正文流式变长）都 1:1 变成额外可滚动余量（`maxScroll = padTop + 贴顶位 + 增长量`）→ 内容明明没超一屏，滚到底/惯性滑到底即可把开启气泡推出视口顶（露出量恰=增长量）。根修=`stageSync` 脚印改**实时读取**（`foot = topInScroll(占位块) − topInScroll(参照气泡)`，每次对账按当前几何重量）、删 `lockFoot` 字段（状态源 −1）；不变量：内容未超一屏时 `scrollHeight ≡ 一屏`、`maxScroll ≡ 贴顶位`（滚动极限恒=开启气泡贴顶位，内容增长/收起都不改变滚动范围——「收起不骤减、不闪动」的旧目标同样成立，占位实时变大对冲），超过一屏占位归零、自然转内容底跟随。配套两处：①气泡参照找回**提前到脚印计算之前**（实时脚印依赖参照物在场），且乐观态暂态区无气泡时（乐观项已被吸收 / `authLive` 在场降级为排队成员）**回落数据区最后一条 `[data-t="u"]` 权威气泡**（引导消息 `data-t="g…"` 天然排除）——否则 t0 退化 0、视口转纯内容底跟随、气泡同样被推上屏顶；②参照两端皆缺（重建窗口内）不写占位高度（高度连续性优先，写 0 = scrollHeight 骤减 = 钳制跳变）。
+
+**发送瞬间「跳到上一条消息」根治（2026-09-11 用户实测，sw v307，exe 172539）**：用户报「发送新消息，界面会短暂跳到上一条消息」（并猜「钉顶逻辑的遗留」——旧 pin 体系确认已零残留，残留的是**责任/时序**）。**根因①**=换出动画窗的初值把 scrollHeight 塌陷：09-09 版 `stageStart` 占位初高取 `p0=min(乐观气泡高, pStar)`，rAF 750ms easeOutCubic 拉到 pStar——占位先缩 ⇒ 同一事务内 scrollHeight 先塌 ⇒ 浏览器按塌后 maxScroll 钳 scrollTop（**首帧就绘在内容底 = 上一回合尾部**）⇒ rAF 逐帧抬到贴顶位 = 用户所见「先跳到上一条消息、再滑回去」。**根因②（触发前提常在）**=`route.js` 载入钉顶的 `lastU` 循环漏 `!injected`（`live.js` 同循环有）：末条 user 为注入引导消息时 `isRealUser` 命中而气泡渲染为 `data-t="g…"`，`[data-m=lastU][data-t="u"]` 恒落空 ⇒ `pinned=false` ⇒ 该会话视图 stage 全程未激活、发送才首次建占位（恒走 `fresh` 路径）；且把引导消息当新回合基线 → 下帧 `hasNewUser` 误判为真。**修**：①`stageStart` 删动画窗——占位高度是几何的纯函数（参照气泡定了终态就定了），写终态 + `stageFollow` 同帧归位，浏览器只绘一帧且那帧即终态；连带退役 `stage.animT` 状态源（占位高度唯一写入者= `stageSync`）、`smooth` 形参（4 调用点两参化；`live.js` 乐观/权威两分支合并为单路径）、`ctx-meter` 滚动让位判据里的 animT 条件（状态源 −2）。②`route.js` `lastU` 循环补 `&& !messages[i].injected`，与 `live.js` 归并为**同一条规则**：钉顶只属于新回合开启消息，引导消息恒不钉顶。**不变量**：占位高度在任意时刻 = `max(0, clientHeight − padBot − 脚印)`（无第二写入者）；发送事务内 scrollHeight 单调不减、scrollTop 一次落在贴顶位（无中间帧可绘）。**证据**：探针 `_agent-src/probe-stage-pin.ts`（跑真实函数体 + 最小布局模型）修后 12/12（占位高度恰写一次；帧末 scrollTop=贴顶位 564；maxScroll≡贴顶位；0 待执行动画帧），`--prefix` 旧构造对照 6/6 复现缺陷（写序 `494px→64px` 回撤；首帧 scrollTop=内容底 134 ≠ 564；rAF 1 帧；逐帧推进后才收敛到贴顶位）。
+
+**发送瞬间「跳到上一条消息」二轮根治：注入吸收帧参照移交（2026-09-11 用户实测 v307 仍跳，sw v308，exe 180922）**：上轮（动画窗+route lastU）修的是真缺陷但**不是主链**——用户换 exe 实测仍跳。**真根因=乐观气泡被「注入消息」吸收的接管帧，`stageSync` 参照回落链选错回合**：CLI 桥接会话发送 → 乐观气泡钉顶（正确）→ CLI 注入落盘（injected:true）→ `absorbPending` 移除 pending → `renderTransient` 摘除暂态区（乐观气泡 DOM 消失）→ `renderSettle → stageSync` 参照重找。而注入开段回合按切段定案 `user:null`（messages.js 切段：injected 无未收尾段 → 不设 `s.user`，回合在 DOM **没有 `data-t="u"` 开启气泡**，注入气泡只以 `data-t="g0"`+`data-g` 形态织在段折叠体 `done-body` 内）→ 旧回落「末条 `[data-t="u"]`」只能命中**上一回合气泡** → `stageFollow` 以 t0=上一回合贴顶位重钉 = 用户所见「跳到上一条消息」，直到新回合内容超一屏才被内容底跟随拉回（dequeue 落盘接管帧不受影响：真实开启气泡就是 `data-t="u"`）。**修**：`stage.js` 新增回合权威锚解析 `guideTurnAnchor`（引导气泡 → `closest('details.done-fold[data-m]')` 段折叠；该段若另有 `data-t="u"`（真实 user 开段、引导系中途织入）仍取开启气泡——折叠顶/气泡顶=回合顶=乐观气泡原位）+ `absorbTurnAnchor`（乐观吸收后的同回合锚：以**文档序**判最新回合开启者——最新引导气泡在末条开启气泡之后 ⇔ 注入开段 → 取折叠锚；否则回落末条开启气泡=dequeue 原行为），乐观参照失联回落改走 `absorbTurnAnchor`，**禁止回落上一回合**。`live.js` hasNewUser 对 injected 的排除定案不动（实时同步中到达的注入消息不主动触发钉顶——本修只接管「乐观参照已死」的对账帧，不新增钉顶触发源）。**已知后续候选**（未改）：`route.js` 载入钉顶对「末回合为注入开段」的会话仍钉上一真实回合（lastU 排除 injected 的 17:25 口径），与 09-09「最后回合开启气泡在场即唤出占位」定案存在张力；若要统一，锚解析可复用 guideTurnAnchor（key 重找需同步支持折叠锚），待用户实测后定。**证据**：探针 `probe-stage-pin.ts` 扩展 D/E 组（最小布局模型补深层查询/closest/dataset/文档序比较）——D 组注入吸收帧：参照移交折叠锚 ✓、帧末 scrollTop=新回合顶 564（≠上一回合 200）✓、占位重挂流末 ✓、高度=视口−142−折叠脚印 438 ✓、maxScroll≡新回合贴顶位 ✓；E 组文档序防误吞：历史旧引导在场+dequeue 接管仍取末条开启气泡 ✓；A 组补 A8/A9 源码断言。修复态 22 过/0 败，`--prefix` 旧动画构造对照 6/6 复现（上轮场景回归保留）。
 
 **视口基准 dvh 根修（2026-09-10 用户实测「占位有点大+乐观气泡被浏览器顶栏遮挡」，sw v285，exe 102248）**：两症状同根——`html,body{height:100%}` 是恒定大视口（=URL 栏**收起**态高），iPad Safari 顶栏展开时叠盖视口顶：贴顶位=视口顶下方 padTop（移动档 60px 常数）处，顶栏展开高>60px 即盖住气泡顶；占位高度公式按大视口补空白，顶栏展开时可视高比容器矮一条 → 占位底部溢出屏幕外。根修=`html{height:100%;height:100dvh}`（100% fallback）：dvh 随顶栏伸缩，视口顶恒=可视区顶，占位高度/贴顶位/stageFollow 几何自动自洽，resize 重算链（`resize→stageSync`）现成咬合，JS 零改动。同批：renderCap 归一化（capRenderedMessages 收拢全数组占位计数+剥全量替换路径挤到中部的残留，强制「至多一条占位、恒在下标 0」，useLogMessages 头部 O(1) 剥离对齐，落盘边界全量 filter 兜底退役）。
 
@@ -167,7 +173,7 @@ cli-dev 活跃会话 2.6~4.6GB/h 的 commit 增长（08-28 多进程连锁 crash
 - `app.js` 入口=import 群+事件绑定+启动序列
 - `core/`：icons（SVG 图标）、state（元素引用/共享可变态/toast/媒体工具）、char（角色形象）、markdown、sessions（会话映射）、live（SSE 会话事件 349-898）、gateway（WS 连接/审批中继）、auth（门禁认证/设备认证）
 - `sidebar/`：mgr-data（管理数据源）、recent（最近会话）、mgr（插件/项目/模型三界面 mgr-tabs）、bubble-search
-- `inputbar/`：ctx-meter（ContextMeter）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/提问卡/回合态/takeover/任务浮窗）、images（图片附件）、send（gwSend/syncGwSend）
+- `inputbar/`：ctx-meter（ContextMeter）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/提问卡/回合态/takeover/任务浮窗）、images（图片附件+文件上传）、send（gwSend/syncGwSend）
 - `chat/`：route（路由渲染）、messages（消息渲染 1206-1947）、stage（钉顶占位/stage 机制）
 
 **跨模块可变状态 = SETTERS 机制**：14 个跨模块写入的 let（ALL/connUp/gateAwait/gateVerified/sessionCwd/takeover/turnLive/btnMode/MODEL_CUR/modelUserPicked/pendingUserMsgs/firstSendHash/lastNavHash/approvalPending；`pendingAskInput` 已随只读提问卡于 2026-09-11 移除，见 §17）定义模块尾生成 `export function setX(v){X=v}`，写入方一律调 setter（import 绑定不可赋值=ESM 硬约束）。读跨模块符号走 import（函数级循环 import 安全：hoisting+live binding）。
@@ -208,7 +214,7 @@ cli-dev 活跃会话 2.6~4.6GB/h 的 commit 增长（08-28 多进程连锁 crash
 
 **链路（CLI 单源 → 网关镜像 → SSE/首载 → web 渲染）**：
 - CLI 出口：`useTasksV2.#notify()`（`#fetch` 与隐藏计时器两条路径唯一汇合点）→ `#report()` → `gatewayClient.notifyTaskState(this.getSnapshot() ?? [])`。**载荷去重**在 `notifyTaskState` 内做（`lastTaskStateJSON` 比较，store 5s 兜底轮询原样重发不发）；`sock.on('open')` 补发当前清单（同 queue-state 重连补发语义）。
-- 网关（`src/gateway/localGateway.ts`）：`normalizeGatewayTasks` 是**形状边界唯一处**——非对象/缺 `id`/缺 `subject` 项丢弃；未知 `status` → `'pending'`；`subject` 截 500；`blockedBy` 只留字符串；非字符串 `owner`/`activeForm` 落 `undefined`；`description` 等长文本不透传（清单行不渲染它）。存 `sessionTasks` Map（`SESSION_TASK_TTL_MS = 10min` + CLI `detach()` 清），`/gateway/session.tasks` 首载 + SSE `{type:'task-state', session, tasks}` 事件体直带全量快照。
+- 网关（`src/gateway/localGateway.ts`）：`normalizeGatewayTasks` 是**形状边界唯一处**——非对象/缺 `id`/缺 `subject` 项丢弃；未知 `status` → `'pending'`；`subject` 截 500；`blockedBy` 只留字符串；非字符串 `owner`/`activeForm` 落 `undefined`；`description` 等长文本不透传（清单行不渲染它）。存 `sessionTasks` Map（**无时间 TTL**——2026-09-12 根修：原 `SESSION_TASK_TTL_MS=10min` 与 CLI「载荷不变不发」去重矛盾，活跃会话清单 10 分钟不变即被 `sweepStaleMaps` 清仓 → `/gateway/session.tasks` 首载/刷新拉到 `[]` 当权威 → 浮窗消失（09-12「任务浮窗不刷新」实证）；生命周期=上报 upsert + `detach()` 清 + 重连 open 补发；`sessionQueues` 排队区同病同修）+ CLI `detach()` 清，`/gateway/session.tasks` 首载 + SSE `{type:'task-state', session, tasks}` 事件体直带全量快照。
 - web（`web-src/core/live.js` 的 SSE 分支 + `core/sessions.js`/`chat/route.js` 首载三入口）写 `live.tasks` 后调 `renderTaskDock()`；切会话/回首页槽位清空同清单同步（`live.tasks = []` + 重渲）。
 
 **单源不变量**：web 渲染的清单 = CLI `getSnapshot()` 的同一份语义（hidden/空 → `[]` → 浮窗整体不出现），**web 无任何状态推导、无形状兜底分支**——形状校验只存在于网关一处（根本原则 5：新增守卫必须能答出守护的不变量，这里的形状边界守护的是「web 消费端恒可信任载荷」）。
@@ -305,3 +311,92 @@ cli-dev 活跃会话 2.6~4.6GB/h 的 commit 增长（08-28 多进程连锁 crash
 **改动面**：`_agent-src/src/gateway/web-src/chat/messages.js`（`statusFlags`/`STALE_SEC` 唯一源 + 导出）、`gateway/web-src/core/live.js`（tick 红标单源调用 + 独占标）、`gateway/web-src/inputbar/approval.js`（claimTick 同源，消掉重复文案/阈值）、`gateway/web/styles.css`（`.is-flagged` 独占规则）、`gateway/web/sw.js` + `web/index.html` 版本 **v305→v306**（v305 为同期审批卡高度改动的既有点位，本次在其上再 bump，保证新 exe 资产对既有缓存一定是新键）；`gateway/web/app.js`、`web-assets.generated.ts` 由 `bun run build:dev` 重新生成（勿手改，已解码核对：app.js 内 `STALE_SEC` + `statusFlags(connUp, awaitingApproval || toolRunning ? 0 : staleSec)` 单调用点、styles.css 独占选择器、index.html `?v=306`）。
 
 **待实测（须换新 exe 重启网关 + 页面刷新到 sw v306）**：①僵死（beat 落后 ≥150s）时状态行只剩红字「无响应 Nm Ns」，**不再**与「正在思考/并思考」同屏；②红标消失（beat 回/重连）后状态文字与计时原样复原、无残留；③审批卡在场 / 工具在飞时照旧不误标（§18 ③ 豁免不回归）；④断连时只显示「连接中断」，流式预览与状态文字同隐；⑤红标独占时与工具行文字左缘对齐（`.d-stale` margin 归零后无 4px 偏移）。
+
+## 21. 侧栏拖拽调宽：展开态自由拖、不记忆（2026-09-12 用户需求，sw v310，exe `cli-dev-20260912135629`，纯前端零协议）
+
+**需求定案**：侧栏展开态可拖右缘自由调宽；仅展开态生效；鼠标手指交互（hover grab / 拖拽中 grabbing）；**不做记忆功能**——每次折叠→再展开回默认 280px（现尺寸）。
+
+**实现**：①`index.html` `#sidebar` 尾部新增 `#panel-resizer` 把手节点；②`styles.css`——把手 = 贴 `#sidebar` 右缘 8px 热区（`right:-4px` 骑缝），hover/拖拽显 3px 竖线，**显示门控 = `#sidebar.open` ∧ ≥721px**（折叠态与手机抽屉 ≤720px 恒 display:none），光标 grab；拖拽中 `body.sb-resizing` 关掉 `#sidebar/#panel/#chat-area/#messages/#empty-hint/#input-wrap.docked` 六处宽度相关过渡（0.28s padding/width 动画会让拖拽滞后）+ `cursor: grabbing` + `user-select: none`；③`web-src/sidebar/recent.js`——pointer 拖拽链：pointerdown（左键 + 复核 `.open`，CSS 门控之上双保险）→ `setPointerCapture` → pointermove 以 `e.clientX`（侧栏左缘 = 0，clientX 即目标宽度）clamp 到 `[232, min(560, innerWidth−120)]` 写 **`:root` 内联 `--panel-w`**——`#sidebar/#panel` 宽、主区避让 `padding-left`、`#input-wrap.docked` half-padding 补偿全消费同一变量，天然联动零特判；pointerup/cancel 摘把。
+
+**「不记忆」的根治做法**：内联 `--panel-w` 是唯一可变状态源，`setPanel(false)` 一行 `documentElement.style.removeProperty('--panel-w')`——状态随折叠自然清零，再展开命中样式表默认 280px（≤720px 媒体查询的 240px 不受内联值影响，因手机端把手恒不可见、不会产生内联值），无第二份记忆态、无 localStorage。
+
+**验证**：`bun run build:dev` 拼接 33 区间 5836 行；内嵌资产 base64 解码复核——styles.css `panel-resizer`/`sb-resizing`/`cursor: grab` 全中、sw.js `floria-v310`（v309 零残留）、index.html `?v=310` 双处 + resizer 节点在。**待实测**：①展开态拖右缘跟手、主区同步让位、输入栏保持中线；②折叠→再展开回 280px；③折叠态/手机端无把手不误触；④hover 显竖线 + 手型光标；⑤拖到边界（232/560）钳制。
+
+## 22. 嵌入式图表：` ```chart ` 双段围栏（web 渲 html / CLI 显 ascii，2026-09-12 用户定案，sw v311，exe `cli-dev-20260912151320`，纯前端零协议）
+
+用户报 ASCII 字符画（组织树等）在 web 渲染丑 → 定案「LLM 同输出 ascii+html 双段、两端各取所需」。模型侧契约写**全局根 `@WrokSpace/CLAUDE.md` 快速要点**（` ```chart ` 围栏 + `%%html`/`%%ascii` 哨兵行分段、语义一致、禁裸 ASCII 字符画、风格可调用 lieflat-charts skill）。
+
+**渲染分工**（两端均只动显示层，协议/转录不动；**普通 ` ```html ` 围栏两端都不受影响**——只有围栏语言精确 `chart` 才触发）：
+- **web**（`web-src/core/markdown.js` + `chat/messages.js` + `styles.css`）：`closeCode(closed)` 分支——`chart` 围栏**已闭合**时 `chartSplit` 拆哨兵段，取 `%%html` 段进 `<iframe class="chart-frame" sandbox="allow-scripts" srcdoc=...>`（opaque origin：模型 HTML 摸不到父页 DOM/不能导航/不能开窗）；`%%ascii` 段弃用，`chart-raw` 留全文供「源码」按钮切换（messages.js 事件委托 `.chart-src`，同 ch-toggle/msg-copy 模式）。**srcdoc 安全链**：mdHtml 入口整体 esc（含引号）→ 属性不破出；浏览器解析 srcdoc 属性实体解码一次 = 恰好还原模型原始 HTML（esc 链与属性解码互相抵消，语义透明）；CHART_BOOT 为自有串 esc 一次同理。**高度自适应**：srcdoc 尾注 CHART_BOOT（ResizeObserver+load 上报 `__chartH` postMessage），messages.js `message` 监听按 `e.source === iframe.contentWindow` 采纳设高（其它窗口伪造不进来），CSS `max-height: 60vh` 超出内部滚动；侧栏拖宽→内容高变→重报，闭环。**流式安全**：围栏未闭合（EOF 收口 closed=false）恒回退代码块，闭合那一帧才切 iframe（防流式每 delta 重建闪烁）。**缺段降级**：无 `%%html` 段/哨兵 → 代码块。复制排除：`messageCopyText` 剔 `.chart-bar/.chart-raw`（srcdoc 是属性不入 textContent，天然不进复制）。
+- **CLI**（`src/components/Markdown.tsx`）：`stripChartHtml` 纯文本预处理接在 `MarkdownBody` 的 `cachedLexer(stripPromptXMLTags(stripChartHtml(children)))`（stripChartHtml 最外层，html 段在 XML 剥离前先剔除）——chart 围栏内删 `%%html` 段与哨兵行、留 `%%ascii` 段给 marked 当普通代码块；`StreamingMarkdown` 渲染统一走 `<Markdown>` 自动覆盖，边界追踪不受影响（strip 只在渲染层）；未闭合围栏（流式中间态）同样剔除 html 段。
+- print.ts（-p 非交互路径）无 markdown 渲染器，不涉。
+
+**验证**：`probe-chart.ts` 28/0（web 真源码切片：双段/缺段/未闭合/` ```html `与` ```html+jinja `不误伤/实体往返透明/srcdoc 属性不破出/思考块同链路；CLI stripChartHtml：双段/逐字透传/混合围栏/流式）+ `probe-chart-embed-assets.ts` 8/0（web-assets 生成物 base64 解码：sw `floria-v311`、styles chart 全套、index `?v=311` 双位、app.js 渲染链符号全中、v310 零残留）+ exe 二进制 `rg -a '%%ascii'` 命中（CLI 侧已编译进 exe）。**待实测**：web 图表渲染/高度自适应/源码切换、CLI 只显 ascii、会话模型按全局契约产出 ` ```chart `。
+
+## 23. web 文件上传：+ 浮窗「上传文件」行 + 文件胶囊/文件卡片 UI（2026-09-12 用户需求四轮定案，sw v315，exe `cli-dev-20260913095727`）
+
+底栏 + 浮窗「上传」组在「选择图片」行下新增「上传文件…」行：任意类型、可多选，选完即上传（不经输入栏暂存）。**二轮定案**：一轮把落盘绝对路径当纯文本回填输入栏被用户否决（「没有文件，需要像图片一样有对应的 UI」）→ 改为与图片附件完全同构的胶囊/卡片链路。**三轮定案**：占位路径再改相对（「我还是希望使用相对路径」）——见发送态。
+
+**链路（与图片占位同模式）**：
+- **输入态**：`#file-upload` change → `images.js` `addUploadFiles` 逐个 `POST /gateway/upload?name=<文件名>&sid=<当前会话>|&project=<newProject>`（原始字节直传，`apiUrl` 同链 token/cookie 认证；**落盘跟随会话（09-12 四轮定案）**：sid/project 与 gwSend 首送建会话归属参数同源，保证「上传落点=消息会话落点」——存量会话带 sid、首页尚无会话带 state.newProject、纯首页无参落全局根；端点细节 → docs/gateway.md §1「文件上传」）→ 成功 push `pendingFiles`（{name, abs, size}）→ **文件胶囊**（`.file-pill`：09-12 三轮改版抄 dsh `AttachmentRail` 附件卡——64×64 方卡与图片缩略图同轨等高、灰底 `rgba(38,49,72,.06)`+薄描边、dshFile 图标+文件名居中两行截断、× 收进卡内右上 4px hover 显形/触屏 `pointer:coarse` 恒显）进附件行 `#img-pills`（与图片胶囊同行，`renderImgPills` 单渲染源，× 复用 `.img-x` 类名按 `data-f`/`data-i` 分流——定位/形状规则 `.file-pill` 自带一份，`.img-pill` 作用域那份不分给 file-pill）。
+- **发送态**：`gwSend` 把待发文件拼 `[文件:<会话 cwd 相对路径>]` 占位进消息文本（与 `[Image #N]` 同位追加；CLI/模型端即普通文本，按会话 cwd 解析 Read）→ 发送成功清 `pendingFiles`；`syncGwSend` 的 hasContent 计入文件。**三轮定案（相对化）**：占位路径由 `send.js` `relUploadPath(abs)` 按**目标会话 cwd** 相对化——`relPath` 纯函数（大小写不敏感逐段比对、`\ /` 通用、跨盘符/无 cwd 退绝对路径=物理上唯一诚实表示）；**四轮定案（落盘跟随会话）后同会话「上传→发送」恒为 `uploads/<名>`**（上传落点=会话根 uploads/，与 cwd 同根），跨会话补发（A 传 B 发）按 B 的 cwd 相对化；存量会话 cwd 取 `/gateway/session` 载荷（`sessions.js` `sessionCwd`，同 relFromCwd 显示链源）；**新会话（首条消息）jsonl 未落盘无 cwd 源 → wsession 响应附 `cwd`（=webSessionProjectRoot，与 spawn cwd 同源）+ 网关 `readSession` 记录缺失分支从 id 编码路径派生 cwd**（新会话空 fetch 不再洗掉 wsession 带回的 cwd）。乐观气泡文本不含文件占位（absorb 为 includes 子串匹配仍命中；落盘文本带相对占位）。
+- **渲染态**（乐观与落盘同构）：`userBodyHtml` 剥 `[文件:...]` 占位 → `userFilesHtml`/`fileCardsHtml` 渲染**文件卡片**（`.msg-files` 容器在 .body/.msg-imgs 之后气泡外下方右对齐，卡片=dshFile 图标+basename 文件名，title=完整路径，**点击复制路径**——document 级委托同 .msg-copy 模式）；乐观气泡（`renderTransient` bubble）渲 `p.files` 卡片同构；排队区（dock，本地乐观项+CLI 队列快照）剥占位不渲染卡片。占位文本原样进 `pendingUserMsgs`/转录（absorb 链 `includes` 匹配不受影响），剥占位只在渲染层。
+
+**与图片附件的关系**：两条独立链路——图片走 base64 内联（不落盘、随 send images 上行、4 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；共用 + 浮窗「上传」组与 `#img-pills` 附件行（图标 `dshFile` 新增）。
+
+**验证**：构建内嵌资产解码 10 项全过（pendingFiles 链/file 占位发送/addUploadFiles 无路径回填残留/userFilesHtml+fileCardsHtml/乐观卡片/点击复制/css 两套/index `?v=313` 双位/sw `floria-v313`/v312 零残留）。**待实测**：上传出胶囊、发送出文件卡片、点击复制路径、会话内按路径 Read；纯文件消息（无正文）气泡形态与排队催办。
+
+## 24. 会话间通信来源行：暴露 chip 带 sid + 气泡/排队区灰字（2026-09-15，sw v317，exe `cli-dev-20260915144722`）
+
+会话 A 的 agent 向会话 B 发消息（`session_send`），B 侧重出**与 user 消息完全同构的气泡**，仅气泡**外**多一行灰色小字「来自 会话：X」。总设计 → 项目根 `20260915133812-会话间协作功能设计方案.md`；授权/工具/网关 → [core.md](core.md) + [gateway.md](gateway.md) §13。本节只写 web 前端。
+
+**暴露入口（两个，均已补 sid）**：
+
+| 入口 | 文件 | 改动 |
+|---|---|---|
+| 输入栏 `@` 浮窗「会话」组 | `inputbar/mention.js` | `mentionItems` 会话项带 `sid: hashOf(s)`；`insertMention(kind,name,sid)` 写 `chip.dataset.sid`；`serializeInput` 输出 `[会话:标题\|sid]`；`mentionChipHtml` 按 `\|` 切分**只显示标题** |
+| 「+」菜单「引用会话」 | `inputbar/commands.js` | 同款 `appendMentionChip(kind,name,sid)` + `findSession/hashOf` 取 sid |
+
+**必须两个都补**：只补 `@` 浮窗会让从菜单暴露的会话退化成纯标题寻址（重名即解析失败）——同一用户手势不应有两种强度的凭据。
+
+**渲染（web 不解析包装，只读投影字段）**：
+
+| 位置 | 改动 |
+|---|---|
+| `chat/messages.js` `whoHtml(m)` | 读 `m.fromSession`（`DisplayMessage` 可选字段，经 `session-delta` 帧原样到达），空则不输出 |
+| 用户开启气泡（`data-t="u"`，`closeSeg`） | `.body` 前插 `${whoHtml(m)}` |
+| 引导气泡（`data-t="g…"`，`weave`） | 同上（忙时排队被 drain 消费走这条形态） |
+
+**前端绝不调 `parseSessionMessage`**（CLAUDE 根本原则 1：不跨前端复刻逻辑）——剥壳在 `conversationDisplay.ts` 的投影层做过一次，前端只消费结果。探针 F5 守这条。
+
+**排队区（`.q-item`）**：`inputbar/approval.js` 把 `q.from.title` 渲染成 `.q-who`（`styles.css` 新增两条，气泡侧复用既有 `.msg .who` 零新增）。**关键坑**：排队区的文本是**尚未过投影的原始包装**（消息还在队列里没进转录），所以拆包必须发生在上报侧——CLI `queueItemsFromSnapshot()` 做 `parseSessionMessage` → `{content: body, from}`，网关 `queue-state` 分支只做形状白名单透传（[gateway.md](gateway.md) §12）。另：来源进排队区重建签名（`dockItems.map(q => [q.from?.title, q.content])`），换来源必重建。
+
+**无乐观气泡**：跨会话消息非本地打字触发，不产生乐观气泡，**不存在乐观/权威同构与接管帧跳变问题**（`approval.js` 的乐观气泡分支不适用本功能）。
+
+**来源行对齐（2026-09-15 用户实测提出）**：来源灰字行**随其气泡一侧对齐**——用户气泡右对齐 → 来源行右对齐。两个前端等权、同时改（`probe-session-link.ts` H 组守这条）：
+
+| 端 | 落点 | 改法 |
+|---|---|---|
+| web | `styles.css` `.msg.user .who` | `align-self: flex-start` → **`flex-end`**（原值是 `.who` 尚无消费方时的遗留值）；`.msg .who` 基础规则不动，`.msg.user` 的 `align-items:flex-end` 不动 ⇒ 气泡宽度行为零变化 |
+| CLI | `UserPromptMessage.tsx` | 外层 column Box **保持默认 stretch**（否则内层气泡会被收成内容宽、改变气泡形态），只给来源行套一层 `<Box flexDirection="row" justifyContent="flex-end">` 行盒 ⇒ 仅该行右移 |
+
+**气泡高度兼容（用户点名）**：`stageSync()` 的几何量（`topInScroll`/`clientHeight`/`scrollHeight`）全为**实时 DOM 读取**、无缓存高度，故灰字行加进 `.msg.user` 内 `.body` 之前时——`t0` 上移一行 = 占位高度减少一行，天然对冲，`maxScroll ≡ 贴顶位` 不变量不破。三条硬约束：①灰字行在 `.msg.user` **容器内**且 `.body` 之前（插容器外则贴顶时灰字行被挤出视口上方）；②**不得脱离文档流**（禁 `position:absolute`，`topInScroll` 用 `offsetTop` 度量，绝对定位会让量到的与看到的失衡）；③两种气泡形态**必须同时**加。既有探针 `probe-stage-pin.ts` 回归 **22/0**。
+
+**验证**：`probe-session-link.ts` **72 过 / 0 败**（A 包装 / B 锚定 / C 暴露集合 / D 解析 / E 自述 / F web 接线 9 / G CLI 接线+工具说明 7 / **H 对齐 3**）。内嵌资产解码复核：`floria-v317`、`?v=317`（两位）、`whoHtml`/`q-who`/`dataset.sid`、`.msg.user .who { align-self: flex-end; }` 全中，旧左对齐与 v316 形态零残留。**待实测**：双会话互发的三种形态（空闲开回合 / 忙入队带来源行可催办 / 离线自动拉起）+ 右对齐观感。**已实测闭环**：09-15 跨会话来件真实抵达（转录落盘形态取证见下）。
+
+## 25. 用户气泡两态同构：乐观/落盘 body 同走 mdHtml（2026-09-15 用户实测「气泡大小有微小差异」，sw v318，exe `cli-dev-20260915225237`）
+
+**现象**：web 发出一条消息，「未接收态」（乐观气泡，`#live-zone`）与「接收态」（落盘权威气泡，`data-t="u"`）的**气泡大小有微小差异**——接管帧那一下高度跳 6px（长文本跳更多）。
+
+**根因**：两态 body 走了**两个渲染函数**（违反 2026-09-07 定案的「乐观开启气泡与落盘气泡同构」不变量，body 渲染是它漏网的一环）：
+
+| 态 | 代码 | body 内层 HTML |
+|---|---|---|
+| 未接收（乐观） | `inputbar/approval.js` `renderTransient` —— 原 `renderUserText(bodyText)` | `esc` 裸文本节点（无块级包裹） |
+| 接收（落盘） | `chat/messages.js` `userBodyHtml(m)` → `mdHtml(txt)` | `<p>…</p>`（`styles.css` `.msg .body p { margin: 3px 0 }` ⇒ 上下各 3px） |
+
+⇒ 高度差 = **6px/段**；多行文本还从「`white-space: normal` 空白折叠」变 `<br>`；markdown 语义（`**粗体**`/链接）此前只在落盘态生效。附带：`.msg .body` 的宽度/`max-width:85%`/padding 两态一致（`.msg` 同处 `#messages` 直接 flex 参与，`#live-zone` 是 `display:contents`），故现象只出在高度。
+
+**修复（同源，非补丁）**：`inputbar/approval.js` 乐观气泡 body 改 `mdHtml(bodyText)`（新增 `import { mdHtml } from '../core/markdown.js'`，无环：markdown.js 不反向依赖 approval.js）。`renderUserText` 保留——排队区 `.q-item` 仍用它（排队项自带 `<p>` 包裹，形态本就与气泡不同）。
+
+**验证**：新增探针 `_agent-src/probe-user-bubble-parity.ts`，**修前 12 过 / 2 败**（败的正是两条同构断言）→ **修后 14 过 / 0 败**：①两路径结构差异取证（`mdHtml('你好')='<p>你好</p>'` vs `renderUserText('你好')='你好'`；多行 `<br>` vs 裸 `\n`；`**x**` 语义只在 mdHtml 侧）②样式侧 `<p>` margin 证据 ③**结构断言：两处气泡 body 必须同源**（乐观走 mdHtml、不再走 renderUserText；`userBodyHtml` 尾部 `return mdHtml(`）④同文本 → 同 HTML。内嵌资产解码复核：`floria-v318`、`?v=318`（两位）、`bodyInner = mdHtml(bodyText)` 全中，`floria-v317` 与 `bodyInner = renderUserText` 零残留。**待实测**：发送消息接管帧不再跳高、多行文本两态一致。

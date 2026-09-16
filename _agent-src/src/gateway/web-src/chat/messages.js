@@ -327,7 +327,7 @@ import { firstSendHash } from '../sidebar/recent.js'
   // writeClipboard 成功 → 图标换 check 1s（DSH 同款反馈窗口），失败 toast
   function messageCopyText(msgEl) {
     const clone = msgEl.cloneNode(true)
-    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, script, style').forEach((el) => el.remove())
+    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, .chart-bar, .chart-raw, script, style').forEach((el) => el.remove())
     return (clone.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
   }
   document.addEventListener('click', (e) => {
@@ -353,6 +353,30 @@ import { firstSendHash } from '../sidebar/recent.js'
     })
   })
 
+  // ---- 嵌入式图表（```chart 围栏，渲染链见 core/markdown.js）----
+  // 「源码」切换（事件委托，innerHTML 重建不受影响）：.chart-embed.as-src 切 iframe ↔ 原文
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('.chart-src') : null
+    if (!btn || !messagesEl.contains(btn)) return
+    const box = btn.closest('.chart-embed')
+    if (!box) return
+    btn.textContent = box.classList.toggle('as-src') ? '图表' : '源码'
+  })
+
+  // 高度自适应：sandbox iframe（opaque origin）内 BOOT 量 body/documentElement scrollHeight 上报
+  // __chartH；按 e.source 精确匹配本页 .chart-frame 才采纳（其它窗口/preview iframe 伪造不进来），
+  // 高度上限交给 CSS max-height，超出内部滚动。宽度变化（如侧栏拖宽）→ 内容高变 → 内部 ResizeObserver 重报，闭环。
+  addEventListener('message', (e) => {
+    const h = e.data && e.data.__chartH
+    if (typeof h !== 'number' || !isFinite(h) || h <= 0) return
+    for (const f of document.querySelectorAll('iframe.chart-frame')) {
+      if (f.contentWindow !== e.source) continue
+      const nh = Math.round(h)
+      if (Math.abs((parseFloat(f.style.height) || 0) - nh) > 1) f.style.height = nh + 'px'
+      return
+    }
+  })
+
   // 压缩/自动摘要标记：转录里压缩会把「会话续接」记成 user|text（后端已映射 role:'system'，
   // 标签「会话续接（自动摘要）」）。命中它 = 当前回合被压缩打断，但 agent 仍在干活——
   // 不应把它当成回合结束，否则「正在处理」被强收成「已处理」、后续思考/工具拆成断开的新段。
@@ -370,6 +394,18 @@ import { firstSendHash } from '../sidebar/recent.js'
   // 合成 user（后台任务通知/对话中断等）已由源码 shouldShowUserMessage 剔除（A/B 路径）、
   // 离线路径由 server.mjs readSession 映射为 role:'system'（C 路径）——前端无需再判系统注入
   // 文本（isSynthText/SYNTH_RE 已于 2026-08-23 删除，见交接文档任务 1）。
+  // 跨会话来件的来源行（2026-09-15 会话间协作）：气泡外一行灰字标识来自哪个会话。
+  // 来源由 CLI 投影给定（DisplayMessage.fromSession，正文里的 `<session-message from=…>` 包装
+  // 已在 conversationDisplay 剥离）——前端不解析包装、不复刻判据。无该字段 = 本地用户输入，
+  // 渲染与本地消息完全一致（用户定案：气泡本体形态不变，只有气泡外多一行小字）。
+  // 位置：插在 .body 之前（DOM 序 = 视觉上方），.msg 是列向 flex → 在文档流里占位（不做绝对定位，
+  // 不参与气泡高度计算），故对既有高度/滚动占位（stageSync 贴顶位）零影响。
+  function whoHtml(m) {
+    const f = m && m.fromSession
+    if (!f || !f.title) return ''
+    return `<div class="who">来自 会话：${esc(String(f.title))}</div>`
+  }
+
   function isRealUser(m) {
     if (m.role !== 'user') return false
     return m.blocks.some((b) => (b.kind === 'text' && b.text && b.text.trim()) || b.kind === 'image')
@@ -392,13 +428,14 @@ import { firstSendHash } from '../sidebar/recent.js'
   function userBodyHtml(m) {
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
-    const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
+    let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
     if (ids.length) {
-      const stripped = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
-      return mdHtml(stripped)
+      txt = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
     }
+    // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
+    txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     const hasImg = m.blocks.some((b) => b.kind === 'image')
-    return mdHtml(hasImg && !txt ? '[图片]' : txt)
+    return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
 
   // 图片容器（用户 2026-08-30 定案：渲染在气泡外）：.msg 内、.body 后——.msg 无背景，
@@ -411,6 +448,29 @@ import { firstSendHash } from '../sidebar/recent.js'
     const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/image-cache/${live.curUuid || ''}/${id}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
+
+  // 文件卡片（2026-09-12 文件上传，用户定案「像图片一样有对应的 UI」）：与图片同构——消息文本里
+  // 的 [文件:<落盘绝对路径>] 占位剥出渲染成气泡外下方文件卡片（图标+文件名，title=完整路径，
+  // 点击复制路径供粘贴他用）。文件已落盘（uploads/ 不随会话清理），无图片的 404/裸文本回落问题。
+  function fileCardsHtml(paths) {
+    const cards = paths.map((p) => {
+      const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
+      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${I.dshFile}<span class="mf-name">${esc(name)}</span></span>`
+    }).join('')
+    return `<div class="msg-files">${cards}</div>`
+  }
+  function userFilesHtml(m) {
+    const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
+    const paths = []
+    txt.replace(/\[文件:([^\]]+)\]/g, (_, p) => { paths.push(p.trim()); return '' })
+    return paths.length ? fileCardsHtml(paths) : ''
+  }
+  // 文件卡片点击 = 复制落盘路径（事件委托，innerHTML 重建不受影响）
+  document.addEventListener('click', (e) => {
+    const c = e.target && e.target.closest ? e.target.closest('.msg-file') : null
+    if (!c || !messagesEl.contains(c)) return
+    writeClipboard(c.dataset.path || '').then((ok) => toast(ok ? '已复制路径' : '复制失败'))
+  })
 
   // 大图预览 lightbox（2026-08-30 用户定案：单击缩略图看大图）：单例覆盖层，
   // src 复用缩略图同 URL（网关 Cache-Control private 1d，字节已缓存零请求）；
@@ -557,7 +617,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         const gbody = userBodyHtml(g.m)
         out.splice(Math.min(g.pos, out.length), 0, {
           kind: 'guide', gi,
-          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}>${gbody ? `<div class="body">${gbody}</div>` : ''}${userImgsHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）；纯图无文本不出空气泡（2026-09-07 空气炮根修）
+          html: `<div class="msg user" data-m="${s.key}" data-t="g${gi}"${g.i != null ? ` data-g="${g.i}"` : ''}>${whoHtml(g.m)}${gbody ? `<div class="body">${gbody}</div>` : ''}${userImgsHtml(g.m)}${userFilesHtml(g.m)}</div>`, // 引导气泡不带复制按钮（用户 2026-08-30 定案）；纯图无文本不出空气泡（2026-09-07 空气炮根修）
         })
       }
       return out
@@ -599,7 +659,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         // 纯图消息（文本剥 [Image #N] 占位后为空）不出 .body 空气泡，复制按钮同去（无文本可复制；
         // 乐观气泡同构同去防接管帧形态跳变）——2026-09-07 空气炮根修
         const ubody = userBodyHtml(m)
-        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u">${ubody ? `<div class="body">${ubody}</div>` : ''}${userImgsHtml(m)}${ubody ? `<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div>` : ''}</div>`
+        segHtml += `<div class="msg user" data-m="${s.key}" data-t="u">${whoHtml(m)}${ubody ? `<div class="body">${ubody}</div>` : ''}${userImgsHtml(m)}${userFilesHtml(m)}${ubody ? `<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div>` : ''}</div>`
         lastNode = { key: s.key, type: 'u' }
       }
 
@@ -794,12 +854,12 @@ import { firstSendHash } from '../sidebar/recent.js'
 
 
   let pendingUserMsgs = []
-  function addUser(text, imgs) {
+  function addUser(text, imgs, files) {
     clearTakeover() // 清掉残留的提问/审批 takeover
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
     // 「新回合开启主张」。主张至多一个：主张折叠在场时后续发送恒为 dock 成员。
     const hasLive = !!messagesEl.querySelector('details.done-fold.done-live')
-    pendingUserMsgs.push({ hash: state.currentHash, text, imgs: imgs || [], baseTs: live.lastDataTs || 0, form: hasLive ? 'dock' : 'bubble', claimTs: Date.now() })
+    pendingUserMsgs.push({ hash: state.currentHash, text, imgs: imgs || [], files: files || [], baseTs: live.lastDataTs || 0, form: hasLive ? 'dock' : 'bubble', claimTs: Date.now() })
     renderTransient()
     // 两层消息流：乐观开启气泡唤出占位（排队成员/dock 不唤——会话处理中发送不打断当前展示，
     // 2026-09-08 定案「只有处于结束状态的会话发送乐观气泡才唤出占位」）。气泡取暂态区最后
@@ -807,7 +867,7 @@ import { firstSendHash } from '../sidebar/recent.js'
     if (!hasLive) {
       const zone = document.getElementById('live-zone')
       const els = zone ? zone.querySelectorAll('.msg.user') : []
-      if (els.length) stageStart(els[els.length - 1], 'optimistic', true)
+      if (els.length) stageStart(els[els.length - 1], 'optimistic')
     }
     scrollBottom() // 发送后跟随下滑（占位在场=两层跟随，动画期不抢）
   }
@@ -917,5 +977,7 @@ export {
   toolMeta,
   userBodyHtml,
   userImgsHtml,
+  userFilesHtml,
+  fileCardsHtml,
   writeClipboard,
 }

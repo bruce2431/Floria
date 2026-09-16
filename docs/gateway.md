@@ -5,7 +5,9 @@
 
 ## 1. API 前缀与端点总览（2026-08-30 根治定案）
 
-网关全部端点挂 `/gateway/<端点>`（health/activate/shutdown/sessions/plugins/models/model/model-report/wsession[/stop]/diagnostics/session[/rename/.queued]/backend/project/file/image-cache/conversation/activity/events），根 `/api` 撤空（旧路径不保留、无兼容双挂）——定案背景：原端点挂根 `/api/*` 与 `/backend/<label>/` 代理页面共享同一 origin 命名空间，被代理页面写死绝对路径 `/api/*` 会打到网关自身（token 401 → 前端探测失败锁 mock，Pj13 两个会话均踩坑）；迁移后被代理页面绝对路径写错只会 404，永不误伤网关；「故意打网关」的预览页（Pj1）显式用 `/gateway/*`。CLI 侧 `gatewayClient`/`conversationDisplay`/`server` 命令、前端 `app.js`/`sw.js`/`default-preview/default.js` 同批迁移。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，不属网关前缀，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开例外不变），sw 缓存排除同步 `/gateway/`。
+网关全部端点挂 `/gateway/<端点>`（health/activate/shutdown/sessions/plugins/models/model/model-report/wsession[/stop]/diagnostics/session[/rename/.queued]/backend/project/file/image-cache/conversation/activity/upload/events），根 `/api` 撤空（旧路径不保留、无兼容双挂）——定案背景：原端点挂根 `/api/*` 与 `/backend/<label>/` 代理页面共享同一 origin 命名空间，被代理页面写死绝对路径 `/api/*` 会打到网关自身（token 401 → 前端探测失败锁 mock，Pj13 两个会话均踩坑）；迁移后被代理页面绝对路径写错只会 404，永不误伤网关；「故意打网关」的预览页（Pj1）显式用 `/gateway/*`。CLI 侧 `gatewayClient`/`conversationDisplay`/`server` 命令、前端 `app.js`/`sw.js`/`default-preview/default.js` 同批迁移。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，不属网关前缀，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开例外不变），sw 缓存排除同步 `/gateway/`。
+
+**文件上传 `/gateway/upload`（2026-09-12）**：`POST /gateway/upload?name=<文件名>&sid=<会话hash>|&project=<项目>`，body=原始字节（单文件上限 20MB，超限 413 复用 `readBodyWithLimit` 限流——原 `readReportBody` 的收集循环抽出共享）。**落盘跟随会话（09-12 四轮用户定案，改掉一轮「恒 exe 目录」旧案）**：sid 解码（`decodeSessionPath`，base64url 解回 `<启动根>/.claude/projects/<uuid>.jsonl`、强制限便携根内）剥 `.claude/projects` marker 得会话启动根 = 落盘根（全局笔=全局根、项目会话=项目根、桥接 CLI=其 cwd，与消息占位相对化 relPath 同根同源）→ `<该根>/uploads/<文件名>`；解码失败 → `sessionProjectRootOf` 磁盘扫描兜一层；新会话（首页首送前上传，尚无 sid）带 `project` → `webSessionProjectRoot` 同源解析（与 wsession 同语义，label 不命中回落全局根）；无任何会话上下文 → `getProjectRoot()`（exe 目录，旧案位置）。同名不覆盖 → `-1`/`-2` 序号；文件名 basename 化 + Windows 非法字符清洗（`\/:*?"<>|` 及控制符 → `_`）+ 保留名防护（CON/PRN/AUX/NUL/COM1-9/LPT1-9 加 `_` 前缀）+ 截断 120 字符。响应 `{ok, name, path:'uploads/<名>', abs:<绝对路径>, size}`；非超限错误（写盘失败等）走 `sendError` 500。前端入口 = + 浮窗「上传文件」行（docs/web-ui.md §23）。**文件占位相对化配套（2026-09-12 三轮）**：①wsession 响应附 `cwd`（=webSessionProjectRoot，与 spawnWebSession 的 spawn cwd 同源）——新会话 jsonl 未落盘，是首条消息文件占位相对化唯一 cwd 源；②`readSession` 记录缺失分支从 id 编码路径派生 cwd（同上剥 marker）——新会话空 fetch 回调 `setSessionCwd(cwd)` 不再洗掉 wsession 带回值。
 
 **安全加固（2026-08-15）**：HTTP 数据接口与 WS 升级一致要求 token——`/gateway/*`（除 `/gateway/health` 探活）与 `/preview/*` 一律校验，失败 401；CLI 侧上报（`conversationDisplay.ts`）经 `src/utils/gatewayToken.ts`（localGateway 启动写/停止清）读取 token 附加；前端所有数据请求/EventSource/预览 iframe 带凭据（token 门锁定态不发请求、解锁后补拉）。
 
@@ -162,7 +164,7 @@ CLI 侧接收口：`src/utils/gatewayClient.ts` 的 `msg.type` 分支 → 各 `b
 
 ## 12. CLI 上行信号族（`/clients` WS，网关按会话镜像 + SSE 群发）
 
-CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients` WS 送上网关，网关三类处置：**无状态转发**（原样 SSE 群发）、**按会话镜像 + 首载快照**（网关内存 Map + TTL + CLI `detach()` 清，`/gateway/session` 首次加载附全量，SSE 增量事件体直带全量快照供前端免拉）、**单调去重**（seq 账本）。
+CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients` WS 送上网关，网关三类处置：**无状态转发**（原样 SSE 群发）、**按会话镜像 + 首载快照**（网关内存 Map + CLI `detach()` 清 + 重连 open 补发，`/gateway/session` 首次加载附全量，SSE 增量事件体直带全量快照供前端免拉；是否配时间 TTL 见下表——CLI 上行是事件驱动/去重后的快照，**载荷不变不发的镜像表禁配时间 TTL**）、**单调去重**（seq 账本）。
 
 | 信号 | 处置 | 首载字段 | 备注 |
 | --- | --- | --- | --- |
@@ -170,10 +172,46 @@ CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients
 | `stream-text` | 无状态转发 | — | 流式字符暂态（'' = 块边界/落盘/打断清除） |
 | `restored` | 无状态转发 | — | 撤回链（文本回填输入栏） |
 | `compact-state` | 无状态转发 | — | 压缩实时态起止（网关无状态，前端按 `live.compactFlags` Map + TTL 自管） |
-| `queue-state` | 镜像 `sessionQueues`（TTL 10min） | `.queued` | CLI `subscribeToCommandQueue` 订阅 + 重连补发 |
-| `task-state` | **镜像 `sessionTasks`（TTL 10min，2026-09-10）** | `.tasks` | CLI `useTasksV2.getSnapshot()` 单源上报 + 重连补发；形状边界 `normalizeGatewayTasks` 只此一处（非对象/缺 id/缺 subject 丢弃、未知 status→pending、subject 截 500、blockedBy 只留字符串） |
+| `queue-state` | 镜像 `sessionQueues`（无时间 TTL，2026-09-12 根修） | `.queued` | CLI `subscribeToCommandQueue` 订阅 + 重连补发；**每项可带 `from:{title,sid?}`（会话间通信来源）**——CLI 上报前已 `parseSessionMessage` 剥壳，网关只做形状边界白名单（title ≤200、可选 sid ≤200），见 §13 |
+| `task-state` | **镜像 `sessionTasks`（无时间 TTL，2026-09-12 根修）** | `.tasks` | CLI `useTasksV2.getSnapshot()` 单源上报 + 重连补发；形状边界 `normalizeGatewayTasks` 只此一处（非对象/缺 id/缺 subject 丢弃、未知 status→pending、subject 截 500、blockedBy 只留字符串）。原 TTL 10min 与「载荷不变不发」矛盾——活跃会话清单 10 分钟不变即被清仓 → web 浮窗消失（09-12 实证根修，生命周期=upsert + detach 清 + 重连补发） |
 | `activity` | 镜像 `sessionActivity`（TTL 10min + REPL 60s 心跳） | `.state`（`/gateway/sessions` 列表） | 会话状态点判定兼需 `isPidAlive(act.pid)`（busy 绿/idle 红/waiting 橘/停止无点，§7 恒绿根修） |
 | `session-delta` | 单调去重 `sessionDeltaSeq`（cli-hello 重置） | `.deltaSeq` | 展示增量（`{seq, anchorSid, messages}`），见 [web-ui.md](web-ui.md) §4 |
 | `cli-hello` | 注册 `cliClients` + 复位 seq 水位 | — | 握手（带 `process.pid` 供网关补填真实 pid，§7） |
 
-**新增信号的收编规范**：内容类通知优先并入 `session-delta` 流（web-ui.md §4 定案）；仅当信号语义不属于「展示序列内容」（如队列/任务清单/压缩态/活性）才单开一类，且一律照上表镜像三件套（Map + TTL + `detach()` 清 + `/gateway/session` 首载字段 + SSE 全量快照）落地。
+**新增信号的收编规范**：内容类通知优先并入 `session-delta` 流（web-ui.md §4 定案）；仅当信号语义不属于「展示序列内容」（如队列/任务清单/压缩态/活性）才单开一类，且一律照上表镜像三件套（Map + `detach()` 清 + 重连 open 补发 + `/gateway/session` 首载字段 + SSE 全量快照）落地。时间 TTL 只配给上行端有心跳/持续重报语义的镜像（activity/display/model）；载荷不变不发的快照表（queue/task）**禁配时间 TTL**（2026-09-12 sessionTasks/sessionQueues 根修定案）。
+
+## 13. 会话间通信：`session-message` 上行→跨会话投递（2026-09-15，`SESSION_LINK`）
+
+**这是目前唯一的 CLI→网关→另一 CLI 的端到端消息路径**（其余 `/clients` 帧都是「web ↔ 某一个 CLI」或纯上行信号）。链路：
+
+```
+会话 A 的 CLI ──上行 /clients {type:'session-message', requestId, toSid, text, from}──► 网关
+                                                                                      │ 纯 sid 路由（不解析标题）
+                                                                                      ▼
+                                                         deliverToSession(toSid, {type:'session-message', text, from})
+                                                          ├─ cliClients.get(toSid) 在线 ──► 直投
+                                                          ├─ spawningPromises.has ────────► pendingDeliveries 暂存
+                                                          │                                  （/clients 注册钩子 flushPendingDeliveries 补投）
+                                                          └─ 离线/从未 spawn ─────────────► resumeAndDeliver（定位项目根 → spawn --resume
+                                                                                             → 400ms×5s 轮询 tryInject）
+会话 B 的 CLI ◄── 下行 {type:'session-message', text, from} ──► enqueue(wrapSessionMessage(from, text), mode:'prompt',
+                                                                 skipSlashCommands:true)  ← 与本地打字同队列同分叉
+回执：{type:'session-message-result', requestId, ok, error?}
+```
+
+**职责分界（定案）**：
+
+| 侧 | 职责 |
+|---|---|
+| CLI（发送方） | 暴露集合判定 + 标题/sid → sid 解析（`utils/sessionExposure.ts` + `GET /gateway/sessions`），**授权与寻址都在转录所在的那一侧完成** |
+| 网关 | **纯 sid 路由**：形状校验（空 `toSid`/空文本/**自发自收** → 回执错误）、三岔投递、回执。**不做标题匹配、无标题索引** |
+
+**`deliverToSession(sessionId, frame, fb)` 是统一三岔口**（发送方与 web `send` 共用同一投递语义）；`DeliveryFeedback` 三态 `staged`/`resuming`/`done`，只有 `done` 回执——前两态由发送侧 20s 超时兜底（`SESSION_MESSAGE_TIMEOUT_MS`）。
+
+**为什么单独开 `session-message` 帧而不复用 `send`**：`send` 帧无 `from` 字段，而来源要一路带到接收侧转录（模型可见，见 [core.md](core.md)）。
+
+**离线拉起沿用既有行为**：不新增信号源——`resumeAndDeliver` 就是 web `send` 那条路径（§7「发送即 resume」），本次仅复用。风险（拉起产生意外副作用）由用户 2026-09-15 定案允可。
+
+**回环**：**网关不做代码级刹车**（用户定案）——靠 `@WrokSpace/.claude/CLAUDE.md` 的「非必要不通信」约束。唯一硬边界是「自发自收」直接拒。
+
+**相关端点**：`GET /gateway/sessions` 返回 `{file, title, state?}[]`，CLI 侧 `fetchSessionDirectory()` 取 `file` 去掉 `.jsonl` 作为 sid（与 web 消息路由的 `hashOf(s)` 同键）、`title` 空则记「未命名会话」。

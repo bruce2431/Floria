@@ -19,25 +19,29 @@
  *   - phase1 全量归并 n<2 时 Python 会把缺 cog_id 的裸节点传进 phase2（潜在
  *     KeyError），TS 统一转 cog1 形状规避
  *
+ * ⚠️ 2026-09-15 用户定案——**全链路纯标注驱动，文本不参与任何判据**（此前 query/keywords
+ * 的余弦在合并判据占 0.15、在边权占 0.15，实测只影响 1 对节点却把 998/1081 条纯文本巧合
+ * 边灌进图，32 节点「无信号大群」即由此粘成）：
+ *   - 节点归并：sim = jaccard(true 集) ≥ cog.merge_threshold（不再有文本项）
+ *   - 边权：weight = cog.w_true_assoc·jt + cog.w_revelant·rv（不再有 cq/ck/cb）
+ *   - edge_filter.no_jt_penalty 随之删除（它本只为压文本背景地板而存在）
+ *   ⇒ coggraph.ts 全文件不再需要嵌入（encode/embedder 依赖已移除）
+ *
+ * ⚠️ **cog 是事实层**（同次定案）：build_graph 永不修正既有节点的记忆集，只把新 pre
+ * 记录折进来（并集）或建新节点 ⇒ **节点集合只增不减**，发现错误直接改 cog 条目；
+ * precog 降级为「收件箱」——pre 必留（新节点入口 + 待标注队列 + 防假标注门禁载体），
+ * consumed 由 precog.ttl_days 回收。故节点不再持久化 merged_from（唯一消费者是已删的
+ * precog 回溯分支），也不再有 true_count/revelant_count（= set.size，纯冗余第二状态源）。
+ *
  * 核心函数走显式 neuronPath（buildCogGraphInDir/detectCommunitiesInDir），
  * 注册名包装层再经 resolveNeuronPath——测试可在隔离目录跑，不污染真实库。
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { cfgGet, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
+import { cfgGet, cfgRequired, resolveNeuronPath } from './config.js'
 import { parse as parseYaml } from 'yaml'
-import {
-  deletePrecog,
-  deriveEntryText,
-  markPrecogConsumed,
-  readMemories,
-  readPrecogRecords,
-  type MemEntry,
-  type PrecogRecord,
-} from './db.js'
-import { hasChinese, segmentChinese } from './segment.js'
-import { encode } from './embedder.js'
+import { deletePrecog, markPrecogConsumed, readPrecogRecords, type PrecogRecord } from './db.js'
 import { leidenCommunities, type LeidenEdgeInput } from './leiden.js'
 
 // ───────────────────────── 类型 ─────────────────────────
@@ -58,8 +62,6 @@ interface Cog1Node {
   keywords: string[]
   true_set: Set<string>
   revelant_set: Set<string>
-  /** phase1 全量归并路径写入；fold 路径不写（对齐 Python：_phase2_associate 只读 merged_from） */
-  merged_from?: string[]
   description: string
 }
 
@@ -76,19 +78,13 @@ export interface CogGraph {
     id: string
     query: string
     keywords: string[]
-    true_count: number
-    revelant_count: number
     true_memories: string[]
     revelant_memories: string[]
-    merged_from: string[]
   }>
   edges: Array<{
     source: string
     target: string
     weight: number
-    cq: number
-    ck: number
-    cb: number
     jt: number
     rv: number
   }>
@@ -126,30 +122,6 @@ function writeJsonAtomic(path: string, data: unknown): void {
   const tmp = `${path}.tmp`
   writeFileSync(tmp, `${JSON.stringify(data, null, 1)}\n`, 'utf-8')
   renameSync(tmp, path)
-}
-
-/** Python _tokenize：空格分段，中文段切词过滤停用词，非中文整段保留；去重保序 */
-function tokenize(text: string): string[] {
-  const tokens: string[] = []
-  for (const part of text.split(/\s+/)) {
-    if (!part) continue
-    if (hasChinese(part)) tokens.push(...segmentChinese(part))
-    else tokens.push(part)
-  }
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const t of tokens) {
-    if (seen.has(t)) continue
-    seen.add(t)
-    result.push(t)
-  }
-  return result
-}
-
-function cosSim(a: number[], b: number[]): number {
-  let dot = 0
-  for (let i = 0; i < a.length; i++) dot += a[i]! * b[i]!
-  return dot
 }
 
 function jaccard(s1: Set<string>, s2: Set<string>): number {
@@ -193,19 +165,10 @@ interface CogOpts {
   cfg: Record<string, unknown>
   cfgContext: string
   cogPrefix: string
-  modelCacheDir: string
 }
 
 function numOpt(opts: CogOpts, path: string): number {
   return Number(cfgRequired(opts.cfg, path, opts.cfgContext))
-}
-
-/** 节点三元组嵌入文本（对照 _emb：q_text 与 q_text+keywords 两路） */
-function embedTextsOf(nd: { query: string; keywords: string[] }): [string, string] {
-  const qt = tokenize(nd.query)
-  const qText = qt.length ? qt.join(' ') : nd.query
-  const kt = tokenize(nd.keywords.join(' '))
-  return [qText, `${qText} ${kt.join(' ')}`]
 }
 
 // ───────────────────────── p5 阶段件 ─────────────────────────
@@ -270,42 +233,22 @@ function preToCog1(nd: PreNode, opts: CogOpts, seq: number): Cog1Node {
     keywords: [...new Set(nd.keywords)].sort(),
     true_set: nd.true_set,
     revelant_set: nd.revelant_set,
-    merged_from: nd.sources,
     description: '',
   }
 }
 
-/** Phase 1：按相似度连通分量归并节点为 cog1（sim = w_q·cos_q + w_k·cos_k + w_t·jac_t） */
-async function phase1Merge(nodes: PreNode[], opts: CogOpts): Promise<Cog1Node[]> {
+/** Phase 1：按相似度连通分量归并节点为 cog1（sim = jaccard(true 集)，纯标注驱动） */
+function phase1Merge(nodes: PreNode[], opts: CogOpts): Cog1Node[] {
   const n = nodes.length
   if (n < 2) return nodes.map((nd, i) => preToCog1(nd, opts, i + 1))
 
-  const wQuery = numOpt(opts, 'cog.w_query')
-  const wKeywords = numOpt(opts, 'cog.w_keywords')
-  const wTrue = numOpt(opts, 'cog.w_true')
   const mergeThreshold = numOpt(opts, 'cog.merge_threshold')
-
-  const qTexts: string[] = []
-  const kwTexts: string[] = []
-  for (const nd of nodes) {
-    const [q, kw] = embedTextsOf(nd)
-    qTexts.push(q)
-    kwTexts.push(kw)
-  }
-  const [queryEmbs, kwEmbs] = await Promise.all([
-    encode(qTexts, opts.modelCacheDir),
-    encode(kwTexts, opts.modelCacheDir),
-  ])
 
   // 邻接（sim ≥ merge_threshold）+ 连通分量
   const adj: boolean[][] = Array.from({ length: n }, () => new Array<boolean>(n).fill(false))
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const sim =
-        wQuery * cosSim(queryEmbs[i]!, queryEmbs[j]!) +
-        wKeywords * cosSim(kwEmbs[i]!, kwEmbs[j]!) +
-        wTrue * jaccard(nodes[i]!.true_set, nodes[j]!.true_set)
-      if (sim >= mergeThreshold) {
+      if (jaccard(nodes[i]!.true_set, nodes[j]!.true_set) >= mergeThreshold) {
         adj[i]![j] = true
         adj[j]![i] = true
       }
@@ -346,20 +289,17 @@ async function phase1Merge(nodes: PreNode[], opts: CogOpts): Promise<Cog1Node[]>
         keywords: [...new Set(nd.keywords)].sort(),
         true_set: nd.true_set,
         revelant_set: nd.revelant_set,
-        merged_from: nd.sources,
         description: '',
       })
     } else {
       const tSet = new Set<string>()
       const rSet = new Set<string>()
-      const allSrc: string[] = []
       const allKw = new Set<string>()
       const queries: string[] = []
       for (const v of comp) {
         const nd = nodes[v]!
         for (const x of nd.true_set) tSet.add(x)
         for (const x of nd.revelant_set) rSet.add(x)
-        allSrc.push(...nd.sources)
         for (const kw of nd.keywords) allKw.add(kw)
         queries.push(nd.query)
       }
@@ -371,7 +311,6 @@ async function phase1Merge(nodes: PreNode[], opts: CogOpts): Promise<Cog1Node[]>
         keywords: [...allKw].sort(),
         true_set: tSet,
         revelant_set: rSet,
-        merged_from: allSrc,
         description: '',
       })
     }
@@ -379,59 +318,33 @@ async function phase1Merge(nodes: PreNode[], opts: CogOpts): Promise<Cog1Node[]>
   return cog1List
 }
 
-/** 加载既有 cog_graph 节点（新 schema 直读 true/revelant_memories；旧节点经 precog 记录回溯） */
-function loadExistingGraphNodes(
-  graphPath: string,
-  recById: Map<string, PrecogRecord>,
-): ExistingNode[] {
+/** 加载既有 cog_graph 节点（cog 即事实层：直读节点自身记忆集，不从 precog 回溯） */
+function loadExistingGraphNodes(graphPath: string): ExistingNode[] {
   const data = readJson<{ nodes?: Array<Record<string, unknown>> }>(graphPath)
   if (!data) return []
   const nodes: ExistingNode[] = []
   for (const nd of data.nodes ?? []) {
     const nid = nd.id as string | undefined
     if (!nid) continue
-    const tsRaw = nd.true_memories as string[] | undefined
-    const rsRaw = nd.revelant_memories as string[] | undefined
-    let ts: Set<string>
-    let rs: Set<string>
-    if (tsRaw === undefined || rsRaw === undefined) {
-      ts = new Set()
-      rs = new Set()
-      for (const rid of (nd.merged_from as string[] | undefined) ?? []) {
-        const rec = recById.get(rid)
-        if (!rec) continue
-        for (const r2 of rec.results ?? []) {
-          if (!r2.id) continue
-          if (r2.accuracy === 'true') ts.add(r2.id)
-          else if (r2.accuracy === 'revelant') rs.add(r2.id)
-        }
-      }
-    } else {
-      ts = new Set(tsRaw)
-      rs = new Set(rsRaw)
-    }
     nodes.push({
       id: nid,
       query: (nd.query as string) ?? '',
       keywords: ((nd.keywords as string[]) ?? []).slice(),
-      true_set: ts,
-      revelant_set: rs,
+      true_set: new Set((nd.true_memories as string[] | undefined) ?? []),
+      revelant_set: new Set((nd.revelant_memories as string[] | undefined) ?? []),
     })
   }
   return nodes
 }
 
 /** 批折叠：新 pre 节点 → 折叠进既有节点（sim ≥ threshold）或新建（批内跑、有全局视野） */
-async function foldIntoExisting(
+function foldIntoExisting(
   newNodes: PreNode[],
   existing: ExistingNode[],
   opts: CogOpts,
-): Promise<Cog1Node[]> {
+): Cog1Node[] {
   if (!existing.length) return phase1Merge(newNodes, opts)
 
-  const wQuery = numOpt(opts, 'cog.w_query')
-  const wKeywords = numOpt(opts, 'cog.w_keywords')
-  const wTrue = numOpt(opts, 'cog.w_true')
   const mergeThreshold = numOpt(opts, 'cog.merge_threshold')
 
   const pool: Cog1Node[] = existing.map(nd => ({
@@ -443,37 +356,22 @@ async function foldIntoExisting(
     revelant_set: nd.revelant_set,
     description: '',
   }))
-  const poolTexts = pool.map(nd => embedTextsOf(nd))
-  const [poolQ, poolKw] = await Promise.all([
-    encode(poolTexts.map(t => t[0]), opts.modelCacheDir),
-    encode(poolTexts.map(t => t[1]), opts.modelCacheDir),
-  ])
-
-  const newTexts = newNodes.map(nd => embedTextsOf(nd))
-  const [newQ, newKw] = await Promise.all([
-    encode(newTexts.map(t => t[0]), opts.modelCacheDir),
-    encode(newTexts.map(t => t[1]), opts.modelCacheDir),
-  ])
 
   const nowStr = nowStampCompact()
   let newIdx = 0
-  for (let k = 0; k < newNodes.length; k++) {
-    const nd = newNodes[k]!
+  for (const nd of newNodes) {
     if (nd.true_set.size === 0 && nd.revelant_set.size === 0) continue
     let bestI = -1
     let bestSim = -1
     for (let i = 0; i < pool.length; i++) {
-      const sim =
-        wQuery * cosSim(newQ[k]!, poolQ[i]!) +
-        wKeywords * cosSim(newKw[k]!, poolKw[i]!) +
-        wTrue * jaccard(nd.true_set, pool[i]!.true_set)
+      const sim = jaccard(nd.true_set, pool[i]!.true_set)
       if (sim > bestSim) {
         bestSim = sim
         bestI = i
       }
     }
     if (bestI >= 0 && bestSim >= mergeThreshold) {
-      // 折叠进既有节点：并集记忆/关键词/来源，保留原 id/query（不破坏颗粒度）
+      // 折叠进既有节点：并集记忆/关键词，保留原 id/query（不破坏颗粒度）
       const target = pool[bestI]!
       for (const x of nd.true_set) target.true_set.add(x)
       for (const x of nd.revelant_set) target.revelant_set.add(x)
@@ -490,39 +388,19 @@ async function foldIntoExisting(
         description: '',
       }
       pool.push(node)
-      poolQ.push(newQ[k]!)
-      poolKw.push(newKw[k]!)
     }
   }
   return pool
 }
 
-function loadMemIndex(neuronPath: string): Map<string, MemEntry> {
-  const dbPath = join(neuronPath, 'l2.mem', 'mem.db')
-  const entries = readMemories(dbPath)
-  if (!entries.length && !existsSync(dbPath)) {
-    throw new Error(`mem.db 不存在（未迁移 DB 化）: ${dbPath}`)
-  }
-  const map = new Map<string, MemEntry>()
-  for (const e of entries) {
-    if (e.memory_id) map.set(e.memory_id, e)
-  }
-  return map
-}
-
-/** Phase 2：重算边构建加权关联图（含 no_jt/rv 惩罚），nodes 直链 + 边按权重降序 */
-async function phase2Associate(
+/** Phase 2：重算边构建加权关联图（纯标注项 + rv 惩罚），nodes 直链 + 边按权重降序 */
+function phase2Associate(
   cog1List: Cog1Node[],
   remainingNodes: ExistingNode[],
   opts: CogOpts,
-  memIndex: Map<string, MemEntry>,
-): Promise<CogGraph> {
-  const wQuery = numOpt(opts, 'cog.w_query_assoc')
-  const wKeywords = numOpt(opts, 'cog.w_keywords_assoc')
-  const wBlocks = numOpt(opts, 'cog.w_blocks_assoc')
+): CogGraph {
   const wTrue = numOpt(opts, 'cog.w_true_assoc')
   const wRevelant = numOpt(opts, 'cog.w_revelant')
-  const noJtPenalty = numOpt(opts, 'edge_filter.no_jt_penalty')
   const rvPenaltyRatio = numOpt(opts, 'edge_filter.rv_penalty.ratio_threshold')
   const rvPenaltyWeight = numOpt(opts, 'edge_filter.rv_penalty.weight')
 
@@ -532,27 +410,14 @@ async function phase2Associate(
     keywords: string[]
     true_set: Set<string>
     revelant_set: Set<string>
-    blocks_text: string
-    true_count: number
-    revelant_count: number
-    merged_from: string[]
   }> = []
   for (const c of cog1List) {
-    const blockTexts: string[] = []
-    for (const t of [...c.true_set].sort()) {
-      const s = memIndex.get(t) ? deriveEntryText(memIndex.get(t)!) : ''
-      if (s) blockTexts.push(s)
-    }
     allNodes.push({
       id: c.cog_id,
       query: c.query,
       keywords: c.keywords,
       true_set: c.true_set,
       revelant_set: c.revelant_set,
-      blocks_text: blockTexts.length ? blockTexts.join('。') : c.query,
-      true_count: c.true_set.size,
-      revelant_count: c.revelant_set.size,
-      merged_from: c.merged_from ?? [],
     })
   }
   for (const r of remainingNodes) {
@@ -562,40 +427,15 @@ async function phase2Associate(
       keywords: r.keywords,
       true_set: r.true_set,
       revelant_set: r.revelant_set,
-      blocks_text: r.query,
-      true_count: r.true_set.size,
-      revelant_count: r.revelant_set.size,
-      merged_from: [],
     })
   }
 
   const m = allNodes.length
   if (m < 2) return { nodes: [], edges: [], params: {} }
 
-  const qTexts: string[] = []
-  const kwTexts: string[] = []
-  const bTexts: string[] = []
-  for (const nd of allNodes) {
-    const qt = tokenize(nd.query)
-    const qText = qt.length ? qt.join(' ') : nd.query
-    const kt = tokenize(nd.keywords.join(' '))
-    qTexts.push(qText)
-    kwTexts.push(`${qText} ${kt.join(' ')}`)
-    const bt = tokenize(nd.blocks_text)
-    bTexts.push(bt.length ? bt.join(' ') : nd.blocks_text)
-  }
-  const [queryEmbs, kwEmbs, blocksEmbs] = await Promise.all([
-    encode(qTexts, opts.modelCacheDir),
-    encode(kwTexts, opts.modelCacheDir),
-    encode(bTexts, opts.modelCacheDir),
-  ])
-
   const edges: CogGraph['edges'] = []
   for (let i = 0; i < m; i++) {
     for (let j = i + 1; j < m; j++) {
-      const cosQ = cosSim(queryEmbs[i]!, queryEmbs[j]!)
-      const cosK = cosSim(kwEmbs[i]!, kwEmbs[j]!)
-      const cosB = cosSim(blocksEmbs[i]!, blocksEmbs[j]!)
       const a = allNodes[i]!
       const b = allNodes[j]!
       const jacT = jaccard(a.true_set, b.true_set)
@@ -604,9 +444,7 @@ async function phase2Associate(
       const bUnion = new Set([...b.true_set, ...b.revelant_set])
       const rvScore = Math.max(overlapRatio(a.revelant_set, bUnion), overlapRatio(b.revelant_set, aUnion))
 
-      let weight = wQuery * cosQ + wKeywords * cosK + wBlocks * cosB + wTrue * jacT + wRevelant * rvScore
-
-      if (jacT <= 0) weight *= noJtPenalty
+      let weight = wTrue * jacT + wRevelant * rvScore
       const rvRatio = rvScore / (jacT + rvScore + 1e-8)
       if (rvRatio > rvPenaltyRatio && weight > 0) weight *= rvPenaltyWeight
 
@@ -614,9 +452,6 @@ async function phase2Associate(
         source: a.id,
         target: b.id,
         weight: round4(weight),
-        cq: round4(cosQ),
-        ck: round4(cosK),
-        cb: round4(cosB),
         jt: round4(jacT),
         rv: round4(rvScore),
       })
@@ -628,17 +463,14 @@ async function phase2Associate(
     id: nd.id,
     query: nd.query,
     keywords: nd.keywords.slice(0, 8),
-    true_count: nd.true_count,
-    revelant_count: nd.revelant_count,
     true_memories: [...nd.true_set].sort(),
     revelant_memories: [...nd.revelant_set].sort(),
-    merged_from: nd.merged_from,
   }))
 
   return {
     nodes: nodesOut,
     edges,
-    params: { w_query: wQuery, w_keywords: wKeywords, w_blocks: wBlocks, w_true: wTrue, w_revelant: wRevelant },
+    params: { w_true: wTrue, w_revelant: wRevelant },
   }
 }
 
@@ -687,16 +519,9 @@ export async function buildCogGraphInDir(neuronPath: string): Promise<CogGraphBu
 
   const personId = String(cfgRequired(cfg, 'person.id', cfgContext))
   const cogPrefix = `C${personId}`
-  void cfgRequired(cfg, 'memory.model_name', cfgContext) // Python 侧显式传模型；TS embedder 单例固定 bge-small-zh
-  const opts: CogOpts = {
-    cfg,
-    cfgContext,
-    cogPrefix,
-    modelCacheDir: join(getGlobalRoot(), 'cache', 'models'),
-  }
+  const opts: CogOpts = { cfg, cfgContext, cogPrefix }
 
-  const recById = new Map(activeRecords.map(r => [r.record_id ?? '', r]))
-  const existing = loadExistingGraphNodes(graphPath, recById)
+  const existing = loadExistingGraphNodes(graphPath)
   const preNodes = buildNodes(activeRecords)
 
   if (!preNodes.length && !existing.length) {
@@ -705,8 +530,8 @@ export async function buildCogGraphInDir(neuronPath: string): Promise<CogGraphBu
 
   // 批折叠：有既有图 → 折叠进既有节点或新建；无既有图 → 全量归并
   const cog1List = existing.length
-    ? await foldIntoExisting(preNodes, existing, opts)
-    : await phase1Merge(preNodes, opts)
+    ? foldIntoExisting(preNodes, existing, opts)
+    : phase1Merge(preNodes, opts)
 
   // 生命周期：TTL 过期 consumed 清除 + 本次聚合的 pre → consumed
   if (removedTtl > 0) {
@@ -723,8 +548,7 @@ export async function buildCogGraphInDir(neuronPath: string): Promise<CogGraphBu
   markPrecogConsumed(precogDbPath, preIds)
 
   // Phase 2：重算边（含折叠后的节点全集）
-  const memIndex = loadMemIndex(neuronPath)
-  const graph = await phase2Associate(cog1List, [], opts, memIndex)
+  const graph = phase2Associate(cog1List, [], opts)
 
   writeJsonAtomic(graphPath, graph)
 

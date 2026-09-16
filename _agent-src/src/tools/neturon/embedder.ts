@@ -115,12 +115,23 @@ export async function encode(
   modelCacheDir: string,
 ): Promise<number[][]> {
   const extractor = await getExtractor(modelCacheDir)
+  // 显式截断到模型位置上限（bge-small-zh = 512），与 Python 侧 sentence-transformers
+  // 的 max_seq_length 语义对齐。**2026-09-15 实测：不传这两个选项时行为也一样**
+  // （transformers.js feature-extraction 默认 truncation + tokenizer 的
+  // model_max_length=512，控制实验下前后向量 cos=1.0000）——此处显式化只为让「喂给
+  // ONNX 的序列长度 ≤ 模型位置表上限」这条不变量落在调用点、不依赖库默认值；上限取自
+  // tokenizer 自身配置，不另立常量。
+  // 注意截断是**静默丢尾**：802 token 的文本 vs 其首 512 token 文本 cos=1.0000，
+  // 即 290 token 完全不进向量 ⇒ 超长块的尾部对检索不可见（写入侧由 blocks.max_chars 拦）。
+  const maxTokens = (extractor as unknown as { tokenizer: { model_max_length: number } }).tokenizer.model_max_length
   const vectors: number[][] = []
   for (let i = 0; i < texts.length; i += ENCODE_BATCH) {
     const chunk = texts.slice(i, i + ENCODE_BATCH)
     const out = await extractor(chunk.map(normalizeForBert), {
       pooling: 'cls',
       normalize: true,
+      truncation: true,
+      max_length: maxTokens,
     })
     const [n, dim] = out.dims as [number, number]
     const data = out.data as Float32Array

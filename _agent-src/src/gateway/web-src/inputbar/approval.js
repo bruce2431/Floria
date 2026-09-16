@@ -1,11 +1,12 @@
 // 瞬态/落定渲染 + 审批卡 + 提问卡 + 回合态（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { TOOL_NAMES, fmtDur, CHEV, ICON_COPY, messagesHtml, pendingUserMsgs, statusFlags } from '../chat/messages.js'
+import { TOOL_NAMES, fmtDur, CHEV, ICON_COPY, messagesHtml, pendingUserMsgs, statusFlags, fileCardsHtml } from '../chat/messages.js'
 import { renderHome, renderSession } from '../chat/route.js'
 import { scrollBottom, stage, stageFollow, stageSync, appendMsg } from '../chat/stage.js'
 import { gws } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { refreshSession, bindLiveFoldTimer } from '../core/live.js'
+import { mdHtml } from '../core/markdown.js'
 import { messagesEl, inputWrap, inputBarEl, sendBtn, state, live, connUp, esc, toast } from '../core/state.js'
 import { renderUserText } from './mention.js'
 import { syncGwSend } from './send.js'
@@ -36,7 +37,9 @@ import { firstSendHash } from '../sidebar/recent.js'
     for (const q of remote) {
       if (q && typeof q.content === 'string' && q.content && !seen.has(q.content)) {
         seen.add(q.content)
-        dockItems.push({ content: q.content, ts: typeof q.ts === 'number' ? q.ts : 0 })
+        // 跨会话来件在队列里同样标来源（CLI 侧 queue-state 已把 wrapper 剥成 content+from，
+        // 见 gatewayClient.queueItemsFromSnapshot）——排队区不出现原始 XML 包装文本
+        dockItems.push({ content: q.content, from: q.from || null, ts: typeof q.ts === 'number' ? q.ts : 0 })
       }
     }
     dockItems.sort((a, b) => (a.ts || 0) - (b.ts || 0))
@@ -50,7 +53,7 @@ import { firstSendHash } from '../sidebar/recent.js'
     }
     // 签名跳过：区内容无变化的重复调用（400ms 防抖刷新/逐条 SSE）不重建 DOM——重建会重播
     // msg-in 入场动画（跳字/滚动路径上的闪烁根源）
-    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => q.content)])
+    const sig = JSON.stringify([authLive, bubble.map((p) => p.text), dockItems.map((q) => [(q.from && q.from.title) || '', q.content])])
     let zone = document.getElementById('live-zone')
     if (zone && zone.dataset.sig === sig) {
       claimTimerSet(bubble.length > 0)
@@ -78,10 +81,17 @@ import { firstSendHash } from '../sidebar/recent.js'
         const imgsHtml = imgs.length
           ? '<div class="msg-imgs">' + imgs.map((im) => '<img class="msg-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
           : ''
-        const bodyText = imgs.length ? String(p.text).replace(/\s*\[Image #\d+\]/g, '') : p.text
-        const bodyInner = renderUserText(bodyText)
-        // 纯图消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
-        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
+        // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
+        const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
+        const filesHtml = files.length ? fileCardsHtml(files) : ''
+        const bodyText = String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+        // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
+        // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
+        // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
+        // 同构不变量见下（乐观开启气泡与落盘气泡同构，2026-09-07 定案）——body 渲染是它此前漏网的一环。
+        const bodyInner = mdHtml(bodyText)
+        // 纯图/纯文件消息：无 .body 空气泡、无复制按钮（落盘接管帧同构同去，2026-09-07 空气炮根修）
+        return '<div class="msg user msg-in" data-t="u">' + (bodyInner ? '<div class="body">' + bodyInner + '</div>' : '') + imgsHtml + filesHtml + (bodyInner ? '<div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">' + ICON_COPY + '</button></div>' : '') + '</div>'
       }).join('') +
       (bubble.length
         ? '<details class="done-fold done-live msg-in" id="claim-fold" open><summary>' + procLabel('正在处理', '0s') + '</summary><div class="done-body"></div></details>'
@@ -91,8 +101,10 @@ import { firstSendHash } from '../sidebar/recent.js'
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = imgs ? String(q.content).replace(/\s*\[Image #\d+\]/g, '') : q.content
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body"><p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+            const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+            // 来源行在 q-body 首行（排队项是单行 flex，标签塞同一行会挤压正文；行内首行即视觉上方）
+            const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)

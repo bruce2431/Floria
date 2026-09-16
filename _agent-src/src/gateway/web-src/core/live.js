@@ -262,6 +262,32 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     return false
   }
 
+  // 回退快照防御（2026-09-11 三诊根治「发送瞬间跳到上一条消息」真主链）：全量快照必须单调
+  // 前进。网关 /gateway/session = 磁盘 jsonl 全量 + CLI 异步上报窗口合并（localGateway.ts
+  // mergeDisplayMessages），回合开启时序窗内两源都可能短暂落后（dequeue 落盘前 / display 缓冲
+  // 重建期）→ 同一会话先后两次 fetch 可能拿到「已渲染内容消失」的回退快照（20260911203904
+  // 录像三态实证：回合4权威渲染在屏 → 0.1s 后被旧快照整页重建洗掉 → hasNewUser 在回退数据上
+  // 把上一回合误判为「新用户消息」stageStart 重钉 =「跳到上一条消息」；随后 delta gap 强制对账
+  // 撞上空窗，force 绕过下方空 fetch 守卫整页清空 = 空白窗口）。回退快照一律整帧丢弃：不渲染、
+  // 不重写 localMessages/deltaSeq 基线、不碰 cwd/模型/队列/任务槽，等下一条 SSE/落盘触发的新
+  // 快照自然恢复。合法重渲（撤回/turn-state 收口）ts 持平放行；压缩收口 summary ts 前进放行；
+  // 首载/切会话基线为 null 无从回退放行。
+  function snapshotStale(local, incoming) {
+    if (!Array.isArray(local) || !local.length) return false
+    if (!Array.isArray(incoming) || !incoming.length) return true
+    const maxTs = (msgs) => {
+      let t = 0
+      for (const m of msgs) {
+        const ts = m && m.timestamp
+        if (typeof ts === 'number' && ts > t) t = ts
+      }
+      return t
+    }
+    const cur = maxTs(local)
+    const next = maxTs(incoming)
+    return next > 0 && cur > 0 && next < cur
+  }
+
   function refreshSession(force) {
     const hash = state.currentHash
     if (!hash) return
@@ -278,6 +304,10 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 历史 innerHTML 整页渲染进新会话 DOM（CLI 单进程单会话无此异步边界，web 必须在每个
         // 异步边界重验身份）。await 后已切走 → 本响应整体作废。
         if (state.currentHash !== hash) return
+        // 回退快照防御（snapshotStale）：必须先于一切副作用与基线赋值——旧快照哪怕被下方
+        // 空 fetch 守卫挡住不渲染，基线（localMessages/deltaSeq）也已被静默回写，后续 delta
+        // 判 gap 反复触发强制对账（回退风暴）。丢弃 = 本响应整体作废。
+        if (snapshotStale(live.localMessages, messages)) return
         setSessionCwd(cwd)
         // 2026-08-30 队列快照：jsonl 文件名（uuid）供 SSE queue-state 会话匹配；queued 交排队区
         live.curUuid = file ? file.replace(/\.jsonl$/, '') : live.curUuid
@@ -428,23 +458,17 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     applyStreamPreview() // 2026-09-08 流式字符通道：重渲洗 DOM 后重挂流式预览暂态（streamText 内存态恢复）
     syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
     if (hasNewUser && uSig !== live.pinnedUserSig) {
-      // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位+平滑上划贴顶。
+      // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位按跟随几何同帧就位。
       // pinnedUserSig 防重复：迟到的刷新不会再重钉上一回合。
       // 命中才推进 lastUserSig/pinnedUserSig（配合上方基线推进规则=真实可重试）。
       const el = messagesEl.querySelector(`[data-m="${lastU}"][data-t="u"]`)
       if (el) {
         live.lastUserSig = uSig // 命中才推进（配合上方基线推进规则=真实可重试）
         live.pinnedUserSig = uSig
-        if (stage.active && stage.key === 'optimistic') {
-          // 乐观气泡唤出的占位在场 → 接管帧同回合延续。必须走 stageStart 直终态（2026-09-09
-          // 「新消息跳动」根修）：乐观期开启的 750ms 平滑窗目标基于接管前几何，接管重建
-          // （live-zone 摘除 → innerHTML 重建）已改几何，沿用旧窗=到点瞬跳；且换 key 帧须
-          // 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照，换气泡即换几何）。
-          // smooth=false：不重播上划动画，作废动画窗并按跟随几何同帧归位。
-          stageStart(el, uSig, false)
-        } else {
-          stageStart(el, uSig, true) // CLI 端发起的新回合（web 观察）同样唤出+动画（体验对齐）
-        }
+        // 换 key 帧必须走 stageStart 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照）：
+        // 乐观气泡唤出的占位在场 → 接管帧同回合延续；CLI 端发起的新回合（web 观察）同样在此
+        // 唤出。2026-09-11 起无动画窗（smooth 分支退役）——两条路径同一落点，不再分叉。
+        stageStart(el, uSig)
       }
     } else {
       renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销

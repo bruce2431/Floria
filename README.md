@@ -4,7 +4,7 @@
 
 ## 本项目内容
 
-- `_agent-src/` — Claude Code 源码 + 构建环境（`src/`、`scripts/`、`package.json`、`bun.lock` 等），命令在 `cd _agent-src` 后执行。
+- `_agent-src/` — Claude Code 源码 + 构建环境（`src/`、`scripts/`、`package.json`、`bun.lock` 等），命令在 `cd _agent-src` 后执行；项目根散落的 `probe-*.ts` / `rebuild-neuron-index.ts` 为本地探针与维护入口，按跟踪路径纪律不入库。
 - `docs/` — 文档库（索引 `docs/README.md`）：`standards.md`（权威规则）/ `build.md`（构建+flag 审计）/ `glossary.md`（术语）/ `core.md`（源码核心机制）/ `gateway.md`（网关服务）/ `web-ui.md`（web 链路）。权威标准见 `@WrokSpace/.claude/CLAUDE.md` 顶部引用。
 - `CLAUDE.md` — 项目级 AI 指引（规则+指针型，细节在 `docs/`）；`README.md` — 本文。
 - `.claude/neturon/neurons/Neuron-Pj16/` — 项目神经元三层库（`l1.cog` / `l2.mem` / `l3.raw`）。项目 LOG 已迁入 `l3.raw/LOG/LOG.md`（历史存档），**新条目一律写 `l2.mem/mem.db`**（入口 `20260910152816-项目神经元初始化/log_append.ts`），项目根不再有 `LOG.md`。
@@ -20,6 +20,7 @@
 - **实时处理折叠**：处理中折叠流式展开旁白/思考/工具步 + 「正在处理」实时计时；回复落地自动收起为「已处理 X」（计时定格），仅保留总结。
 - **带图消息全链**：web 端拖拽/粘贴上传图片（一次最多 4 张），气泡内联缩略图 + lightbox 查看；CLI/web 双端渲染一致。
 - **远程审批**：CLI 权限弹窗实时中继为 web 审批卡，iPad/手机可远程批准/拒绝，双端竞速先操作者生效。
+- **会话间协作**：输入栏 `@` 浮窗或「+」菜单「引用会话」把会话暴露给 agent 后，agent 可用 `session_send` 跨会话投递消息（暴露即授权）；接收侧与本地 user 消息同构落盘、同路入队，气泡外带一行来源灰字。
 - **项目个性化预览**：项目产物（架构图/可视化页）落 `<项目>/.claude/preview/`，由网关静态托管，web 项目预览页内直接查看。
 - **神经元知识库（NEURON_RAG，feature 门控）**：BGE 本地嵌入 + recall/remember 内置工具 + leiden 社群认知形成链，全链 TS 化进 exe。
 
@@ -57,13 +58,13 @@
 - 产物：dev 构建直出**项目根** `cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`，正式编译出 `_agent-src/dist/cli-<YYYYMMDDHHMMSS>.exe`。**带时间戳是强制规范，不允许覆盖**（不设固定名副本）。
 - 部署：构建完成即已在项目根，直接用带时间戳的产物 exe 启动，**重启会话/网关进程才生效**（web 前端资源内嵌进 exe，换 exe 即换前端）。
 - codegraph 索引：`_agent-src/src/.codegraph/`（相对路径存储），MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
-- **当前最新构建与逐项变更不在本文累积**——一律见神经元 LOG 层 `.claude/neturon/neurons/Neuron-Pj16/`（09-10 前 `l3.raw/LOG/LOG.md`，其后 `l2.mem/mem.db`）；最新产物看项目根时间戳最大的 `cli-dev-*.exe`（当前 `cli-dev-20260911113010.exe`，sw v306，待实测）。
+- **当前最新构建与逐项变更不在本文累积**——一律见神经元 LOG 层 `.claude/neturon/neurons/Neuron-Pj16/`（09-10 前 `l3.raw/LOG/LOG.md`，其后 `l2.mem/mem.db`）；最新产物看项目根时间戳最大的 `cli-dev-*.exe`（当前 `cli-dev-20260916103139.exe`，sw v318，默认 feature、不含 NEURON_RAG）。
 
 ## 版本控制（git）
 
 - 2026-08-15 git init，远程 `bruce2431/Floria`，**仅跟踪 `_agent-src/`、`README.md`、`docs/` 三个路径**；`CLAUDE.md`/子项目目录/报告 md 等由项目根 `.gitignore` 排除（`.gitignore` 本身不入库），exe 亦不入库。
 - **GitHub Release 发布**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<x>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`）；流程 = commit+push → 同名 tag → Release（notes 按神经元 LOG 条目主题分组）→ 附对应 exe 为 asset。
-- 发布记录见神经元 LOG 层。最新：版本 16（2026-09-11，版本主题「前端模块化与实时链根治」，tag `2.1.87-dev.20260911.t033010.sha683ab66c`，asset `cli-dev-20260911113010.exe`）；上版：版本 15（2026-09-10，tag `2.1.87-dev.20260910.t024228.sha37e00c61`，asset `cli-dev-20260910104228.exe`）。
+- 发布记录见神经元 LOG 层。最新：版本 17（2026-09-16，版本主题「跨会话协作与神经元重整」，tag `2.1.87-dev.20260916.t023139.sha95ba5349`，asset `cli-dev-20260916103139.exe`）；上版：版本 16（2026-09-11，版本主题「前端模块化与实时链根治」，tag `2.1.87-dev.20260911.t033010.sha683ab66c`，asset `cli-dev-20260911113010.exe`）。
 
 ## 新结构速览（便携根 = `@WrokSpace`）
 

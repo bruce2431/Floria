@@ -100,8 +100,9 @@ import { queryCheckpoint } from './utils/queryProfiler.js'
 import { runTools } from './services/tools/toolOrchestration.js'
 import {
   createToolLoopBreakerState,
+  toolLoopBreakerBeginBatch,
   toolLoopBreakerCheck,
-  TOOL_LOOP_BREAKER_LIMIT,
+  type ToolLoopBreakerKind,
 } from './utils/toolLoopBreaker.js'
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
@@ -297,10 +298,15 @@ async function* queryLoop(
   // sites.
   let taskBudgetRemaining: number | undefined = undefined
 
-  // 工具循环熔断器状态（2026-09-12，跨迭代）：同名同参连续 TOOL_LOOP_BREAKER_LIMIT 次 →
-  // 判定模型复读死循环（事故原型 pj18：TaskUpdate(#5) 纯复读 754 次/2h41m，结果恒成功无
-  // 失败信号可打断）。扫描点在 runTools 前；触发即收口回合。Loop-local 而非 State 字段，
-  // 同 taskBudgetRemaining 理由——避免触碰 7 个 continue 站点。
+  // 工具循环熔断器状态（2026-09-12，跨迭代；2026-09-18 晚重设计三维）：①同名同参连续
+  // 5 次 → 判定模型复读死循环（事故原型 pj18：TaskUpdate(#5) 纯复读 754 次/2h41m，结果恒
+  // 成功无失败信号可打断）；②连续 4 个纯簿记批（批内全部为任务清单工具、无实质工具）→
+  // 判定任务刷屏退化（事故原型 pj15-网传状态：TaskCreate 666+ 次参数次次不同跨轮不停）；
+  // ③单批簿记 40 次 → 判定单轮簿记洪水（pj15 单轮 333 个形态）。②③按批判据的前提：
+  // 单批大批量突发（一次建 10-30 个任务的计划）是合法正常流——09-18 实锤现场 2beb0073
+  // TaskCreate 单批 10 连在旧判据「连续 8 次」第 8 个撞线误伤，故病理信号从「量」改为
+  // 「跨轮持续性」与「单轮超大量」。扫描点在 runTools 前；触发即收口回合。Loop-local
+  // 而非 State 字段，同 taskBudgetRemaining 理由——避免触碰 7 个 continue 站点。
   const toolLoopBreaker = createToolLoopBreakerState()
 
   // Snapshot immutable env/statsig/session state once at entry. See QueryConfig
@@ -1172,6 +1178,7 @@ async function* queryLoop(
           querySource,
           aborted: toolUseContext.abortController.signal.aborted,
           messages: messagesForQuery,
+          errorMsg: lastMessage,
           cacheSafeParams: {
             systemPrompt,
             userContext,
@@ -1432,24 +1439,28 @@ async function* queryLoop(
       })
     }
 
-    // 2026-09-12 工具循环熔断：执行前逐块喂状态机。达 TOOL_LOOP_BREAKER_LIMIT 的块连同其后缀
-    // 全部不执行（后缀由下方合成 error tool_result 保 1:1 映射防孤儿 tool_use），回合收口不再
-    // 回喂模型——复读态下回喂只会续读（pj18 实证）。不变量：「达阈值的逐字重发调用不产生执行，
-    // 本批每个 tool_use 都有 tool_result」。streamingToolExecutor 为 statsig 门控（本构建恒关，
-    // 工具执行只走 runTools 路径），不为死配置加分支。
+    // 2026-09-12 工具循环熔断：执行前逐块喂状态机（每批 beginBatch 划批）。达阈值的块连同
+    // 其后缀全部不执行（后缀由下方合成 error tool_result 保 1:1 映射防孤儿 tool_use），回合
+    // 收口不再回喂模型——复读态下回喂只会续读（pj18 实证）。不变量：「达阈值的逐字重发调用
+    // 不产生执行，本批每个 tool_use 都有 tool_result」。streamingToolExecutor 为 statsig 门控
+    // （本构建恒关，工具执行只走 runTools 路径），不为死配置加分支。
+    toolLoopBreakerBeginBatch(toolLoopBreaker)
     const allowedToolUseBlocks: ToolUseBlock[] = []
     let breakerTripped = false
     let breakerToolName = ''
     let breakerStreak = 0
+    let breakerKind: ToolLoopBreakerKind = 'identical'
     for (const block of toolUseBlocks) {
       const check = toolLoopBreakerCheck(toolLoopBreaker, block.name, block.input)
       if (check.blocked) {
         breakerTripped = true
         breakerToolName = block.name
         breakerStreak = check.streak
+        breakerKind = check.kind
         logEvent('tengu_tool_loop_breaker_tripped', {
           tool: block.name,
           streak: check.streak,
+          kind: check.kind,
           queryChainId: queryChainIdForAnalytics,
           queryDepth: queryTracking.depth,
         })
@@ -1494,9 +1505,17 @@ async function* queryLoop(
       // tool_use↔tool_result 1:1，防下一轮请求孤儿 tool_use 400），随后直接收口回合——
       // 跳过工具摘要/附件/续跑，复读态下回喂只会续读（pj18 实证外部注入才可唤醒）。
       const breakerNotice =
-        `[工具循环熔断] 调用 ${breakerToolName}（完全相同参数）已连续 ${breakerStreak} 次，` +
-        `判定为模型复读死循环，本批剩余调用未执行、本回合收口。请勿原样重试；` +
-        `如确需重做，请改变参数或先向用户说明。`
+        breakerKind === 'familyBatch'
+          ? `[任务工具熔断] 任务簿记工具（${breakerToolName}）已连续 ${breakerStreak} 轮被调用而无实质工具推进，` +
+            `判定为任务刷屏退化循环，本批剩余调用未执行、本回合收口。请立即停止创建/更新任务，` +
+            `直接用实际工具（Edit/Bash/Grep 等）推进工作；任务清单等实际工作落地后再整理。`
+          : breakerKind === 'familyFlood'
+            ? `[任务工具熔断] 任务簿记工具（${breakerToolName}）本批内已达 ${breakerStreak} 次调用（单轮簿记洪水），` +
+              `判定为任务刷屏退化循环，本批剩余调用未执行、本回合收口。请立即停止创建/更新任务，` +
+              `直接用实际工具（Edit/Bash/Grep 等）推进工作；任务清单等实际工作落地后再整理。`
+            : `[工具循环熔断] 调用 ${breakerToolName}（完全相同参数）已连续 ${breakerStreak} 次，` +
+              `判定为模型复读死循环，本批剩余调用未执行、本回合收口。请勿原样重试；` +
+              `如确需重做，请改变参数或先向用户说明。`
       let seenBlocks = 0
       for (const assistantMessage of assistantMessages) {
         for (const content of assistantMessage.message.content) {
@@ -1524,7 +1543,12 @@ async function* queryLoop(
         }
       }
       yield createAssistantAPIErrorMessage({
-        content: `⚠️ 工具循环熔断：${breakerToolName} 以完全相同参数连续调用 ${breakerStreak} 次，本回合已收口（详见上方工具错误结果）。`,
+        content:
+          breakerKind === 'familyBatch'
+            ? `⚠️ 任务工具熔断：任务簿记工具已连续 ${breakerStreak} 轮调用而未推进实际工作，本回合已收口（详见上方工具错误结果）。`
+            : breakerKind === 'familyFlood'
+              ? `⚠️ 任务工具熔断：任务簿记工具本批内已调用 ${breakerStreak} 次而未推进实际工作，本回合已收口（详见上方工具错误结果）。`
+              : `⚠️ 工具循环熔断：${breakerToolName} 以完全相同参数连续调用 ${breakerStreak} 次，本回合已收口（详见上方工具错误结果）。`,
       })
       return { reason: 'tool_loop_breaker' }
     }

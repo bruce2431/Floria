@@ -571,6 +571,24 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     const newBubble = [...frag.children].find((n) => n.matches('[data-t="u"]')) || null
     const keepBubble = !!(oldBubble && newBubble && oldBubble.isConnected)
     if (keepBubble) newBubble.remove()
+    // img 换血（2026-09-18「旁白消息的图片仍闪」根治）：段内除段首用户气泡外的节点（尤其
+    // 引导气泡 data-t="g<gi>"——上传图片经排队注入后正是落在这里，与旁白行同段）每帧重建，
+    // 新 <img> 到 paint 时尚未解码（image-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
+    // 再回弹。与全量重建路径同一不变量：已落盘图片字节不可变 → 同 src 的旧节点直接换回，
+    // 零回源零重解码。只从「本次将被删除」的节点采池——保留的旧气泡节点不动（引导气泡与
+    // 用户气泡可能同 src，采走会让保留气泡丢图）。
+    const imgsOf = (n) => (n.matches('img') ? [n] : []).concat([...n.querySelectorAll('img')])
+    const imgPools = new Map()
+    for (const n of oldNodes) {
+      if (keepBubble && n === oldBubble) continue
+      for (const im of imgsOf(n)) {
+        const k = im.getAttribute('src')
+        if (!k) continue
+        let pool = imgPools.get(k)
+        if (!pool) { pool = []; imgPools.set(k, pool) }
+        pool.push(im)
+      }
+    }
     for (const n of oldNodes) if (!(keepBubble && n === oldBubble)) n.remove()
     const inserted = [...frag.children]
     let anchor = null
@@ -595,6 +613,13 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       ref = after || tail
     }
     messagesEl.insertBefore(frag, ref)
+    // 同 src 的新 <img> 换回旧节点（见上方「img 换血」；此时新图尚未解码，换回即沿用已解码位图）
+    for (const n of inserted) {
+      for (const im of imgsOf(n)) {
+        const pool = imgPools.get(im.getAttribute('src'))
+        if (pool && pool.length) im.replaceWith(pool.shift())
+      }
+    }
     // ① 开合态恢复（仅旧集已有的折叠；新增折叠不在集内=保留 HTML 默认）
     for (const n of inserted) {
       for (const d of (n.matches('details') ? [n] : []).concat([...n.querySelectorAll('details')])) {

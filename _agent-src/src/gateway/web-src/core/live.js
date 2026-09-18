@@ -6,7 +6,7 @@ import { stage, stageFollow, stageStart } from '../chat/stage.js'
 import { hideGate } from './auth.js'
 import { setChar } from './char.js'
 import { needToken, apiUrl, setConn } from './gateway.js'
-import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, applySessionModel } from './sessions.js'
+import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, applySessionModel, withSynthetic } from './sessions.js'
 import { messagesEl, inputEl, bodyEl, state, ALL, live, connUp, toast } from './state.js'
 import { renderTransient, renderSettle, claimStartTs, claimTick, syncTurnLive, takeover, clearTakeover, renderTaskDock } from '../inputbar/approval.js'
 import { renderCtxMeter } from '../inputbar/ctx-meter.js'
@@ -16,6 +16,27 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
   // ---------- 实时同步（阶段1：SSE 监听 jsonl 变化，自动刷新会话/列表）----------
   // 兼容：刷新只替换 messagesEl 内层，折叠开合（含网关实时折叠）与滚动位置尽量保留；
   // 只读视图下最后一段「处理中（尚无回复）」的已处理折叠默认展开，回复落地后自动收起。
+
+  // 前端资产版本自愈（2026-09-17）：守护不变量 = 运行中的前端代码 = 网关当前资产版本。
+  // 换 exe/新构建后旧标签页只重连 WS/SSE、不重载 JS（代码还是页面加载时那份），修复永远
+  // 送达不了常开标签页（三轮「修复没生效」实报的交付根因）。hello（每次 SSE 建连/重连都发）
+  // 时拉服务器 sw.js 的 CACHE 版本与页面加载时基线比对：漂移即自动刷新（输入栏有内容则只
+  // 提示不强刷，不毁用户正在输入的内容）。重载后新基线同版本 → 无回环。
+  let bootSwVer = null
+  async function checkAssetFresh() {
+    try {
+      const res = await fetch('/sw.js', { cache: 'no-store' })
+      const m = /CACHE\s*=\s*'([^']+)'/.exec(await res.text())
+      if (!m) return
+      if (bootSwVer == null) { bootSwVer = m[1]; return }
+      if (m[1] === bootSwVer) return
+      bootSwVer = m[1]
+      if (inputEl.textContent.trim()) { toast('前端有新版本，请手动刷新页面'); return }
+      toast('前端已更新，正在刷新…')
+      setTimeout(() => location.reload(), 800)
+    } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
+  }
+
   function initLive() {
     if (!('EventSource' in window)) return
     if (needToken()) return // token 门锁定态：不建 SSE（避免 401 重连刷屏，hideGate 解锁后再建）
@@ -26,7 +47,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       live.lastSseAt = Date.now() // 任何事件到达=链活（parse 失败同样是活性证明，先记再解析）
       let ev
       try { ev = JSON.parse(e.data) } catch { return }
-      if (ev.type === 'hello') { refreshList(); refreshSession() }
+      if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
       else if (ev.type === 'activity') {
         // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）。
         // 2026-09-07 断连感知：state=null（CLI /clients 断开 → 网关 detach 群发）= 会话进程
@@ -227,7 +248,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         live.listSig = sig
         // 保留展开中的项目文件夹
         const openF = [...bodyEl.querySelectorAll('.folder.open')].map((f) => f.dataset.f)
-        setAll(data.sessions)
+        setAll(withSynthetic(data.sessions))
         applyTurnEndAt(ALL)
         renderRecent()
         if (openF.length) {
@@ -355,8 +376,12 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
     // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
-    // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）
-    live.maxImgId = 0
+    // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）。
+    // 2026-09-16 单调不回卷根修：视图（localMessages）在压缩归档/delta 重写窗口会丢历史块，
+    // 清零重扫会把 maxImgId 回卷 → 下张图复用旧 id → CLI storeImage('w') 覆写字节 + 网关
+    // max-age=86400 把首次取到的旧字节钉在该 URL 上 = 新图显示成旧图（b5bd1265 实证 A/B/C
+    // 三图全 1 号互覆）。id 不复用是分配器不变量，不依赖视图完整：重扫只增不减（跨会话切回
+    // 基准偏高无害，image-cache 按会话分目录，id 只需会话内唯一）。
     for (const m of messages) {
       for (const b of m.blocks || []) {
         if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
@@ -401,7 +426,13 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     // 重建的闪烁，且 tool-running 光泽动画不再被重建打断（2.6s 扫光能完整播放）。
     // 条件：上次渲染存在 + 消息数只增不减（SSE 纯追加；回退/压缩等减少则整页）+ 有处理中末段。
     // 回复落地（段结束）/新回合/消息数减少 → 整页重建一次（低频，带「已处理」收拢可接受）。
-    const html = messagesHtml(messages)
+    // 2026-09-18 卡顿根治（增量帧省历史段渲染）：原实现每帧无条件全量 messagesHtml 序列化整个
+    // 会话，而历史段自上轮渲染以来内容不变、增量路径只消费末段 html——长会话下每条 session-delta
+    //（引擎变化合帧最高 ~10 次/秒）都付 MB 级字符串拼接 + md 全文重解析 = 主线程卡顿主根。改惰性
+    // 两段式：先 lazy 切段（历史段只切段不生成 HTML，O(N) 轻量；末段真渲染产出本轮 lastSegInfo/
+    // charNote）→ 判定可增量直接 applySegDelta（历史段零渲染成本）；不可增量（切段边界/回合收口/
+    // 锚点缺失）再跑全量渲染付全额——行为与原等价，全量频次=切段边界（低频）。
+    messagesHtml(messages, true)
     // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
     // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
     // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
@@ -416,6 +447,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       applySegDelta(lastSegInfo)
       renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
     } else {
+      const html = messagesHtml(messages)
       // 折叠开合恢复改用**结构稳定键**（2026-09-11 根治）：原实现按 querySelectorAll('details')
       // 的数组下标采集/回填，注释假定「索引稳定」——但整页重建时 details 序列本就会变：处理中段的
       // liveFoldBody 尾组数随工具增长、think-row 数随思考块增长、回合收口时处理中段转已完成段
@@ -435,7 +467,23 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       const doneLivePrev = new Set([...messagesEl.querySelectorAll('details')].filter((d) => d.classList.contains('done-live')).map(foldKey))
       // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
       const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
+      // img 换血（2026-09-18 内存峰值/闪烁根治）：整页 innerHTML 重建全部节点 → 全部 <img> 重建且
+      // image-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
+      // 「先塌后弹」闪烁）。src 相同的图内容不变 → 重建前按 src 采池，重建后同 src 换回旧节点
+      //（池 shift 支持同 src 多图），零回源零重解码；池剩余节点随 GC 回收。
+      const imgPools = new Map()
+      for (const im of messagesEl.querySelectorAll('img')) {
+        const k = im.getAttribute('src')
+        if (!k) continue
+        let pool = imgPools.get(k)
+        if (!pool) { pool = []; imgPools.set(k, pool) }
+        pool.push(im)
+      }
       messagesEl.innerHTML = html
+      for (const im of messagesEl.querySelectorAll('img')) {
+        const pool = imgPools.get(im.getAttribute('src'))
+        if (pool && pool.length) im.replaceWith(pool.shift())
+      }
       if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
       // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
       // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
@@ -488,11 +536,43 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
   // （该段输出前的最后一个 data-m 元素）插回原位；无锚点（末段即首条）则追加到末尾。
   function applySegDelta(info) {
     const key = String(info.key)
-    messagesEl.querySelectorAll(`[data-m="${key}"]`).forEach((n) => n.remove())
+    // 增量替换状态保持（2026-09-18「状态行更新/旁白行新增→界面跳动」根治）：段替换以段为粒度
+    // 整段换血，段内有两类 HTML 再生不出来的状态——
+    // ① details 开合态（段折叠用户手动关上 / tool-fold 用户手动展开）：按 HTML 默认值重建
+    //    （处理中=open、tool-fold=收起）意味着每次状态行更新/旁白行新增都把折叠态拍回默认 =
+    //    整段高度每增量跳一次。全量重建路径已按 foldKey 恢复开合（2026-09-11 定案「用户手动
+    //    展开的折叠照常恢复」），增量路径同受此不变量约束——此处按同一键语义捕获并恢复
+    //    （键不在旧集的新增折叠保留 HTML 默认：处理中展开、工具行收起）。
+    // ② 用户气泡及其图片：气泡在段内不变（who/图/文件/复制钮落盘后皆静态），重建节点令 imgs
+    //    重新请求/解码（image-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
+    //    的跳动。DOM 已有同 key 气泡时保留旧节点、丢弃新段气泡节点只换其余（气泡=段首元素，
+    //    其余部分删后插回流末锚点前=文档序不变；处理中段恒为末段，旧气泡与流末锚点之间不存在
+    //    他段节点）。
+    const oldNodes = [...messagesEl.querySelectorAll(`[data-m="${key}"]`)]
+    const foldKeyOf = (d) => {
+      const cls = d.className.split(' ')[0]
+      if (d.dataset.m) return `@${d.dataset.m}|${d.dataset.t || ''}|${cls}`
+      const host = d.closest('[data-m]')
+      const scope = host || messagesEl
+      const idx = [...scope.querySelectorAll('details.' + cls)].indexOf(d)
+      return `${host ? host.dataset.m + '|' + (host.dataset.t || '') : 'root'}|${cls}#${idx}`
+    }
+    const prevOpen = new Map()
+    for (const n of oldNodes) {
+      for (const d of (n.matches('details') ? [n] : []).concat([...n.querySelectorAll('details')])) {
+        prevOpen.set(foldKeyOf(d), d.open)
+      }
+    }
     const tmp = document.createElement('div')
     tmp.innerHTML = info.html
     const frag = document.createDocumentFragment()
     for (const n of [...tmp.children]) frag.appendChild(n)
+    const oldBubble = oldNodes.find((n) => n.matches('[data-t="u"]'))
+    const newBubble = [...frag.children].find((n) => n.matches('[data-t="u"]')) || null
+    const keepBubble = !!(oldBubble && newBubble && oldBubble.isConnected)
+    if (keepBubble) newBubble.remove()
+    for (const n of oldNodes) if (!(keepBubble && n === oldBubble)) n.remove()
+    const inserted = [...frag.children]
     let anchor = null
     if (info.prev) {
       // 同 data-t 多元素时（如多轮 end_turn 的多个 reply 气泡、同 key 多 fold）取文档序最后一个
@@ -503,16 +583,24 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     // 插入点恒避让暂态区与 .pin-stage（暂态区子元素/两层占位必须是流末）：段尾无后继或无锚点
     //（首段处理中）时都插到 #live-zone 之前——否则新段节点越过暂态区/落到占位块后面，
     // 占位错位到内容中间持续到刷新（2026-08-28 钉顶占位突然死亡根因一；2026-09-07 排队区
-    // 插到新消息上一行同根因，暂态区结构化消除）。
+    // 插到新消息上一行同根因，暂态区结构化消除）。气泡保留旧节点时同样插流末锚点前
+    //（见上：旧行为按 prev 锚点插会把新折叠体插到保留气泡之前，文档序颠倒）。
     const zone = document.getElementById('live-zone')
     const spacer = messagesEl.querySelector('.pin-stage')
     const tail = zone || spacer
-    if (anchor && anchor.isConnected) {
+    let ref = tail
+    if (!keepBubble && anchor && anchor.isConnected) {
       let after = anchor.nextSibling
       while (after && after.nodeType !== 1) after = after.nextSibling
-      messagesEl.insertBefore(frag, after || tail)
-    } else {
-      messagesEl.insertBefore(frag, tail)
+      ref = after || tail
+    }
+    messagesEl.insertBefore(frag, ref)
+    // ① 开合态恢复（仅旧集已有的折叠；新增折叠不在集内=保留 HTML 默认）
+    for (const n of inserted) {
+      for (const d of (n.matches('details') ? [n] : []).concat([...n.querySelectorAll('details')])) {
+        const k = foldKeyOf(d)
+        if (prevOpen.has(k)) d.open = prevOpen.get(k)
+      }
     }
   }
 
@@ -576,31 +664,38 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       // .tool-line.tool-running——running 分支 summary 与 toolCurHtml 两条出口同款类，单一判据。
       const awaitingApproval = takeover === 'approval'
       const toolRunning = !!fold.querySelector('.tool-line.tool-running')
-      // 单状态槽（2026-09-11 用户定案「一次应该只有一个状态，现在是无响应，应该只有无响应」）：
-      // 红标在场时它**独占**状态槽——stEl 所在状态显示行挂 .is-flagged，styles.css 隐去同行
-      // .think-state（含并发尾缀「并思考」）与 .think-stream（流式预览=引擎产出的暂态，引擎无产出
-      // 即过期，留着与红标互相打脸）。旧形态是并排注解（「正在思考 · 2m57s · 无响应 2m51s」两个
-      // 状态同时在场），信号恢复即整行复原（每秒重算，无残留态）。
-      // 豁免规则（审批等待/工具在飞 = 已知阻塞）→ 本帧不参与僵死判定，传 0 表达「判据不适用」；
-      // 阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造（优先级：连接中断 > 无响应）。
-      const flags = statusFlags(connUp, awaitingApproval || toolRunning ? 0 : staleSec)
+      // ④ 2026-09-18 用户定案：无响应降为**最底层优先级**——状态行有任意状态在场（正在思考/
+      // 正在生成/正在压缩/正在运行）即不判，仅当无任何状态时才允许红标。压缩期误标实证根修：
+      // 压缩是一次大 LLM 调用，零增量产出 → beat 恒停超 150s 被判「无响应」，且单状态槽挤掉
+      // 「正在压缩」。状态判据 = .think-state 的 data-label（messages.js vacuumOf 单源渲染，
+      // 压缩实证档 compact-state 同源 TTL 5min）；stEl 查询提前至此，下方计时复用同一节点。
+      const stEl = fold.querySelector('.think-state')
+      const hasStatus = !!(stEl && (stEl.dataset.label || '').trim())
+      // 单状态槽（2026-09-11 用户定案「一次应该只有一个状态」）：红标在场时它**独占**状态槽——
+      // stEl 所在状态显示行挂 .is-flagged，styles.css 隐去同行 .think-state（含并发尾缀「并思考」）
+      // 与 .think-stream（流式预览=引擎产出的暂态，引擎无产出即过期，留着与红标互相打脸）。
+      // 信号恢复即整行复原（每秒重算，无残留态）。
+      // 豁免规则（审批等待/工具在飞/任意状态在场 = 已知阻塞或已有状态表达）→ 本帧不参与僵死
+      // 判定，传 0 表达「判据不适用」；阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造
+      // （优先级：连接中断 > 无响应，无响应为最底层）。
+      const flags = statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
       // 两行各自独立跳字（2026-09-09 用户定案「折叠顶只留正在处理/已处理，状态标识归工具行层」；
       // 二轮定案：工具调用行=折叠体，状态显示行是其内暂态层 .fold-state——有工具组并入 summary
       // 同行、无工具组独立行，动画展示不留存）：① 折叠顶 summary 恒「正在处理 + d-dur 总时长」；
-      // ② 思考/压缩状态 .think-state 落 .fold-state 暂态层，tick 原地续「· Ns」。全程节点级
+      // ② 思考/压缩状态 .think-state 落 .fold-state 暂态层，tick 原地续「 Ns」（2026-09-18 分隔点
+      // 全撤：用户定案状态行不用「·」，空格分隔）。全程节点级
       // textContent 更新、不 innerHTML 重建——重建会每秒重启扫光动画并洗掉 applyStreamPreview
       // 挂的流式预览节点。
       // 状态行文本节点独立（2026-09-11）：.think-state 首子节点恒为 .t-ico 行首槽（与工具行同款
       // 16px 槽 + 5px gap，文字左缘同基准）——整节点 textContent 赋值会连图标槽一并洗掉，槽一没
       // 文字左缘即回跳（用户实测的「跳动」），故 tick 只写 .ts-text 文本节点。
-      const stEl = fold.querySelector('.think-state')
       if (stEl) {
         // 文案由 messages.js vacuumLabel 单一映射后写进 data-label（含并发尾缀「并思考」形态）；
         // tick 只补计时，不复刻 mode→label 映射（旧实现在此处重复一份三元链，改文案要改两处）。
         const label = stEl.dataset.label || ''
         const ts = Number(stEl.dataset.ts) || 0
         const dsec = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
-        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} · ${fmtDur(dsec)}` : label
+        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${fmtDur(dsec)}` : label
       }
       const durEl = sum.querySelector('.d-dur')
       if (durEl) durEl.textContent = ' ' + fmtDur(sec)
@@ -615,7 +710,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         if (!fhost) return
         fhost.appendChild(flEl)
       }
-      flEl.innerHTML = flags
+      if (flEl.innerHTML !== flags) flEl.innerHTML = flags // 值不变不重写：每秒空写会打断子动画并触发无谓样式重算（2026-09-18 卡顿小刀）
       // 状态槽独占判定（同帧、同一判据 flags 非空）：宿主是状态显示行 .fold-state 时才挂标
       //（回退宿主 .done-body 里本就没有 .think-state，无需隐）。信号恢复 → 摘标 = 状态文字复原。
       const frow = flEl.parentElement

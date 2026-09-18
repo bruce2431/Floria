@@ -4,7 +4,7 @@
 > 本文件是**权威标准**：新建/修改 skill、plugin、MCP、changelog、工作区内容时以本文为准。
 > 优先级：**本文 > `.claude/CLAUDE.md` 对应章节 > 官方文档**。
 >
-> 本文件属 `docs/` 文档库（2026-09-10 由原 `STANDARDS.md` 重组而来）。同库姊妹件：
+> 本文件属 `docs/` 文档库。同库姊妹件：
 > **构建标准与 feature flag 活审计 → [build.md](build.md)**；
 > **项目预览页 Web 容器标准 → [gateway.md](gateway.md)**；
 > **代码机制细节 → [core.md](core.md)**（本文只写规则约束）。
@@ -26,11 +26,11 @@
 @WrokSpace/               ← 便携根 = 主工作区（日常产出、项目、临时任务）
 ├── .claude/              ← 便携全局配置根（settings/skills/plugins；会话与自动记忆均在项目级）
 │   └── .claude-portable  ← 便携标记（在配置根内部，不可移动/删除）
-├── Pj16-CodeAgent构建/   ← 源码构建区 + 权威标准（原 CODE2431 根 _agent-src 迁入）
+├── Pj16-CodeAgent构建/   ← 源码构建区 + 权威标准
 │   ├── _agent-src/       ← 构建源码（src/ scripts/ package.json node_modules/ …）
 │   ├── docs/             ← 文档库（本文件 + build/glossary/core/gateway/web-ui/README）
 │   └── README.md         ← 目录结构说明
-├── Pj1-…/Pj15-…/         ← 项目
+├── PjN-…/                ← 项目
 ├── .trash/YYYY-MM-DD/    ← 归档（禁止删除，只归档）
 ├── LOG.md                ← 工作区 LOG
 ├── README.md             ← 工作区规范
@@ -38,24 +38,23 @@
 ```
 
 - `.claude/` 内部：
-  - `skills/` — 纯 skill（json-canvas / officecli / wetrace-wechat-tool）
-  - `plugins/` — 插件（agent-browser / codegraph）
+  - `skills/` — 纯 skill
+  - `plugins/` — 插件（agent-browser / codegraph / github 等，现状清单见 §5.7）
   - `plugins/` 下 `marketplaces/`、`data/`、`known_marketplaces.json` 是**系统管理目录，勿动**；缓存清理只动 `cache/` 三层，不碰插件目录
-  - `projects/` — 旧版全局自动记忆桶（2026-08-11 起自动记忆改项目级，遗留桶不再读写），App 管理
+  - `projects/` — 全局会话/记忆散装区（web「笔」新建会话落此，见 §2.1；旧版全局自动记忆桶遗留，App 管理）
   - `sessions/`、`history.jsonl` — 旧版会话存储，App 管理（新会话写入项目 `.claude/projects/*.jsonl` 平铺目录）
 
-### 2.1 会话 / 自动记忆存储布局（2026-08-11 扁平化）
+### 2.1 会话 / 自动记忆存储布局
 
 | 数据 | 位置 | 说明 |
 |---|---|---|
-| **会话** | `<项目>/.claude/projects/*.jsonl` | **项目本地、平铺**（不再按启动目录分桶），随项目文件夹打包/归档不丢失 |
+| **会话** | `<项目>/.claude/projects/*.jsonl` | **项目本地、平铺**（不按启动目录分桶），随项目文件夹打包/归档不丢失 |
 | **自动记忆** | `<项目>/.claude/projects/memory/` | **项目本地、平铺**，随项目文件夹打包/归档不丢失；`MEMORY.md` + 各主题文件 |
 
-- 会话目录：`getProjectDir()`（`sessionStoragePortable.ts`）＝ `<项目>/.claude/projects`（**平铺**）。跨项目会话列表（`/resume`、stats、cleanup、insights 等）用**逐级向上扫描**：`getProjectSessionDirsUpToHome(cwd)` / `getSessionProjectsParentsUpToHome(cwd)` 从 CWD 逐级收集 `<dir>/.claude/projects` 直至配置根，再加配置根本身的 projects 目录 → 从任何子目录启动都能看到该项目全部会话。
+- 会话目录：`getProjectDir()`（`sessionStoragePortable.ts`）＝ `<项目>/.claude/projects`（**平铺**）。跨项目会话列表（`/resume`、stats、cleanup、insights 等）用**逐级向上扫描**：`getProjectSessionDirsUpToHome(cwd)` / `getSessionProjectsParentsUpToHome(cwd)` 从 CWD 逐级收集 `<dir>/.claude/projects` 直至配置根，再加配置根本身的 projects 目录 → 从任何子目录启动都能看到该项目全部会话。全工作区已无任何 `<sanitized>` 旧桶，全部平铺。
 - 自动记忆：`getAutoMemPath()`（`memdir/paths.ts`），优先级 = `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` → settings.json `autoMemoryDirectory`（policy/local/user，排除 projectSettings）→ 默认 `<项目>/.claude/projects/memory/`（镜像会话目录 `getProjectDir()`，随项目移动）。`getMemoryBaseDir()` 仍锚定全局配置根，仅服务**用户级 agent-memory**（`<配置根>/agent-memory/`）与旧路径检测；自动记忆不再落全局根。
-- **启动位置决定记忆**：记忆按「启动时 CWD 的项目根」解析，写入该项目 `.claude/projects/memory/`——从 `@WrokSpace` 启动读写工作区记忆，从 `@WrokSpace/Pj2-…` 启动读写 Pj2 记忆。统一从 `@WrokSpace/cli-dev.exe` 启动。从同一项目不同子目录启动，会话/记忆共用同一平铺目录，不再碎片化。
+- **启动位置决定记忆**：记忆按「启动时 CWD 的项目根」解析，写入该项目 `.claude/projects/memory/`——从 `@WrokSpace` 启动读写工作区记忆，从 `@WrokSpace/PjN-…` 启动读写该项目记忆。统一从 `@WrokSpace/cli-dev.exe` 启动。从同一项目不同子目录启动，会话/记忆共用同一平铺目录。
 - **归档**：要归档某项目时，直接 zip 整个项目文件夹（含 `.claude/projects/`）即带走会话**和自动记忆**（两者同目录），无需单独导出。
-- **迁移现状（2026-08-11 完成）**：一次性扁平化迁移（`@WrokSpace/.claude/scripts/migrate-flat-sessions.mjs`）已收尾——各项目与配置根的 `<sanitized>` 旧桶内 `*.jsonl` / `<sessionId>/` 子目录 / `memory/` 全部上移合并到 `.claude/projects/` 顶层，跨桶按 sessionId 去重保留最新（仅 `fs.rename`，mtime/会话名不变），旧桶与重复文件移 `.trash/YYYY-MM-DD/`。原「当前会话 harness 记忆桶」由用户手动平铺合并；并发活跃会话桶在会话重启改走平铺写入后由脚本归档。另发现并归档了 4 个项目根级的**更早期**遗留记忆桶（`<项目>/<sanitized>/memory/`，早于 `.claude/projects` 结构，内容与平铺完全一致）。当前全工作区已无任何 `<sanitized>` 桶，全部平铺。
 
 ## 3. 便携配置根与路径红线
 
@@ -110,7 +109,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 
 ### 5.1 定义
 - 目录内**含 `.claude-plugin/plugin.json` 即视为插件**（manifest 驱动）。
-- 带 MCP 服务器、引擎代码、活数据（如 neturon `brain/`）、模板的扩展一律走 plugin。
+- 带 MCP 服务器、引擎代码、活数据、模板的扩展一律走 plugin。
 
 ### 5.2 plugin.json（清单）
 ```json
@@ -160,50 +159,47 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - `.mcp.json` 用 `${CLAUDE_PLUGIN_ROOT}` 指向插件根定位脚本（相对路径，便携）。
 
 ### 5.7 现状清单
-- ~~`neturon/`~~（已移除，2026-09-04 核实不存在）— neturon-rag RAG 插件（MCP 形态 `rag_search`/`rag_cog_context`/`rag_fill_precog`/`rag_source`/`rag_should_search`）。已被 Pj16 TS 内置版取代：引擎重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件，NEURON_RAG 门控，标准见 §7），插件随之退役。**数据根 `@WrokSpace/.claude/neturon/` 不动**（neurons/ 记忆库 + cache/models 模型，TS 版原样续用）；`engine/` Python 引擎已随之归档 `.trash/2026-09-04/engine/`（用户定案不留兜底，出问题直接报错；neurons/ 记忆库与 cache/models 留原位供 TS 版使用）。
 - `codegraph/`（name=`codegraph`）— 代码知识图谱 MCP，索引 `Pj16-CodeAgent构建/_agent-src/src/.codegraph/`
-- `github/`（name=`github`）— GitHub 官方 MCP（github-mcp-server v1.12.1 Windows 二进制内置 `mcp/`，2026-09-11 装）：stdio + `--toolsets=context,repos,issues,pull_requests,users,git`；PAT 填 `.mcp.json` env `GITHUB_PERSONAL_ACCESS_TOKEN`（classic 勾 repo+delete_repo；`delete_repository` 不可逆须用户确认）；接入说明 `docs/setup-guide.md`；命名空间 `mcp__plugin_github_github__*`，重启会话生效
-- ~~`qwen-mm/`~~（已移除 2026-08-24 → `.trash/2026-08-24/qwen-mm/`）— Qwen-MM-Plugins 便携版（2026-08-14）：core（本地多模态读取/可视化 MCP + skill）+ api（云端 Qwen VL/Omni/ASR，需 DashScope key）。引擎 `src/`（精简 pyproject：core viz 全依赖 + api 依赖并入 `[project].dependencies`，entry `qwen-mm-plugins-core`/`qwen-mm-plugins-api`）+ `skills/qwen-mm-plugins-core/`、`skills/qwen-mm-plugins-api/` + `config/config` 活数据。`.mcp.json` 两个 server，均 `uvx --from ${CLAUDE_PLUGIN_ROOT}`（本地构建，不联网）：`qwen-mm-plugins-core` / `qwen-mm-plugins-api`，env `PYTHONUTF8=1`（防 Windows GBK `UnicodeEncodeError`）+ `QWEN_MM_CONFIG_DIR=${CLAUDE_PLUGIN_ROOT}/config`（便携）。config 写 `DASHSCOPE_API_KEY` + `DASHSCOPE_BASE_URL`（用户百炼专属网关 `…maas.aliyuncs.com/compatible-mode/v1`，可覆盖默认 dashscope 地址）。MCP 工具命名空间 `mcp__plugin_qwen-mm_qwen-mm-plugins-core__*` / `mcp__plugin_qwen-mm_qwen-mm-plugins-api__*`。移除原因：用户主动移除视觉插件；config 内 `DASHSCOPE_API_KEY` 已随目录进 `.trash` 未删除。MCP 工具下次重启会话后消失。
-- ~~`telemetry-monitor/`~~（已移除 2026-08-14 → `.trash/2026-08-14/telemetry-monitor/`）：会话遥测 MCP（notify_progress 推飞书 / get_session_status 读会话摘要）。`get_session_status` 用的旧桶 glob（`projects/*/*.jsonl`）与平铺会话存储不兼容已失效，功能被内置网关 `/gateway/sessions` 覆盖；`notify_progress` 飞书推送能力随内置网关接管。MCP 工具下次重启会话后消失。
+- `github/`（name=`github`）— GitHub 官方 MCP（github-mcp-server Windows 二进制内置 `mcp/`）：stdio + `--toolsets=context,repos,issues,pull_requests,users,git`；PAT 填 `.mcp.json` env `GITHUB_PERSONAL_ACCESS_TOKEN`（classic 勾 repo+delete_repo；`delete_repository` 不可逆须用户确认）；接入说明 `docs/setup-guide.md`；命名空间 `mcp__plugin_github_github__*`，重启会话生效
+- 已移除（归档 `.trash/`，勿引用）：`neturon/`（neturon-rag RAG 插件，已被 Pj16 TS 内置版取代 → §7；数据根 `@WrokSpace/.claude/neturon/` 不动，TS 版原样续用）、`qwen-mm/`（Qwen 多模态视觉插件）、`telemetry-monitor/`（会话遥测 MCP，功能被内置网关 `/gateway/sessions` 覆盖）
 
 ## 6. MCP 服务器标准
 
 - 只通过插件 `.mcp.json` 注册（`"command"` + `"args"`，可含 `${CLAUDE_PLUGIN_ROOT}`）。
-- **参数来源仅两个**：config 或指令运行时显式提供；**禁写死默认值**（如 `top_k` 必填，`default_res`/`model` 已在 config）。
+- **参数来源仅两个**：config 或指令运行时显式提供；**禁写死默认值**。
 - **序列化必须用管线序列化器**：cog.json → `_write_cog_json(_serialize_cog)`，mem.json → `serialize_revelant_inline`；**禁裸 `json.dump(indent=2)`**——numpy `float32` 等会直接序列化崩溃。
 - **MCP 必须完全复刻管线逻辑**（管线=成熟摹本，MCP 须完全实现，不允许近似）。
 - 检索类工具返回 `precog.record_id` 时，调用方**必须立即** `rag_fill_precog` 填 accuracy/description（`true`=直接回答 / `revelant`=相关非直接 / `false`=噪音）。
-- 已知坑：`rag_cog_context` 曾报 `Object of type float32 is not JSON serializable`（cog 层 numpy 分数未转 Python float）——MCP 侧修复时注意。
 
 ## 7. 记忆 / RAG 标准（neturon）
 
-- **TS 内置化进行时（2026-09-03/09-04）**：引擎已重写为纯进程内置工具 `_agent-src/src/tools/neturon/`（15 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/roster/index），`feature('NEURON_RAG')` 门控**默认关**。工具 = `neuron_recall` / `neuron_remember` / `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（build_graph / detect_communities）。双引擎对照 114/114 全绿（**2026-09-15 起已主动偏离 Python**：cog 全链改纯标注驱动、文本不参与任何判据，见 core.md「认知图形成」——该 114/114 现只覆盖 leiden/社群统计等未改部分）。**Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）。历史另一 quirk「fold 路径 `merged_from` 恒空」已随该字段一并删除。neturon-rag 插件**已移除**（2026-09-04，见 §5.7）——下方 MCP 时代流程描述仅作数据格式/管线语义参考。待重建 NEURON_RAG exe（构建命令见 [build.md](build.md)）实测 p5/p6（`neuron_cog`），通过后定案 NEURON_RAG 转默认开。机制细节 → [core.md](core.md)「神经元内置检索/记忆」；定案全文 → 项目根 `20260829142535-神经元内置架构定案.md`（v2.2）。
-- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段）→ `l1.cog`（社群/节点/precog）。**raw 层惯例（2026-09-10 照 Neuron-李京瑾 定案）**：每条 mem 条目的 `revelant[0]` = 其 raw 层 `message_id`（`l3.raw/<来源>/message.db`），`source` = 来源标签（'LOG'/'MEM'/'QQ'/'微信'…）——Pj16 实例同此（LOG.md 原文已真移动进 `l3.raw/LOG/`，项目根不再有 LOG.md，LOG.md 冻结为历史存档；新 LOG 条目直接写 mem 层，入口现状见 core.md）。
-- **`blocks` 标准（2026-09-15 定案，声明源 = 各库 `config.yaml`）**：`blocks.max_chars`（Pj16=300 字）+ `prompts.add_memory`。**块数 ≥ 2，一块一件事；单块 ≤ max_chars；block[0] = 检索锚**（查询形自然语句 + 关键标识：功能名/文件路径/参数名/报错原文）；按 `；。` 主切、【标签】并入首块；**块内不嵌时间戳**；禁纯工具名块。写入侧由 `memwriter.ts` 强制切分（`blocks` 与 `[input.content]` 两条路径同切，`splitBlock`/`blockMaxChars`），不靠自觉。**动因**：encode 超 512 token 静默丢尾 + 逐块 max-pool 每块一票 ⇒ 块长/块数直接决定向量形态。机制推导与实测数字 → [core.md](core.md)「神经元内置检索/记忆」。
+- **引擎 = TS 进程内置工具** `_agent-src/src/tools/neturon/`（16 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/cogname/roster/index），`feature('NEURON_RAG')` 门控**默认开**（build.ts defaultFeatures）。工具 = `recall` / `remember`（**不带 neuron_ 前缀**——常驻直载、不经 ToolSearch 检索，系统提示自带 schema 直接调用）+ `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（延迟加载，ToolSearch 可检索；ops 三 action = build_graph / detect_communities / name_communities）。neturon-rag 插件已移除（§5.7）；机制细节 → [core.md](core.md)「神经元内置检索/记忆」。**Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）。**认知链已主动偏离 Python**：cog 全链纯标注驱动、文本不参与任何判据（core.md「认知图形成」），Python 对照只覆盖 leiden/社群统计等未改部分。
+- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段）→ `l1.cog`（社群/节点/precog）。**raw 层惯例**：每条 mem 条目的 `revelant[0]` = 其 raw 层 `message_id`（`l3.raw/<来源>/message.db`），`source` = 来源标签（'LOG'/'MEM'/'QQ'/'微信'…）——**全部在盘项目同此**：`_agent-src/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库，各项目根历史 LOG.md 已迁入 raw+mem 层并真移动（项目根不再有 LOG.md；新 LOG 条目一律写各自 mem 层，Pj16 入口现状见 core.md）。
+- **`blocks` 标准（声明源 = 各库 `config.yaml`）**：`blocks.max_chars`（Pj16=300 字）+ `prompts.add_memory`。**块数 ≥ 2，一块一件事；单块 ≤ max_chars；block[0] = 检索锚**（查询形自然语句 + 关键标识：功能名/文件路径/参数名/报错原文）；按 `；。` 主切、【标签】并入首块；**块内不嵌时间戳**；禁纯工具名块。写入侧由 `memwriter.ts` 强制切分（`blocks` 与 `[input.content]` 两条路径同切，`splitBlock`/`blockMaxChars`），不靠自觉。**动因**：encode 超 512 token 静默丢尾 + 逐块 max-pool 每块一票 ⇒ 块长/块数直接决定向量形态。机制推导与实测数字 → [core.md](core.md)「神经元内置检索/记忆」。
 - **写记忆**：脚本/工具全文存 `l3.raw/`，`core_file` 只存**相对路径**引用；同一源不重复记录（复用同一源）。
-- **检索（双检索）**：`rag_search` 查 mem（唯一写 precog）+ `rag_cog_context` 全查五层（概念/社群/precog节点/聚合节点/mem）。
-- 命中后用 `rag_source` 取完整 `men.content` 确认真实上下文，按 `core_file[].path` 复用脚本，不重复造轮子。
+- **检索（双检索）**：`recall` 查 mem（唯一写 precog）+ `neuron_cog` 全查五层（概念/社群/precog节点/聚合节点/mem）。
+- 命中后用 `neuron_source` 取完整 `mem.content` 确认真实上下文，按 `core_file[].path` 复用脚本，不重复造轮子。
 - 同一话题有失败（pattern=try）和成功（pattern=succeed）两条时，认准成功那条。
-- 提及人物名（ljj/lcx/gky/sc/lyg 等）先 `rag_should_search`，人名 = explicit 触发。
 - 查询用自然语句（做了什么/怎么做的），不要关键词堆砌（BGE 对自然语句友好）。
+- LOG 条目写库入口（Pj16 现状）→ CLAUDE.md「文件维护规范」：UTF-8 脚本文件 `bun:sqlite` 直写 mem 层，禁 `bun -e` 内联中文；写后 `probe-neuron-index.ts` 只读核验（可自主跑），`rebuild-neuron-index.ts` 全量重编码（重资源长跑）启动前必须先征得用户同意。
 
 ## 8. Changelog 标准
 
 - **源文件 = `changes.md`**（exe 旁或 CWD）。App 启动时 `syncLocalChangesToCache()` 把它同步进 `.claude/cache/changelog.md`（供 "What's new" 展示）。
 - `cache/changelog.md` 是 **App 展示缓存**，会被同步/网络拉取**覆盖**，**禁止手工往里写**。
-- **禁止**在 `@WrokSpace` 根创建 `CHANGELOG.md`——官方惯例在本 fork 不适用，App 不读它（2026-08-07 已踩坑归档）。
+- **禁止**在 `@WrokSpace` 根创建 `CHANGELOG.md`——官方惯例在本 fork 不适用，App 不读它。
 - 格式：`## <版本号/日期>` + `- 条目`；支持非 semver 键（如日期），解析器会自动按日期排序。
 - 工作区的变更记录走 `@WrokSpace/LOG.md`（LOG 只追加），两者职责不同，不混用。
 
 ## 9. 工作区约定（@WrokSpace）
 
-- **🔴 所有文件只能在项目内建立（红线）**：任何生成/创建/修改文件都必须落在 `Pj16-CodeAgent构建/**` 内（Pj16 会话：本项目与工作区根 `LOG.md` + 规范四件（`CLAUDE.md`/`README.md`/`STATUS.md`/`.hermes.md`）自动放行，其它落点写操作**弹审批**（`defaultMode: default`，仅 `rm`/`rmdir` 直接拒绝）；Pj1/Pj2/Pj11/Pj13/Pj14/Pj15 各自 `.claude/settings.json` 为 deny 锁死，只写自身 + 根 5 件）。**严禁在项目外创建任何文件**，包括但不限于：系统临时目录（`/tmp`、`%TEMP%`）、桌面根、其它盘符、工作区根等。截图/临时产物一律放任务目录或项目内子目录（如 `SubPj1-*/shots/`）（2026-08-12 曾把截图拷到 `/tmp` 违规，须避免）。
-- **LOG 只追加不修改**，`patch` 追加模式，时间戳从 `date` 命令获取。
+- **🔴 所有文件只能在项目内建立（红线）**：任何生成/创建/修改文件都必须落在所属项目内（Pj16 会话：本项目与工作区根 `LOG.md` + 规范四件（`CLAUDE.md`/`README.md`/`STATUS.md`/`.hermes.md`）自动放行，其它落点写操作**弹审批**（`defaultMode: default`，仅 `rm`/`rmdir` 直接拒绝）；其余项目各自 `.claude/settings.json` 为 deny 锁死，只写自身 + 根 5 件）。**严禁在项目外创建任何文件**，包括但不限于：系统临时目录（`/tmp`、`%TEMP%`）、桌面根、其它盘符、工作区根等。截图/临时产物一律放任务目录或项目内子目录。
+- **LOG 只追加不修改**：工作区根 `LOG.md` 走 `patch` 追加、时间戳从 `date` 命令获取；项目 LOG 写神经元 mem 层（见 §7），时间戳进 `memory_id`。
 - **临时任务目录命名**：`YYYYMMDDHHMMSS-名称`（紧凑时间戳无方括号）；存量 `[YYYY-MM-DD-HH-MM-SS]-名称` 旧目录不改名（含其中会话，改名断接续）。
-- **单文件产出不建临时目录**：单个 md/脚本/图等直接建 `YYYYMMDDHHMMSS-名称.ext` 放目标位置（如项目根 `Pj16-CodeAgent构建/`），多文件才建 `YYYYMMDDHHMMSS-名称/` 目录（`.hermes.md` 规则A）。
+- **单文件产出不建临时目录**：单个 md/脚本/图等直接建 `YYYYMMDDHHMMSS-名称.ext` 放目标位置（如项目根），多文件才建 `YYYYMMDDHHMMSS-名称/` 目录（`.hermes.md` 规则A）。
 - **禁止删除**：废弃内容移到 `.trash/YYYY-MM-DD/`。
 - **操作后立即验证结果**。
-- 项目变更需**同时更新**项目内 LOG 和工作区 LOG；状态目录树见 `STATUS.md`。
+- 项目变更需**同时更新**项目内神经元 mem 层 LOG 和工作区 LOG；状态目录树见 `STATUS.md`。
 - 门控规则见 `.hermes.md`（禁止捏造事实、禁止删除、临时任务命名、操作后验证）。
 - **不自己运行** `启动.bat` / `start_site.py` 启动本地站点（0zijun 等由用户自己双击启动；需要站点运行时告知用户去启动）。
 
@@ -219,16 +215,16 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 | 项目 `.claude/` | trust/onboarding 触发创建 | **惰性创建**（首次写项目设置才 mkdir；会话存储的 `.claude/projects/` 写会话时自动建） |
 | 会话/记忆存储 | 全局 `~/.claude/projects/` 统一 | **会话/自动记忆均项目级、平铺**：会话 `<项目>/.claude/projects/*.jsonl`，记忆 `<项目>/.claude/projects/memory/` |
 | 权限规则 `@/` 前缀 | 无此语法 | **自定义特性，生效中**：`@/` 解析到便携根（`.claude-portable` 标记所在 `.claude` 的父目录 = `@WrokSpace`），Edit/Read 的 allow/deny 规则均有效（`filesystem.ts` `patternWithRoot`） |
-| `.claude` 目录编辑 | 可直接编辑 | **危险目录守卫**：路径任意段 = `.claude`（`.claude/worktrees` 除外）→ acceptEdits 与项目级 allow 被无视，强制弹「编辑自己配置」审批；唯一豁免 = **会话级** allow 规则 `/.claude/**` 或 `~/.claude/**`（审批框选项 2 即写入，会话结束失效） |
-| 品牌身份 | Claude Code / Anthropic | **白标 Floria**（2026-09-01 P0 落实：身份句族 11 处 + env 假情报 3 句 + 主提示散句 + 工具描述 + guide agent 改造为 Floria guide；`CLAUDE_CODE_ATTRIBUTION_HEADER` 全局关；D 层功能性标识 `.claude`/`CLAUDE_*`/工具协议等不动） |
+| `.claude` 目录编辑 | 可直接编辑 | **危险目录守卫**：路径任意段 = `.claude`（`.claude/worktrees`、`.claude/preview` 除外）→ acceptEdits 与项目级 allow 被无视，强制弹「编辑自己配置」审批；唯一豁免 = **会话级** allow 规则 `/.claude/**` 或 `~/.claude/**`（审批框选项 2 即写入，会话结束失效）。**`.claude/preview` 豁免（fork 改动，`filesystem.ts` worktrees 特例同款）**：预览产物是网关静态托管内容非可执行配置，回归 acceptEdits/allow 正常判定；preview 下嵌套 `.claude` 仍拦 |
+| 品牌身份 | Claude Code / Anthropic | **白标 Floria**：身份句族 + env 假情报 + 主提示散句 + 工具描述 + guide agent 改造为 Floria guide；`CLAUDE_CODE_ATTRIBUTION_HEADER` 全局关；D 层功能性标识 `.claude`/`CLAUDE_*`/工具协议等不动 |
 
 ## 11. 常见坑速查
 
 - **`.claude/.claude-portable` / `.claude/` 挪走** → exe 副本向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。
-- **exe 副本放进带配置根标记的项目 `.claude/`**（含 `.claude.json`/`settings.json`/`plugins`/`skills` 等）→ 配置根判定第 2 步静默切到项目本地，插件/记忆/凭证全失效（Pj2 已踩坑，见记忆 portable_config_behavior）。**只有 `projects/` 的目录不算配置根**。Pj16 现状（2026-09-04 核实）：`Pj16-CodeAgent构建/.claude/` 自带 `settings.json`（08-12 会话权限）标记位本就命中，但本机 `CLAUDE_CONFIG_DIR` 已设 **HKCU 用户级**恒指 `@WrokSpace/.claude`（envUtils.ts 第 1 步 env 永远赢）→ 邻接判定永不生效，项目级 skill（archify）/`preview/` 可安全存放；仅无该 env 的拷 exe 部署场景按本条处理。
-- **会话/自动记忆项目级、平铺**（2026-08-11 起，不再按启动目录分 `<sanitized>` 桶）：会话写入 `<项目>/.claude/projects/*.jsonl`，自动记忆写入 `<项目>/.claude/projects/memory/`，均随项目打包归档不丢失。跨项目会话列表用逐级向上扫描。
+- **exe 副本放进带配置根标记的项目 `.claude/`**（含 `.claude.json`/`settings.json`/`plugins`/`skills` 等）→ 配置根判定第 2 步静默切到项目本地，插件/记忆/凭证全失效。**只有 `projects/` 的目录不算配置根**。Pj16 现状：`Pj16-CodeAgent构建/.claude/` 自带 `settings.json` 标记位本就命中，但本机 `CLAUDE_CONFIG_DIR` 已设 **HKCU 用户级**恒指 `@WrokSpace/.claude`（envUtils.ts 第 1 步 env 永远赢）→ 邻接判定永不生效，项目级 skill（archify）/`preview/` 可安全存放；仅无该 env 的拷 exe 部署场景按本条处理。
+- **会话/自动记忆项目级、平铺**（不按启动目录分桶）：会话写入 `<项目>/.claude/projects/*.jsonl`，自动记忆写入 `<项目>/.claude/projects/memory/`，均随项目打包归档不丢失。跨项目会话列表用逐级向上扫描。
 - **项目级 `.claude/` 启动不自动建** → 只在首次写项目设置（`/permissions`、`/config`、MCP 审批、插件装项目 scope）才惰性创建；要手动放 `CLAUDE.md` 或空 `settings.json`。
-- **settings.json hooks 用 CWD 相对路径**（`.claude/...`）→ 在 `@WrokSpace\[项目]\` 等子目录会话里 `recall_hook.py`/`statusline.mjs` 静默跳过（RAG 自动触发失效），只在 `@WrokSpace` 根目录跑才命中。
+- **settings.json hooks 用 CWD 相对路径**（`.claude/...`）→ 在子目录会话里 hook 脚本静默跳过，只在 `@WrokSpace` 根目录跑才命中。
 - **MCP/插件/hook 改动不热加载** → 必须重启会话。
-- **编辑 `.claude` 下文件总弹审批** → 是危险目录守卫（`isDangerousFilePathToAutoEdit`）在拦，不是权限规则失效；审批框选项 2 = 写会话级 `/.claude/**` 豁免（会话结束失效）。`@/` 前缀规则本身有效，勿建议改写成绝对路径（违反便携红线）。
+- **编辑 `.claude` 下文件总弹审批** → 是危险目录守卫（`isDangerousFilePathToAutoEdit`）在拦，不是权限规则失效；审批框选项 2 = 写会话级 `/.claude/**` 豁免（会话结束失效）。`@/` 前缀规则本身有效，勿建议改写成绝对路径（违反便携红线）。**例外**：`.claude/preview/**` 已豁免该守卫（回归 acceptEdits/allow 正常判定）——web 审批卡对预览文件还弹卡 = 会话还在跑旧 exe。
 - **MCP 序列化** → 禁裸 `json.dump(indent=2)`，用管线序列化器，否则 float32 崩溃。

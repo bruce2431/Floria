@@ -392,5 +392,4 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 - **根因**（§30 的残留缺口）：`applySegDelta` 的状态保持只覆盖 `[data-t="u"]` 段首用户气泡——段内其余 `data-m=key` 节点（尤其**引导气泡 `data-t="g<gi>"`**，见 `chat/messages.js` `weave`）每增量仍整段重建。回合中上传的图片若经排队注入（`queued_command`）落成引导气泡，就与旁白行（`.done-think`）同段；每次旁白/状态行到达 → 引导气泡 `<img>` 重建 → image-cache `private,no-cache` 必回源 → 新节点在 paint 时尚未解码 = 0 高塌缩再回弹。用户口径「旁白消息的图片没修复」即此。
 - **修法**（`core/live.js` `applySegDelta`）：照搬 §31 整页重建的 img 换血语义——删旧节点**前**从「本次将被删除」的节点按其 `img[src]` 采池（同一 src 多图用数组 shift），插入新段后同 src 的新 `<img>` 一律 `replaceWith` 换回旧节点（旧节点持已解码位图，零回源零重解码）。保留的 `[data-t="u"]` 旧气泡**不采池**：引导气泡与其可能同 src，采走会让保留气泡丢图。同一不变量：已落盘图片字节不可变（image-cache 单调 id）→ img 节点不跨帧重建。
-- **配套**：sw `floria-v341→v342`、`app.js?v=342`；exe `cli-dev-20260918231033.exe`。
 

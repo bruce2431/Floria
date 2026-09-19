@@ -369,6 +369,19 @@ import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toa
     st.raf = requestAnimationFrame(frame)
     bindNeuPointer(st)
     st.frame = frame
+    // 认知层缺失照实提示（库只有记忆层：cog_graph.json/community.json 由认知管线产出，未跑即无）
+    const cog = data.cognition || {}
+    if (!cog.graph || !cog.communities) {
+      const old = box.querySelector('.neu-note')
+      if (old) old.remove()
+      const note = document.createElement('div')
+      note.className = 'neu-note'
+      note.textContent = !cog.graph
+        ? '该库尚无认知图（未跑认知管线 recall → fill_precog → build_graph），当前仅呈现记忆层 ' + data.mems.length + ' 条'
+        : '该库尚未检测社群（未跑 detect_communities），认知节点暂未归群'
+      box.appendChild(note)
+      st.note = note
+    }
   }
 
   /** 屏幕坐标 → 图坐标 */

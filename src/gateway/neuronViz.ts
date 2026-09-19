@@ -12,6 +12,8 @@
  *   mems[]         记忆节点（mem.db memories；preview/chars 供浮窗与尺寸计算）
  * mem↔cog 连边由前端从 cogs[].mem_ids/rel_ids 派生（同一 mem 可挂多 cog，边随事实走）；
  * cog↔社群连边由 cogs[].community 派生（-1 = 未入群，min_group_size 过滤产物，照实呈现）。
+ * 认知层可缺省：cog_graph.json / community.json 由认知管线产出，未跑过的库只有记忆层——
+ * 此时按空认知层出图（cognition.graph/communities = false，前端据此提示），不是错误。
  *
  * 不做 NEURON_RAG 门控：本模块只读盘上 JSON/sqlite，不引入 embedder/transformers；
  * 库文件独立于该编译期 flag 存在，默认构建即可出图。
@@ -102,6 +104,8 @@ export interface NeuronGraphPayload {
     chars: number
   }>
   mems: Array<{ id: string; chars: number; source: string | null; time: string | null; preview: string }>
+  /** 认知层就绪度：库可以只有记忆层（LOG 迁入后未跑认知管线）——照实上报，供前端提示 */
+  cognition: { graph: boolean; communities: boolean }
 }
 
 /** community.json 键形如 resolution_1.0；兜底取 1.0 档，无则首键（键序 0.5/0.8/1.0/… 字典序） */
@@ -148,14 +152,13 @@ function previewOf(blocks: string[]): string {
   return t.length > 80 ? t.slice(0, 80) + '…' : t
 }
 
-/** 显式目录版（测试隔离 + 网关路由共用；文件缺失/分辨率非法直接抛错，由 sendError 暴露） */
+/** 显式目录版（测试隔离 + 网关路由共用；分辨率参数非法直接抛错，由 sendError 暴露） */
 export function buildNeuronGraphInDir(neuronPath: string, resKey?: string): NeuronGraphPayload {
   const graphPath = join(neuronPath, 'l1.cog', 'cog_graph.json')
   const commPath = join(neuronPath, 'l1.cog', 'community.json')
   const graph = readJson<{
     nodes?: Array<{ id?: unknown; query?: unknown; keywords?: unknown; true_memories?: unknown; revelant_memories?: unknown }>
   }>(graphPath)
-  if (!graph) throw new Error('cog_graph.json 不存在（先经 neuron build_graph 构建认知图）')
   const commAll = readJson<Record<string, {
     communities?: Array<{
       size?: unknown
@@ -163,15 +166,18 @@ export function buildNeuronGraphInDir(neuronPath: string, resKey?: string): Neur
       members?: Array<{ id?: unknown; query?: unknown; role?: unknown; core_score?: unknown }>
     }>
   }>>(commPath)
-  if (!commAll) throw new Error('community.json 不存在（先经 neuron detect_communities 检测社群）')
 
-  const keys = Object.keys(commAll)
+  // 认知层可缺省（照实呈现，不报错）：库迁移/新建后只有记忆层，cog_graph.json 与
+  // community.json 均须由认知管线（recall → fill_precog → build_graph → detect_communities）
+  // 产出，未跑过即无——此时出图 = 纯记忆层。仅「community.json 存在但显式指定档不存在」
+  // 才是真实参数错误，仍然抛错。
+  const keys = commAll ? Object.keys(commAll) : []
   const cog2 = readCog2(neuronPath)
-  const wantKey = resKey !== undefined && resKey !== '' ? `resolution_${resKey}` : pickCommKey(keys, cog2)
-  if (!keys.includes(wantKey)) {
+  const wantKey = keys.length ? (resKey ? `resolution_${resKey}` : pickCommKey(keys, cog2)) : ''
+  if (wantKey && !keys.includes(wantKey)) {
     throw new Error(`分辨率 ${wantKey} 不存在，可用：${keys.join(', ')}`)
   }
-  const resolution = wantKey.slice('resolution_'.length)
+  const resolution = wantKey ? wantKey.slice('resolution_'.length) : ''
 
   const mems = readMemories(join(neuronPath, 'l2.mem', 'mem.db'))
   const memById = new Map(mems.map((m) => [m.memory_id, m]))
@@ -179,7 +185,7 @@ export function buildNeuronGraphInDir(neuronPath: string, resKey?: string): Neur
   for (const m of mems) memChars.set(m.memory_id, deriveEntryText(m).length)
 
   // cog 节点（true/revelant 分列，供前端区分连边语义）
-  const cogs = (graph.nodes ?? [])
+  const cogs = (graph?.nodes ?? [])
     .filter((nd) => typeof nd.id === 'string')
     .map((nd) => {
       const memIds = [...new Set(((nd.true_memories as string[]) ?? []).filter((x) => memById.has(x)))]
@@ -212,7 +218,7 @@ export function buildNeuronGraphInDir(neuronPath: string, resKey?: string): Neur
   }
 
   // 社群（community.json 成员 = cog id；逐群回填 cogs[].community）
-  const communities = (commAll[wantKey]?.communities ?? []).map((c, i) => {
+  const communities = (wantKey ? commAll![wantKey]?.communities ?? [] : []).map((c, i) => {
     const memberList = (c.members ?? [])
       .filter((m) => typeof m.id === 'string' && cogById.has(m.id as string))
       .map((m) => ({
@@ -260,6 +266,7 @@ export function buildNeuronGraphInDir(neuronPath: string, resKey?: string): Neur
       time: idTime(m.memory_id),
       preview: previewOf(m.blocks),
     })),
+    cognition: { graph: graph !== null, communities: keys.length > 0 },
   }
 }
 

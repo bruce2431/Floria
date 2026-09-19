@@ -3746,6 +3746,19 @@ function setFirstSendHash(v) { firstSendHash = v }
     st.raf = requestAnimationFrame(frame)
     bindNeuPointer(st)
     st.frame = frame
+    // 认知层缺失照实提示（库只有记忆层：cog_graph.json/community.json 由认知管线产出，未跑即无）
+    const cog = data.cognition || {}
+    if (!cog.graph || !cog.communities) {
+      const old = box.querySelector('.neu-note')
+      if (old) old.remove()
+      const note = document.createElement('div')
+      note.className = 'neu-note'
+      note.textContent = !cog.graph
+        ? '该库尚无认知图（未跑认知管线 recall → fill_precog → build_graph），当前仅呈现记忆层 ' + data.mems.length + ' 条'
+        : '该库尚未检测社群（未跑 detect_communities），认知节点暂未归群'
+      box.appendChild(note)
+      st.note = note
+    }
   }
 
   /** 屏幕坐标 → 图坐标 */
@@ -6701,6 +6714,17 @@ function setApprovalPending(v) { approvalPending = v }
     }
     renderImgPills()
   }
+
+// 排队图片点击催办（2026-09-19）：点击排队图片触发催办，发送 queue-nudge
+document.addEventListener('click', (e) => {
+  const pendingImg = e.target.closest?.('.pending-img')
+  if (!pendingImg) return
+  // 如果点击的是删除按钮，不触发催办
+  if (e.target.classList.contains('img-x')) return
+  if (!state.currentHash || !gws || gws.readyState !== 1) return
+  gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
+  toast('已催办：本条并入当前轮次')
+})
 
   async function gwSend() {
     if (!GATEWAY) return false

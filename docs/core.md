@@ -145,6 +145,13 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 - **不为没有可延迟工具的会话花钱**：`tools.some(isDeferredTool)` 为假时根本不探测（`getToolSearchMode()==='standard'` 同理早退）。
 - **老会话自愈**：探测结果进 `messagesForAPI` 构建前（`claude.ts` 的 `useToolSearch` 与本请求同拍），`useToolSearch=false` 分支照旧剥掉历史里的 `tool_reference`（`stripToolReferenceBlocksFromUserMessage`）与 `caller` 字段——与 haiku 今天走的是同一条既存路径，不复刻。
 
-**已知残留（与 haiku 同档，未扩权）**：`isToolSearchEnabledOptimistic()` 是同步且只看 mode/env，`ToolSearchTool.isEnabled()` 亦如是，故判不支持的模型仍会看到 ToolSearchTool；其调用结果被剥成占位文本。要彻底摘掉需把该工具启用态改成模型感知（跨同步/异步边界），当前不动。
+**门控分两层，别把第二层当成缺口**：
+
+| 层 | 件 | 性质 |
+|---|---|---|
+| 进程内工具池 | `tools.ts` `getTools()` 里的 `isToolSearchEnabledOptimistic()`、`ToolSearchTool.isEnabled()` | **同步、只看 mode/env，不认识模型**——判不支持的模型在这一层仍会看到 ToolSearchTool |
+| 请求线上 | `claude.ts` 按 `useToolSearch` 过滤后 `filteredTools` 才进 `toolToAPISchema` | **唯一决定模型看到什么的地方**；`useToolSearch=false` 时 `filteredTools` 直接剥掉 ToolSearchTool |
+
+`useToolSearch` 由 `await isToolSearchEnabled(...)` 得出（含上表探测结果），故模型在线上根本看不到 ToolSearchTool、也无从调用；`toolExecution.ts` 那句「先用 ToolSearchTool 装载」的提示只在有延迟工具时才可能触发。系统提示里也不含工具搜索文案（`ToolSearchTool/prompt.ts` 只在工具本体进 `filteredTools` 时才随 schema 上线）。**因此不需要给 `isEnabled()` 补模型感知**——那是与线上过滤重复的第二道守卫。
 
 **验证**：`probes/probe-toolref-autodetect.ts` **16 过 / 0 败**（A 静态名单与非池模型 / B 真端点判定 glm-4.7·glm-4.5-air 拒、glm-5.3-flash 429 fail-open / C 同步入口读同一缓存 / D 幂等 / E 组合门含 haiku 短路与「无可延迟工具零耗时」）。纯 CLI 层，无 web 改动不 bump sw。

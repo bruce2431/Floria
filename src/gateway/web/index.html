@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=334" />
+  <link rel="stylesheet" href="/styles.css?v=335" />
 </head>
 <body>
 <div id="app">
@@ -217,45 +217,46 @@
       </div>
     </div>
   </main>
+
+  <!-- 搜索覆盖层 -->
+  <div id="search-overlay">
+    <div id="search-box">
+      <div class="s-top">
+        <span class="s-title">搜索</span>
+        <button id="search-close" title="关闭">✕</button>
+      </div>
+      <div class="search-row"><span id="s-mag"></span><input id="search-input" placeholder="搜索全部对话…"></div>
+      <div id="search-results"></div>
+    </div>
+  </div>
+  
+  <!-- 风险确认门（dsh RiskConfirmation + Modal：全屏遮罩 + 居中对话框） -->
+  <div id="risk-modal" hidden></div>
+  <!-- 会话重命名弹窗（2026-08-24 侧栏行操作 · DSH rename dialog 移植：mask + dialog + input + 确认） -->
+  <div id="rename-modal" hidden>
+    <div class="mask"></div>
+    <div class="dialog" role="dialog" aria-modal="true" aria-label="重命名会话">
+      <div class="header">
+        <h2 class="title">重命名会话</h2>
+        <button type="button" class="close" aria-label="关闭"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg></button>
+      </div>
+      <div class="body">
+        <input id="rename-input" class="rename-input" type="text" placeholder="输入新标题" maxlength="200" autocomplete="off"/>
+        <div id="rename-error" class="rename-error" role="alert" hidden></div>
+      </div>
+      <div class="footer">
+        <button type="button" class="button outline" id="rename-cancel">取消</button>
+        <button type="button" class="button primary" id="rename-ok">重命名</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 聊天气泡弹层（最近会话，贴在 rail 附近） -->
 <div id="bubble-pop" class="popup"></div>
 
-<!-- 搜索覆盖层 -->
-<div id="search-overlay">
-  <div id="search-box">
-    <div class="s-top">
-      <span class="s-title">搜索</span>
-      <button id="search-close" title="关闭">✕</button>
-    </div>
-    <div class="search-row"><span id="s-mag"></span><input id="search-input" placeholder="搜索全部对话…"></div>
-    <div id="search-results"></div>
-  </div>
-</div>
-
-<!-- 风险确认门（dsh RiskConfirmation + Modal：全屏遮罩 + 居中对话框） -->
-<div id="risk-modal" hidden></div>
-<!-- 会话重命名弹窗（2026-08-24 侧栏行操作 · DSH rename dialog 移植：mask + dialog + input + 确认） -->
-<div id="rename-modal" hidden>
-  <div class="mask"></div>
-  <div class="dialog" role="dialog" aria-modal="true" aria-label="重命名会话">
-    <div class="header">
-      <h2 class="title">重命名会话</h2>
-      <button type="button" class="close" aria-label="关闭"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg></button>
-    </div>
-    <div class="body">
-      <input id="rename-input" class="rename-input" type="text" placeholder="输入新标题" maxlength="200" autocomplete="off"/>
-      <div id="rename-error" class="rename-error" role="alert" hidden></div>
-    </div>
-    <div class="footer">
-      <button type="button" class="button outline" id="rename-cancel">取消</button>
-      <button type="button" class="button primary" id="rename-ok">重命名</button>
-    </div>
-  </div>
-</div>
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=345"></script>
+<script src="/app.js?v=346"></script>
 </body>
 </html>

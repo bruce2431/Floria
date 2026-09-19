@@ -55,7 +55,9 @@ a { text-decoration: none; color: inherit; }
      --vv-pan  浏览器为露出焦点元素对可视视口的上顶量——#app 反向锚回，否则整界面（含侧栏与
                空态 Floria 背景）被一起顶起
      --kb-lift 空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出键盘）
-   不变量：侧栏与 #empty-hint（绝对铺满 #chat-area 的 Floria 背景层）不参与任何位移。 */
+   不变量：侧栏与 #empty-hint（绝对铺满 #chat-area 的 Floria 背景层）不参与任何位移。
+   覆盖层（#search-overlay / #risk-modal / #rename-modal）同在 #app 内 absolute 定位并收 --kb，
+   故「上顶补偿 + 键盘压缩」对它们与 app 壳体同源，不必各自复刻视口公式。 */
 #app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; top: var(--vv-pan, 0px); }
 
 /* ================= 主聊天区 ================= */
@@ -1096,7 +1098,10 @@ body.kb-open #input-wrap { transition: none; }
 /* 风险确认门（dsh RiskConfirmation + Modal 完全移植：全屏遮罩 + 居中 r24 对话框，
    warning 行 + checkbox 认可 + footer[outline 取消 / primary 确认]） */
 #risk-modal {
-  position: fixed; inset: 0; z-index: 1000;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
+     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
+     的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 #risk-modal[hidden] { display: none; }
@@ -1106,7 +1111,7 @@ body.kb-open #input-wrap { transition: none; }
   position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 20px;
   width: min(440px, 100%); max-width: 100%;
-  max-height: calc(100vh - 48px);
+  max-height: calc(100% - 48px);
   padding: 0 0 24px; overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0); border-radius: 24px;
   background: #fff;
@@ -1624,12 +1629,16 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 
 /* 搜索覆盖层 */
 #search-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.18); z-index: 100; display: none;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
+     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
+     的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0;
+  background: rgba(0, 0, 0, 0.18); z-index: 100; display: none;
   align-items: center; justify-content: center;
 }
 #search-overlay.show { display: flex; }
 #search-box {
-  width: min(560px, calc(100% - 32px)); max-height: 74vh; background: #fff; border-radius: 16px;
+  width: min(560px, calc(100% - 32px)); max-height: 74%; background: #fff; border-radius: 16px;
   box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; animation: pop 0.18s ease;
 }
 @keyframes pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
@@ -1807,7 +1816,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·
    body mt20 px24 · footer px24 右对齐 gap8 · Button outline/primary r18 h36 */
 #rename-modal {
-  position: fixed; inset: 0; z-index: 1000;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
+     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
+     的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 #rename-modal[hidden] { display: none; }
@@ -1816,7 +1828,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 20px;
   width: min(380px, 100%); max-width: 100%;
-  max-height: calc(100vh - 48px);
+  max-height: calc(100% - 48px);
   padding: 0 0 24px; overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 24px;
   background: #fff;

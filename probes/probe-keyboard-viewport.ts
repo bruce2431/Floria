@@ -53,11 +53,26 @@ ok('A2 启动序列调 initViewport（紧随 initLive）', (() => {
   const j = appSrc.indexOf('initViewport()')
   return i >= 0 && j > i && j - i < 120
 })())
-ok('A3 applyKeyboard 消费 visualViewport', /window\.visualViewport/.test(body(viewportJs, 'function applyKeyboard()')))
+ok('A3 syncKeyboard 消费 visualViewport', /window\.visualViewport/.test(body(viewportJs, 'function syncKeyboard()')))
 ok('A3 键盘高只由布局视口与可视视口差得出', /root\.clientHeight,\s*vv\.height,\s*vv\.offsetTop,\s*vv\.scale/.test(viewportJs))
 ok('A3 上顶量 pan 交 #app 反向锚回', /setProperty\('--vv-pan'/.test(viewportJs))
 ok('A3 空态底栏抬升量独立计算（--kb-lift）', /setProperty\('--kb-lift'/.test(viewportJs))
 ok('A3 键盘在场重算消息流占位几何（stageSync）', /stageSync\(\)/.test(viewportJs) && /import \{ stageSync \}/.test(viewportJs))
+
+// ---------- ②b 相位：补偿必须与视觉变化同帧（rAF 转手必晚一帧 = 侧栏被顶起一瞬间） ----------
+ok('A4 监听器直挂同步段（resize/scroll 同帧写补偿）',
+  /vv\.addEventListener\('resize', syncKeyboard\)/.test(viewportJs) && /vv\.addEventListener\('scroll', syncKeyboard\)/.test(viewportJs))
+ok('A4 无 rAF 转手的补偿路径（旧 scheduleKeyboard 应已删除）',
+  !/scheduleKeyboard/.test(viewportJs) && !/requestAnimationFrame\(syncKeyboard/.test(viewportJs))
+const syncBody = body(viewportJs, 'function syncKeyboard()')
+// 读 visualViewport 的 offsetTop 是取值不是量算；只有读 DOM 元素的布局位才强制布局
+const layoutReads = [...syncBody.matchAll(/([\w.$]+)\.offsetTop/g)].map((m) => m[1]).filter((s) => s !== 'vv')
+ok('A4 同步段内不读元素布局（getBoundingClientRect/offset* 会强制布局，拖累上顶过程）',
+  syncBody.length > 0 && !/getBoundingClientRect|offsetHeight|offsetWidth/.test(syncBody) && layoutReads.length === 0,
+  layoutReads.join(','))
+ok('A4 键盘高经变量交接延迟段（lastKb，不回读 CSS 变量）', /lastKb = kb/.test(syncBody) && /lastKb > 0/.test(body(viewportJs, 'function settle()')))
+ok('A4 仅「量算 + 占位重算」走 rAF 合帧', /requestAnimationFrame\(settle\)/.test(viewportJs) && /stageSync\(\)/.test(body(viewportJs, 'function settle()')))
+ok('A4 文档滚动归零也在同步段（与上顶同理须同帧）', /scrollTo\(0, 0\)/.test(syncBody))
 
 // ---------- ③ CSS 消费点（三个变量缺一即「被顶起」或「抬头/漏出」） ----------
 ok('B1 #app 以 --vv-pan 锚定可视视口顶', /#app \{[^}]*top:\s*var\(--vv-pan, 0px\)/.test(css))
@@ -70,8 +85,25 @@ ok('B1 无残留的写死 docked top（旧 calc(100% - 22px) 应已并入 --kb �
 ok('B1 #empty-hint 自身不含任何位移/收缩（背景层不参与）',
   !/#empty-hint \{[^}]*var\(--kb/.test(css))
 
+// ---------- ③b 覆盖层（搜索层/风险门/重命名弹窗）：定位源须与 app 壳体同一 ----------
+for (const [name, id] of [['搜索层', 'search-overlay'], ['风险门', 'risk-modal'], ['重命名弹窗', 'rename-modal']] as const) {
+  const re = new RegExp(`#${id} \\{[^}]*position: absolute;[^}]*bottom: var\\(--kb, 0px\\)`)
+  ok(`B2 ${name} #${id} 在 app 壳体内 absolute 且 bottom 收 --kb`, re.test(css))
+  ok(`B2 ${name} 不再 position:fixed 挂 body（会与 app 视口锚定脱钩）`, !new RegExp(`#${id} \\{[^}]*position: fixed`).test(css))
+}
+const appOpen = indexHtml.indexOf('<div id="app">')
+const appShellEnd = indexHtml.indexOf('<!-- 聊天气泡弹层')
+ok('B2 三件覆盖层的 DOM 真在 #app 内（不靠 CSS 假装）',
+  appOpen >= 0 && appShellEnd > appOpen &&
+    ['search-overlay', 'risk-modal', 'rename-modal'].every((id) => {
+      const k = indexHtml.indexOf(`id="${id}"`)
+      return k > appOpen && k < appShellEnd
+    }))
+ok('B2 对话框高度上限用容器百分比（vh=布局视口，键盘在场会溢出可视区）',
+  !/max-height: calc\(100vh - 48px\)/.test(css) && !/max-height: 74vh/.test(css))
+
 // ---------- ④ 产物与版本同步 ----------
-ok('C1 产物 app.js 含定义与调用点', ['function kbGeometry(', 'function applyKeyboard(', 'function initViewport(', 'initViewport()'].every((s) => appJs.includes(s)))
+ok('C1 产物 app.js 含定义与调用点', ['function kbGeometry(', 'function syncKeyboard(', 'function settle(', 'function initViewport(', 'initViewport()'].every((s) => appJs.includes(s)))
 ok('C1 产物 app.js 未引用模块 import 语法（拼接已剥壳）', !/^\s*import .*viewport\.js/m.test(appJs))
 const swV = /const CACHE = 'floria-v(\d+)'/.exec(swJs)?.[1]
 const appV = /\/app\.js\?v=(\d+)/.exec(indexHtml)?.[1]

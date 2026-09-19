@@ -1,7 +1,7 @@
 # web 前端链路定案（web-ui）
 
 > 本文件属 `docs/` 文档库，收录 web 前端（内置网关静态托管页）的**现行链路与不变量**。
-> 前端唯一手改处 = `_agent-src/src/gateway/web-src/`（22 个 ESM 模块），`src/gateway/web/app.js` 由构建生成、勿手改；改动须 bump `?v=` cache-bust 并重新构建 exe（→ [build.md](build.md) §1.1）。网关服务侧（认证 / mDNS / 预览容器 / 审批中继 / 独立会话进程链）→ [gateway.md](gateway.md)；源码核心机制 → [core.md](core.md)；术语 → [glossary.md](glossary.md)。改动以下任一链路时必须同步更新本文。
+> 前端唯一手改处 = `src/gateway/web-src/`（22 个 ESM 模块），`src/gateway/web/app.js` 由构建生成、勿手改；改动须 bump `?v=` cache-bust 并重新构建 exe（→ [build.md](build.md) §1.1）。网关服务侧（认证 / mDNS / 预览容器 / 审批中继 / 独立会话进程链）→ [gateway.md](gateway.md)；源码核心机制 → [core.md](core.md)；术语 → [glossary.md](glossary.md)。改动以下任一链路时必须同步更新本文。
 
 ## 1. pushState 路径路由
 
@@ -170,7 +170,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 12. 前端模块化架构（web-src/）
 
-**定案**：web 前端 JS 源码模块化——`_agent-src/src/gateway/web-src/` 下 22 个 ESM 模块，**web-src/ 是唯一手改处**；构建时 `scripts/build.ts` spawn 自写拼接器 `scripts/bundle-web-modules.ts` 把各模块按切割区间行序拼回单 IIFE 写 `web/app.js`（生成物勿手改，每次构建重新生成）。产物文件名/引用不变，sw CORE、`?v=` cache-bust、gen-web-assets、网关静态路由全链零改动。
+**定案**：web 前端 JS 源码模块化——`src/gateway/web-src/` 下 22 个 ESM 模块，**web-src/ 是唯一手改处**；构建时 `scripts/build.ts` spawn 自写拼接器 `scripts/bundle-web-modules.ts` 把各模块按切割区间行序拼回单 IIFE 写 `web/app.js`（生成物勿手改，每次构建重新生成）。产物文件名/引用不变，sw CORE、`?v=` cache-bust、gen-web-assets、网关静态路由全链零改动。
 
 **打包器定案——自写拼接器（非 Bun.build）**：Bun.build 按依赖图**重排模块执行序**，而多个模块的顶层立即执行代码（事件绑定/DOM 初始化）引用 `state.js` 的 const → TDZ 崩溃；且 IIFE 顶部切割区间外的 `const $ = (id) => document.getElementById(id)` 不属任何模块、切割即丢 → `state.js` 顶层 `$('chat-area')` ReferenceError。根治=拼接器按 MODULES 表**原区间行序**拼回（行序=原执行序，TDZ 不可能复现；`const $` 注回 IIFE 顶部原位；头注释 + IIFE 壳照原版重建）。拼接器三机制：**锚点检索**定位区间起点（区间首行=节标题/独特函数签名，手改增删行不破坏拼接）、**marker 尾界**（`// —— 跨模块写入口`/`export {` 首现处，body=头尾全量）、**首行防呆**（锚点前必恰有 1 分隔空行=第二重校验）。setter 跟随定义模块末区间输出（0 缩进 function 声明，hoisting 无 TDZ）。
 
@@ -191,7 +191,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **链路**：web `.q-item` 点击（事件委托，`#live-zone` 重建不影响；`cursor:pointer` + hover 浮起 + `title` 提示「点击催办：结束当前思考，本条立即并入本轮」）→ `/clients` WS 发 `{type:'queue-nudge', sessionId}` → 网关 `handleWsMessage` `case 'queue-nudge'` 按会话精确路由（未在线回 status；**不 resumeAndDeliver**——离线会话没有生成流可断，排队消息在那边本就只走常规投递）→ CLI `gatewayClient.ts` 收帧 → `src/bridge/gatewayQueueNudgeHandle.ts`（模块级句柄，仿 `gatewayInterruptHandle.ts` 模式）→ REPL 注册 handler 判活两条（缺一不可）：**①有在飞生成**（`abortController` 存活）、**②队列里确有可 drain 的用户消息**（`getDrainableQueuedPrompt()` 非空）→ `requestQueueNudge()`。headless（无 REPL）无句柄 → 静默忽略；旧 exe 收到未知帧同样静默忽略。
 
-**已验证**：`messageQueueManager` 侧自取证探针 `_agent-src/probe-queue-nudge.ts` 16 项全过（可催办对象判据四种形态 + 一次性消费 + 队列清空失效）。
+**已验证**：`messageQueueManager` 侧自取证探针 `probes/probe-queue-nudge.ts` 16 项全过（可催办对象判据四种形态 + 一次性消费 + 队列清空失效）。
 
 ## 14. 处理中段尾部工具组恒收口
 
@@ -216,7 +216,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **DOM 与几何**：`#task-dock`（`index.html`）是 `#input-bar` 的**子元素**（`#input-bar` `position:relative` 为其定位上下文），`bottom:100%` 贴输入栏上沿之上、`overflow:hidden` 作裁切盒，`pointer-events:none`（仅在 `.td-lip` 与展开态 `.td-panel` 上恢复）保证不可见盒体永不挡聊天区点击。收敛态面板 `transform: translateY(100%)` **整块藏进输入栏后**，露出件只剩 `.td-lip` **12px 把手条**（hover 14px，兼作点击热区）。**把手材质 = 同族材质**（`background:#fff` + `1px solid rgba(0,0,0,0.1)`、`border-bottom:none` 紧贴栏顶不画第二道线、`border-radius:10px 10px 0 0`）——收敛态露出的**就是 `.td-panel` 自身的顶边**（与展开态同材质，揭示/收合视觉连续）；`.blocked`（接管卡在场）加 `opacity:.55` 显式弱化。展开态面板 `translateY(calc(-1 * var(--td-gap)))`，`--td-gap` = **10px** 为面板底边与输入栏上沿的间距；几何唯一出口 = `#task-dock` 上的 `--td-gap` 变量，盒 `padding:18px 10px 0`（上 18px 供展开态上移后浮出阴影不被裁）。点击边沿/`.td-head` 切换 `.open`（0.32s cubic-bezier，与接管栏同款缓动）；宽=输入栏宽−48px 居中（`margin:0 10px` + 盒左右 padding 10px），`max-height: min(40vh,460px)` 内部滚动，展开态重渲保留 `panel.scrollTop`（兜底轮询不跳顶）。行渲染与 CLI `TaskListV2` 同构：图标 `✔/◼/◻`、id 数字升序（非字典序）、`completed` 与「被未完成前序阻塞」行 dim、阻塞行 tooltip「等待前序任务：<id>」、`in_progress` 行 tooltip = `activeForm`（CLI spinner 同源）、owner 渲染 `@name`。**接管让位**：审批/提问卡入场（`showTakeover`）→ 自动清 `taskOpen` 并加 `.blocked`（边沿 `disabled` + `onclick=null`），卡撤走（`finishClear`）恢复可点且**仍保持收敛**（由用户点开）。
 
-**自取证**：`_agent-src/probe-task-dock.ts`（源码切片求值模式：从 `inputbar/approval.js` 按标记区间取出浮窗区间 + 最小 DOM 桩求值，测真源码非复制品；另从 `localGateway.ts` 切 `normalizeGatewayTasks` 经 `Bun.Transpiler` 剥类型后测形状边界）——10 组 39 断言全过。
+**自取证**：`probes/probe-task-dock.ts`（源码切片求值模式：从 `inputbar/approval.js` 按标记区间取出浮窗区间 + 最小 DOM 桩求值，测真源码非复制品；另从 `localGateway.ts` 切 `normalizeGatewayTasks` 经 `Bun.Transpiler` 剥类型后测形状边界）——10 组 39 断言全过。
 
 **实测前提（勿漏）**：本链的**上报端在 CLI 进程内**（`useTasksV2` → `notifyTaskState`），故**产生清单的那个 CLI 会话本身必须跑含本链的新 exe**；换网关 exe 只更新 web 前端（内嵌资源）不足以显示。**旧 exe 会话的换新路径**：web 侧栏关闭该会话进程（或本地退出窗口）→ web 再发消息即由网关 `resumeAndDeliver` 拉起 `process.execPath`（=网关自身新 exe）→ 此后清单才会上报。
 
@@ -329,7 +329,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **修复（同源，非补丁）**：乐观气泡 body 改 `mdHtml(bodyText)`（新增 `import { mdHtml } from '../core/markdown.js'`，无环：markdown.js 不反向依赖 approval.js）。`renderUserText` 保留——排队区 `.q-item` 仍用它（排队项自带 `<p>` 包裹，形态本就与气泡不同）。
 
-**验证**：探针 `_agent-src/probe-user-bubble-parity.ts`——①两路径结构差异取证（`mdHtml('你好')='<p>你好</p>'` vs `renderUserText('你好')='你好'`；多行 `<br>` vs 裸 `\n`；`**x**` 语义只在 mdHtml 侧）②样式侧 `<p>` margin 证据 ③**结构断言：两处气泡 body 必须同源**（乐观走 mdHtml、不再走 renderUserText）④同文本 → 同 HTML。
+**验证**：探针 `probes/probe-user-bubble-parity.ts`——①两路径结构差异取证（`mdHtml('你好')='<p>你好</p>'` vs `renderUserText('你好')='你好'`；多行 `<br>` vs 裸 `\n`；`**x**` 语义只在 mdHtml 侧）②样式侧 `<p>` margin 证据 ③**结构断言：两处气泡 body 必须同源**（乐观走 mdHtml、不再走 renderUserText）④同文本 → 同 HTML。
 
 ## 26. 「神经」tab：神经元选择卡片 + 三级节点图
 
@@ -346,7 +346,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **交互**：滚轮缩放 0.25–3×、空白拖拽平移、节点拖拽（fixed + reheat）、悬停浮窗、点击钉住（<5px 位移判定；钉住态浮窗跟随节点屏幕坐标，空白点击解除）。
 - **浮窗 `.neu-pop`**（300px 白卡，`pointer-events:none` 但成员列表可滚）：comm 卡（**有社群名显示名**（cog2.json 命名，含描述行）否则「群 N·认知 X」+ 记忆/密度/内容 chips + 成员列表，core 实心/context 空心角色点随社群色）、cog 卡（群 N/游离 + query + 关键词≤6 + 统计 chips）、mem 卡（时间 + 预览 + 内容/来源）；群节点 canvas 标签同理（名·size / 群N·size）；esc 全量转义。
 
-**验证**：`_agent-src/probe-neuron-viz.ts`（收敛循环跑满至 alpha=0.003 与前端停机一致；后端真实库直读闭包/复算/错误路径；前端源码切片注入：连边数恒等、多 cog 挂载 mem 事实闭合、确定性布局逐位一致、无 NaN/误差有界、cog 聚在 host 社群、fixed 冻结、**向心与尺寸无关**（异型异径孤节点单 tick 位移逐位相等）、**弹簧力 ∝ alpha 无地板**、**速度上限随 alpha 收缩**、**统一外场判别**（分级旧值会给出数倍差）、浮窗 XSS 转义）。
+**验证**：`probes/probe-neuron-viz.ts`（收敛循环跑满至 alpha=0.003 与前端停机一致；后端真实库直读闭包/复算/错误路径；前端源码切片注入：连边数恒等、多 cog 挂载 mem 事实闭合、确定性布局逐位一致、无 NaN/误差有界、cog 聚在 host 社群、fixed 冻结、**向心与尺寸无关**（异型异径孤节点单 tick 位移逐位相等）、**弹簧力 ∝ alpha 无地板**、**速度上限随 alpha 收缩**、**统一外场判别**（分级旧值会给出数倍差）、浮窗 XSS 转义）。
 
 ## 27. 项目预览页软重入：openProjectPreview 两级重入
 
@@ -399,7 +399,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **症状**：从侧栏切到「神经」等管理视图后，该会话一有新消息就可能被拉回 chat 消息流界面——**有宽度、没底栏**（`#chat-area.mgr-on` 仍在位：避让 padding 生效、`#input-wrap { display:none }` 隐藏输入栏）。
 - **根因**（同一不变量第三次复发）：`live.curUuid` 非空 ⇔ 当前视图正展示该会话，六条 SSE 守卫（session-delta / queue-state / task-state / compact-state / turn-state / stream-text）全押在它上面。`renderMgr`（插件/项目/模型/神经四分支）**只清 `state.currentHash` 不清槽** → 会话 A 的 `session-delta` 到达时按残留 `curUuid` 命中守卫 → `renderSessionBody` 整页重建 `#messages`，把管理视图（如神经元 canvas 图）洗成会话消息流；`mgr-on` 未摘故输入栏仍隐藏。前两次同类（`renderHome` 串会话、`openProjectPreview` 洗预览）都是就地补清单，漏了下一个入口，本次一并收敛。
 - **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
-- **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口请调它，勿就地补行）。**探针**：`_agent-src/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 源码提取后喂 `(curUuid, ev.session)` 四组合，验证清槽后残留 delta 必被丢弃）。
+- **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口请调它，勿就地补行）。**探针**：`probes/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 源码提取后喂 `(curUuid, ev.session)` 四组合，验证清槽后残留 delta 必被丢弃）。
 
 
 ## 35. 键盘弹出适配：应用锚定可视视口顶，键盘只压缩「消息流底界 + 底栏」
@@ -410,5 +410,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
   - **应用锚回**：`--vv-pan = vv.offsetTop` → `#app { position: relative; top: var(--vv-pan) }`，应用恒贴可视视口顶（侧栏、背景层零位移）。
   - **消息流底界**：`--kb = html.clientHeight − vv.height`（键盘高，与应用顶同一坐标系）→ `#chat-scroll { margin-bottom: var(--kb) }` 收的是滚动视窗本身，最后几条不再压在键盘下；键盘在场时调 `stageSync()` 按新几何重算两层占位。
   - **底栏**：会话态 `#input-wrap.docked { top: calc(100% - 22px - var(--kb)) }`（底边距口径不变，抬到键盘上沿上方 22px）；空态底栏钉在 `.g-stage` 台面 76.75% 不贴版底，按实测自然底算 `--kb-lift`（`stageEl.top + wrap.offsetTop + wrap.offsetHeight/2 + 22 − vv.height`，`offsetTop/offsetHeight` 是布局位，不受 transform 与过渡影响）→ `#empty-hint #input-wrap { transform: translate(-50%, calc(-50% - var(--kb-lift))) }`。键盘在场 `body.kb-open #input-wrap { transition: none }`（0.55s 缓动会整程拖尾在键盘后）。
-  - **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA` 且 `vv.scale ≤ 1.01`——捏合缩放同样压低 `vv.height`，必须排除（否则缩放会误当键盘）。安卓布局视口随键盘同步缩（`L − vv.height ≈ 0`）→ 自然不重复抬。事件：`vv.resize`/`vv.scroll`/`orientationchange`，rAF 合帧。
-- **边界**：无 `visualViewport`（旧浏览器）时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前保证顶层 `let` 先初始化）。**探针**：`_agent-src/probe-keyboard-viewport.ts`（只读，31/0）——结构断言（拼接表接线/启动序列调用/五个 CSS 消费点/无残留写死 `calc(100% - 22px)`/`#empty-hint` 自身不含 `--kb` 位移）+ 行为真值表（`kbGeometry` 从 `core/viewport.js` 源码提取后喂桌面/聚焦瞬间/iPad 有上顶/安卓/捏合/异常共 10 组）。
+  - **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA` 且 `vv.scale ≤ 1.01`——捏合缩放同样压低 `vv.height`，必须排除（否则缩放会误当键盘）。安卓布局视口随键盘同步缩（`L − vv.height ≈ 0`）→ 自然不重复抬。事件：`vv.resize`/`vv.scroll`/`orientationchange`。
+  - **相位（二轮根修）**：上顶是**帧级**动作，补偿写入必须与事件**同帧**落地——经 `requestAnimationFrame` 转手必然晚一帧，那一帧就是用户看到的「侧栏被顶起一瞬间后回弹」。故拆两段：**同步段 `syncKeyboard`**（`--kb`/`--vv-pan`/`body.kb-open`/`window.scrollTo(0,0)` 直接在事件回调里写，只写样式属性、不读元素布局）＋**延迟段 `settle`**（rAF 合帧：`--kb-lift` 实测 + `stageSync()` 占位重算，二者是连续量、晚一帧不可见，且逐事件 `getBoundingClientRect` 会强制布局拖累上顶过程）；键盘高经模块内 `lastKb` 交接，不回读 CSS 变量。
+- **覆盖层同源锚定（二轮）**：`#search-overlay` / `#risk-modal` / `#rename-modal` 原为 `body` 下的兄弟节点 + `position: fixed`，与 app 壳体的视口锚定**脱钩**——键盘一起它们既不随 `--vv-pan` 补偿、也不受 `--kb` 约束，重命名弹窗会随键盘下移/被键盘压住。根治＝三件 DOM 移入 `#app`，改 `position: absolute; top:0; right:0; bottom: var(--kb, 0px); left:0`：定位源与 app 壳体同一（上顶补偿由 `#app` 一条链接管，键盘压缩由 `bottom` 收 `--kb` 一条链接管），覆盖层不再各自复刻视口公式；顺带把对话框高度上限从视口单位改容器百分比（`74vh → 74%`、`calc(100vh - 48px) → calc(100% - 48px)`——`vh` 是布局视口，键盘在场会溢出可视区）。
+- **边界**：无 `visualViewport`（旧浏览器）时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前保证顶层 `let` 先初始化）。**探针**：`probes/probe-keyboard-viewport.ts`（只读，45/0）——结构断言（拼接表接线/启动序列调用/同步段无 rAF 转手且不读元素布局/只量算段走 rAF/五个 CSS 消费点/三件覆盖层在 `#app` 内且收 `--kb`、无 `position:fixed` 残留/对话框不用 `vh`/`#empty-hint` 自身不含 `--kb` 位移）+ 行为真值表（`kbGeometry` 从 `core/viewport.js` 源码提取后喂桌面/聚焦瞬间/iPad 有上顶/安卓/捏合/异常共 10 组）。

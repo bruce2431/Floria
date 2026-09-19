@@ -104,7 +104,7 @@ ok('B2 三件覆盖层的 DOM 真在 #app 内（不靠 CSS 假装）',
 ok('B2 对话框高度上限用容器百分比（vh=布局视口，键盘在场会溢出可视区）',
   !/max-height: calc\(100vh - 48px\)/.test(css) && !/max-height: 74vh/.test(css))
 
-// ---------- ③c 底栏子件（向上弹出的七个弹层）：上限一律收 --bar-room ----------
+// ---------- ③c 底栏子件（向上弹出的六个弹层，七处上限声明）：上限一律收 --bar-room ----------
 // 底栏上沿到可视视口顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。
 ok('B3 余量由「底栏上沿 − 可视视口上顶」实测（同为 client 坐标口径）',
   /setProperty\(\s*'--bar-room',\s*popRoom\(wrap\.getBoundingClientRect\(\)\.top, vv\.offsetTop, BAR_ROOM_MARGIN\)/.test(viewportJs))

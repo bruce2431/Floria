@@ -6809,6 +6809,13 @@ function setApprovalPending(v) { approvalPending = v }
   // 不读取布局、不触发布局）；仅「空态底栏抬升量实测 + stageSync 占位重算」走 rAF 合帧
   // （连续量、晚一帧不可见；且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。
   // 空态底栏钉在 .g-stage 台面 76.75%（不贴版底），只需抬「露出键盘」的量（--kb-lift，实测）。
+  // 底栏子件（2026-09-19 三轮，用户「底栏的子部件也要适配」）：底栏上所有向上弹出的子件
+  // （@提及 / 命令菜单 / 任务浮窗 / 项目·模型·上下文弹层）都贴在栏体上沿外展开，旧写法的高度
+  // 上限是 vh 或定值——vh 是布局视口，键盘在场不缩，键盘越高弹层上半截越落在可视区外（够不着）。
+  // 统一出口 = settle 实测「底栏上沿到可视视口顶」的余量写 --bar-room（纯几何 popRoom），子件
+  // 一律 max-height: min(<设计上限>, var(--bar-room, <设计上限>))：键盘起落、底栏多行长高、空态↔
+  // 会话态迁移全由这一条量算吸收，弹层不再各自复刻视口公式。以**底栏上沿**量 = 对所有子件都是
+  // 安全上界（栏内 chip 系锚点更低、实际可用更多；取本值只会让内容多滚一点，绝不越出可视区）。
   // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → 键盘高与上顶量。
   function kbGeometry(L, vvH, vvTop, scale, editing) {
     // 捏合缩放不是键盘：scale≠1 时 vv 同样变矮，必须排除（否则缩放会误当键盘抬底栏）
@@ -6816,11 +6823,22 @@ function setApprovalPending(v) { approvalPending = v }
     return { kb: Math.max(0, L - vvH), pan: Math.max(0, vvTop) }
   }
 
+  // 弹层可用高度（纯几何，探针直测本函数，勿复制公式）：底栏上沿在可视视口内的 y − 呼吸常量。
+  // barTop 是 client 坐标（含 #app 的 --vv-pan 位移），vvTop = 可视视口上顶（同 client 坐标口径），
+  // 相减才是「离用户看到的顶边多远」；margin 含弹层底距锚点的 gap(4~10px) 与顶部呼吸余量。
+  function popRoom(barTop, vvTop, margin) {
+    return Math.max(0, Math.round(barTop - vvTop - margin))
+  }
+
   // 编辑中判定：只有文本输入在场才会弹键盘（非文本聚焦不应触发任何位移）
   function isEditing() {
     const el = document.activeElement
     return !!el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
   }
+
+  // 弹层顶部呼吸余量：一并吃下「弹层底距锚点 4~10px 的 gap」+ 与可视区顶的留白（常量在量算侧，
+  // 故 --bar-room 已直接是「弹层可安全占用的高度」，消费点不必各自再减间距）
+  const BAR_ROOM_MARGIN = 20
 
   let lastKb = 0      // 同步段算得的键盘高，供延迟段量算复用（避免回读 CSS 变量）
   let settleRaf = 0
@@ -6854,6 +6872,14 @@ function setApprovalPending(v) { approvalPending = v }
       lift = Math.max(0, Math.round(naturalBottom + 22 - vv.height))
     }
     document.documentElement.style.setProperty('--kb-lift', lift + 'px')
+    // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：rect.top 含 --kb-lift/--vv-pan 的位移与
+    // 空态台面定位，与 vv.offsetTop 同为 client 坐标口径 → 两者的差就是「离可视区顶多远」。
+    if (wrap) {
+      document.documentElement.style.setProperty(
+        '--bar-room',
+        popRoom(wrap.getBoundingClientRect().top, vv.offsetTop, BAR_ROOM_MARGIN) + 'px',
+      )
+    }
     stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }
 
@@ -6866,6 +6892,11 @@ function setApprovalPending(v) { approvalPending = v }
     vv.addEventListener('resize', syncKeyboard)
     vv.addEventListener('scroll', syncKeyboard) // 缩放/上顶改变 offsetTop，同样要同帧重算
     window.addEventListener('orientationchange', syncKeyboard)
+    // 底栏自身几何变化（多行长高 / 接管卡换高 / 空态↔会话态迁移 / 窗口缩放的回流）同样要重量：
+    // --bar-room 与 --kb-lift 都取自底栏位置，只挂 vv 事件会漏掉这些帧。写入的是位移与上限变量，
+    // 不回改底栏盒模型 → 观察者自触发一次即收敛（幂等，非回环）。
+    const wrap = document.getElementById('input-wrap')
+    if (wrap) new ResizeObserver(scheduleSettle).observe(wrap)
     syncKeyboard()
     settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
   }

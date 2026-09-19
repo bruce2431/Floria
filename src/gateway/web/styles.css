@@ -50,14 +50,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 a { text-decoration: none; color: inherit; }
 
 /* ================= 键盘弹出（移动端）=================
-   唯一真源 = visualViewport（core/viewport.js 写入三个变量，缺省全 0 = 无键盘行为）：
-     --kb      键盘高（应用局部坐标，与应用顶同一坐标系）——键盘只压缩「消息流底界 + 底栏」
-     --vv-pan  浏览器为露出焦点元素对可视视口的上顶量——#app 反向锚回，否则整界面（含侧栏与
-               空态 Floria 背景）被一起顶起
-     --kb-lift 空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出键盘）
+   唯一真源 = visualViewport（core/viewport.js 写入四个变量，缺省全 0 = 无键盘行为）：
+     --kb       键盘高（应用局部坐标，与应用顶同一坐标系）——键盘只压缩「消息流底界 + 底栏」
+     --vv-pan   浏览器为露出焦点元素对可视视口的上顶量——#app 反向锚回，否则整界面（含侧栏与
+                空态 Floria 背景）被一起顶起
+     --kb-lift  空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出键盘）
+     --bar-room 底栏上沿到可视视口顶的余量（实测，已含顶部呼吸常量）= 底栏子件弹层的安全高度上界
    不变量：侧栏与 #empty-hint（绝对铺满 #chat-area 的 Floria 背景层）不参与任何位移。
    覆盖层（#search-overlay / #risk-modal / #rename-modal）同在 #app 内 absolute 定位并收 --kb，
-   故「上顶补偿 + 键盘压缩」对它们与 app 壳体同源，不必各自复刻视口公式。 */
+   故「上顶补偿 + 键盘压缩」对它们与 app 壳体同源，不必各自复刻视口公式。
+   底栏子件（#mention-pop / #cmd-pop / #task-dock .td-panel / #proj-pop / #model-pop / #ctx-panel
+   六个向上弹出的弹层）同款做法：高度上限一律 min(<设计上限>, var(--bar-room, <设计上限>))。
+   勿改回 vh/裸定值——vh 是布局视口且键盘在场不缩，键盘越高弹层上半截越落在可视区外；
+   也勿各自复刻「100vh − 键盘」之类的公式（状态源会变多，见 CLAUDE 根本原则 5）。 */
 #app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; top: var(--vv-pan, 0px); }
 
 /* ================= 主聊天区 ================= */
@@ -488,7 +493,8 @@ a { text-decoration: none; color: inherit; }
 #task-dock.open .td-lip { opacity: 0; pointer-events: none; }
 #task-dock .td-panel {
   margin: 0 10px; /* 面板宽 = 输入栏宽 −48px（14×2 盒内缩 + 10×2 面板缩），居中 */
-  max-height: min(40vh, 460px); overflow-y: auto; overscroll-behavior: contain;
+  /* 40vh/460px = 桌面设计上限（不随键盘变），--bar-room（键盘节）= 可视区硬上界，两者取小 */
+  max-height: min(40vh, 460px, var(--bar-room, 460px)); overflow-y: auto; overscroll-behavior: contain;
   border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 14px; background: #fff;
   box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.04), 0 12px 32px 0 rgba(0, 0, 0, 0.12);
   font-size: 13px; line-height: 20px; color: #0f1115;
@@ -924,6 +930,9 @@ body.kb-open #input-wrap { transition: none; }
 #ctx-panel {
   position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20;
   box-sizing: border-box; width: 264px; padding: 12px;
+  /* 上限收 --bar-room（键盘节）：面板常态只 ~110px（设计上限 240px 常态不生效），此上限只为
+     键盘把可视区压到极矮时不越出可视区顶 */
+  max-height: min(240px, var(--bar-room, 240px)); overflow-y: auto;
   border: 1px solid rgba(0, 0, 0, 0); border-radius: 12px; background: #fff;
   box-shadow: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
   font-size: 12px; line-height: 20px; color: #61666b; cursor: default;
@@ -942,7 +951,7 @@ body.kb-open #input-wrap { transition: none; }
 #mention-pop {
   position: absolute; left: 0; right: 0; bottom: calc(100% + 10px);
   background: #fff; border: 1px solid var(--border); border-radius: 16px;
-  box-shadow: var(--shadow); z-index: 60; max-height: 300px;
+  box-shadow: var(--shadow); z-index: 60; max-height: min(300px, var(--bar-room, 300px));
   overflow-y: auto; padding: 8px;
 }
 #mention-pop[hidden] { display: none; }
@@ -1020,7 +1029,8 @@ body.kb-open #input-wrap { transition: none; }
   display: flex; flex-direction: column;
   /* 宽度基准注意：包含块 #proj-root 是窄 chip，100% 会把弹层压死 → 用 max-content+固定下限 */
   width: max-content; min-width: 220px; max-width: min(320px, calc(100vw - 48px));
-  max-height: 320px; overflow-y: auto;
+  /* 上限收 --bar-room（键盘节）：锚点=窄 chip，本值以底栏上沿量、对其偏保守（永不越出可视区顶） */
+  max-height: min(320px, var(--bar-room, 320px)); overflow-y: auto;
   border-radius: 12px; background: #fff;
   box-shadow: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
 }
@@ -1043,7 +1053,8 @@ body.kb-open #input-wrap { transition: none; }
   position: absolute; left: 0; right: 0; bottom: calc(100% + 4px);
   z-index: 100; padding: 4px;
   display: flex; flex-direction: column;
-  max-height: 380px; overflow: hidden;
+  /* 上限收 --bar-room（键盘节）：超出时由 .viewport（flex-shrink 1 + min-height 0 + overflow-y auto）接管滚动 */
+  max-height: min(380px, var(--bar-room, 380px)); overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0);
   border-radius: 12px; background: #fff;
   box-shadow: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
@@ -1168,7 +1179,8 @@ body.kb-open #input-wrap { transition: none; }
   width: max-content;
   min-width: min(240px, calc(100vw - 32px));
   max-width: min(420px, calc(100vw - 32px));
-  max-height: min(360px, calc(100vh - 96px));
+  /* 上限收 --bar-room（键盘节）：旧的 calc(100vh − 96px) 是布局视口口径，键盘在场不缩、必然越界 */
+  max-height: min(360px, var(--bar-room, 360px));
   overflow: hidden; padding: 4px;
   border: 1px solid rgba(0, 0, 0, 0); border-radius: 12px;
   background: #fff;
@@ -1741,7 +1753,8 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 @media (max-width: 720px) {
   #model-seat.trigger { max-width: 128px; padding: 0 8px; }
   #model-seat.trigger .triggerEffort, #model-seat.trigger .chevron { display: none; }
-  #cmd-pop, #model-pop { max-height: 300px; }
+  /* 手机档设计上限 300px；键盘节再收 --bar-room（手机键盘占屏比最高，这一档最需要） */
+  #cmd-pop, #model-pop { max-height: min(300px, var(--bar-room, 300px)); }
   /* 手机 docked 输入栏宽度：70vw 比例收缩是桌面小窗定案（#input-wrap.docked 主规则），
      手机视口下 70vw≈275px 反成 min 把卡片压窄变形、且与空态宽度（calc(100% - 32px)）不一致；
      手机档固定近满宽 + 16px 边距，空态/会话态一致。 */

@@ -1,8 +1,10 @@
 // probe-keyboard-viewport.ts —— 「键盘只压缩消息流底界与底栏」不变量探针（只读，2026-09-19）
 // 背景：移动端（iPad/手机）底栏聚焦弹键盘时，浏览器把整个可视视口上顶 → 侧栏与空态 Floria
 // 背景跟着被顶起。定案：应用锚定可视视口顶，键盘只影响「消息流底界 + 底栏」两处。
-// 断言分两类：① 源码/产物结构（唯一真源接线、三个 CSS 变量消费点、版本同步）；
-// ② 行为真值表——几何函数 kbGeometry 从 web-src 源码**提取**（非手抄），喂真实维度组合。
+// 断言分两类：① 源码/产物结构（唯一真源接线、四个 CSS 变量消费点、版本同步）；
+// ② 行为真值表——几何函数 kbGeometry / popRoom 从 web-src 源码**提取**（非手抄），喂真实维度组合。
+// 覆盖三批现象：应用被整体顶起（--vv-pan）、覆盖层随键盘下移/溢出（--kb）、底栏子件弹层伸到
+// 可视区外（--bar-room，见 B3 族）。
 // 用法：bun run ./probe-keyboard-viewport.ts   （输出 pass/fail，末行 N/M）
 
 const SRC = `${import.meta.dir}/../src/gateway/web-src`
@@ -102,6 +104,27 @@ ok('B2 三件覆盖层的 DOM 真在 #app 内（不靠 CSS 假装）',
 ok('B2 对话框高度上限用容器百分比（vh=布局视口，键盘在场会溢出可视区）',
   !/max-height: calc\(100vh - 48px\)/.test(css) && !/max-height: 74vh/.test(css))
 
+// ---------- ③c 底栏子件（向上弹出的七个弹层）：上限一律收 --bar-room ----------
+// 底栏上沿到可视视口顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。
+ok('B3 余量由「底栏上沿 − 可视视口上顶」实测（同为 client 坐标口径）',
+  /setProperty\(\s*'--bar-room',\s*popRoom\(wrap\.getBoundingClientRect\(\)\.top, vv\.offsetTop, BAR_ROOM_MARGIN\)/.test(viewportJs))
+ok('B3 底栏自身几何变化（多行长高/接管卡换高/空态↔会话态迁移）也触发重量',
+  /new ResizeObserver\(scheduleSettle\)\.observe\(wrap\)/.test(viewportJs))
+const BAR_POPS: [string, RegExp][] = [
+  ['@ 提及浮窗 #mention-pop', /#mention-pop \{[^}]*max-height: min\(300px, var\(--bar-room, 300px\)\)/],
+  ['命令菜单 #cmd-pop', /#cmd-pop \{[^}]*max-height: min\(380px, var\(--bar-room, 380px\)\)/],
+  ['命令菜单/模型弹层（手机档）', /#cmd-pop, #model-pop \{ max-height: min\(300px, var\(--bar-room, 300px\)\); \}/],
+  ['任务浮窗 #task-dock .td-panel', /#task-dock \.td-panel \{[^}]*max-height: min\(40vh, 460px, var\(--bar-room, 460px\)\)/],
+  ['项目选择弹层 #proj-pop', /#proj-pop \{[^}]*max-height: min\(320px, var\(--bar-room, 320px\)\)/],
+  ['模型·推理弹层 #model-pop', /#model-pop \{[^}]*max-height: min\(360px, var\(--bar-room, 360px\)\)/],
+  ['上下文面板 #ctx-panel', /#ctx-panel \{[^}]*max-height: min\(240px, var\(--bar-room, 240px\)\)/],
+]
+for (const [name, re] of BAR_POPS) ok(`B3 ${name} 上限收 --bar-room`, re.test(css), '回归裸定值/vh 上限即越出可视区')
+ok('B3 唯一真源导出 popRoom（探针直测，消费者不各自复刻公式）',
+  /export \{ initViewport, kbGeometry, popRoom \}/.test(viewportJs))
+ok('B3 底栏弹层不再有布局视口口径的 vh 上限残留（键盘在场不缩）',
+  !/min\(360px, calc\(100vh - 96px\)\)/.test(css))
+
 // ---------- ④ 产物与版本同步 ----------
 ok('C1 产物 app.js 含定义与调用点', ['function kbGeometry(', 'function syncKeyboard(', 'function settle(', 'function initViewport(', 'initViewport()'].every((s) => appJs.includes(s)))
 ok('C1 产物 app.js 未引用模块 import 语法（拼接已剥壳）', !/^\s*import .*viewport\.js/m.test(appJs))
@@ -135,6 +158,28 @@ if (geoBody) {
     ok(`D2 ${name}`, got.kb === kb && got.pan === pan, `期望 kb=${kb} pan=${pan} 实得 kb=${got.kb} pan=${got.pan}`)
   }
   ok('D3 全部真值行一致', wrong === 0, `${wrong} 行不符`)
+}
+
+// ---------- ⑤b 行为真值表：弹层余量函数（同样从源码提取） ----------
+const prBody = body(viewportJs, 'function popRoom(')
+ok('D4 popRoom 可从源码提取', prBody.length > 0, 'viewport.js 函数签名被改写？')
+if (prBody) {
+  const popRoom = new Function(`return ${prBody}`)() as (barTop: number, vvTop: number, margin: number) => number
+  // [名称, 底栏上沿(client), 可视视口上顶(client), 呼吸常量, 期望余量]
+  const T2: [string, number, number, number, number][] = [
+    ['无键盘：底栏上沿 700、可视顶 0、呼吸 20 → 680', 700, 0, 20, 680],
+    ['iPad 键盘 300 + 上顶 100：底栏上沿 480 → 360', 480, 100, 20, 360],
+    ['上顶量已经吃掉全部空间：余量 0（不为负）', 100, 100, 20, 0],
+    ['底栏落到可视区顶之上：钳到 0（不产生负 max-height）', 80, 100, 20, 0],
+    ['子像素取整', 480.6, 100, 20, 361],
+  ]
+  let wrong2 = 0
+  for (const [name, barTop, vvTop, margin, want] of T2) {
+    const got = popRoom(barTop, vvTop, margin)
+    if (got !== want) wrong2++
+    ok(`D5 ${name}`, got === want, `期望 ${want} 实得 ${got}`)
+  }
+  ok('D5 弹层余量真值行全部一致', wrong2 === 0, `${wrong2} 行不符`)
 }
 
 console.log(`\n${pass}/${fail}`)

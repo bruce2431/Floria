@@ -104,11 +104,20 @@ import { stageSync } from '../chat/stage.js'
     vv.addEventListener('resize', syncKeyboard)
     vv.addEventListener('scroll', syncKeyboard) // 缩放/上顶改变 offsetTop，同样要同帧重算
     window.addEventListener('orientationchange', syncKeyboard)
-    // 底栏自身几何变化（多行长高 / 接管卡换高 / 空态↔会话态迁移 / 窗口缩放的回流）同样要重量：
-    // --bar-room 与 --kb-lift 都取自底栏位置，只挂 vv 事件会漏掉这些帧。写入的是位移与上限变量，
-    // 不回改底栏盒模型 → 观察者自触发一次即收敛（幂等，非回环）。
+    // 底栏自身「尺寸」类变化（多行长高 / 接管卡换高 / 窗口缩放的回流）同样要重量：--bar-room 与
+    // --kb-lift 都取自底栏位置，只挂 vv 事件会漏掉这些帧。写入的是位移与上限变量，不回改底栏盒模型
+    // → 观察者自触发一次即收敛（幂等，非回环）。
     const wrap = document.getElementById('input-wrap')
-    if (wrap) new ResizeObserver(scheduleSettle).observe(wrap)
+    if (wrap) {
+      new ResizeObserver(scheduleSettle).observe(wrap)
+      // 「位移」类变化 ResizeObserver 看不到（观察者只报尺寸）：键盘收起 --kb 归零、空态↔会话态迁移
+      // 都让 #input-wrap 的 top/transform 走 0.55s 过渡，而 settle 在事件后一帧读 rect，拿到的是动画
+      // 中间值 —— 此时量出的 --bar-room 是「收起前」的小值，且其后不再有任何事件重量 ⇒ 值被钉死，
+      // 底栏子件弹层上限 min(设计上限, --bar-room) 随之永久卡小、内容被 overflow 截断。
+      // 守护不变量 = --bar-room 恒对应底栏**到位**后的位置；过渡结束即到位，故此刻重量一次。
+      // 只听 end：中断（transitioncancel）只会由新的 --kb/几何改动引起，那条路已各自排了 settle。
+      wrap.addEventListener('transitionend', (e) => { if (e.target === wrap) scheduleSettle() })
+    }
     syncKeyboard()
     settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
   }

@@ -113,6 +113,10 @@ ok('B3 余量由「底栏上沿 − 可视视口上顶」实测（同为 client 
     /setProperty\('--bar-room', barRoom \+ 'px'\)/.test(viewportJs))
 ok('B3 底栏自身几何变化（多行长高/接管卡换高/空态↔会话态迁移）也触发重量',
   /new ResizeObserver\(scheduleSettle\)\.observe\(wrap\)/.test(viewportJs))
+// 位移类变化（键盘收起 --kb 归零 / 空态↔会话态迁移：top/transform 走 0.55s 过渡）改的是位置不是尺寸，
+// ResizeObserver 观察不到；只在过渡结束重量，才拿得到「底栏到位后」的 rect（否则量到动画中间值被钉死）。
+ok('B3 底栏位移类变化（过渡驱动）在过渡结束时重量 —— 否则 --bar-room 量到动画中间值被永久卡小',
+  /wrap\.addEventListener\('transitionend', \(e\) => \{ if \(e\.target === wrap\) scheduleSettle\(\) \}\)/.test(viewportJs))
 const BAR_POPS: [string, RegExp][] = [
   ['@ 提及浮窗 #mention-pop', /#mention-pop \{[^}]*max-height: min\(300px, var\(--bar-room, 300px\)\)/],
   ['命令菜单 #cmd-pop', /#cmd-pop \{[^}]*max-height: min\(380px, var\(--bar-room, 380px\)\)/],

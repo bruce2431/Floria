@@ -197,6 +197,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **气泡归属（不变量）**：**气泡属于文字、不属于图片**——气泡壳（`padding`/`border-radius`/`background`/虚线边框/hover）挂在文字段 `.q-text` 上，`.q-item` 是纯命中盒（`cursor:pointer` + 命中区，自带零壳）；`width: fit-content` 令气泡按文字收窄。归属由 **DOM 结构本身**决定（有无 `.q-text`），无类名、无布尔状态源。三态：纯文本项=一个气泡；纯图项=无 `.q-text` ⇒ 无气泡、整张图即点击体；文字+图项=文字带气泡、图片在气泡外裸渲染（`.q-imgs` 仅在前面有件时留 `margin-top`）。**排队图恒用 `.q-img`，绝不换 `.msg-img`**——lightbox 委托（`chat/messages.js`）只认 `.msg-img` ⇒ 点排队图**结构上不可能**开大图，只触发上面的 `queue-nudge`（与「只有已发送图片才有大图」同一机制，无需额外守卫）。
 
+**右对齐（`.q-body` 必须是块流）**：`.queue-dock` 整体 `align-items: flex-end`，`.q-body` 内三段（`.q-who`/`.q-text`/`.q-imgs`）须**右缘一致**——`fit-content` 的气泡若不额外处理会落在 q-body **左侧**、与更宽的图片错开成阶梯状，故 `.q-text` 加 `margin-left: auto`、`.q-who` 加 `text-align: right`（同 `.msg.user .who`）。**`.q-body` 不得改成 flex 列**：它同时是 `.q-item`（flex 行）的 `flex: 1; min-width: 0` 子项，改 flex 列后 `.q-imgs` 退化为收缩宽度的 flex 子项，`.q-img` 的 `max-width: min(160px, 100%)` 里的 `100%` 变成循环依赖、图片塌成细条（浏览器把该百分比解析到极小值）。
+
 **已验证**：`probes/probe-queue-nudge.ts` 16/0。
 
 ## 14. 处理中段尾部工具组恒收口
@@ -377,16 +379,17 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
 - **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口调它，勿就地补行）。**探针**：`probes/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 提取后喂 `(curUuid, ev.session)` 四组合）。
 
-## 35. 键盘弹出适配：应用锚定可视视口顶，键盘只压缩「消息流底界 + 底栏」
+## 35. 键盘弹出适配：不抵消可视视口上顶，只抬「浏览器没顶掉的那部分」
 
-**原理**：`html` 高 = `100dvh`，键盘**不改变布局视口**（只压可视视口），浏览器为露出焦点底栏把**可视视口整体上顶**（`visualViewport.offsetTop > 0`）——移动的是视口而非布局，故必须显式补偿。
+**原理**：`html` 高 = `100dvh`，键盘**不改变布局视口**（只压可视视口），浏览器为露出焦点底栏把**可视视口整体上顶**（`visualViewport.offsetTop = pan > 0`）——移动的是视口而非布局。
 
-**唯一真源 = `visualViewport`（前端新增 `core/viewport.js`）**：
-- **应用锚回**：`--vv-pan = vv.offsetTop` → `#app { position: relative; top: var(--vv-pan) }`，应用恒贴可视视口顶（侧栏、背景层零位移）。
-- **消息流底界**：`--kb = html.clientHeight − vv.height` → `#chat-scroll { margin-bottom: var(--kb) }`；键盘在场时调 `stageSync()` 按新几何重算两层占位。
-- **底栏**：会话态 `#input-wrap.docked { top: calc(100% - 22px - var(--kb)) }`；空态底栏按实测自然底算 `--kb-lift`（`stageEl.top + wrap.offsetTop + wrap.offsetHeight/2 + 22 − vv.height`）→ `#empty-hint #input-wrap { transform: translate(-50%, calc(-50% - var(--kb-lift))) }`。键盘在场 `body.kb-open #input-wrap { transition: none }`。
-- **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA`/**`IFRAME`** 且 `vv.scale ≤ 1.01`（捏合缩放同样压低 `vv.height`，必须排除）；安卓布局视口随键盘同步缩 → 自然不重复抬。**`IFRAME` 分支不可省**：项目预览的站点页面跑在 `.preview-frame` 里，焦点进入 iframe 文档时父文档 `activeElement` 就是该 `<iframe>` 元素本身（浏览器标准行为）——不认它则预览内打字恒非编辑态，`kbGeometry` 直接返回 `{0,0}`（`--vv-pan`/`--kb` 都不写），键盘每次上顶可视视口都无人抵消 = 每敲一个字整页上下跳。放宽判定不引入空位移：位移量全由可视视口实测量算，无键盘时 `kb`/`pan` 天然为 0。事件：`vv.resize`/`vv.scroll`/`orientationchange`。
-- **相位**：拆两段——**同步段 `syncKeyboard`**（`--kb`/`--vv-pan`/`body.kb-open`/`window.scrollTo(0,0)` 直接在事件回调里写，只写样式属性、不读元素布局；上顶是帧级动作，经 rAF 转手必晚一帧=「侧栏被顶起一瞬间后回弹」）＋**延迟段 `settle`**（rAF 合帧：`--kb-lift` 实测 + `stageSync()`，二者连续量晚一帧不可见，且逐事件 `getBoundingClientRect` 会强制布局）；键盘高经模块内 `lastKb` 交接。
+**不抵消 pan（四轮定案）**：`pan` 是合成器线程上的瞬时位移，用主线程写样式去抵消**天生晚一帧**——一帧错位就表现为「先向上（浏览器上顶）→立即下拉（补偿落地）→恢复（pan 回落）」的往复（用户上报「侧栏还是会跳动」，并定案「撤回对侧栏和背景的限制，直接整个顶起」）。故应用整体随上顶一起走，我们只保证**底栏与消息流底界恒贴可视区底界**；`#app` 恒无 top 位移，`--vv-pan` 已退役（少一个状态源、无分支）。**探针钉住**：`--vv-pan` 写入与 `#app` 的 `top` 消费均不得复活。
+
+**唯一真源 = `visualViewport`（前端 `core/viewport.js`）**：
+- **`--kb = html.clientHeight − pan − vv.height`**（浏览器上顶已吃掉的位移不计入）：`pan=0` 时与旧式 `L − vv.height` 完全等价，`pan>0` 时同样精确。→ `#chat-scroll { margin-bottom: var(--kb) }`（消息流底界）；键盘在场时调 `stageSync()` 按新几何重算两层占位。
+- **底栏**：会话态 `#input-wrap.docked { top: calc(100% - 22px - var(--kb)) }`；空态底栏按实测自然底算 `--kb-lift`（`stageEl.top + wrap.offsetTop + wrap.offsetHeight/2 + 22 − (vv.offsetTop + vv.height)`——**可视区底界必须含上顶量**，两侧同为 client 坐标口径）→ `#empty-hint #input-wrap { transform: translate(-50%, calc(-50% - var(--kb-lift))) }`。键盘在场 `body.kb-open #input-wrap { transition: none }`。
+- **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA`/**`IFRAME`** 且 `vv.scale ≤ 1.01`（捏合缩放同样压低 `vv.height`，必须排除）；安卓布局视口随键盘同步缩 → 自然不重复抬。**`IFRAME` 分支不可省**：项目预览的站点页面跑在 `.preview-frame` 里，焦点进入 iframe 文档时父文档 `activeElement` 就是该 `<iframe>` 元素本身（浏览器标准行为）——不认它则预览内打字恒非编辑态，`kbGeometry` 直接返回 `{kb:0}`（`--kb` 不写），键盘每次上顶可视视口都无人让位 = 每敲一个字整页上下跳。放宽判定不引入空位移：位移量全由可视视口实测量算，无键盘时 `kb` 天然为 0。事件：`vv.resize`/`vv.scroll`/`orientationchange`。
+- **相位**：拆两段——**同步段 `syncKeyboard`**（`--kb`/`body.kb-open`/`window.scrollTo(0,0)` 直接在事件回调里写，只写样式属性、不读元素布局）＋**延迟段 `settle`**（rAF 合帧：`--kb-lift` 实测 + `--bar-room` 实测 + `stageSync()`，连续量晚一帧不可见，且逐事件 `getBoundingClientRect` 会强制布局）；键盘高经模块内 `lastKb` 交接。
 - **覆盖层同源锚定**：`#search-overlay` / `#risk-modal` / `#rename-modal` 移入 `#app`，改 `position: absolute; top:0; right:0; bottom: var(--kb, 0px); left:0`：定位源与 app 壳体同一，覆盖层不再各自复刻视口公式；对话框高度上限从视口单位改容器百分比（`74vh → 74%`、`calc(100vh - 48px) → calc(100% - 48px)`）。
 - **底栏子件同源收口**：底栏上**向上弹出**的子件共六个（七处上限声明）——`#mention-pop`、`#cmd-pop`、`#task-dock .td-panel`、`#proj-pop`、`#model-pop`、`#ctx-panel`——高度上限一律 `max-height: min(<设计上限>, var(--bar-room, <设计上限>))`。`--bar-room` 由纯几何函数 `popRoom(barTop, vvTop, margin)` 在 `settle` 内量得（`wrap.getBoundingClientRect().top − vv.offsetTop − 20`，即「底栏上沿离可视区顶多远」）。**取底栏上沿量是刻意的**：栏内 chip 系锚点更低、真实可用更多 ⇒ 本值对它们是**安全上界**，一个变量覆盖全部七处。**不变量：`--bar-room` 恒对应底栏「到位后」的位置**——触发侧除 `vv` 事件外另两处：`ResizeObserver` 观察 `#input-wrap`（**尺寸类**变化：多行长高/接管卡换高）＋ `transitionend`（`e.target === wrap`，**位移类**变化：键盘收起 `--kb` 归零、空态↔会话态迁移都让 `top`/`transform` 走 0.55s 过渡，而 `settle` 在事件后一帧读 `rect` 只能拿到动画中间值 ⇒ 量出的余量被钉在「收起前」的小值且再无事件重量，弹层上限随之永久卡小、内容被 `overflow` 截断；过渡结束即底栏到位，此刻重量才拿到终值）。超上限时滚动下沉到弹层自身（`overflow-y: auto` 或内部 flex 子项 `min-height:0`）。
 - **边界**：无 `visualViewport` 时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前）。**探针**：`probes/probe-keyboard-viewport.ts`（只读，73/0）——结构断言（拼接表接线/启动序列调用/同步段无 rAF 转手且不读元素布局/只量算段走 rAF/四个变量全部消费点/三件覆盖层在 `#app` 内且收 `--kb`、无 `position:fixed` 残留/对话框不用 `vh`/六个子件的七处上限声明均收 `--bar-room`/`--bar-room` 的尺寸类与位移类触发齐备/`#empty-hint` 自身不含 `--kb`/产物 `app.js` 含 `IFRAME` 判定）+ 行为真值表（`kbGeometry` 与 `popRoom` 均从源码提取后喂 10 组 + 5 组；`isEditing` 经 `new Function('document', …)` 注入打桩喂 6 组：`IFRAME`/`INPUT`/`TEXTAREA`/`contenteditable`→true，`BUTTON`/`null`→false）。

@@ -1,9 +1,10 @@
-// probe-keyboard-viewport.ts —— 「键盘只压缩消息流底界与底栏」不变量探针（只读，2026-09-19）
-// 背景：移动端（iPad/手机）底栏聚焦弹键盘时，浏览器把整个可视视口上顶 → 侧栏与空态 Floria
-// 背景跟着被顶起。定案：应用锚定可视视口顶，键盘只影响「消息流底界 + 底栏」两处。
-// 断言分两类：① 源码/产物结构（唯一真源接线、四个 CSS 变量消费点、版本同步）；
+// probe-keyboard-viewport.ts —— 「底栏恒贴可视区底界」不变量探针（只读，2026-09-19）
+// 背景：移动端（iPad/手机）底栏聚焦弹键盘时，浏览器把整个可视视口上顶。定案（四轮）：不抵消
+// 这个上顶（主线程写样式抵消合成器位移必晚一帧 ⇒ 「先向上→立即下拉→恢复」抖动），应用随之上移，
+// 只把「浏览器没顶掉的那部分」抬给底栏与消息流底界（--kb = L − pan − vv.height）。
+// 断言分两类：① 源码/产物结构（唯一真源接线、三个 CSS 变量消费点、版本同步）；
 // ② 行为真值表——几何函数 kbGeometry / popRoom 从 web-src 源码**提取**（非手抄），喂真实维度组合。
-// 覆盖三批现象：应用被整体顶起（--vv-pan）、覆盖层随键盘下移/溢出（--kb）、底栏子件弹层伸到
+// 覆盖三批现象：pan 抵消抖动（--vv-pan 退役）、覆盖层随键盘下移/溢出（--kb）、底栏子件弹层伸到
 // 可视区外（--bar-room，见 B3 族）。
 // 用法：bun run ./probe-keyboard-viewport.ts   （输出 pass/fail，末行 N/M）
 
@@ -57,8 +58,13 @@ ok('A2 启动序列调 initViewport（紧随 initLive）', (() => {
 })())
 ok('A3 syncKeyboard 消费 visualViewport', /window\.visualViewport/.test(body(viewportJs, 'function syncKeyboard()')))
 ok('A3 键盘高只由布局视口与可视视口差得出', /root\.clientHeight,\s*vv\.height,\s*vv\.offsetTop,\s*vv\.scale/.test(viewportJs))
-ok('A3 上顶量 pan 交 #app 反向锚回', /setProperty\('--vv-pan'/.test(viewportJs))
+// pan 不再抵消（2026-09-19 四轮）：--vv-pan 整个退役，应用随浏览器上顶一起走。
+ok('A3 上顶量 pan 不再反向抵消（--vv-pan 写入已删除）', !/setProperty\('--vv-pan'/.test(viewportJs))
+ok('A3 kb 扣掉浏览器上顶已吃掉的部分（L − pan − vvH）',
+  /Math\.max\(0, L - pan - vvH\)/.test(viewportJs) && /const pan = Math\.max\(0, vvTop\)/.test(viewportJs))
 ok('A3 空态底栏抬升量独立计算（--kb-lift）', /setProperty\('--kb-lift'/.test(viewportJs))
+ok('A3 空态抬升量按「可视区底界」比较（含上顶量，两坐标口径不混用）',
+  /naturalBottom \+ 22 - \(vv\.offsetTop \+ vv\.height\)/.test(viewportJs))
 ok('A3 键盘在场重算消息流占位几何（stageSync）', /stageSync\(\)/.test(viewportJs) && /import \{ stageSync \}/.test(viewportJs))
 
 // ---------- ②b 相位：补偿必须与视觉变化同帧（rAF 转手必晚一帧 = 侧栏被顶起一瞬间） ----------
@@ -77,7 +83,8 @@ ok('A4 仅「量算 + 占位重算」走 rAF 合帧', /requestAnimationFrame\(se
 ok('A4 文档滚动归零也在同步段（与上顶同理须同帧）', /scrollTo\(0, 0\)/.test(syncBody))
 
 // ---------- ③ CSS 消费点（三个变量缺一即「被顶起」或「抬头/漏出」） ----------
-ok('B1 #app 以 --vv-pan 锚定可视视口顶', /#app \{[^}]*top:\s*var\(--vv-pan, 0px\)/.test(css))
+ok('B1 #app 无任何 top 位移残留（pan 抵消会与合成器上顶抢位移 ⇒ 一帧错位=抖动）',
+  /#app \{[^}]*\}/.test(css) && !/#app \{[^}]*top:\s*var\(--vv-pan/.test(css))
 ok('B1 消息流底界收 --kb（margin-bottom，缩小滚动视窗本身）', /#chat-scroll \{[^}]*margin-bottom:\s*var\(--kb, 0px\)/.test(css))
 ok('B1 docked 底栏抬 --kb（底边距 22px 口径不变）', /#input-wrap\.docked \{[^}]*top:\s*calc\(100% - 22px - var\(--kb, 0px\)\)/.test(css))
 ok('B1 空态底栏抬 --kb-lift（Floria 背景层零位移）', /#empty-hint #input-wrap \{[^}]*transform:\s*translate\(-50%, calc\(-50% - var\(--kb-lift, 0px\)\)\)/.test(css))
@@ -153,25 +160,27 @@ ok('C2 index.html 引用 styles.css 且带 cache-bust', /\/styles\.css\?v=\d+/.t
 const geoBody = body(viewportJs, 'function kbGeometry(')
 ok('D1 kbGeometry 可从源码提取', geoBody.length > 0, 'viewport.js 函数签名被改写？')
 if (geoBody) {
-  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scale: number, editing: boolean) => { kb: number; pan: number }
-  // [名称, L, vvH, vvTop, scale, editing, 期望 kb, 期望 pan]
-  const T: [string, number, number, number, number, boolean, number, number][] = [
-    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 1, false, 0, 0],
-    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 1, true, 0, 0],
-    ['iPad 键盘 300 无上顶：抬 300', 834, 534, 0, 1, true, 300, 0],
-    ['iPad 键盘 300 + 上顶 100：抬 300 且反向锚 100', 834, 534, 100, 1, true, 300, 100],
-    ['安卓（布局视口同步缩）：不重复抬', 534, 534, 0, 1, true, 0, 0],
-    ['捏合缩放（非编辑）：不抬', 834, 500, 0, 1, false, 0, 0],
-    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 2, true, 0, 0],
-    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 1.005, true, 300, 0],
-    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 1, true, 0, 0],
-    ['异常：offsetTop 为负 → pan 不为负', 834, 534, -5, 1, true, 300, 0],
+  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scale: number, editing: boolean) => { kb: number }
+  // [名称, L, vvH, vvTop, scale, editing, 期望 kb]——kb = 浏览器上顶之后**仍需自行抬升**的量
+  const T: [string, number, number, number, number, boolean, number][] = [
+    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 1, false, 0],
+    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 1, true, 0],
+    ['iPad 键盘 300 无上顶：抬 300', 834, 534, 0, 1, true, 300],
+    ['iPad 键盘 300 + 浏览器上顶 100：只抬浏览器没顶掉的 200', 834, 534, 100, 1, true, 200],
+    ['上顶已吃掉全部空缺（pan=键盘高）：不再抬（应用整体顶起）', 834, 272, 562, 1, true, 0],
+    ['上顶超过键盘高 → kb 不为负', 834, 272, 700, 1, true, 0],
+    ['安卓（布局视口同步缩）：不重复抬', 534, 534, 0, 1, true, 0],
+    ['捏合缩放（非编辑）：不抬', 834, 500, 0, 1, false, 0],
+    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 2, true, 0],
+    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 1.005, true, 300],
+    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 1, true, 0],
+    ['异常：offsetTop 为负 → 上顶量夹到 0', 834, 534, -5, 1, true, 300],
   ]
   let wrong = 0
-  for (const [name, L, vvH, vvTop, scale, editing, kb, pan] of T) {
+  for (const [name, L, vvH, vvTop, scale, editing, kb] of T) {
     const got = kbGeometry(L, vvH, vvTop, scale, editing)
-    if (got.kb !== kb || got.pan !== pan) wrong++
-    ok(`D2 ${name}`, got.kb === kb && got.pan === pan, `期望 kb=${kb} pan=${pan} 实得 kb=${got.kb} pan=${got.pan}`)
+    if (got.kb !== kb) wrong++
+    ok(`D2 ${name}`, got.kb === kb, `期望 kb=${kb} 实得 kb=${got.kb}`)
   }
   ok('D3 全部真值行一致', wrong === 0, `${wrong} 行不符`)
 }

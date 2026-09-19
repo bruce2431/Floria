@@ -6849,19 +6849,21 @@ function setApprovalPending(v) { approvalPending = v }
 
 
   // ---------- 键盘弹出适配（2026-09-19）----------
-  // 不变量：应用锚定「可视视口顶」，键盘只压缩「消息流底界 + 底栏」两处——侧栏与空态 Floria
-  // 背景（#empty-hint 绝对铺满 #chat-area，本身不参与位移）零移动，标题栏/URL 栏也不参与。
-  // 几何：L = html clientHeight（=100dvh，移动端键盘不改变布局视口，只压可视视口）→
-  // 键盘高 kb = L − vv.height；该值就是「底栏从版底抬到键盘上沿」所需的位移（应用局部坐标系
-  // 与可视视口顶对齐，故抬 kb 即贴键盘上沿，见 styles.css 键盘节）。
-  // pan = vv.offsetTop：浏览器为露出焦点元素会把可视视口整体上顶（本页 body overflow:hidden、
-  // 内容不溢出 ⇒ 文档无可滚余量，位移只可能来自可视视口上顶，不会来自文档滚动）——不反向抵消
-  // 则整界面（含侧栏/背景）被顶起，即用户上报现象；--vv-pan 交 #app 以 top 锚回。
-  // 相位（2026-09-19 二轮，用户「侧栏还是会被顶起一瞬间后回弹」）：上顶是帧级动作，补偿必须与
-  // 事件同帧落地——经 requestAnimationFrame 转手必然晚一帧，那一帧就是可见的「顶起」。故
-  // --kb / --vv-pan / kb-open 类 / 文档滚动归零全部在事件回调里**同步**写（只写样式属性，
-  // 不读取布局、不触发布局）；仅「空态底栏抬升量实测 + stageSync 占位重算」走 rAF 合帧
-  // （连续量、晚一帧不可见；且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。
+  // 不变量：底栏恒贴在**可视区底界**之上，消息流底界恒不落到键盘之下；应用其余部分随浏览器的
+  // 可视视口上顶一起走。
+  // 几何：L = html clientHeight（=100dvh，移动端键盘不改变布局视口，只压可视视口）；浏览器为
+  // 露出焦点元素会把可视视口整体上顶 pan = vv.offsetTop（本页 body overflow:hidden、内容不
+  // 溢出 ⇒ 文档无可滚余量，位移只可能来自可视视口上顶，不会来自文档滚动）。
+  // 关键：**不抵消 pan**（2026-09-19 四轮，用户「侧栏还是会跳动，先向上然后立即下拉最后恢复…
+  // 要不还是撤回对侧栏和背景的限制，直接整个顶起」）。pan 是合成器线程上的瞬时位移，用主线程写
+  // 样式去抵消**天生晚一帧**：一帧错位就是「先向上（浏览器上顶）→立即下拉（补偿落地）→恢复
+  // （pan 回落）」的往复，JS 赢不了这场竞速、也不必赢。改为全盘接受浏览器位移，只把「浏览器没
+  // 顶掉的那部分」算作 kb：**kb = L − pan − vv.height**（pan=0 时与旧式 L − vv.height 完全等价；
+  // pan>0 时应用整体顶起，而底栏与消息流底界仍精确贴在可视区上）。同一式子在两种上顶形态下都
+  // 自洽 ⇒ 本模块只有一个位移变量，无分支，--vv-pan 退役。
+  // 相位（2026-09-19 二轮）：--kb / kb-open 类 / 文档滚动归零全部在事件回调里**同步**写（只写
+  // 样式属性，不读取布局、不触发布局）；仅「空态底栏抬升量实测 + stageSync 占位重算」走 rAF
+  // 合帧（连续量、晚一帧不可见；且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。
   // 空态底栏钉在 .g-stage 台面 76.75%（不贴版底），只需抬「露出键盘」的量（--kb-lift，实测）。
   // 底栏子件（2026-09-19 三轮，用户「底栏的子部件也要适配」）：底栏上所有向上弹出的子件
   // （@提及 / 命令菜单 / 任务浮窗 / 项目·模型·上下文弹层）都贴在栏体上沿外展开，旧写法的高度
@@ -6870,16 +6872,18 @@ function setApprovalPending(v) { approvalPending = v }
   // 一律 max-height: min(<设计上限>, var(--bar-room, <设计上限>))：键盘起落、底栏多行长高、空态↔
   // 会话态迁移全由这一条量算吸收，弹层不再各自复刻视口公式。以**底栏上沿**量 = 对所有子件都是
   // 安全上界（栏内 chip 系锚点更低、实际可用更多；取本值只会让内容多滚一点，绝不越出可视区）。
-  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → 键盘高与上顶量。
+  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → 仍需自行抬升的键盘高
+  // （浏览器上顶 pan 已吃掉的位移不计入，见文件头「不抵消 pan」）。
   function kbGeometry(L, vvH, vvTop, scale, editing) {
     // 捏合缩放不是键盘：scale≠1 时 vv 同样变矮，必须排除（否则缩放会误当键盘抬底栏）
-    if (!editing || scale > 1.01) return { kb: 0, pan: 0 }
-    return { kb: Math.max(0, L - vvH), pan: Math.max(0, vvTop) }
+    if (!editing || scale > 1.01) return { kb: 0 }
+    const pan = Math.max(0, vvTop) // 上顶量非负（本页无滚动不产生负值；夹取守住「kb 只由真实空缺得出」）
+    return { kb: Math.max(0, L - pan - vvH) }
   }
 
   // 弹层可用高度（纯几何，探针直测本函数，勿复制公式）：底栏上沿在可视视口内的 y − 呼吸常量。
-  // barTop 是 client 坐标（含 #app 的 --vv-pan 位移），vvTop = 可视视口上顶（同 client 坐标口径），
-  // 相减才是「离用户看到的顶边多远」；margin 含弹层底距锚点的 gap(4~10px) 与顶部呼吸余量。
+  // barTop 是 client 坐标（应用不再有补偿位移 ⇒ 即布局坐标），vvTop = 可视视口上顶（同 client
+  // 坐标口径），相减才是「离用户看到的顶边多远」；margin 含弹层底距锚点的 gap(4~10px) 与顶部呼吸余量。
   function popRoom(barTop, vvTop, margin) {
     return Math.max(0, Math.round(barTop - vvTop - margin))
   }
@@ -6909,10 +6913,9 @@ function setApprovalPending(v) { approvalPending = v }
     const vv = window.visualViewport
     if (!vv) return
     const root = document.documentElement
-    const { kb, pan } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, vv.scale, isEditing())
+    const { kb } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, vv.scale, isEditing())
     lastKb = kb
     root.style.setProperty('--kb', kb + 'px')
-    root.style.setProperty('--vv-pan', pan + 'px')
     document.body.classList.toggle('kb-open', kb > 0)
     if (window.scrollY) window.scrollTo(0, 0) // 键盘引起的文档滚动与上顶同理，须同帧归零
     scheduleSettle()
@@ -6926,15 +6929,16 @@ function setApprovalPending(v) { approvalPending = v }
     const wrap = document.getElementById('input-wrap')
     const stageEl = wrap && wrap.parentElement && wrap.parentElement.classList.contains('g-stage') ? wrap.parentElement : null
     // offsetTop/offsetHeight 是布局位（不受 transform 与过渡影响，无中间态读数），台面几何零常数
-    // 依赖——自然底 = stage 顶 + 底栏 offsetTop + 半高；抬到键盘上沿上方 22px（与会话态 docked 同口径）。
+    // 依赖——自然底 = stage 顶 + 底栏 offsetTop + 半高；抬到可视区底界上方 22px（与会话态 docked 同口径）。
     let lift = 0
     if (lastKb > 0 && stageEl) {
       const naturalBottom = stageEl.getBoundingClientRect().top + wrap.offsetTop + wrap.offsetHeight / 2
-      lift = Math.max(0, Math.round(naturalBottom + 22 - vv.height))
+      // 可视区底界同为 client 坐标口径 = 上顶量 + 可视高（两者不再混用，pan>0 时也正确）
+      lift = Math.max(0, Math.round(naturalBottom + 22 - (vv.offsetTop + vv.height)))
     }
     document.documentElement.style.setProperty('--kb-lift', lift + 'px')
-    // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：rect.top 含 --kb-lift/--vv-pan 的位移与
-    // 空态台面定位，与 vv.offsetTop 同为 client 坐标口径 → 两者的差就是「离可视区顶多远」。
+    // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：rect.top 含 --kb-lift 的位移与空态台面
+    // 定位，与 vv.offsetTop 同为 client 坐标口径 → 两者的差就是「离可视区顶多远」。
     if (wrap) {
       const barRoom = popRoom(wrap.getBoundingClientRect().top, vv.offsetTop, BAR_ROOM_MARGIN)
       document.documentElement.style.setProperty('--bar-room', barRoom + 'px')

@@ -128,3 +128,23 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 - **边界**：Bash 原生写不经工具链不可归因（仍后写覆盖无提示）；注册表按项目根隔离，跨项目撞车查不到回落原文；本会话自己的行跳过（自家写会刷新自家 readFileState）。
 
 **验证**：`probes/probe-file-modifier-registry.ts` **5 过 / 0 败**。纯 CLI 工具层，无 web 改动不 bump sw。
+
+## 工具搜索可用性（`utils/toolSearch.ts`）
+
+工具搜索（defer_loading）把 MCP/可延迟工具的 schema 从首轮 prompt 里挪走、改由模型调 `ToolSearchTool` 按需取回，回结果里的 `tool_reference` 块是 Anthropic 私有 beta 内容类型。**这不是模型名字的属性，而是供应商 shim 的属性**——同一家 Zhipu 的 glm-5.3-flash 容忍裸 `tool_reference`，glm-4.7 / glm-4.5-air 直接 `400 invalid_request_error code 1210`。上游用一张静态名字黑名单（`DEFAULT_UNSUPPORTED_MODEL_PATTERNS`，只有 `haiku`）来挡，于是每个新发布的 3P 模型都天然踩坑、直到有人报障改代码。
+
+| 件 | 职责 |
+|---|---|
+| `modelSupportsToolReference(model)` | 同步入口。先读学习缓存，其次静态名字黑名单，未知模型默认**支持**（负向测试） |
+| `probeToolReferenceSupport(model)` | 异步探测，按小写模型名缓存；同模型并发只发一次（in-flight 去重） |
+| `isToolSearchEnabled(...)` | 组合门：静态名单否 → 关；名单放行但**确有可延迟工具**时才 `await` 探测 |
+
+- **探测形状**=最小复刻 ToolSearchTool 的产物：一条 assistant `tool_use` 配一条 `tool_result`，content 为裸 `[{type:'tool_reference'}]`。**不要往 content 里加 `text`/改用消息级 sibling**——那是另一种线形，测不出 ToolSearchTool 真正会发的东西（加了 text 后 Zhipu 反而 200，探测会假报支持）。
+- **只打 3P 池端点**。`findModelProvider(model)` 落空（firstParty / Bedrock / Vertex）即返回支持、不发请求——第一方 API 是参考实现。
+- **fail-open**：429 / 5xx / 网络 / 超时（8s）/ 凭据读不到，一律判「支持」。只有明确的 `400` 才判不支持，避免抖动端点静默丢掉动态工具加载。
+- **不为没有可延迟工具的会话花钱**：`tools.some(isDeferredTool)` 为假时根本不探测（`getToolSearchMode()==='standard'` 同理早退）。
+- **老会话自愈**：探测结果进 `messagesForAPI` 构建前（`claude.ts` 的 `useToolSearch` 与本请求同拍），`useToolSearch=false` 分支照旧剥掉历史里的 `tool_reference`（`stripToolReferenceBlocksFromUserMessage`）与 `caller` 字段——与 haiku 今天走的是同一条既存路径，不复刻。
+
+**已知残留（与 haiku 同档，未扩权）**：`isToolSearchEnabledOptimistic()` 是同步且只看 mode/env，`ToolSearchTool.isEnabled()` 亦如是，故判不支持的模型仍会看到 ToolSearchTool；其调用结果被剥成占位文本。要彻底摘掉需把该工具启用态改成模型感知（跨同步/异步边界），当前不动。
+
+**验证**：`probes/probe-toolref-autodetect.ts` **16 过 / 0 败**（A 静态名单与非池模型 / B 真端点判定 glm-4.7·glm-4.5-air 拒、glm-5.3-flash 429 fail-open / C 同步入口读同一缓存 / D 幂等 / E 组合门含 haiku 短路与「无可延迟工具零耗时」）。纯 CLI 层，无 web 改动不 bump sw。

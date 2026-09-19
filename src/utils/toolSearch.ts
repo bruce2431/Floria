@@ -238,6 +238,13 @@ function getUnsupportedToolReferencePatterns(): string[] {
  */
 export function modelSupportsToolReference(model: string): boolean {
   const normalizedModel = model.toLowerCase()
+
+  // Learned answer wins over the static list: it came from the endpoint itself.
+  const learned = probedToolReferenceSupport.get(normalizedModel)
+  if (learned !== undefined) {
+    return learned
+  }
+
   const unsupportedPatterns = getUnsupportedToolReferencePatterns()
 
   // Check if model matches any unsupported pattern
@@ -249,6 +256,152 @@ export function modelSupportsToolReference(model: string): boolean {
 
   // New models are assumed to support tool_reference
   return true
+}
+
+/**
+ * Answers of probeToolReferenceSupport, keyed by lowercase model name.
+ *
+ * `DEFAULT_UNSUPPORTED_MODEL_PATTERNS` is a static name list, and a name list
+ * cannot describe a 3P Anthropic-compatible endpoint: accepting tool_reference
+ * is a property of the vendor's shim, not of the model name, and it varies per
+ * model within one vendor (Zhipu's glm-5.3-flash silently tolerates a bare
+ * tool_reference tool_result, while glm-4.7 and glm-4.5-air reject it with
+ * 400 invalid_request_error). A name list therefore means every newly released
+ * model stays broken until someone reports it and edits code.
+ *
+ * So the answer is read off the endpoint once per process and cached here.
+ * Sync callers (attachments.ts) observe the same cache; unknown = assume
+ * supported, matching upstream's negative-test default.
+ */
+const probedToolReferenceSupport = new Map<string, boolean>()
+
+/**
+ * In-flight probes, so concurrent callers share one request instead of
+ * stampeding the endpoint on the first turn.
+ */
+const toolReferenceProbes = new Map<string, Promise<boolean>>()
+
+/** A hung endpoint must not stall the first turn — fail open on timeout. */
+const TOOL_REFERENCE_PROBE_TIMEOUT_MS = 8_000
+
+/**
+ * Whether the model's endpoint accepts a bare `tool_reference` block inside
+ * tool_result content — the exact shape ToolSearchTool emits and that
+ * claude.ts puts on the wire whenever tool search is enabled.
+ *
+ * Only 3P pool endpoints are in question (the first-party API is the
+ * reference implementation). The probe is one ~30-token request sent at most
+ * once per model per process. Anything other than a 200/400 answer (429, 5xx,
+ * network, timeout, unresolvable credentials) fails open to "supported", so a
+ * flaky endpoint never silently loses dynamic tool loading.
+ */
+export function probeToolReferenceSupport(model: string): Promise<boolean> {
+  const key = model.toLowerCase()
+  const learned = probedToolReferenceSupport.get(key)
+  if (learned !== undefined) {
+    return Promise.resolve(learned)
+  }
+
+  let inflight = toolReferenceProbes.get(key)
+  if (!inflight) {
+    inflight = runToolReferenceProbe(model).then(
+      supported => {
+        probedToolReferenceSupport.set(key, supported)
+        toolReferenceProbes.delete(key)
+        return supported
+      },
+      () => {
+        toolReferenceProbes.delete(key)
+        return true
+      },
+    )
+    toolReferenceProbes.set(key, inflight)
+  }
+  return inflight
+}
+
+async function runToolReferenceProbe(model: string): Promise<boolean> {
+  // Kill switch already forces 'standard' — no wire shape to learn about.
+  if (getToolSearchMode() === 'standard') {
+    return true
+  }
+
+  let endpoint: { baseUrl: string; apiKey: string }
+  try {
+    // Lazy require, same convention as modelSupportOverrides.ts — keeps this
+    // module loadable from the many sync call sites without a cycle.
+    const { findModelProvider, loadCredentials } = require('./credentials/pool.js') as typeof import('./credentials/pool.js')
+    const providerName = findModelProvider(model)
+    // Not a pool provider (first-party / Bedrock / Vertex) → reference impl.
+    if (!providerName) return true
+    const config = loadCredentials().providers[providerName]
+    const keyEntry =
+      config?.keys?.[config.activeKeyIndex] ?? config?.keys?.[0]
+    if (!config?.baseUrl || !keyEntry?.value) return true
+    endpoint = { baseUrl: config.baseUrl, apiKey: keyEntry.value }
+  } catch {
+    return true
+  }
+
+  // Minimal reproduction of the shape ToolSearchTool produces: an assistant
+  // tool_use paired with a tool_result whose content is a bare tool_reference.
+  const body = {
+    model,
+    max_tokens: 1,
+    messages: [
+      { role: 'user', content: 'ok' },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_probe',
+            name: 'Read',
+            input: { file_path: 'probe' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_probe',
+            content: [{ type: 'tool_reference', tool_name: 'Read' }],
+          },
+        ],
+      },
+    ],
+  }
+
+  try {
+    const response = await fetch(
+      `${endpoint.baseUrl.replace(/\/+$/, '')}/v1/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': endpoint.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(TOOL_REFERENCE_PROBE_TIMEOUT_MS),
+      },
+    )
+    if (response.ok) return true
+    // The endpoint parsed the request and rejected it: this is the capability
+    // answer we came for (Zhipu returns 400 invalid_request_error / code 1210).
+    if (response.status === 400) {
+      logForDebugging(
+        `tool_reference probe: '${model}' rejected a bare tool_reference block (400) — disabling tool search for this model`,
+      )
+      return false
+    }
+    // 401/403/429/5xx: the endpoint never judged the shape. Fail open.
+    return true
+  } catch {
+    return true
+  }
 }
 
 /**
@@ -415,11 +568,21 @@ export async function isToolSearchEnabled(
     })
   }
 
-  // Check if model supports tool_reference
-  if (!modelSupportsToolReference(model)) {
+  // Check if the model's endpoint accepts tool_reference blocks. The static
+  // name list can't speak for a 3P shim — accepting the block is a property of
+  // the vendor's endpoint, not of the model name — so ask the endpoint itself
+  // once per process and cache the answer. The probe request is spent only
+  // when something would actually be deferred, so sessions with no MCP or
+  // deferred tools never pay for it.
+  const supportsToolReference = modelSupportsToolReference(model)
+    ? tools.some(t => isDeferredTool(t))
+      ? await probeToolReferenceSupport(model)
+      : true
+    : false
+  if (!supportsToolReference) {
     logForDebugging(
-      `Tool search disabled for model '${model}': model does not support tool_reference blocks. ` +
-        `This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.`,
+      `Tool search disabled for model '${model}': its endpoint does not accept tool_reference blocks. ` +
+        `This feature is only available on endpoints that implement the Anthropic tool-search beta.`,
     )
     logModeDecision(false, 'standard', 'model_unsupported')
     return false

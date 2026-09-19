@@ -36,11 +36,15 @@ Important: "bundle cleanly" does not always mean "runtime-safe". Some flags stil
 - `VOICE_MODE`
   已包含在默认构建管线（不限 dev 构建）。启用 `/voice`、push-to-talk UI、voice notices、dictation plumbing。运行时原依赖 claude.ai OAuth + 原生音频模块或 SoX 兜底录音器——OAuth 登录线路已彻底移除，`/voice` 运行时恒不可用（UI/按键编排仍编入，语音 STT/连接链按 OAuth token 恒缺位拒绝），flag 保留仅编排水位，待定去留。
 - `PRIVATE_GATEWAY`
-  【内置私有化网关，默认开，纯本地】进 `defaultFeatures`：所有默认构建（build / build:dev / compile）均注册 `/server` 指令，内置网关随 exe 编入（`--gateway` 独立进程 + 内嵌 web 前端）。链路详情 → [gateway.md](gateway.md)。
+  【内置私有化网关，默认开，纯本地】进 `defaultFeatures`：所有默认构建（build / build:dev / compile）均注册 `/server` 指令，内置网关随 exe 编入（`--gateway` 独立进程 + 内嵌 web 前端）。token 落盘 `getPortableRoot()/.claude/gateway/token` 跨进程共享；空闲自动回收——cliClients/sockets/sseClients 三集合全空持续 `GATEWAY_IDLE_MINUTES`（默认 10，env 可调）分钟即关。纯本地指令，不涉 OAuth/GrowthBook/Anthropic API。API 清单/安全加固/前缀迁移全链 → [gateway.md](gateway.md)。
 - `REACTIVE_COMPACT`
   进 `defaultFeatures` 默认编入。usage-policy 拒绝（stop_reason='refusal'）自动剥图恢复 + PTL/媒体超限恢复；门控接入 `query.ts`（`tryReactiveCompact` / `isWithheldPromptTooLong` / `isWithheldMediaSizeError` / `isWithheldUsagePolicyRefusal`）与 `commands/compact/compact.ts`（`compactViaReactive` / `isReactiveOnlyMode`）。条目详情见 §2.6。
 - `SESSION_LINK`
   【会话间协作，默认开，纯本地/TUI 无关】进 `defaultFeatures`——门控点 = `tools.ts` 里 `feature('SESSION_LINK') ? getSessionSendTool() : null`（工具注册）+ `SessionSendTool.isEnabled()`。启用 `session_send` 工具与跨会话投递（不门控接收侧——接收走既有 `enqueue`，无新代码）。链路 → [core.md](core.md) 末节 + [gateway.md](gateway.md) §13 + [web-ui.md](web-ui.md) §24。
+- `BUILTIN_EXPLORE_PLAN_AGENTS`
+  进 `defaultFeatures`：内置 explore/plan agent 预设。
+- `NEURON_RAG`
+  【本 fork 自有，默认开】神经元记忆/RAG 引擎纯进程内置化（`src/tools/neturon/` 16 件：BGE 向量检索 @huggingface/transformers + p5/p6 认知链 leiden.ts + coggraph.ts，无 python 子进程）。注册 `recall`/`remember`（**不带 neuron_ 前缀**，常驻直载、不经 ToolSearch，直接调用）+ `neuron_list`/`neuron_source`/`neuron_fill_precog`/`neuron_cog`（延迟加载，ToolSearch 可检索）。专用 flag 构建（`--feature=NEURON_RAG`，产物名带代号）仅存档意义。标准见 [standards.md](standards.md) §7，机制见 [core.md](core.md)。
 
 ### 2.2 Working Experimental Features
 
@@ -61,7 +65,6 @@ These are the user-facing or behavior-changing flags that currently bundle clean
 - `TOKEN_BUDGET` — Enables token budget tracking, prompt triggers, and token warning UI.
 - `ULTRAPLAN` — Enables `/ultraplan`, prompt triggers, and exit-plan affordances.
 - `ULTRATHINK` — Enables the extra thinking-depth mode switch.
-- `VOICE_MODE` — Enables voice toggling, dictation keybindings, voice notices, and voice UI.
 - `STREAMLINED_OUTPUT` — Enables streamlined message-output transformation in headless `stream-json` mode when `CLAUDE_CODE_STREAMLINED_OUTPUT=true`（`cli/print.ts` 门控）.
 
 #### Agent, Memory, and Planning Experiments
@@ -69,7 +72,6 @@ These are the user-facing or behavior-changing flags that currently bundle clean
 - `AGENT_MEMORY_SNAPSHOT` — Stores extra custom-agent memory snapshot state in the app.
 - `AGENT_TRIGGERS` — Enables local cron/trigger tools and bundled trigger-related skills.
 - `AGENT_TRIGGERS_REMOTE` — Enables the remote trigger tool path.
-- `BUILTIN_EXPLORE_PLAN_AGENTS` — Enables built-in explore/plan agent presets（默认编入）.
 - `CACHED_MICROCOMPACT` — Enables cached microcompact state through query and API flows.
 - `COMPACTION_REMINDERS` — Enables reminder copy around compaction and attachment flows.
 - `EXTRACT_MEMORIES` — Enables post-query memory extraction hooks.
@@ -88,14 +90,10 @@ These are the user-facing or behavior-changing flags that currently bundle clean
 - `CONNECTOR_TEXT` — Enables connector-text block handling in API/logging/UI paths.
 - `MCP_RICH_OUTPUT` — Enables richer MCP UI rendering.
 - `NATIVE_CLIPBOARD_IMAGE` — Enables the native macOS clipboard image fast path.
-- `NEURON_RAG`
-  【本 fork 自有；默认开】神经元记忆/RAG 引擎纯进程内置化：注册 `recall`/`remember`（**不带 neuron_ 前缀**，常驻直载、不经 ToolSearch 检索，直接调用）+ `neuron_list`/`neuron_source`/`neuron_fill_precog`/`neuron_cog`（延迟加载，ToolSearch 可检索）六工具（`src/tools/neturon/` 16 件：BGE 向量检索 @huggingface/transformers + p5/p6 认知链 leiden.ts + coggraph.ts，无 python 子进程）。专用 flag 构建（`--feature=NEURON_RAG`，产物名带代号）仅存档意义。标准见 [standards.md](standards.md) §7，机制见 [core.md](core.md)。
 - `POWERSHELL_AUTO_MODE` — Enables PowerShell-specific auto-mode permission handling.
 - `TREE_SITTER_BASH` — Enables the tree-sitter bash parser backend.
 - `TREE_SITTER_BASH_SHADOW` — Enables the tree-sitter bash shadow rollout path.
 - `UNATTENDED_RETRY` — Enables unattended retry behavior in API retry flows.
-- `PRIVATE_GATEWAY`
-  【内置私有化网关，默认开】注册 `/server` 指令（on/off/status 开关内置网关；`--gateway` 独立进程模式——`/server on` detached spawn 自身 exe，`src/gateway/localGateway.ts`（node:http + ws），CLI 退出不影响网关；web 端 WS `send` 带 `sessionId` → 网关按会话跨进程路由 → CLI `gatewayClient.ts` WS 客户端收消息 → `enqueue` 注入对应 REPL（与打字同路径）；token 落盘 `getPortableRoot()/.claude/gateway/token` 跨进程共享；空闲自动回收——cliClients/sockets/sseClients 三集合全空持续 `GATEWAY_IDLE_MINUTES`（默认 10，env 可调）分钟自动关闭；无 AGENT_CWD；会话列表/读取/SSE 基于便携根）。API 清单、安全加固（token 门）、`/gateway/*` 前缀迁移等全链 → [gateway.md](gateway.md)。纯本地指令，不涉 OAuth/GrowthBook/Anthropic API。
 
 ### 2.3 Bundle-Clean Support Flags
 
@@ -120,14 +118,14 @@ These also bundle cleanly, but they are mostly rollout, platform, telemetry, or 
 
 ### 2.4 Compile-Safe But Runtime-Caveated
 
-These bundle today, but would still treat as experimental because they have meaningful runtime caveats:
+可打包 ≠ 运行时安全——以下旗标编入后仍有运行期缺口：
 
-- `VOICE_MODE` — Bundles cleanly; runtime was gated on claude.ai OAuth, which was removed entirely（voice_stream backend dead, `/voice` 恒不可用）. Local recording backend (SoX fallback) no longer relevant.
-- `NATIVE_CLIPBOARD_IMAGE` — Bundles cleanly, but only accelerates macOS clipboard reads when `image-processor-napi` is present.
-- `BRIDGE_MODE`, `CCR_AUTO_CONNECT`, `CCR_MIRROR`, `CCR_REMOTE_SETUP` — Bundle cleanly, but are gated at runtime on claude.ai OAuth plus GrowthBook entitlement checks.【已放弃】整族放弃：云端远程控制目标被内置网关覆盖，已从 `build.ts` `fullExperimentalFeatures` 剔除（不再编入 dev-full），源码门控代码保留（编译期 tree-shake 裁掉）。
-- `KAIROS_BRIEF`, `KAIROS_CHANNELS` — Bundle cleanly, but they do not restore the full missing assistant stack. They only expose the brief/channel-specific surfaces that still exist.
-- `CHICAGO_MCP` — Bundles cleanly, but the runtime path still reaches externalized `@ant/computer-use-*` packages. This is compile-safe, not fully runtime-safe, in the external snapshot.
-- `TEAMMEM` — Bundles cleanly, but only does useful work when team-memory config/files are actually enabled in the environment.
+- `VOICE_MODE` — `/voice` 恒不可用（voice_stream 后端随 OAuth 移除而死），flag 仅保留 UI/按键编排。
+- `NATIVE_CLIPBOARD_IMAGE` — 仅在 `image-processor-napi` 存在时加速 macOS 剪贴板读图。
+- `BRIDGE_MODE` / `CCR_AUTO_CONNECT` / `CCR_MIRROR` / `CCR_REMOTE_SETUP` —【已放弃】运行期需 claude.ai OAuth + GrowthBook 门；已从 `build.ts` `fullExperimentalFeatures` 剔除，源码门控保留（tree-shake）。
+- `KAIROS_BRIEF` / `KAIROS_CHANNELS` — 不恢复完整 assistant 栈，只暴露仍存在的 brief/channel surface。
+- `CHICAGO_MCP` — 运行期仍触及外部化 `@ant/computer-use-*` 包，属 compile-safe 非 runtime-safe。
+- `TEAMMEM` — 仅当环境真启用 team-memory 配置/文件时有用。
 
 ### 2.5 Restored Stub Flags
 

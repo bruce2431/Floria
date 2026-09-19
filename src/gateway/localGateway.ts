@@ -2478,7 +2478,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 2026-08-24 模型 web/CLI 同步：CLI 侧 reportCurrentModel 上报每会话实际模型（内存 Map，detach 清扫）。
-  // 每会话 override 不写凭据池，web 端 /gateway/session 据此读取校准模型 seat，与 CLI 实际使用一致。
+  // 每会话 override 不写凭据池，web 端 /gateway/session 据此读取校准模型 seat，与 CLI 实际使用一致；
+  // 2026-09-19 起同一落值再 SSE 群发（见下），web 不必等拉取。
   if (req.method === 'POST' && url.pathname === '/gateway/model-report') {
     try {
       const parsed = await readReportBody(req)
@@ -2488,8 +2489,15 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         sendJson(res, 400, { error: 'invalid body' })
         return
       }
-      sessionModels.set(sid, { model, updatedAt: Date.now() })
+      const modelTs = Date.now()
+      sessionModels.set(sid, { model, updatedAt: modelTs })
       sweepStaleMaps()
+      // 2026-09-19 实时化：落值后 SSE 群发 {type:'model', session, model, modelTs}（与 queue-state/
+      // task-state 同款「镜像存储 + 转发」）——此前 web 只能等下一次 /gateway/session 拉取才校准，
+      // 会话空闲时可能长时间不来，「CLI 切了模型、web 底栏不动」正是这条延迟造成的。
+      // modelTs = 本次上报时刻，web 端与「用户刚在 web 切过的时刻」比对，用于丢弃切换前的在途快照。
+      const s = `data: ${JSON.stringify({ type: 'model', session: sid, model, modelTs })}\n\n`
+      sendAll(sseClients, (c) => { c.res.write(s) })
       sendJson(res, 200, { ok: true })
     } catch (error) {
       sendReportBodyError(res, error)

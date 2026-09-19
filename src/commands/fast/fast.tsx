@@ -8,6 +8,7 @@ import { Box, Link, Text } from '../../ink.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
 import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
+import { reportCurrentModel } from '../../utils/gatewayClient.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { clearFastModeCooldown, FAST_MODE_MODEL_DISPLAY, getFastModeModel, getFastModeRuntimeState, getFastModeUnavailableReason, isFastModeEnabled, isFastModeSupportedByModel, prefetchFastModeStatus } from '../../utils/fastMode.js';
 import { formatDuration } from '../../utils/format.js';
@@ -31,6 +32,9 @@ function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => App
         fastMode: true
       };
     });
+    // 2026-09-19 模型 web/CLI 同步：开快速模式会顶替当前模型（不支持快速模式时），属模型切换点，
+    // 需上报网关（onChangeAppState 已把 mainLoopModel 同步进 STATE override，读值即真）。
+    reportCurrentModel();
   } else {
     setAppState(prev => ({
       ...prev,

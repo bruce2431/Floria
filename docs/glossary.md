@@ -111,4 +111,5 @@
 | `restored` | 撤回链（文本回填输入栏） |
 | `queue-state` | CLI 入队上报（排队 dock 数据源；每项可带 `from:{title,sid?}` = 会话间通信来源，CLI 上报前已剥包装，见 [gateway.md](gateway.md) §12/§13） |
 | `task-state` | CLI TodoV2 任务清单上报（任务浮窗数据源；空数组=清单清空 → 浮窗整体不出现） |
+| `model` | CLI 每会话实际模型上报（HTTP `/gateway/model-report` 落值即群发，唯一不走 `/clients` WS 的信号；底栏模型 seat 实时校准源，见 [web-ui.md](web-ui.md) §5） |
 | `ws-failed` | web 独立会话启动失败 |

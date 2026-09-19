@@ -106,6 +106,13 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
           renderTaskDock()
         }
       }
+      else if (ev.type === 'model') {
+        // 2026-09-19 模型实时校准（用户「CLI 切了模型、web 底栏不动」）：CLI 每会话实际模型变化 →
+        // 网关 /gateway/model-report 落值后 SSE 群发（事件体带 model + modelTs）。此前 web 只能等
+        // 下一次 /gateway/session 拉取才校准，会话空闲时长时间不来 → 底栏停在旧模型。
+        // 仅当前会话采纳（其它会话的模型变化与本会话底栏无关），冲突判定见 applySessionModel。
+        if (live.curUuid && ev.session === live.curUuid) applySessionModel(ev.model, ev.modelTs)
+      }
       else if (ev.type === 'session-delta') {
         // 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎变化 delta 直达——CLI 过滤投影
         //（filterConversationForDisplay 权威单源）的「锚点 + 其后整体替换」增量（anchorSid =

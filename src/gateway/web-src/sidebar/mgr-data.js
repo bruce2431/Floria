@@ -3,6 +3,7 @@
 import { hideGate } from '../core/auth.js'
 import { needToken, apiUrl } from '../core/gateway.js'
 import { loadModelCur, saveModelCur, MODEL_CUR, renderModelSeat } from '../inputbar/model-select.js'
+import { state } from '../core/state.js'
 import { renderMgrGrid, renderMgrModels } from './mgr.js'
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
@@ -44,12 +45,19 @@ import { renderMgrGrid, renderMgrModels } from './mgr.js'
       const data = await res.json()
       if (!data || !('model' in data)) throw new Error(data.error || 'bad response')
       MODELS = data
-      // 与凭据池真实状态对齐（CLI 同源）：model 优先本地持久化（刷新恢复，含 CLI 上报的会话模型），
-      // 次之 activeModel；provider=activeProvider；effortLevel=settings.effortLevel。
+      // 与凭据池真实状态对齐（CLI 同源）：provider=activeProvider；effortLevel=settings.effortLevel。
+      // model 优先级分两态（2026-09-19 修正「CLI 已切、web 底栏保留上一个」）：
+      //   会话内（state.currentHash 非空）：本地 MODEL_CUR 最高——它由 /gateway/session（CLI 上报）
+      //     与 SSE model 事件写入，是本会话的权威值；localStorage(saved) 是上次刷新残留，最低。
+      //     旧实现把 saved 放最高，刷新即用陈旧值压掉网关真实模型（用户看到的「保留上一个」）。
+      //   非会话态（列表/home）：无会话权威，按网关 activeModel → 便携根 settings.model → saved。
       const saved = loadModelCur()
+      const inSession = !!state.currentHash
       setModelCur({
         provider: data.activeProvider || (saved ? saved.provider : '') || MODEL_CUR.provider,
-        model: (saved && saved.model) || data.activeModel || (data.model ? String(data.model) : MODEL_CUR.model),
+        model: inSession
+          ? MODEL_CUR.model || data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || ''
+          : data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || MODEL_CUR.model,
         effortLevel: data.effortLevel != null ? String(data.effortLevel) : (saved && saved.effortLevel !== undefined ? saved.effortLevel : undefined),
       })
       saveModelCur()

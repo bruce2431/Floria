@@ -8,6 +8,7 @@ import { useCommandQueue } from 'src/hooks/useCommandQueue.js';
 import { type IDEAtMentioned, useIdeAtMentioned } from 'src/hooks/useIdeAtMentioned.js';
 import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from 'src/services/analytics/index.js';
 import { type AppState, useAppState, useAppStateStore, useSetAppState } from 'src/state/AppState.js';
+import { reportCurrentModel } from 'src/utils/gatewayClient.js';
 import type { FooterItem } from 'src/state/AppStateStore.js';
 import { getCwd } from 'src/utils/cwd.js';
 import { isQueuedCommandEditable, popAllEditable } from 'src/utils/messageQueueManager.js';
@@ -2044,6 +2045,10 @@ function PromptInput({
         })
       };
     });
+    // 2026-09-19 模型 web/CLI 同步：内联模型选择器与 /model 选择器同为切换点，此前不上报网关 →
+    // 网关存的每会话模型停在旧值，web 底栏读它校准便永远落后一步（onChangeAppState 已把
+    // mainLoopModel 同步进 STATE override，此处读 getMainLoopModel() 即真）。
+    reportCurrentModel();
     setShowModelPicker(false);
     const effectiveFastMode = (isFastMode ?? false) && !wasFastModeDisabled;
     let message = `Model set to ${modelDisplayString(model)}`;

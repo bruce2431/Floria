@@ -18,6 +18,7 @@ import { logEvent, type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPAT
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { ThemePicker } from '../ThemePicker.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../../state/AppState.js';
+import { reportCurrentModel } from '../../utils/gatewayClient.js';
 import { ModelPicker } from '../ModelPicker.js';
 import { modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/model.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
@@ -211,6 +212,9 @@ export function Config({
       mainLoopModel: value,
       mainLoopModelForSession: null
     }));
+    // 2026-09-19 模型 web/CLI 同步：/config 内改模型同样是切换点，需上报网关（onChangeAppState
+    // 已把 mainLoopModel 同步进 STATE override，读 getMainLoopModel() 即真）。
+    reportCurrentModel();
     setChanges(prev_0 => {
       const valStr = modelDisplayString(value) + (isBilledAsExtraUsage(value, false, isOpus1mMergeEnabled()) ? ' · Billed as extra usage' : '');
       if ('model' in prev_0) {

@@ -64,6 +64,11 @@ function ModelPickerWrapper(t0) {
         mainLoopModel: model,
         mainLoopModelForSession: null
       }));
+      // 2026-09-19 模型 web/CLI 同步补口：交互选择器此前**完全不上报**网关——handleSelect 已写
+      // AppState.mainLoopModel，onChangeAppState 的 diff 钩子同步把该值落到 STATE override
+      // （getMainLoopModel 与 fork/辅助查询同源），所以此处只需补一次上报，读值即真。
+      // 少这一口 → 网关存的每会话模型恒停在切换前的值，web 底栏读它校准 → 「CLI 切了、web 不跟」。
+      reportCurrentModel();
       let message = `Set model to ${chalk.bold(renderModelLabel(model))}`;
       if (effort !== undefined) {
         message = message + ` with ${chalk.bold(effort)} effort`;
@@ -220,7 +225,9 @@ function SetModelAndClose({
         mainLoopModel: modelValue,
         mainLoopModelForSession: null
       }));
-      // 2026-08-24 模型 web/CLI 同步：/model 切换后上报实际模型给网关
+      // 2026-08-24 模型 web/CLI 同步：/model 切换后上报实际模型给网关。
+      // 2026-09-19 复核：本路径读值即真——setAppState 的 diff 钩子（onChangeAppState）已把
+      // mainLoopModel 同步进 STATE override，getMainLoopModel() 与主循环取值一致，无需再写 override。
       reportCurrentModel();
       let message = `Set model to ${chalk.bold(renderModelLabel(modelValue))}`;
       if (switchedProvider) {

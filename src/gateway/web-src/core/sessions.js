@@ -4,7 +4,7 @@ import { hideGate } from './auth.js'
 import { needToken, apiUrl } from './gateway.js'
 import { refreshList } from './live.js'
 import { bodyEl, state, ALL, live, toast } from './state.js'
-import { saveModelCur, MODEL_CUR, modelUserPicked, renderModelSeat } from '../inputbar/model-select.js'
+import { saveModelCur, MODEL_CUR, modelUserPicked, setModelUserPicked, renderModelSeat } from '../inputbar/model-select.js'
   // ---------- 会话映射 ----------
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可
@@ -75,11 +75,23 @@ import { saveModelCur, MODEL_CUR, modelUserPicked, renderModelSeat } from '../in
     // file = jsonl 文件名（uuid），供 SSE queue-state / task-state 事件按会话精确匹配。
     return { messages: data.display || data.messages, context: data.context || null, model: data.model || null, modelTs: data.modelTs || null, vision: !!data.vision, cwd: data.cwd || null, queued: Array.isArray(data.queued) ? data.queued : [], tasks: Array.isArray(data.tasks) ? data.tasks : [], file: typeof data.file === 'string' ? data.file : null, deltaSeq: typeof data.deltaSeq === 'number' ? data.deltaSeq : null }
   }
-  // 用 CLI 上报的会话实际模型校准模型 seat（2026-08-24 模型 web/CLI 同步）。仅当用户本次会话内
-  // 未主动切换（modelUserPicked=false）时采纳，避免覆盖刚切的选择。modelTs 暂保留（供后续冲突判定）。
+  // 用 CLI 上报的会话实际模型校准模型 seat（2026-08-24 模型 web/CLI 同步；2026-09-19 改冲突判定）。
+  // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
+  // **切换前的在途快照**——用户刚在 web 切过（modelUserPicked）且这条上报的时刻早于那次切换
+  // （modelTs < 本地 ts）→ 它是切换前发出的旧数据，采纳会把刚做的选择回滚（用户反馈「web 保留了
+  // 上一个」）。旧实现用 modelUserPicked 一票否决整页会话剩余时间，CLI 侧后续切模型永远进不来
+  // → 弃用，改为时间戳比较；一旦采纳过一次上报（外部真相落定）即解除防回滚标记，恢复常态跟随。
   function applySessionModel(model, modelTs) {
-    if (!model || modelUserPicked) return
-    if (MODEL_CUR.model === model) return
+    if (!model) return
+    // 写 modelUserPicked 一律走 setModelUserPicked（ESM 导入绑定只读，直接赋值 esbuild 直接报错）
+    if (MODEL_CUR.model === model) { setModelUserPicked(false); return }
+    if (
+      modelUserPicked &&
+      typeof modelTs === 'number' &&
+      typeof MODEL_CUR.ts === 'number' &&
+      modelTs < MODEL_CUR.ts
+    ) return
+    setModelUserPicked(false)
     setModelCur({ ...MODEL_CUR, model })
     saveModelCur()
     renderModelSeat()

@@ -42,7 +42,10 @@ import { modelProviderOf } from '../sidebar/mgr.js'
   }
   function saveModelCur() {
     try {
-      localStorage.setItem(MODEL_KEY, JSON.stringify({ provider: MODEL_CUR.provider, model: MODEL_CUR.model, effortLevel: MODEL_CUR.effortLevel, ts: Date.now() }))
+      // 2026-09-19：ts 同时回写 MODEL_CUR（不只写 localStorage）——applySessionModel 的「切换前在途
+      // 快照」判定要比 modelTs < MODEL_CUR.ts，ts 只落盘不进内存则内存版恒无 ts，判定失效。
+      MODEL_CUR.ts = Date.now()
+      localStorage.setItem(MODEL_KEY, JSON.stringify({ provider: MODEL_CUR.provider, model: MODEL_CUR.model, effortLevel: MODEL_CUR.effortLevel, ts: MODEL_CUR.ts }))
     } catch { /* 存储不可用忽略 */ }
   }
   let MODEL_CUR = loadModelCur() || { provider: '', model: '', effortLevel: undefined }

@@ -795,16 +795,23 @@ export function refreshGatewayRegistration(): void {
  *
  * 每会话模型 override（mainLoopModelOverride）只存在于本进程内存，网关 /gateway/models 只返回凭据池
  * 全局默认 activeModel，web 模型 seat 因此与 CLI 实际使用不一致。本函数在 WS 连接后与模型切换点
- * 各调用一次，网关存 sessionId→model（TTL 10min），web 端 /gateway/session 读取校准。带 token query
- *（对齐 conversationDisplay.ts 的 gatewayApiUrl 模式）；网关未起 / 未在线时静默失败。
+ * 各调用一次，网关存 sessionId→model（见 localGateway sessionModels），web 端 /gateway/session 读取
+ * + SSE model 事件实时校准。带 token query（对齐 conversationDisplay.ts 的 gatewayApiUrl 模式）；
+ * 网关未起 / 未在线时静默失败。
+ *
+ * intendedModel（2026-09-19 修「CLI 切了、web 底栏不跟」）：不传时读 getMainLoopModel()，而它取
+ * STATE.mainLoopModelOverride——**web 控制切换**（GatewayControlBridge）按 2026-09-18 同拍化设计
+ * 只把新值挂起到回合边界才落地，切换刚发生时这里读到的仍是切换前的旧值，网关存下的每会话模型
+ * 于是恒为旧值，web 底栏拿它校准 → 永远停在旧模型。故该类切换点应把它**将要生效**的模型经本参数
+ * 显式传入（调用方最清楚）；不传时维持原语义（CLI 侧切换点已把新值写进 STATE，读值即真）。
  */
-export function reportCurrentModel(): void {
+export function reportCurrentModel(intendedModel?: string): void {
   try {
     const token = getGatewayToken()
     if (!token) return
     const sessionId = getSessionId()
     if (!sessionId) return
-    const model = getMainLoopModel()
+    const model = intendedModel ?? getMainLoopModel()
     if (!model) return
     void fetch(
       `${gatewayBaseUrl()}/gateway/model-report?token=${encodeURIComponent(token)}`,

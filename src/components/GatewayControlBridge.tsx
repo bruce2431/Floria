@@ -7,6 +7,7 @@
  *    setPendingSessionProvider），回合边界（REPL getToolUseContext）与模型名快照同一拍落地；
  *    此处只立即更新显示态 setAppState({ mainLoopModelForSession: resolved })。
  *    'default'/null → 清覆盖+清绑定，回落读盘 getActiveModel()（凭据池）——只影响本会话，不写全局凭据池。
+ *    上报网关带 resolved（2026-09-19）：STATE 此刻尚未落地，不显式传值只会报出切换前的旧模型。
  *  - effort → setAppState({ effortValue })
  *  - rename → 更新内存标题缓存（terminal title / status line / 退出 re-append）+ 输入栏徽标
  *    （standaloneAgentContext.name，useSwarmBanner 渲染），2026-08-25 web 重命名实时同步。
@@ -38,8 +39,11 @@ export function GatewayControlBridge(): null {
             ? prev
             : { ...prev, mainLoopModelForSession: resolved },
         )
-        // 2026-08-24 模型 web/CLI 同步：切换后立即上报实际模型给网关（web 端读取校准）
-        reportCurrentModel()
+        // 2026-08-24 模型 web/CLI 同步：切换后立即上报实际模型给网关（web 端读取校准）。
+        // 2026-09-19 修：新值此刻还挂起在 pending（回合边界才落地 STATE），读 getMainLoopModel()
+        // 只会得到切换前的旧值 → 上报必须显式带「将要生效的模型」；resolved=null（'default'/清覆盖）
+        // 无具体模型可报，交回默认读值路径（与主循环回落同源）。
+        reportCurrentModel(resolved ?? undefined)
       } else if (kind === 'effort') {
         // null = 显式 Off（网关 'off'→null 约定）：保留 null 透传，resolveAppliedEffort
         // 据此显式不发 effort（2026-09-18 能力声明激活默认链后 undefined 会跟随默认，

@@ -82,7 +82,13 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **`listModels`（GET /gateway/models）** 返回 `model = activeModel ?? settings.model`（与 CLI 同源）+ `activeProvider/activeModel/providerModels/effortLevel`，凭据池条目随带 `effortLevels`；前端模型浮窗渲染真实凭据池模型、effort 面板按声明动态渲染。`gatewayClient.ts` WS 收 `{type:'model'|'effort'}` → `invokeControlOverride`；前端 `mselChoose` 调 `apiSetModel` POST（有会话带 `sessionId`，首页/新会话带 `defaultModel`）。CLI 思考等级渲染：LogoV2/CondensedLogo 用 `getDisplayedEffortLevel`（未设置回落 `'high'`）以 `<模型名>·<思考等级>` 显示。
 
-**模型 web/CLI 同步**：每会话 override 只存在于 CLI 内存，web 只读凭据池全局默认 → 需上报。①CLI `reportCurrentModel()`（WS open 回调 + GatewayControlBridge/useReplBridge/model.tsx 三处切换点后调用，POST `/gateway/model-report` 带 `{sessionId, model}`），网关 `sessionModels` Map（**无时间 TTL**，CLI 断开 detach 删 + 重连 open 补报 + stop 清空，与 sessionQueues/sessionTasks 同构——有 TTL 会把长时间不切模型的活跃会话清成 `model=null`）+ `GET /gateway/session` 附 `model/modelTs`；②web 双保险：`MODEL_CUR` 持久化 `localStorage`（`floria-model-v1`）+ `applySessionModel(model, modelTs)`（`modelUserPicked` 标记：用户未手动切过才用上报模型校准 seat）。
+**模型 web/CLI 同步**：每会话 override 只存在于 CLI 内存，web 只读凭据池全局默认 → 需上报。**唯一权威源 = 网关 `sessionModels`；web 的 `MODEL_CUR` 只是该权威源的本地投影 + 乐观前置**。
+
+①**CLI 上报**：`reportCurrentModel(intendedModel?)`（`gatewayClient.ts`）POST `/gateway/model-report` 带 `{sessionId, model}`。调用点 = WS open 回调（重连补报）+ 全部切换点：`GatewayControlBridge`（web 控制切换）、`useReplBridge`、`model.tsx` 交互选择器与 `/model` 路径、`PromptInput` 内联 ModelPicker、`fast.tsx` 开 fast（可能替换模型）、`Config.tsx` 默认模型改动——**不变量 = 任一改变本会话实际模型的落点必须上报**。**参数语义**：不传则读 `getMainLoopModel()`（取 STATE override，CLI 侧切换点已落地新值即真）；**web 控制切换必须显式传 `intendedModel`**——该路径把新值挂起到回合边界才落地（见上「同拍化」），切换瞬间读 STATE 得到的是旧值，上报即恒报旧模型。
+
+②**网关**：`sessionModels` Map（**无时间 TTL**，CLI 断开 detach 删 + 重连 open 补报 + stop 清空，与 sessionQueues/sessionTasks 同构——有 TTL 会把长时间不切模型的活跃会话清成 `model=null`）+ `GET /gateway/session` 附 `model/modelTs`；落值同时 **SSE 群发 `{type:'model', session, model, modelTs}`**（与 queue-state/task-state 同款「镜像存储 + 转发」），web 不必等下一次拉取——会话空闲时底栏也能实时跟。
+
+③**web 采纳**：`applySessionModel(model, modelTs)` 一律采纳上报值（网关即外部真相）；唯一例外是**切换前的在途快照**——用户刚在 web 切过（`modelUserPicked`）且该上报 `modelTs < MODEL_CUR.ts`（本地切换时刻）→ 丢弃。`MODEL_CUR.ts` 由 `saveModelCur()` 回写（不只落 localStorage）；采纳过一次上报即清 `modelUserPicked`，恢复常态跟随。`loadModelsData` 的 model 优先级**按态分叉**：会话内 `MODEL_CUR`（SSE/拉取写入的会话权威）> `activeModel` > 便携根 `settings.model` > 本地 `saved`；非会话态（列表/首页）`activeModel` > `settings.model` > `saved`——`saved` 是上次刷新残留，任何态下都不得压过网关值。`MODEL_CUR` 持久化 key `floria-model-v1`。
 
 ## 6. web 打断按钮与打断收口 / 撤回链
 
@@ -365,7 +371,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 34. 切视图即清全局槽收敛为共享出口：管理视图（神经 tab）不再被实时流洗成 chat
 
-- **不变量**：`live.curUuid` 非空 ⇔ 当前视图正展示该会话（六条 SSE 守卫——session-delta / queue-state / task-state / compact-state / turn-state / stream-text——全押在它上面）。
+- **不变量**：`live.curUuid` 非空 ⇔ 当前视图正展示该会话（七条 SSE 守卫——session-delta / queue-state / task-state / compact-state / turn-state / stream-text / model——全押在它上面）。
 - **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
 - **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口调它，勿就地补行）。**探针**：`probes/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 提取后喂 `(curUuid, ev.session)` 四组合）。
 

@@ -389,9 +389,10 @@ export async function handlePromptSubmit(
 /**
  * Core logic for executing user input without UI side effects.
  *
- * All commands arrive as `queuedCommands`. First command gets full treatment
- * (attachments, ideSelection, pastedContents with image resizing). Commands 2-N
- * get `skipAttachments` to avoid duplicating turn-level context.
+ * All commands arrive as `queuedCommands`. First command gets the turn-level
+ * context (attachments, ideSelection); commands 2-N get `skipAttachments` to
+ * avoid duplicating it. `pastedContents` is per-command (a message's own images)
+ * and is carried by every command.
  */
 async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
   const {
@@ -445,9 +446,9 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
     let nextInput: string | undefined
     let submitNextInput: boolean | undefined
 
-    // Iterate all commands uniformly. First command gets attachments +
-    // ideSelection + pastedContents, rest skip attachments to avoid
-    // duplicating turn-level context (IDE selection, todos, diffs).
+    // Iterate all commands uniformly. First command gets the turn-level context
+    // (attachments + ideSelection), rest skip attachments to avoid duplicating
+    // it (IDE selection, todos, diffs). pastedContents 逐条自带（见下方循环内注释）。
     const commands = queuedCommands ?? []
 
     // Compute the workload tag for this turn. queueProcessor can batch a
@@ -479,7 +480,14 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           mode: cmd.mode,
           setToolJSX,
           context: makeContext(),
-          pastedContents: isFirst ? cmd.pastedContents : undefined,
+          // 逐条自带（2026-09-19 排队丢图根修）：pastedContents 是**每条消息自己的**载荷
+          // （web/bridge 一条命令一份图，与 CLI 本地粘贴同构），不是回合级共享上下文——
+          // 原 `isFirst ? cmd.pastedContents : undefined` 把两者混为一谈：queueProcessor
+          // 批量抽干同 mode 非斜杠命令（一轮内多条 prompt 一次 executeUserInput），
+          // 第 2..N 条 pastedContents 被抹平 → processUserInput 的 storeImages 不执行
+          // → image-cache 无字节 → web 内联图 404 回落 [Image #N] 裸文本。
+          // 回合级上下文（ideSelection/attachments/setUserInputOnProcessing）仍由 isFirst 门控。
+          pastedContents: cmd.pastedContents,
           messages,
           setUserInputOnProcessing: isFirst
             ? setUserInputOnProcessing

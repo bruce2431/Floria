@@ -5,8 +5,8 @@
 
 ## 1. 构建标准
 
-- 源码构建区 `Pj16-CodeAgent构建/_agent-src/`：`src/` `scripts/` `package.json` `bun.lock` `tsconfig.json` `env.d.ts` `node_modules/`。
-- 命令（均在 `cd Pj16-CodeAgent构建/_agent-src &&` 后执行）：
+- 源码构建区 = 本仓库根（`Floria/`）：`src/` `scripts/` `probes/` `package.json` `bun.lock` `tsconfig.json` `env.d.ts` `node_modules/`。
+- 命令（均在 `cd Pj16-CodeAgent构建/Floria` 后执行）：
   - `bun install` — 装依赖（bun >= 1.3.11）
   - `bun run build` — 构建 → 项目根 `./cli-<ts>.exe`
   - `bun run build:dev` — dev 构建 → **项目根** `cli-dev-<YYYYMMDDHHMMSS>.exe`（dev 构建即部署：产物直出项目根，build.ts 按脚本位置推导 PROJECT_ROOT；构建统一用本命令）
@@ -15,12 +15,12 @@
   - `bun run dev` — 源码直跑（入口 `src/entrypoints/cli.tsx`）
 - 产物命名（`scripts/build.ts`）= `<前缀>-<YYYYMMDDHHMMSS>[-<显式 --feature 代号>]`，显式 feature 代号用 `+` 连接（如 `cli-dev-<YYYYMMDDHHMMSS>-PRIVATE_GATEWAY.exe`）；前缀 dev=`cli-dev`、compile=`dist/cli`。默认六个 feature（VOICE_MODE + BUILTIN_EXPLORE_PLAN_AGENTS + PRIVATE_GATEWAY + REACTIVE_COMPACT[usage-policy 拒绝/媒体超限/PTL 自动恢复] + SESSION_LINK[会话间协作] + NEURON_RAG[神经元内置检索/记忆]）与 `--feature-set=dev-full` 不进文件名。**构建一律 `bun run build:dev`（产物名不带 `-PRIVATE_GATEWAY` 代号，含发布；`build:dev:gateway` 已废弃不使用）**；按特性构建仍用 `--feature=X`（产物名带该特性代号；NEURON_RAG 已进默认，显式传 `--feature=NEURON_RAG` 仅剩命名作用）。
 - 产物是**自包含单文件二进制**（`bun build --compile --bytecode --packages bundle`），拷到任意项目目录即可用，运行时不需要 src/node_modules。**exe 产物带时间戳是强制规范，不允许覆盖**（禁止覆盖成固定名如 `cli-dev.exe`）；部署/换新 = 直接用新时间戳 exe 启动，旧产物原样保留。
-- codegraph 索引：`Pj16-CodeAgent构建/_agent-src/src/.codegraph/`（相对路径存储，随 src 迁移有效）；MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
-- dev 版本号从 git 派生（sha 取自 git HEAD；仓库仅跟踪 `_agent-src/`、`README.md`、`docs/`，其余项目文件由 .gitignore 排除）。
+- codegraph 索引：`src/.codegraph/`（相对路径存储，随 src 迁移有效）；MCP 查询带 `projectPath=Pj16-CodeAgent构建/Floria/src`。
+- dev 版本号从 git 派生（sha 取自 git HEAD；本目录即仓库根，其自身内容全量入库，`node_modules/`/`dist/`/`temp/`/`*.exe` 由 `.gitignore` 排除）。
 
 ### 1.1 前端内嵌打包与 cache-busting（改 web 前端必读）
 
-前端权威 `_agent-src/src/gateway/web-src/`（22 ESM 模块，`gateway/web/app.js` 为构建生成物勿手改）；构建时 `scripts/gen-web-assets.ts` 递归 base64 内联进 exe（build.ts 每次构建前自动运行），`localGateway.ts` 内嵌优先、磁盘 public 仅兜底（项目根优先 + 便携根兜底）。**前端改动必须重新构建 exe 才生效**（无磁盘热重载）；**cache-busting**：index.html 资源引用带版本号 `?v=N`（styles.css/app.js），每次前端改动同步 bump 该号（+ sw.js CACHE），浏览器强制下载新版绕过 HTTP 缓存（资源引用为绝对路径，见 [gateway.md](gateway.md) pushState 路由章节）；**注意：前端从未注册 Service Worker**（web/ 目录无 serviceWorker 代码，sw.js 是死文件，浏览器不跑它——更新可靠靠 cache-busting 而非 sw）。**bytecode exe 内嵌资产不可 grep**（字符串经编码），验证资产版本用 `curl http://127.0.0.1:8124/sw.js` 与 `/app.js`。
+前端权威 `src/gateway/web-src/`（22 ESM 模块，`gateway/web/app.js` 为构建生成物勿手改）；构建时 `scripts/gen-web-assets.ts` 递归 base64 内联进 exe（build.ts 每次构建前自动运行），`localGateway.ts` 内嵌优先、磁盘 public 仅兜底（项目根优先 + 便携根兜底）。**前端改动必须重新构建 exe 才生效**（无磁盘热重载）；**cache-busting**：index.html 资源引用带版本号 `?v=N`（styles.css/app.js），每次前端改动同步 bump 该号（+ sw.js CACHE），浏览器强制下载新版绕过 HTTP 缓存（资源引用为绝对路径，见 [gateway.md](gateway.md) pushState 路由章节）；**注意：前端从未注册 Service Worker**（web/ 目录无 serviceWorker 代码，sw.js 是死文件，浏览器不跑它——更新可靠靠 cache-busting 而非 sw）。**bytecode exe 内嵌资产不可 grep**（字符串经编码），验证资产版本用 `curl http://127.0.0.1:8124/sw.js` 与 `/app.js`。
 
 ## 2. Feature Flags 活审计
 
@@ -181,9 +181,9 @@ These are the ones that still look expensive to restore because the first missin
 
 ### 2.8 Useful Entry Points
 
-- Feature-aware build logic: `_agent-src/scripts/build.ts`
-- Feature-gated command imports: `_agent-src/src/commands.ts`
-- Feature-gated tool imports: `_agent-src/src/tools.ts`
-- Feature-gated task imports: `_agent-src/src/tasks.ts`
-- Feature-gated query behavior: `_agent-src/src/query.ts`
-- Feature-gated CLI entry paths: `_agent-src/src/entrypoints/cli.tsx`
+- Feature-aware build logic: `scripts/build.ts`
+- Feature-gated command imports: `src/commands.ts`
+- Feature-gated tool imports: `src/tools.ts`
+- Feature-gated task imports: `src/tasks.ts`
+- Feature-gated query behavior: `src/query.ts`
+- Feature-gated CLI entry paths: `src/entrypoints/cli.tsx`

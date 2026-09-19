@@ -6,7 +6,7 @@
  *   注入同款 esc + mention 桩，测的是真源码。
  * CLI 侧：src/components/Markdown.tsx 的 stripChartHtml——剥 TS 类型标注后求值。
  *
- * 运行：cd _agent-src && bun probe-chart.ts
+ * 运行：cd Floria && bun probes/probe-chart.ts
  */
 import { readFileSync } from 'node:fs'
 

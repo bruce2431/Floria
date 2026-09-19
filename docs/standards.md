@@ -26,10 +26,13 @@
 @WrokSpace/               ← 便携根 = 主工作区（日常产出、项目、临时任务）
 ├── .claude/              ← 便携全局配置根（settings/skills/plugins；会话与自动记忆均在项目级）
 │   └── .claude-portable  ← 便携标记（在配置根内部，不可移动/删除）
-├── Pj16-CodeAgent构建/   ← 源码构建区 + 权威标准
-│   ├── _agent-src/       ← 构建源码（src/ scripts/ package.json node_modules/ …）
-│   ├── docs/             ← 文档库（本文件 + build/glossary/core/gateway/web-ui/README）
-│   └── README.md         ← 目录结构说明
+├── Pj16-CodeAgent构建/   ← 项目根（非仓库根）
+│   ├── Floria/           ← 源码构建区 + 权威标准 = git 仓库根（远程 bruce2431/Floria）
+│   │   ├── src/ scripts/ probes/ assets/ package.json node_modules/ …
+│   │   ├── docs/         ← 文档库（本文件 + build/glossary/core/gateway/web-ui/README）
+│   │   └── README.md     ← 仓库说明
+│   ├── README.md         ← 项目目录结构说明
+│   └── CLAUDE.md         ← 项目级 AI 指引
 ├── PjN-…/                ← 项目
 ├── .trash/YYYY-MM-DD/    ← 归档（禁止删除，只归档）
 ├── LOG.md                ← 工作区 LOG
@@ -58,7 +61,7 @@
 
 ## 3. 便携配置根与路径红线
 
-**配置根解析**（`Pj16-CodeAgent构建/_agent-src/src/utils/envUtils.ts` `getClaudeConfigHomeDir`，优先级从高到低）：
+**配置根解析**（`src/utils/envUtils.ts` `getClaudeConfigHomeDir`，优先级从高到低）：
 
 1. `CLAUDE_CONFIG_DIR` 环境变量
 2. exe 旁边的 `.claude/`（**须带配置根标记**：`.claude-portable`/`.claude.json`/`settings.json`/`plugins`/`skills`/`commands`/`credentials.json`/`history.jsonl` 任一存在才认；**只有 `projects/` 不算** → 项目本地会话目录不会误判）
@@ -159,7 +162,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - `.mcp.json` 用 `${CLAUDE_PLUGIN_ROOT}` 指向插件根定位脚本（相对路径，便携）。
 
 ### 5.7 现状清单
-- `codegraph/`（name=`codegraph`）— 代码知识图谱 MCP，索引 `Pj16-CodeAgent构建/_agent-src/src/.codegraph/`
+- `codegraph/`（name=`codegraph`）— 代码知识图谱 MCP，索引 `src/.codegraph/`
 - `github/`（name=`github`）— GitHub 官方 MCP（github-mcp-server Windows 二进制内置 `mcp/`）：stdio + `--toolsets=context,repos,issues,pull_requests,users,git`；PAT 填 `.mcp.json` env `GITHUB_PERSONAL_ACCESS_TOKEN`（classic 勾 repo+delete_repo；`delete_repository` 不可逆须用户确认）；接入说明 `docs/setup-guide.md`；命名空间 `mcp__plugin_github_github__*`，重启会话生效
 - 已移除（归档 `.trash/`，勿引用）：`neturon/`（neturon-rag RAG 插件，已被 Pj16 TS 内置版取代 → §7；数据根 `@WrokSpace/.claude/neturon/` 不动，TS 版原样续用）、`qwen-mm/`（Qwen 多模态视觉插件）、`telemetry-monitor/`（会话遥测 MCP，功能被内置网关 `/gateway/sessions` 覆盖）
 
@@ -173,8 +176,8 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 
 ## 7. 记忆 / RAG 标准（neturon）
 
-- **引擎 = TS 进程内置工具** `_agent-src/src/tools/neturon/`（16 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/cogname/roster/index），`feature('NEURON_RAG')` 门控**默认开**（build.ts defaultFeatures）。工具 = `recall` / `remember`（**不带 neuron_ 前缀**——常驻直载、不经 ToolSearch 检索，系统提示自带 schema 直接调用）+ `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（延迟加载，ToolSearch 可检索；ops 三 action = build_graph / detect_communities / name_communities）。neturon-rag 插件已移除（§5.7）；机制细节 → [core.md](core.md)「神经元内置检索/记忆」。**Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）。**认知链已主动偏离 Python**：cog 全链纯标注驱动、文本不参与任何判据（core.md「认知图形成」），Python 对照只覆盖 leiden/社群统计等未改部分。
-- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段）→ `l1.cog`（社群/节点/precog）。**raw 层惯例**：每条 mem 条目的 `revelant[0]` = 其 raw 层 `message_id`（`l3.raw/<来源>/message.db`），`source` = 来源标签（'LOG'/'MEM'/'QQ'/'微信'…）——**全部在盘项目同此**：`_agent-src/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库，各项目根历史 LOG.md 已迁入 raw+mem 层并真移动（项目根不再有 LOG.md；新 LOG 条目一律写各自 mem 层，Pj16 入口现状见 core.md）。
+- **引擎 = TS 进程内置工具** `src/tools/neturon/`（16 件：config/serialize/npyio/embedder/segment/retriever/memwriter/precog/usageHint/recall/remember/leiden/coggraph/cogname/roster/index），`feature('NEURON_RAG')` 门控**默认开**（build.ts defaultFeatures）。工具 = `recall` / `remember`（**不带 neuron_ 前缀**——常驻直载、不经 ToolSearch 检索，系统提示自带 schema 直接调用）+ `neuron_list` / `neuron_source` / `neuron_fill_precog` / `neuron_cog`（延迟加载，ToolSearch 可检索；ops 三 action = build_graph / detect_communities / name_communities）。neturon-rag 插件已移除（§5.7）；机制细节 → [core.md](core.md)「神经元内置检索/记忆」。**Python quirk 保真勿「修正」**：`partition.q` = igraph VertexClustering.q 无权 γ=1 模块度（加权 Q 以 `q_weighted` 随工具返回）。**认知链已主动偏离 Python**：cog 全链纯标注驱动、文本不参与任何判据（core.md「认知图形成」），Python 对照只覆盖 leiden/社群统计等未改部分。
+- **三层管线**：`l3.raw`（脚本/工具全文）→ `l2.mem`（记忆片段）→ `l1.cog`（社群/节点/precog）。**raw 层惯例**：每条 mem 条目的 `revelant[0]` = 其 raw 层 `message_id`（`l3.raw/<来源>/message.db`），`source` = 来源标签（'LOG'/'MEM'/'QQ'/'微信'…）——**全部在盘项目同此**：`scripts/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库，各项目根历史 LOG.md 已迁入 raw+mem 层并真移动（项目根不再有 LOG.md；新 LOG 条目一律写各自 mem 层，Pj16 入口现状见 core.md）。
 - **`blocks` 标准（声明源 = 各库 `config.yaml`）**：`blocks.max_chars`（Pj16=300 字）+ `prompts.add_memory`。**块数 ≥ 2，一块一件事；单块 ≤ max_chars；block[0] = 检索锚**（查询形自然语句 + 关键标识：功能名/文件路径/参数名/报错原文）；按 `；。` 主切、【标签】并入首块；**块内不嵌时间戳**；禁纯工具名块。写入侧由 `memwriter.ts` 强制切分（`blocks` 与 `[input.content]` 两条路径同切，`splitBlock`/`blockMaxChars`），不靠自觉。**动因**：encode 超 512 token 静默丢尾 + 逐块 max-pool 每块一票 ⇒ 块长/块数直接决定向量形态。机制推导与实测数字 → [core.md](core.md)「神经元内置检索/记忆」。
 - **写记忆**：脚本/工具全文存 `l3.raw/`，`core_file` 只存**相对路径**引用；同一源不重复记录（复用同一源）。
 - **检索（双检索）**：`recall` 查 mem（唯一写 precog）+ `neuron_cog` 全查五层（概念/社群/precog节点/聚合节点/mem）。

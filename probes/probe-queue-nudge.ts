@@ -7,7 +7,7 @@
  *   ③ consumeQueueNudge 一次性消费（消费后 peek 转假，不会无限断流）；
  *   ④ 队列清空（被 remove / 被 drain）→ 标记自动失效（不误伤下一轮生成）；
  *   ⑤ 斜杠命令 / task-notification / 子代理命令都不算可催办对象。
- * 运行：cd _agent-src && bun run probe-queue-nudge.ts
+ * 运行：cd Floria && bun probes/run probe-queue-nudge.ts
  */
 import {
   enqueue,

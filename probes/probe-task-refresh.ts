@@ -20,7 +20,7 @@
  *
  * 修前对照：①②必败（常量在、清扫分支在），③-⑦修前即过（既有多道闸，本次未动）。
  *
- * 运行：cd _agent-src && bun probe-task-refresh.ts
+ * 运行：cd Floria && bun probes/probe-task-refresh.ts
  */
 import { readFileSync } from 'node:fs'
 

@@ -10,7 +10,7 @@
  * （输出 <p>…</p>，styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）⇒ 接管帧高度跳 6px、
  * 多行文本还从「空白折叠」变 `<br>`。修复 = 乐观侧同走 mdHtml（两路径同构，同 2026-09-07 定案的不变量）。
  *
- * 运行：cd _agent-src && bun probe-user-bubble-parity.ts
+ * 运行：cd Floria && bun probes/probe-user-bubble-parity.ts
  */
 import { readFileSync } from 'node:fs'
 

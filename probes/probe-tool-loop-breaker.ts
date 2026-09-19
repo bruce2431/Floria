@@ -19,7 +19,7 @@
  *     唯一喂入点；扫描在 runTools 前；runTools 只收 allowedToolUseBlocks；熔断分支含合成
  *     tool_result（1:1 映射哨兵）+ 用户可见提示 + return { reason: 'tool_loop_breaker' }
  *
- * 运行：cd _agent-src && bun probe-tool-loop-breaker.ts
+ * 运行：cd Floria && bun probes/probe-tool-loop-breaker.ts
  */
 import { readFileSync } from 'node:fs'
 import {

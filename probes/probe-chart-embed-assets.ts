@@ -1,7 +1,7 @@
 /**
  * 探针：web-assets.generated.ts 内嵌资产解码复核（chart 嵌入式图表随 build 进 exe）
  * 从生成物按 base64 解出 index.html / styles.css / sw.js / app.js，断言 v311 与 chart 符号在位。
- * 运行：cd _agent-src && bun probe-chart-embed-assets.ts
+ * 运行：cd Floria && bun probes/probe-chart-embed-assets.ts
  */
 import { readFileSync } from 'node:fs'
 

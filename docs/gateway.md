@@ -133,7 +133,7 @@ CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts
 
 **floria 亦可答复提问**：AskUserQuestion 走同一中继——前端 `renderQuestionApproval` 渲染逐题单选交互表单，`sendApprove` 带 `{input, answers}`，网关 approve 路由对 `data.answers` 生成 `updatedInput={questions:数组, answers}`（questions 取数组本体勿嵌套），CLI 交互应答 `buildAllow(updatedInput)` 拿到 answers 执行工具。
 
-**审批中继常驻化（现状）**：`permissionCallbacks` 为 `gatewayClient.ts` 模块级常量、**模块加载即 `setGatewayPermissionCallbacks(...)` 常驻注册**（open/close 两处注册与清空全部删除）。不变量：**「审批请求一旦产生，必入待发表」与 WS 连接状态彻底解耦**——若回调挂在 `sock.on('open')`，断连窗口内回调为 null，弹窗创建瞬间取快照拿到 null ⇒ 整条 bridge 分支被跳过、`sendRequest` 都不调用，请求既不上报也不进 `pendingApprovalRequests`，之后任何重连补发都无据可依。探针 `_agent-src/probe-approval-relay-resident.ts` 6/6。
+**审批中继常驻化（现状）**：`permissionCallbacks` 为 `gatewayClient.ts` 模块级常量、**模块加载即 `setGatewayPermissionCallbacks(...)` 常驻注册**（open/close 两处注册与清空全部删除）。不变量：**「审批请求一旦产生，必入待发表」与 WS 连接状态彻底解耦**——若回调挂在 `sock.on('open')`，断连窗口内回调为 null，弹窗创建瞬间取快照拿到 null ⇒ 整条 bridge 分支被跳过、`sendRequest` 都不调用，请求既不上报也不进 `pendingApprovalRequests`，之后任何重连补发都无据可依。探针 `probes/probe-approval-relay-resident.ts` 6/6。
 
 **审批确认送达后才关卡**：CLI 消费 `approval-response` 后回执 `approval-processed`（仅本地消费才发，竞速输不发）→ 网关转发 `approval-confirmed`（session_id+requestId）、approve 路由 else 分支回 `approval-rejected` → 前端 `sendApprove` 不再立即清卡，设 `approvalPending` 等待确认（8s 超时 + 断连 `showApprovalError` 保留卡片+重试）；`approval-dismiss` 撤卡清理 pending。
 

@@ -5,7 +5,7 @@
  * 本探针从源码「按标记区间切片」取出纯函数（FIELD_LABELS…prettyToolInput，无 DOM 依赖）后求值，
  * 用 state.js 里同款 esc 实现做注入——测的是真源码，不是复制品。
  *
- * 运行：cd _agent-src && bun probe-approval-pretty.ts
+ * 运行：cd Floria && bun probes/probe-approval-pretty.ts
  */
 import { readFileSync } from 'node:fs'
 
@@ -33,7 +33,7 @@ function ok(name: string, cond: boolean, extra = '') {
 
 // ---- ① Edit：红/绿两段文本 diff，不再是 JSON ----
 const edit = prettyToolInput('Edit', {
-  file_path: 'Pj16-CodeAgent构建/_agent-src/src/gateway/web/styles.css',
+  file_path: 'Pj16-CodeAgent构建/Floria/src/gateway/web/styles.css',
   old_string: '#input-bar { transition: height 0.32s; }',
   new_string: '#input-bar { transition: height 0.32s; }\n#input-bar.bar-reveal > :not(#composer-takeover) { animation: barRevealIn 0.17s ease-out both; }',
   replace_all: false,

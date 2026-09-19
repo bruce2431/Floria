@@ -2,7 +2,7 @@
  * 探针 · 神经元可视化（web「神经」tab）
  *   后端 A = src/gateway/neuronViz.ts 数据链，真实 Neuron-Pj16 库只读直读
  *   前端 B = web-src/sidebar/neurons.js 源码切片注入（task-dock 探针模式），与真实库 payload 做集成
- * 跑法：cd _agent-src && bun probe-neuron-viz.ts
+ * 跑法：cd Floria && bun probes/probe-neuron-viz.ts
  */
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'

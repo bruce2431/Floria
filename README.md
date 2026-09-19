@@ -1,16 +1,15 @@
-# Pj16-CodeAgent构建
+# Floria
 
-便携版 Claude Code 的源码构建区 + 权威标准所在项目。
+便携版 Claude Code fork 的**源码构建区 + 权威标准**所在仓库（原 `Pj16-CodeAgent构建/_agent-src/`，现为独立 git 仓库根，远程 `bruce2431/Floria`）。
 
-## 本项目内容
+## 仓库内容
 
-- `_agent-src/` — Claude Code 源码 + 构建环境（`src/`、`scripts/`、`package.json`、`bun.lock` 等），命令在 `cd _agent-src` 后执行；其下散落的 `probe-*.ts` / `rebuild-neuron-index.ts` 等为本地探针与维护入口，按跟踪路径纪律不入库。
-- `docs/` — 文档库（索引 `docs/README.md`）：`standards.md`（权威规则）/ `build.md`（构建+flag 审计）/ `glossary.md`（术语）/ `core.md`（源码核心机制）/ `gateway.md`（网关服务）/ `web-ui.md`（web 链路）。权威标准见 `@WrokSpace/.claude/CLAUDE.md` 顶部引用。
-- `CLAUDE.md` — 项目级 AI 指引（规则+指针型，细节在 `docs/`）；`README.md` — 本文。
-- `.claude/neturon/neurons/Neuron-Pj16/` — 项目神经元三层库（`l1.cog` / `l2.mem` / `l3.raw`）。历史 LOG 原文冻结在 `l3.raw/LOG/`，**新条目一律写 `l2.mem/mem.db`**（写 mem = 更新 LOG）；项目根不再有 `LOG.md`。
-- `.claude/` — 项目级配置（会话存档 + 跨会话记忆 `projects/memory/`）。
-- `SubPj3-角色形象设计/` — 子项目（#char 四态图源 + 界面动效 demo）。
-- `refer/` — 界面设计参考截图。
+- `src/` — Claude Code 源码（bun + ink + React，入口 `src/entrypoints/cli.tsx`）；web 前端唯一手改处 `src/gateway/web-src/`，内置网关 `src/gateway/`。
+- `scripts/` — 构建与维护入口：`build.ts`（构建 + 编译期 feature 裁剪）、`bundle-web-modules.ts`（前端拼接器）、`gen-web-assets.ts`（资产内联）、`init-neuron-project.ts` / `rebuild-neuron-index.ts`（神经元库维护）。
+- `probes/` — 本地探针 `probe-*.ts`（秒级只读验证，`bun probes/probe-X.ts` 直跑）。
+- `docs/` — 文档库（索引 `docs/README.md`）：`standards.md`（权威规则）/ `build.md`（构建 + flag 审计）/ `glossary.md`（术语）/ `core.md`（源码核心机制）/ `gateway.md`（网关服务）/ `web-ui.md`（web 链路）；`docs/screenshots/` 界面截图。
+- `assets/` — 构建资源；`package.json` / `bun.lock` / `tsconfig.json` / `env.d.ts` — 构建环境。
+- `temp/` — 临时产物落点（不入库）。
 
 ## 功能速览
 
@@ -28,57 +27,38 @@
 
 **Web 前端**：插件页（官方市场 + 个人插件）/ 项目页（项目分组，点击进入个性化预览）/ 模型页（全局默认模型切换）。
 
-![插件页](./_agent-src/docs/screenshots/web-plugins.jpeg)
+![插件页](./docs/screenshots/web-plugins.jpeg)
 
-![项目页](./_agent-src/docs/screenshots/web-projects.jpeg)
+![项目页](./docs/screenshots/web-projects.jpeg)
 
-![模型页](./_agent-src/docs/screenshots/web-models.jpeg)
+![模型页](./docs/screenshots/web-models.jpeg)
 
 **会话处理折叠**：处理中流式展示旁白/思考/工具 + 计时；完成后自动收起为「已处理 X」，仅留总结。
 
-![处理中：流式展开](./_agent-src/docs/screenshots/session-live.png)
+![处理中：流式展开](./docs/screenshots/session-live.png)
 
-![完成后：自动折叠仅留总结](./_agent-src/docs/screenshots/session-fold.png)
+![完成后：自动折叠仅留总结](./docs/screenshots/session-fold.png)
 
 **引导消息碎片化交错渲染**：旁白与工具折叠行按线性序交错。
 
-![引导消息](./_agent-src/docs/screenshots/session-guide.png)
+![引导消息](./docs/screenshots/session-guide.png)
 
 **设备配对授权门**：新设备连入时出一次性配对码。
 
-![设备配对授权门](./_agent-src/docs/screenshots/pairing-gate.png)
+![设备配对授权门](./docs/screenshots/pairing-gate.png)
 
 **项目个性化预览**：产物由 skill 落 `<项目>/.claude/preview/`，网关静态托管 `/preview/<label>/*`，项目页 iframe 直开（无预览回落内置默认主页），远程设备经 `/backend/<label>/` 反代可看。
 
-![Pj13 项目个性化预览：论文精读](./_agent-src/docs/screenshots/preview-pj13.png)
+![Pj13 项目个性化预览：论文精读](./docs/screenshots/preview-pj13.png)
 
 ## 构建与部署
 
-- 命令（在 `_agent-src/` 内）：`bun install` / `bun run dev`（源码直跑）/ `bun run build:dev`（dev 构建，默认含内置网关，构建与发布统一用本命令）/ `bun run compile`（正式编译 `dist/cli-<ts>.exe`）。
-- 产物：dev 构建直出**项目根** `cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`，正式编译出 `_agent-src/dist/cli-<YYYYMMDDHHMMSS>.exe`。**带时间戳是强制规范，不允许覆盖**（不设固定名副本）。
+- 命令（在本仓库根目录执行）：`bun install` / `bun run dev`（源码直跑）/ `bun run build:dev`（dev 构建，默认含内置网关，构建与发布统一用本命令）/ `bun run compile`（正式编译 `dist/cli-<ts>.exe`）。
+- 产物：dev 构建直出**项目根**（`Pj16-CodeAgent构建/`）`cli-dev-<YYYYMMDDHHMMSS>[-<flag>].exe`，正式编译出 `dist/cli-<YYYYMMDDHHMMSS>.exe`。**带时间戳是强制规范，不允许覆盖**（不设固定名副本）。
 - 部署：构建完成即已在项目根，直接用带时间戳的产物 exe 启动，**重启会话/网关进程才生效**（web 前端资源内嵌进 exe，换 exe 即换前端）。
-- codegraph 索引：`_agent-src/src/.codegraph/`（相对路径存储），MCP 查询带 `projectPath=Pj16-CodeAgent构建/_agent-src/src`。
-- **当前最新构建与逐项变更不在本文累积**——一律见神经元 LOG 层 `.claude/neturon/neurons/Neuron-Pj16/l2.mem/mem.db`；最新产物看项目根时间戳最大的 `cli-dev-*.exe`。
+- codegraph 索引：`src/.codegraph/`（相对路径存储），MCP 查询带 `projectPath=Pj16-CodeAgent构建/Floria/src`。
 
 ## 版本控制（git）
 
-- 远程 `bruce2431/Floria`，**仅跟踪 `_agent-src/`、`README.md`、`docs/` 三个路径**；`CLAUDE.md`/子项目目录/报告 md 等由项目根 `.gitignore` 排除（`.gitignore` 本身不入库），exe 亦不入库。
+- 本目录即仓库根，远程 `bruce2431/Floria`；`node_modules/`、`.codegraph/`、`dist/`、`temp/`、`*.exe`、`.env*` 由 `.gitignore` 排除。
 - **GitHub Release 发布**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<x>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`）；流程 = commit+push → 同名 tag → Release（notes 按神经元 LOG 条目主题分组）→ 附对应 exe 为 asset。
-- 发布记录见神经元 LOG 层（发版历史不在本文累积）。
-
-## 新结构速览（便携根 = `@WrokSpace`）
-
-```
-@WrokSpace/
-├── .claude/              ← 全局配置根（settings/skills/plugins/记忆/会话）
-│   └── .claude-portable  ← 便携标记（在配置根内部，不可移动/删除）
-├── Pj16-CodeAgent构建/   ← 本项目（源码构建区 + 权威标准）
-│   ├── SubPj3-角色形象设计/ ← #char 四态图源 + 界面动效 demo（唯一现存子项目）
-│   ├── refer/            ← 界面设计参考截图
-│   └── <时间戳>-<名称>/   ← 临时任务目录（发布/验证等，用毕归档 .trash）
-└── Pj1-…/Pj17-…/         ← 其他项目
-```
-
-## 归档
-
-- 废弃文件按工作区「禁止删除」规则归档到 `@WrokSpace/.trash/YYYY-MM-DD/`。

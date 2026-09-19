@@ -6,7 +6,7 @@
  * 依赖 $ / live / state / takeover / esc / CHEV 六个外部标识）后求值，DOM 用最小桩注入——
  * 测的是真源码，不是复制品。
  *
- * 运行：cd _agent-src && bun probe-task-dock.ts
+ * 运行：cd Floria && bun probes/probe-task-dock.ts
  */
 import { readFileSync } from 'node:fs'
 

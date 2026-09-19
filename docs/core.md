@@ -2,7 +2,7 @@
 
 > 本文件属 `docs/` 文档库。
 > 官方源码重构快照 2.1.87（bun + ink + React，入口 `src/entrypoints/cli.tsx`），官方文档不适用。
-> 路径均相对 `Pj16-CodeAgent构建/_agent-src/`。姊妹件：**术语 → [glossary.md](glossary.md)**；**构建/flag → [build.md](build.md)**；**规则标准 → [standards.md](standards.md)**；**网关服务 → [gateway.md](gateway.md)**；**web 链路 → [web-ui.md](web-ui.md)**。改动以下任一机制时必须同步更新本文。
+> 路径均相对仓库根（`Floria/`，原 `_agent-src/`）。姊妹件：**术语 → [glossary.md](glossary.md)**；**构建/flag → [build.md](build.md)**；**规则标准 → [standards.md](standards.md)**；**网关服务 → [gateway.md](gateway.md)**；**web 链路 → [web-ui.md](web-ui.md)**。改动以下任一机制时必须同步更新本文。
 
 ## 便携配置根（`envUtils.ts`）
 
@@ -56,7 +56,7 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 
 **blocks 标准（声明源 = 各库 `config.yaml`）**：`blocks.max_chars`（Pj16 = **300 字** ≈180 token，落 BGE 位置上限 512 的安全余量）+ 库个性约定 `prompts.add_memory`（读取方 `remember.ts:52`）——块数 ≥ 2、一块一件事；单块 ≤ max_chars；**block[0] = 检索锚**（查询形自然语句 + 关键标识：功能名/文件路径/参数名/报错原文）；按 `；。` 主切、`【标签】` 并入首块；**块内不嵌时间戳**（条目时间已蕴含在 memory_id）；禁纯工具名块。**写入侧强制**：`memwriter.ts` `splitBlock(block, maxChars)`（就近取窗口后半段的句末标点 `。；！？` 或换行，找不到才硬切）与 `blockMaxChars(cfg)`（读 `blocks.max_chars`，缺省 300），`buildEntry` 对 `blocks` 与 `[input.content]` **两条路径都切**。**动因**：encode 对超长输入**静默丢尾**（transformers.js feature-extraction 默认按 tokenizer 的 512 token 截断），超长块的尾部对检索零贡献；且 BGE 路径是**逐块 encode + 逐维 max-pool**（每块一票），块长/块数直接决定向量形态。**已知副作用**：max-pool 使池化向量范数随块数增长 ⇒ 同一 query 对同一条目的 cos 近似 ∝ 1/√块数，**块数本身即 cos 惩罚**——判条目 cos 高低先看块数；kw 项（读全文不受截断影响）兜住实际检索效果。precog 标注语义定案：检索某组件历史→修改相同东西=true、不同东西但改相同文件相同部分=revelant。source 是来源标签（对照真身库 'QQ'/'微信'）。
 
-**LOG 更新口（现行做法）**：新 LOG 条目 = UTF-8 脚本文件 `bun:sqlite` 同构直写 `l2.mem/mem.db`（**禁 `bun -e` 内联中文**——Windows 下 mojibake；脚本自带断言，blocks 超限 exit(1) 不落盘；`memory_id=PJ16_MEM_{ts}`、`source='MEM'`、blocks 按上述标准）。**直写绕过写入器 ⇒ mem.db 行数与 `embeddings.npy` 行数漂移**（INSERT 只追加，缺失行恒在尾部）。漂移由**下一次经 memwriter 的写入自动消化**（`computeEmbeddings` 增量补齐，O(K) 毫秒级，见上段）——不必再人工重编码；漂移窗口内该库 recall 仍按行数不一致报错。两件维护入口：**`_agent-src/rebuild-neuron-index.ts`**（走 `memwriter.rebuildEmbeddings(forceFull=true)` 按 `readMemories` 行序全量重编码，覆写 npy + index_config，幂等可重跑，指定库路径为可选参数；**降为建库/换模型/行序破坏时的人工入口，启动前必须先征得用户同意**）+ **`_agent-src/probe-neuron-index.ts`**（A 行数三处一致 / B 每行 L2 归一 / C 真检索可用，9 过 0 败，秒级只读可自主跑）。**全项目神经元化**：`_agent-src/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库并迁入各自历史 LOG，写法通用。使用标准 → [standards.md](standards.md) §7。
+**LOG 更新口（现行做法）**：新 LOG 条目 = UTF-8 脚本文件 `bun:sqlite` 同构直写 `l2.mem/mem.db`（**禁 `bun -e` 内联中文**——Windows 下 mojibake；脚本自带断言，blocks 超限 exit(1) 不落盘；`memory_id=PJ16_MEM_{ts}`、`source='MEM'`、blocks 按上述标准）。**直写绕过写入器 ⇒ mem.db 行数与 `embeddings.npy` 行数漂移**（INSERT 只追加，缺失行恒在尾部）。漂移由**下一次经 memwriter 的写入自动消化**（`computeEmbeddings` 增量补齐，O(K) 毫秒级，见上段）——不必再人工重编码；漂移窗口内该库 recall 仍按行数不一致报错。两件维护入口：**`scripts/rebuild-neuron-index.ts`**（走 `memwriter.rebuildEmbeddings(forceFull=true)` 按 `readMemories` 行序全量重编码，覆写 npy + index_config，幂等可重跑，指定库路径为可选参数；**降为建库/换模型/行序破坏时的人工入口，启动前必须先征得用户同意**）+ **`probes/probe-neuron-index.ts`**（A 行数三处一致 / B 每行 L2 归一 / C 真检索可用，9 过 0 败，秒级只读可自主跑）。**全项目神经元化**：`scripts/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库并迁入各自历史 LOG，写法通用。使用标准 → [standards.md](standards.md) §7。
 
 ## WebSearch 本地多后端检索
 
@@ -87,7 +87,7 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 - **落点**：`queryLoop` 跨迭代状态声明在 `while (true)` 之前；**每批 tool_use 执行前**（`runTools` 调用前）逐块喂入扫描。`streamingToolExecutor` 为 statsig 门控本构建恒关，不为死配置加分支。
 - **触发行为**：达阈值块连同**本批后缀**全部不执行（`runTools` 只收 `allowedToolUseBlocks` 前缀）；后缀逐块合成 **error tool_result**（`is_error:true`，与 `yieldMissingToolResultBlocks` 同构——不变量「本批每个 tool_use 都有 result」，防下一轮请求孤儿 tool_use 400）；再 yield 一条用户可见的 assistant 错误消息（①维「⚠️ 工具循环熔断」/②③维「⚠️ 任务工具熔断…请立即停止创建/更新任务，直接用实际工具推进工作」）；`return { reason: 'tool_loop_breaker' }` **直接收口回合**，不再回喂模型（复读态下回喂只会续读；收口后由用户决策续跑）。
 - **已知取舍**：被熔断批次的「allowed 前缀」已正常执行，其真实结果保留；排队消息与本熔断的交互不变（收口后 follow-up drain 照常）。
-- 探针 `_agent-src/probe-tool-loop-breaker.ts`：A 组真实状态机行为（阈值/重置/不可序列化 input）+ B 组 query.ts 结构断言。
+- 探针 `probes/probe-tool-loop-breaker.ts`：A 组真实状态机行为（阈值/重置/不可序列化 input）+ B 组 query.ts 结构断言。
 
 ## 会话间协作（`session_send` 工具 + `sessionMessage` / `sessionAddressing`，`SESSION_LINK`）
 
@@ -113,7 +113,7 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 
 **回环**：**不做代码级刹车**——靠「非必要不通信」软约束 + 工具 `prompt.ts` 同款措辞。硬边界 = 寻址自环拒绝 + 网关拒「自发自收」；实测出现 agent 对喷再补硬护栏（限频/审批）。
 
-**验证**：`_agent-src/probe-session-link.ts` **47 过 / 0 败**（A 包装往返 / D 寻址含 D7 sid 键优先与 D10 复合令牌不代拆 / F web 接线 / G CLI 接线+工具说明+G7 撤门钉（标识符级防 sessionExposure 残留回潮）/ H 来源行对齐）。
+**验证**：`probes/probe-session-link.ts` **47 过 / 0 败**（A 包装往返 / D 寻址含 D7 sid 键优先与 D10 复合令牌不代拆 / F web 接线 / G CLI 接线+工具说明+G7 撤门钉（标识符级防 sessionExposure 残留回潮）/ H 来源行对齐）。
 
 ## 跨会话文件修改归因（`utils/fileModifierRegistry.ts`）
 
@@ -127,4 +127,4 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 - **拦截提示五处**：Edit（ec7）/ Write（ec3）/ NotebookEdit（ec10）三处 validateInput + Edit/Write 两处竞态 `FILE_UNEXPECTEDLY_MODIFIED_ERROR` throw 后缀拼接——竞态路径恰是「两会话真同时」的主现场。
 - **边界**：Bash 原生写不经工具链不可归因（仍后写覆盖无提示）；注册表按项目根隔离，跨项目撞车查不到回落原文；本会话自己的行跳过（自家写会刷新自家 readFileState，不构成撞车）。
 
-**验证**：`_agent-src/probe-file-modifier-registry.ts` **5 过 / 0 败**。纯 CLI 工具层，无 web 改动不 bump sw。
+**验证**：`probes/probe-file-modifier-registry.ts` **5 过 / 0 败**。纯 CLI 工具层，无 web 改动不 bump sw。

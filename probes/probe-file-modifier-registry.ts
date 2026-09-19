@@ -4,7 +4,7 @@
  * 守护的不变量：跨进程文件修改归因——写入方 record 后，另一「会话」（模拟=直插他 sid 行）
  * 能在 mtime 撞车路径上查到写入方 sid；sinceTs 过滤生效。
  *
- * 用法：bun _agent-src/probe-file-modifier-registry.ts（cwd 须为 Pj16 项目根，
+ * 用法：bun Floria/probes/probe-file-modifier-registry.ts（cwd 须为 Pj16 项目根，
  * 注册表落 <项目根>/.claude/file-mods.jsonl）。探针行键为本探针专属 tmp 路径，
  * 与真实文件永不匹配，留在注册表内无害（超量由压缩重写回收），故不做删行清理
  * （整文件重写在多会话并发追加下有丢行竞态，不值）。

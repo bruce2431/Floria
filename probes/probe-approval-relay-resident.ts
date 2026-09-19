@@ -15,7 +15,7 @@
  *
  * 修前对照：① 必败（顶层无注册，回调只在 open 时出现），② 必败，③ 不可达（回调为 null）。
  *
- * 运行：cd _agent-src && bun probe-approval-relay-resident.ts
+ * 运行：cd Floria && bun probes/probe-approval-relay-resident.ts
  */
 import { readFileSync } from 'node:fs'
 import { getGatewayPermissionCallbacks } from '../src/bridge/gatewayPermissionRelay.js'

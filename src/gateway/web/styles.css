@@ -825,28 +825,6 @@ body.kb-open #input-wrap { transition: none; }
   cursor: pointer; display: grid; place-items: center;
 }
 #img-pills .img-pill .img-x:hover { background: #2c3138; }
-/* 排队图片（2026-09-19）：去掉气泡样式，整张可点击催办 */
-#img-pills .pending-img {
-  position: relative; flex: none;
-  width: 64px; height: 64px;
-  overflow: visible;
-  cursor: pointer;
-}
-#img-pills .pending-img img {
-  width: 100%; height: 100%;
-  object-fit: cover;
-  display: block;
-}
-#img-pills .pending-img .img-x {
-  position: absolute; top: -6px; right: -6px;
-  width: 18px; height: 18px;
-  border: none; border-radius: 999px;
-  background: #0f1115; color: #fff;
-  font-size: 12px; line-height: 18px; padding: 0;
-  cursor: pointer; display: grid; place-items: center;
-  z-index: 10;
-}
-#img-pills .pending-img .img-x:hover { background: #2c3138; }
 /* 文件胶囊（2026-09-12 三轮改版：抄 dsh AttachmentRail 附件卡形态）——64×64 方卡与图片缩略图
    同轨等高，灰底薄描边（dsw interactive-bg-hover rgba(38,49,72,.06) / border-l2-thin rgba(0,0,0,.1)），
    dshFile 图标+文件名居中两行截断；× 收进卡内右上 4px（dsh .remove 语义：hover 显形、
@@ -1930,9 +1908,13 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    与 .msg .who 同一语义、同一视觉体系（12px→11px 随排队项字号收一档），不做绝对定位 */
 .queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
 .queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
-/* 排队项图片缩略图（2026-08-30）：48px 小图随文本行堆叠（q-body 内），object-fit cover 同输入栏胶囊 */
+/* 排队图片（2026-09-19 用户定案「排队图片不要气泡」）：带图的排队项去掉气泡壳（虚线框/灰底/
+   内边距全撤），图片按已发送图片的尺寸裸渲染——整张图即点击体，点图触发催办（委托在 approval.js
+   的 .q-item 上），不走大图预览（大图只属已发送图片：lightbox 只认 .msg-img，此处恒 .q-img）。 */
+.queue-dock .q-item.has-img,
+.queue-dock .q-item.has-img:hover { background: none; border: none; padding: 0; }
 .queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.queue-dock .q-imgs .q-img { display: block; width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); }
+.queue-dock .q-imgs .q-img { display: block; max-width: min(160px, 100%); max-height: 160px; width: auto; height: auto; border-radius: 10px; margin: 0; cursor: pointer; }
 
 /* ===== 神经元视图（2026-09-16「神经」tab）：层级1 选择卡片 + 层级2 Canvas 三级节点图 ===== */
 /* 层级1 卡片统计行（复用 .mgr-card 外观，仅加统计 chips 行） */

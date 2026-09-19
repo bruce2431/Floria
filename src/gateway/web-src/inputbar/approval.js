@@ -104,7 +104,12 @@ import { firstSendHash } from '../sidebar/recent.js'
             const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div></div>'
+            // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
+            const body = txt ? '<p>' + renderUserText(txt) + '</p>' : ''
+            // has-img：带图排队项去气泡壳（styles.css）。2026-09-19 用户定案「排队图片不要气泡，
+            // 整张图即点击体，点图催办而不开大图（大图只属已发送图片）」——故此处仍用 .q-img
+            // （不是 .msg-img），绝不落进 messages.js 的 lightbox 委托。
+            return '<div class="q-item' + (imgs ? ' has-img' : '') + '" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + body + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)

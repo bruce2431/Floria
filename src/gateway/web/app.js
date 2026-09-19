@@ -5710,7 +5710,12 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div></div>'
+            // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
+            const body = txt ? '<p>' + renderUserText(txt) + '</p>' : ''
+            // has-img：带图排队项去气泡壳（styles.css）。2026-09-19 用户定案「排队图片不要气泡，
+            // 整张图即点击体，点图催办而不开大图（大图只属已发送图片）」——故此处仍用 .q-img
+            // （不是 .msg-img），绝不落进 messages.js 的 lightbox 委托。
+            return '<div class="q-item' + (imgs ? ' has-img' : '') + '" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + body + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)
@@ -6641,7 +6646,7 @@ function setApprovalPending(v) { approvalPending = v }
     } else {
       box.hidden = false
       box.innerHTML = pendingImages
-        .map((p, i) => `<div class="pending-img" data-i="${i}"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></div>`)
+        .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('') + pendingFiles
         .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
@@ -6714,17 +6719,6 @@ function setApprovalPending(v) { approvalPending = v }
     }
     renderImgPills()
   }
-
-// 排队图片点击催办（2026-09-19）：点击排队图片触发催办，发送 queue-nudge
-document.addEventListener('click', (e) => {
-  const pendingImg = e.target.closest?.('.pending-img')
-  if (!pendingImg) return
-  // 如果点击的是删除按钮，不触发催办
-  if (e.target.classList.contains('img-x')) return
-  if (!state.currentHash || !gws || gws.readyState !== 1) return
-  gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
-  toast('已催办：本条并入当前轮次')
-})
 
   async function gwSend() {
     if (!GATEWAY) return false
@@ -6961,6 +6955,13 @@ document.addEventListener('click', (e) => {
     // 不回改底栏盒模型 → 观察者自触发一次即收敛（幂等，非回环）。
     const wrap = document.getElementById('input-wrap')
     if (wrap) new ResizeObserver(scheduleSettle).observe(wrap)
+    // 底栏「位移」类变化 ResizeObserver 看不到（观察者只报尺寸）：键盘收起 --kb 归零、空态↔会话态
+    // 迁移都让 #input-wrap 的 top/transform 走 0.55s 过渡，而 settle 在事件后一帧读 rect，拿到的是
+    // 动画中间值 —— 此时量出的 --bar-room 是「收起前」的小值，且其后不再有任何事件重量 ⇒ 值被钉死，
+    // 底栏子件弹层上限 min(设计上限, --bar-room) 随之永久卡小、内容被 overflow 截断。
+    // 守护不变量 = --bar-room 恒对应底栏**到位**后的位置；过渡结束即到位，故此刻重量一次。
+    // 只听 end：中断（transitioncancel）只会由新的 --kb/几何改动引起，那条路已各自排了 settle。
+    wrap.addEventListener('transitionend', (e) => { if (e.target === wrap) scheduleSettle() })
     syncKeyboard()
     settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
   }

@@ -2,7 +2,7 @@
 
 import { toast, esc, state } from '../core/state.js'
 import { I } from '../core/icons.js'
-import { apiUrl, gws } from '../core/gateway.js'
+import { apiUrl } from '../core/gateway.js'
 import { syncGwSend } from './send.js'
   // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
   // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
@@ -30,7 +30,7 @@ import { syncGwSend } from './send.js'
     } else {
       box.hidden = false
       box.innerHTML = pendingImages
-        .map((p, i) => `<div class="pending-img" data-i="${i}"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></div>`)
+        .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('') + pendingFiles
         .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
@@ -103,17 +103,6 @@ import { syncGwSend } from './send.js'
     }
     renderImgPills()
   }
-
-// 排队图片点击催办（2026-09-19）：点击排队图片触发催办，发送 queue-nudge
-document.addEventListener('click', (e) => {
-  const pendingImg = e.target.closest?.('.pending-img')
-  if (!pendingImg) return
-  // 如果点击的是删除按钮，不触发催办
-  if (e.target.classList.contains('img-x')) return
-  if (!state.currentHash || !gws || gws.readyState !== 1) return
-  gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
-  toast('已催办：本条并入当前轮次')
-})
 
 export {
   addImageFiles,

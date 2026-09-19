@@ -431,6 +431,12 @@ import { firstSendHash } from '../sidebar/recent.js'
     let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
     if (ids.length) {
       txt = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
+    } else {
+      // non-vision 模型：CLI 不把 image 块写进消息 content（processUserInput 丢弃，
+      // 见 skipInputImages），display 链无 imageId → 占位符按 id 精确剥的旧条件失效，
+      // 会以 [Image #N] 裸文本上屏。此处全剥：占位是 web 发送端内部令牌，对应图片
+      // 已由 userImgsHtml 依同一批 id 渲染，不剥就重影。
+      txt = txt.replace(/\s*\[Image #\d+\]/g, '')
     }
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
@@ -438,12 +444,25 @@ import { firstSendHash } from '../sidebar/recent.js'
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
 
+  // 文本里的 [Image #N] 占位（web 发送端拼的内部令牌）→ id 列表。CLI 落盘文件名即 N
+  // （storeImages 按 pastedContents id 命名），故凭占位即可拼出 image-cache URL。
+  function textImageIds(m) {
+    const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
+    const out = []
+    txt.replace(/\[Image #(\d+)\]/g, (_, n) => { out.push(Number(n)); return '' })
+    return out
+  }
+
   // 图片容器（用户 2026-08-30 定案：渲染在气泡外）：.msg 内、.body 后——.msg 无背景，
   // 视觉即气泡正下方右侧。图未落盘（404）→ onerror 替换为 [Image #N] 裸文本，不出破图
   //（用户定案「会话重启后图片不留盘，就仅渲染裸文本就好了」）。
+  // id 来源两路：image 块 imageId（vision 模型，CLI 把图附进 content）；无 image 块时回落
+  // 文本占位符（non-vision 模型，CLI 丢弃 image 块但 storeImages 仍无条件落盘）——保证
+  // 「模型忽略图片」不等于「界面不显示图片」，切换识图模型后同一路径即正常可用。
   function userImgsHtml(m) {
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
+    if (!ids.length) ids.push(...textImageIds(m))
     if (!ids.length) return ''
     const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/image-cache/${live.curUuid || ''}/${id}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`

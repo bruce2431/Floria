@@ -388,3 +388,10 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **不变量**：`state.currentHash` 的无会话态恒为 `''`（与 `firstSendHash`、乐观项 `pendingUserMsgs.hash` 同一约定），**不得再引入 `null``**——乐观项归属守卫、事务收口、主张计时起点 `claimStartTs`、撤回链 `inCur` 命中都押在这一个表示上。`falsy` 用法（`!state.currentHash`）不受影响。
 - **五处赋值点**：`core/state.js` 初值、`chat/route.js` 的 `route()`（非 session 路由分支）与 `renderHome`、`sidebar/mgr.js` 的 `renderMgr` 与 `openProjectPreview`（硬挂载分支）。判定侧一行未动即全部有效。
 - **探针**：`probes/probe-optimistic-hash.ts`（只读）——源码层断言五处赋值点均为 `''` 且全 `web-src` 无 `currentHash = null` 残留、`addUser` 写入即 `state.currentHash`、生成物 `app.js` 同步。
+
+## 37. 用户图片渲染 id 双来源：模型识图能力不影响图片显示
+
+- **不变量**：**模型是否识图只决定图片发不发 API，不决定界面渲不渲染图片**。图片始终显示，`（当前模型不支持识图，已忽略图片）`提示（`processUserInput.ts` 在非识图模型下追加进消息文本）作为普通文本一并保留。
+- **id 双来源**（`chat/messages.js` `userImgsHtml`）：①`blocks[].imageId`——识图模型，CLI 将 image 块附进消息 content，display 链（`conversationDisplay.ts`）按 `msg.imagePasteIds` 对位产出；②文本里的 `[Image #N]` 占位——非识图模型下 CLI 丢弃 image 块（`processUserInput.ts` 的 `skipInputImages` 分支），display 链无 imageId，此时回落占位符取 id。两条路拼的 URL 相同：`/gateway/image-cache/<会话uuid>/<id>`。
+- **落盘与鉴图解耦**：`storeImages`（`utils/imageStore.ts`）在 `supportsVision` 判定之前无条件执行，故非识图模型下图片同样落在 image-cache、按 `pastedContents` id 命名——这是双来源能共用同一 URL 的前提。
+- **占位符剥除条件**（`userBodyHtml`）：有 imageId 块时按 id 精确剥（原行为）；无 image 块时全剥 `[Image #N]`——否则占位会以裸文本与渲染出的图重影。

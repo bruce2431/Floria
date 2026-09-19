@@ -195,6 +195,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **链路**：web `.q-item` 点击（事件委托，`cursor:pointer` + `title` 提示）→ `/clients` WS 发 `{type:'queue-nudge', sessionId}` → 网关按会话精确路由（未在线回 status；**不 resumeAndDeliver**——离线会话没有生成流可断）→ CLI `gatewayClient.ts` → `src/bridge/gatewayQueueNudgeHandle.ts`（模块级句柄）→ REPL 注册 handler 判活两条（缺一不可）：**①有在飞生成**（`abortController` 存活）、**②队列里有可 drain 的用户消息** → `requestQueueNudge()`。headless 无句柄 → 静默忽略。
 
+**气泡归属（不变量）**：**气泡属于文字、不属于图片**——气泡壳（`padding`/`border-radius`/`background`/虚线边框/hover）挂在文字段 `.q-text` 上，`.q-item` 是纯命中盒（`cursor:pointer` + 命中区，自带零壳）；`width: fit-content` 令气泡按文字收窄。归属由 **DOM 结构本身**决定（有无 `.q-text`），无类名、无布尔状态源。三态：纯文本项=一个气泡；纯图项=无 `.q-text` ⇒ 无气泡、整张图即点击体；文字+图项=文字带气泡、图片在气泡外裸渲染（`.q-imgs` 仅在前面有件时留 `margin-top`）。**排队图恒用 `.q-img`，绝不换 `.msg-img`**——lightbox 委托（`chat/messages.js`）只认 `.msg-img` ⇒ 点排队图**结构上不可能**开大图，只触发上面的 `queue-nudge`（与「只有已发送图片才有大图」同一机制，无需额外守卫）。
+
 **已验证**：`probes/probe-queue-nudge.ts` 16/0。
 
 ## 14. 处理中段尾部工具组恒收口
@@ -312,7 +314,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 25. 用户气泡两态同构：乐观/落盘 body 同走 mdHtml
 
-**规则**：两态 body 必须走**同一渲染函数**（「乐观开启气泡与落盘气泡同构」不变量）。乐观（`renderTransient`）改 `mdHtml(bodyText)` 与落盘（`chat/messages.js` `userBodyHtml`）同源；`renderUserText` 保留——排队区 `.q-item` 仍用它（排队项自带 `<p>` 包裹，形态本就不同）。**验证**：`probes/probe-user-bubble-parity.ts`（两路径结构差异取证 + 样式 `<p>` margin 证据 + 结构断言两处 body 同源 + 同文本同 HTML）。
+**规则**：两态 body 必须走**同一渲染函数**（「乐观开启气泡与落盘气泡同构」不变量）。乐观（`renderTransient`）改 `mdHtml(bodyText)` 与落盘（`chat/messages.js` `userBodyHtml`）同源；`renderUserText` 保留——排队区 `.q-text` 仍用它（排队项自带 `<p>` 包裹、且气泡壳在 `.q-text` 上，形态本就不同）。**验证**：`probes/probe-user-bubble-parity.ts`（两路径结构差异取证 + 样式 `<p>` margin 证据 + 结构断言两处 body 同源 + 同文本同 HTML）。
 
 ## 26. 「神经」tab：神经元选择卡片 + 三级节点图
 

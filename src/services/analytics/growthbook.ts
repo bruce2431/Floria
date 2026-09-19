@@ -38,8 +38,6 @@ export type GrowthBookUserAttributes = {
   organizationUUID?: string
   accountUUID?: string
   userType?: string
-  subscriptionType?: string
-  rateLimitTier?: string
   firstTokenTime?: number
   email?: string
   appVersion?: string
@@ -428,10 +426,9 @@ function isGrowthBookEnabled(): boolean {
  * Hostname of ANTHROPIC_BASE_URL when it points at a non-Anthropic proxy.
  *
  * Enterprise-proxy deployments (Epic, Marble, etc.) typically use
- * apiKeyHelper auth, which means isAnthropicAuthEnabled() returns false and
- * organizationUUID/accountUUID/email are all absent from GrowthBook
- * attributes. Without this, there's no stable attribute to target them on
- * — only per-device IDs. See src/utils/auth.ts isAnthropicAuthEnabled().
+ * apiKeyHelper auth, so organizationUUID/accountUUID/email are all absent
+ * from GrowthBook attributes. Without this, there's no stable attribute to
+ * target them on — only per-device IDs.
  *
  * Returns undefined for unset/default (api.anthropic.com) so the attribute
  * is absent for direct-API users. Hostname only — no path/query/creds.
@@ -472,8 +469,6 @@ function getUserAttributes(): GrowthBookUserAttributes {
     ...(user.organizationUuid && { organizationUUID: user.organizationUuid }),
     ...(user.accountUuid && { accountUUID: user.accountUuid }),
     ...(user.userType && { userType: user.userType }),
-    ...(user.subscriptionType && { subscriptionType: user.subscriptionType }),
-    ...(user.rateLimitTier && { rateLimitTier: user.rateLimitTier }),
     ...(user.firstTokenTime && { firstTokenTime: user.firstTokenTime }),
     ...(email && { email }),
     ...(user.appVersion && { appVersion: user.appVersion }),

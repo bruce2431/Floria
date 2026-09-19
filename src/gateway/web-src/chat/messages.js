@@ -35,14 +35,14 @@ import { firstSendHash } from '../sidebar/recent.js'
   }
   function toolLine(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
   // 提问在消息流里的紧凑行（DSH 工具行语义）：icon + 「提问」+ 状态（等待回答 / 已回答）。
   // 2026-09-11 ④ 用户定案移除只读提问卡（`questionCardHtml` 静态不可交互的输入栏接管卡，
   // 「有一个静态的提问卡不可交互的…直接移除就好」）——AskUserQuestion 在 web 只留本紧凑行，
   // 作答在 CLI 窗口；web 可交互提问走 CLI 经审批链下发的 question 分支（renderQuestionApproval）。
   function askLineHtml(answered) {
-    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 · ${answered ? '已回答' : '等待回答'}</span>`
+    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 ${answered ? '已回答' : '等待回答'}</span>`
   }
   // 工具类型 → 概括短语（连续工具折叠的 summary 标签）
   const TOOL_VERB = {
@@ -185,7 +185,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         // 根治：唯一行容器 .fold-state 同时承载「运行行（可收缩，.tl-text 省略号收尾）+ 状态尾缀（原子）」，
         // 收缩压力落在工具文本上、尾缀恒完整 → 几何上不可能再出现逐字换行。
         const cur = toolMeta(running[running.length - 1].block)
-        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' · ' + esc(cur.detail) : ''}</span></span>`
+        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' ' + esc(cur.detail) : ''}</span></span>`
         if (isTail && vacuumState) {
           sumInner = `<span class="fold-state">${runLine}${stateSpan(true, false)}</span>`
           stateAppend = '' // 已并入本行，防下方 ${stateAppend} 二次追加
@@ -245,7 +245,7 @@ import { firstSendHash } from '../sidebar/recent.js'
   // 光泽扫动标识运行态（无蓝点、无 <details> 提示行、无输入 JSON，用户 2026-08-26 定案）。
   function toolCurHtml(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
 
   // ---- 文件变更汇总卡片（Codex 风格：+N 绿 / -N 红）----
@@ -613,7 +613,12 @@ import { firstSendHash } from '../sidebar/recent.js'
   // refreshSession 对处理中末段只替换该段 DOM（applySegDelta），头部历史消息保留不动——消除整页重建闪烁。
   let lastSegInfo = null
 
-  function messagesHtml(messages) {
+  // lazy（2026-09-18 web 卡顿根治）：true = 惰性两段式——切段循环照跑（桶分配 O(N) 轻量）但
+  // 历史段不生成 HTML（think/ask/tool/reply 行的 html 置空）、closeSeg 只封存不渲染（按渲染同序
+  // 静态推进 lastNode 供末段 prev 锚点链）；仅末段（isFinal）真渲染并在入口补齐置空行。调用方
+  // live.js renderSessionBody 增量帧据此把「每帧全会话 MB 级序列化」降为「O(N) 切段 + 末段渲染」；
+  // 判定不可增量时再跑一次全量（lazy=false）付全额，行为与原等价。
+  function messagesHtml(messages, lazy) {
     // 按「用户消息 → AI 处理 → 回复」切段：
     // 真实 user 消息开新段；assistant/tool 的 thinking 与 tool_use 归入「已处理」折叠，
     // 段内最后一个带文本的 assistant 消息 = 回复（主内容），其余文本（过程旁白）也折进去。
@@ -666,9 +671,34 @@ import { firstSendHash } from '../sidebar/recent.js'
       const processing = isFinal && !s.finished && !turnEnded // 最后一段且末尾还没收到纯文本回复 = 处理中
       // 末段仍在处理中（未出正式回复）且段内最近有工具调用 → 按该工具选形象；否则（回复已发布/空闲）默认 1
       if (isFinal) charNote = (!(s.finished || turnEnded) && s.lastTool) ? toolToChar(s.lastTool) : 1
+      // 惰性收口（2026-09-18）：非末段不渲染——历史段 DOM/内容自上轮以来不变，增量路径只消费
+      // 末段 html。按渲染同序静态推进 lastNode（u→f→a→c）供末段 prev 锚点链；节点存在性与渲染
+      // 路径等价：u=有开启气泡；f=非 reply 项非空（groupTools/liveFoldBody 有行必有折叠，skip 段
+      // processing 恒 false）；a=每条 reply 项；c=变更卡。texts 回填（重 markdown）一并跳过。
+      if (lazy && !isFinal) {
+        if (s.user) lastNode = { key: s.key, type: 'u' }
+        let nFold = s.guides ? s.guides.length : 0
+        for (const it of s.items) if (it.kind !== 'reply') nFold++
+        if (nFold) lastNode = { key: s.key, type: 'f' }
+        for (const it of s.items) if (it.kind === 'reply') lastNode = { key: s.key, type: 'a' }
+        if (s.changes && s.changes.size) lastNode = { key: s.key, type: 'c' }
+        return
+      }
       // 旁白 text 原位回填（与其后的动作交错，不再统一沉到段尾）；正式回复（end_turn）已在切段时
       // 气泡化（reply 项 → 折叠体外），不进 texts
       for (const t of s.texts) s.items[t.idx].html = processTextHtml(t.text)
+      // 惰性帧渲染段补生成（2026-09-18）：lazy 切段置空的行在此补齐（仅末段真渲染会走到）。
+      // ask 按吸附后的 answer 终态生成（切段时 false 缓存失效）；tool 行 html 恒为完成行基线
+      //（toolLine 产物，运行态由 flushTools 按改写分派 toolCurHtml，与原切段即生成等价）。
+      if (lazy) {
+        for (const it of s.items) {
+          if (it.html) continue
+          if (it.kind === 'think') it.html = thinkRowHtml(it.text, false)
+          else if (it.kind === 'ask') it.html = askLineHtml(it.answer != null)
+          else if (it.kind === 'reply') it.html = replyBubbleHtml(s.key, it.text)
+          else if (it.kind === 'tool') it.html = toolLine(it.block)
+        }
+      }
       // 思考行不做 running 态回填（思考永不独立成行：真空态=liveFoldBody 工具行内 .fold-state
       // 状态显示行，2026-09-09 用户定案「状态标识与工具调用行在一起」，v267 summary 轮转方案废弃）
 
@@ -796,13 +826,13 @@ import { firstSendHash } from '../sidebar/recent.js'
       for (const b of m.blocks) {
         // 思考块进 items 并记索引（s.thinks 供处理中段 running 态定位）；单块放行由数据层保证
         //（prompt 全剔/transcript 单全局/prompt-tail-think 尾巴单块），前端不再二次折叠（P2 删留尾兜底）
-        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
+        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: lazy ? '' : thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
         else if (b.kind === 'text' && hasTool && b.text && b.text.trim()) {
           // 工具消息里的旁白文本：按块原位插入 items（保持 content 数组顺序——旁白在其对应工具调用之上），
           // 不统一沉到段尾；纯文本消息（无 tool_use）仍在循环后整体追加（保持同消息多 text 块拼接为一条的语义）。
           // end_turn/stop_sequence 正式回复（理论不带 tool_use，防御分支）→ 流内 reply 气泡，不进 texts
           if (isEndStop(m.stopReason)) {
-            seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, b.text), text: b.text })
+            seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, b.text), text: b.text })
             seg.replyTs = m.timestamp
           } else {
             seg.items.push({ kind: 'text', html: '', text: b.text })
@@ -813,12 +843,12 @@ import { firstSendHash } from '../sidebar/recent.js'
         else if (b.kind === 'tool_use') {
           if (b.name === 'AskUserQuestion') {
             // 提问块 → DSH 风格提问卡（答案由后续 tool_result 文本吸附）
-            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: askLineHtml(false) }
+            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: lazy ? '' : askLineHtml(false) }
             seg.items.push(it)
             seg.lastAsk = it
             seg.lastStep = 'ask'
           } else {
-            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
+            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: lazy ? '' : toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
           }
         }
         else if (b.kind === 'tool_result') {
@@ -844,7 +874,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         // closeSeg 时原位填充。
         const text = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
         if (m.stopReason === undefined || isEndStop(m.stopReason)) {
-          seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, text), text })
+          seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, text), text })
           seg.replyTs = m.timestamp
         } else {
           seg.items.push({ kind: 'text', html: '', text })

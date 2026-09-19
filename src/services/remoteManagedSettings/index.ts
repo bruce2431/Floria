@@ -7,7 +7,6 @@
  *
  * Eligibility:
  * - Console users (API key): All eligible
- * - OAuth users (Claude.ai): Only Enterprise/C4E and Team subscribers are eligible
  * - API fails open (non-blocking) - if fetch fails, continues without remote settings
  * - API returns empty settings for users without managed settings
  */
@@ -15,12 +14,8 @@
 import axios from 'axios'
 import { createHash } from 'crypto'
 import { open, unlink } from 'fs/promises'
-import { getOauthConfig, OAUTH_BETA_HEADER } from '../../constants/oauth.js'
-import {
-  checkAndRefreshOAuthTokenIfNeeded,
-  getAnthropicApiKeyWithSource,
-  getClaudeAIOAuthTokens,
-} from '../../utils/auth.js'
+import { getOauthConfig } from '../../constants/oauth.js'
+import { getAnthropicApiKeyWithSource } from '../../utils/auth.js'
 import { registerCleanup } from '../../utils/cleanupRegistry.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { classifyAxiosError, getErrnoCode } from '../../utils/errors.js'
@@ -182,18 +177,7 @@ function getRemoteSettingsAuthHeaders(): {
       }
     }
   } catch {
-    // No API key available - continue to check OAuth
-  }
-
-  // Fall back to OAuth tokens (for Claude.ai users)
-  const oauthTokens = getClaudeAIOAuthTokens()
-  if (oauthTokens?.accessToken) {
-    return {
-      headers: {
-        Authorization: `Bearer ${oauthTokens.accessToken}`,
-        'anthropic-beta': OAUTH_BETA_HEADER,
-      },
-    }
+    // No API key available
   }
 
   return {
@@ -249,10 +233,6 @@ async function fetchRemoteManagedSettings(
   cachedChecksum?: string,
 ): Promise<RemoteManagedSettingsFetchResult> {
   try {
-    // Ensure OAuth token is fresh before fetching settings
-    // This prevents 401 errors from stale cached tokens
-    await checkAndRefreshOAuthTokenIfNeeded()
-
     // Use local auth header getter to avoid circular dependency with getSettings()
     const authHeaders = getRemoteSettingsAuthHeaders()
     if (authHeaders.error) {

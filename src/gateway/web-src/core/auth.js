@@ -10,6 +10,7 @@ import { closeMentionPop } from '../inputbar/mention.js'
 import { renderModelSeat } from '../inputbar/model-select.js'
 import { syncGwSend } from '../inputbar/send.js'
 import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
+import { loadNeuronsData } from '../sidebar/neurons.js'
 import { renderRecent } from '../sidebar/recent.js'
   function deviceHint() {
     return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? 'iPad' : ''
@@ -149,7 +150,7 @@ import { renderRecent } from '../sidebar/recent.js'
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
     if (state.preview) route()
-    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true) }
+    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true); if (state.mgr === 'neurons') loadNeuronsData(true) }
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、

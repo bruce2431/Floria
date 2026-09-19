@@ -5,7 +5,6 @@
 // The mock headers may not exactly match the API specification or real-world behavior.
 // Always validate against actual API responses before relying on this for production features.
 
-import type { SubscriptionType } from '../services/oauth/types.js'
 import { setMockBillingAccessOverride } from '../utils/billing.js'
 import type { OverageDisabledReason } from './claudeAiLimits.js'
 
@@ -82,11 +81,8 @@ export type MockScenario =
 let mockHeaders: MockHeaders = {}
 let mockEnabled = false
 let mockHeaderless429Message: string | null = null
-let mockSubscriptionType: SubscriptionType | null = null
 let mockFastModeRateLimitDurationMs: number | null = null
 let mockFastModeRateLimitExpiresAt: number | null = null
-// Default subscription type for mock testing
-const DEFAULT_MOCK_SUBSCRIPTION: SubscriptionType = 'max'
 
 // Track individual exceeded limits with their reset times
 type ExceededLimit = {
@@ -625,24 +621,12 @@ export function getMockHeaders(): MockHeaders | null {
 }
 
 export function getMockStatus(): string {
-  if (
-    !mockEnabled ||
-    (Object.keys(mockHeaders).length === 0 && !mockSubscriptionType)
-  ) {
+  if (!mockEnabled || Object.keys(mockHeaders).length === 0) {
     return 'No mock headers active (using real limits)'
   }
 
   const lines: string[] = []
   lines.push('Active mock headers:')
-
-  // Show subscription type - either explicitly set or default
-  const effectiveSubscription =
-    mockSubscriptionType || DEFAULT_MOCK_SUBSCRIPTION
-  if (mockSubscriptionType) {
-    lines.push(`  Subscription Type: ${mockSubscriptionType} (explicitly set)`)
-  } else {
-    lines.push(`  Subscription Type: ${effectiveSubscription} (default)`)
-  }
 
   Object.entries(mockHeaders).forEach(([key, value]) => {
     if (value !== undefined) {
@@ -678,7 +662,6 @@ export function getMockStatus(): string {
 export function clearMockHeaders(): void {
   mockHeaders = {}
   exceededLimits = []
-  mockSubscriptionType = null
   mockFastModeRateLimitDurationMs = null
   mockFastModeRateLimitExpiresAt = null
   mockHeaderless429Message = null
@@ -800,34 +783,6 @@ export function getScenarioDescription(scenario: MockScenario): string {
     default:
       return 'Unknown scenario'
   }
-}
-
-// Mock subscription type management
-export function setMockSubscriptionType(
-  subscriptionType: SubscriptionType | null,
-): void {
-  if (process.env.USER_TYPE !== 'ant') {
-    return
-  }
-  mockEnabled = true
-  mockSubscriptionType = subscriptionType
-}
-
-export function getMockSubscriptionType(): SubscriptionType | null {
-  if (!mockEnabled || process.env.USER_TYPE !== 'ant') {
-    return null
-  }
-  // Return the explicitly set subscription type, or default to 'max'
-  return mockSubscriptionType || DEFAULT_MOCK_SUBSCRIPTION
-}
-
-// Export a function that checks if we should use mock subscription
-export function shouldUseMockSubscription(): boolean {
-  return (
-    mockEnabled &&
-    mockSubscriptionType !== null &&
-    process.env.USER_TYPE === 'ant'
-  )
 }
 
 // Mock billing access (admin vs non-admin)

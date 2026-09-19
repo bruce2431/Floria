@@ -25,6 +25,10 @@ import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isENOENT } from '../../utils/errors.js'
 import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
 import {
+  fileModifierSuffix,
+  recordFileModifier,
+} from '../../utils/fileModifierRegistry.js'
+import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
 } from '../../utils/fileHistory.js'
@@ -217,10 +221,12 @@ export const FileWriteTool = buildTool({
     // block is always reached when the file exists.
     const lastWriteTime = Math.floor(fileMtimeMs)
     if (lastWriteTime > readTimestamp.timestamp) {
+      const suffix = fileModifierSuffix(fullFilePath, readTimestamp.timestamp)
       return {
         result: false,
-        message:
-          'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+        message: suffix
+          ? `File has been modified since read${suffix}. Read it again before attempting to write it.`
+          : 'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
         errorCode: 3,
       }
     }
@@ -296,7 +302,12 @@ export const FileWriteTool = buildTool({
           lastRead.limit === undefined
         // meta.content is CRLF-normalized — matches readFileState's normalized form.
         if (!isFullRead || meta.content !== lastRead.content) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          throw new Error(
+            FILE_UNEXPECTEDLY_MODIFIED_ERROR +
+              (lastRead
+                ? fileModifierSuffix(fullFilePath, lastRead.timestamp)
+                : ''),
+          )
         }
       }
     }
@@ -342,6 +353,7 @@ export const FileWriteTool = buildTool({
       offset: undefined,
       limit: undefined,
     })
+    recordFileModifier(fullFilePath)
 
     // Log when writing to CLAUDE.md
     if (fullFilePath.endsWith(`${sep}CLAUDE.md`)) {

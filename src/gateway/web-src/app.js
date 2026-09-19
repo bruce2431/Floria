@@ -14,7 +14,6 @@ import { I } from './core/icons.js'
 import { initLive } from './core/live.js'
 import { loadSessions } from './core/sessions.js'
 import { inputEl, bubblePop, overlay, sInput, state, saveMgrView, isMobile } from './core/state.js'
-import { initViewport } from './core/viewport.js'
 import { gwSend } from './inputbar/send.js'
 import { renderBubble, openSearch, renderSearch } from './sidebar/bubble-search.js'
 import { renderProject } from './sidebar/mgr.js'
@@ -105,7 +104,6 @@ import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
     await detectGateway()
     await loadSessions()
     initLive()
-    initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)
     setChar(1) // 启动默认形象
     // 2026-08-30 改定案（用户）：刷新保留当前界面——/session/<hash> 直进恢复，boot 不再把会话路径

@@ -6,7 +6,7 @@ import { mdInline, relTime } from '../core/markdown.js'
 import { inputEl, state, esc } from '../core/state.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
-  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「插件/技能 + 近48h 会话」浮窗，选中插入内联 chip ----------
+  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
@@ -17,7 +17,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
-  // 见 src/utils/sessionExposure.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
   function splitSessionToken(v) {
     const i = String(v).indexOf('|')
     return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
@@ -104,14 +104,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const ql = (q || '').trim().toLowerCase()
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
-    if (MGR) {
-      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
-      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
-    }
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
+    }
+    if (MGR) {
+      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
+      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
     }
     return items
   }

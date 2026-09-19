@@ -13,7 +13,7 @@ import type { Input, Output } from './FileReadTool.js';
 
 /**
  * Check if a file path is an agent output file and extract the task ID.
- * Agent output files follow the pattern: {projectTempDir}/tasks/{taskId}.output
+ * Agent output files follow the pattern: {projectRoot}/.claude/tasks/{sessionId}/{taskId}.output
  */
 function getAgentOutputTaskId(filePath: string): string | null {
   const prefix = `${getTaskOutputDir()}/`;

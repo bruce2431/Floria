@@ -16,11 +16,14 @@ import {
   clearApiKeyHelperCache,
   clearAwsCredentialsCache,
   clearGcpCredentialsCache,
-  getClaudeAIOAuthTokens,
-  handleOAuth401Error,
-  isClaudeAISubscriber,
-  isEnterpriseSubscriber,
 } from '../../utils/auth.js'
+import {
+  getActiveApiKey,
+  getActiveBaseUrl,
+  hasUsableKeys,
+  markCurrentKeyExhaustedFor,
+  rotateKey,
+} from '../../utils/credentials/pool.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import {
@@ -232,34 +235,27 @@ export async function* withRetry<T>(
       if (
         client === null ||
         (lastError instanceof APIError && lastError.status === 401) ||
-        isOAuthTokenRevokedError(lastError) ||
         isBedrockAuthError(lastError) ||
         isVertexAuthError(lastError) ||
         isStaleConnection
       ) {
-        // On 401 "token expired" or 403 "token revoked", force a token refresh
-        if (
-          (lastError instanceof APIError && lastError.status === 401) ||
-          isOAuthTokenRevokedError(lastError)
-        ) {
-          const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
-          if (failedAccessToken) {
-            await handleOAuth401Error(failedAccessToken)
-          } else {
-            // Not OAuth — try credential pool key rotation
-            try {
-              const { markCurrentKeyExhausted, rotateKey, hasUsableKeys } =
-                await import('../../utils/credentials/pool.js')
-              markCurrentKeyExhausted()
-              if (hasUsableKeys()) {
-                const newKey = rotateKey()
-                logForDebugging(
-                  `[API:auth] Key exhausted, rotated to new key${newKey ? '' : ' (no usable keys left)'}`,
-                )
-              }
-            } catch {
-              // Pool module not available, ignore
+        // On 401, retire only the pool key this request actually carried.
+        // Anthropic OAuth token refresh 线路已移除（2026-09-18）。
+        if (lastError instanceof APIError && lastError.status === 401) {
+          // 2026-09-18 根修：只有「本次请求实际携带的就是池里这把钥匙」才允许停用它——
+          // env/apiKeyHelper 钥匙或跨商错配（钥匙 A 家 + 端点 B 家）引发的 401 不得连坐凭据池
+          // （详见 pool.ts markCurrentKeyExhaustedFor；误标一次 = 永久登不上，现已带冷却自愈）。
+          // 判定沿用 client.ts 的同一把钥匙解析（静态导入：编译产物内 require 取不到池模块）。
+          const poolBaseUrl = getActiveBaseUrl()
+          if (markCurrentKeyExhaustedFor(poolBaseUrl ? getActiveApiKey() : null)) {
+            if (hasUsableKeys()) {
+              const newKey = rotateKey()
+              logForDebugging(
+                `[API:auth] Key exhausted, rotated to new key${newKey ? '' : ' (no usable keys left)'}`,
+              )
             }
+          } else {
+            logForDebugging('[API:auth] 401 与凭据池当前钥匙无关，不标记失效')
           }
         }
         client = await getClient()
@@ -344,7 +340,7 @@ export async function* withRetry<T>(
         // If FALLBACK_FOR_ALL_PRIMARY_MODELS is not set, fall through only if the primary model is a non-custom Opus model.
         // TODO: Revisit if the isNonCustomOpusModel check should still exist, or if isNonCustomOpusModel is a stale artifact of when Claude Code was hardcoded on Opus.
         (process.env.FALLBACK_FOR_ALL_PRIMARY_MODELS ||
-          (!isClaudeAISubscriber() && isNonCustomOpusModel(options.model)))
+          isNonCustomOpusModel(options.model))
       ) {
         consecutive529Errors++
         if (consecutive529Errors >= MAX_529_RETRIES) {
@@ -635,14 +631,6 @@ export function is529Error(error: unknown): boolean {
   )
 }
 
-function isOAuthTokenRevokedError(error: unknown): boolean {
-  return (
-    error instanceof APIError &&
-    error.status === 403 &&
-    (error.message?.includes('OAuth token has been revoked') ?? false)
-  )
-}
-
 function isBedrockAuthError(error: unknown): boolean {
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
     // AWS libs reject without an API call if .aws holds a past Expiration value
@@ -747,12 +735,7 @@ function shouldRetry(error: APIError): boolean {
   const shouldRetryHeader = error.headers?.get('x-should-retry')
 
   // If the server explicitly says whether or not to retry, obey.
-  // For Max and Pro users, should-retry is true, but in several hours, so we shouldn't.
-  // Enterprise users can retry because they typically use PAYG instead of rate limits.
-  if (
-    shouldRetryHeader === 'true' &&
-    (!isClaudeAISubscriber() || isEnterpriseSubscriber())
-  ) {
+  if (shouldRetryHeader === 'true') {
     return true
   }
 
@@ -777,21 +760,15 @@ function shouldRetry(error: APIError): boolean {
   // Retry on lock timeouts.
   if (error.status === 409) return true
 
-  // Retry on rate limits, but not for ClaudeAI Subscription users
-  // Enterprise users can retry because they typically use PAYG instead of rate limits
+  // Retry on rate limits.
   if (error.status === 429) {
-    return !isClaudeAISubscriber() || isEnterpriseSubscriber()
-  }
-
-  // Clear API key cache on 401 and allow retry.
-  // OAuth token handling is done in the main retry loop via handleOAuth401Error.
-  if (error.status === 401) {
-    clearApiKeyHelperCache()
     return true
   }
 
-  // Retry on 403 "token revoked" (same refresh logic as 401, see above)
-  if (isOAuthTokenRevokedError(error)) {
+  // Clear API key cache on 401 and allow retry
+  // (凭据池钥匙停用/自愈在主重试循环 markCurrentKeyExhaustedFor 处理)。
+  if (error.status === 401) {
+    clearApiKeyHelperCache()
     return true
   }
 

@@ -14,7 +14,11 @@
 
 export type ControlOverrideKind = 'model' | 'effort' | 'rename'
 
-type ControlOverrideHandler = (kind: ControlOverrideKind, value: unknown) => void
+type ControlOverrideHandler = (
+  kind: ControlOverrideKind,
+  value: unknown,
+  provider?: string | null,
+) => void
 
 let handler: ControlOverrideHandler | null = null
 
@@ -23,9 +27,13 @@ export function setControlOverrideHandle(h: ControlOverrideHandler | null): void
 }
 
 /** gatewayClient 收到网关控制消息时调用；未挂载（非 REPL 进程）时静默忽略。 */
-export function invokeControlOverride(kind: ControlOverrideKind, value: unknown): void {
+export function invokeControlOverride(
+  kind: ControlOverrideKind,
+  value: unknown,
+  provider?: string | null,
+): void {
   try {
-    handler?.(kind, value)
+    handler?.(kind, value, provider)
   } catch {
     /* 忽略：控制消息失败不影响 REPL */
   }

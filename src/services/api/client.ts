@@ -7,17 +7,14 @@ import {
 } from 'src/utils/cch.js'
 import type { GoogleAuth } from 'google-auth-library'
 import {
-  checkAndRefreshOAuthTokenIfNeeded,
   getAnthropicApiKey,
   getApiKeyFromApiKeyHelper,
-  getClaudeAIOAuthTokens,
   getCodexOAuthTokens,
-  isClaudeAISubscriber,
   isCodexSubscriber,
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
-import { getActiveBaseUrl } from 'src/utils/credentials/pool.js'
+import { getActiveApiKey, getActiveBaseUrl } from 'src/utils/credentials/pool.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
@@ -29,7 +26,6 @@ import {
   getIsNonInteractiveSession,
   getSessionId,
 } from '../../bootstrap/state.js'
-import { getOauthConfig } from '../../constants/oauth.js'
 import { isDebugToStdErr, logForDebugging } from '../../utils/debug.js'
 import {
   getAWSRegion,
@@ -137,13 +133,9 @@ export async function getAnthropicClient({
     defaultHeaders['x-anthropic-additional-protection'] = 'true'
   }
 
-  logForDebugging('[API:auth] OAuth token check starting')
-  await checkAndRefreshOAuthTokenIfNeeded()
-  logForDebugging('[API:auth] OAuth token check complete')
-
-  if (!isClaudeAISubscriber()) {
-    await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
-  }
+  // Anthropic OAuth 登录线路已移除（2026-09-18）：无 token 检查、无订阅分支，
+  // 认证只有凭据池 / env / apiKeyHelper（configureApiKeyHeaders）与 Bedrock/Vertex/Foundry 自带链。
+  await configureApiKeyHeaders(defaultHeaders, getIsNonInteractiveSession())
 
   const resolvedFetch = buildFetch(fetchOverride, source)
 
@@ -322,19 +314,19 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
+  // 不变量（2026-09-18 根修）：钥匙与端点同源——池里定了端点，钥匙就只能来自池。
+  // 旧写法 `apiKey || getAnthropicApiKey()` 在 -p 模式（preferThirdPartyAuthentication，见
+  // utils/auth.ts）会取 env ANTHROPIC_API_KEY：env 是 A 家的钥匙、baseUrl 是池里 B 家的端点
+  // ⇒ 跨商错配 401（bigmodel 对非本家钥匙回「令牌已过期或验证不正确」，2026-09-18 14:51 实证），
+  // 还会被 withRetry 的 401 分支连带停用池里那把好钥匙。池端点在场时不再回落 env/apiKeyHelper：
+  // 池里没可用钥匙就是没钥匙，由上层报明确错误（errors.ts 凭据池文案），绝不把请求打到别家端点。
+  // Anthropic OAuth（authToken / 订阅判定 / staging baseURL）已整体移除（2026-09-18）。
   const poolBaseUrl = getActiveBaseUrl()
+  const poolApiKey = poolBaseUrl ? getActiveApiKey() : null
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
-    apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
-    authToken: isClaudeAISubscriber()
-      ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
-    // Set baseURL from credential pool, or OAuth config for staging
-    ...(poolBaseUrl
-      ? { baseURL: poolBaseUrl }
-      : process.env.USER_TYPE === 'ant' &&
-        isEnvTruthy(process.env.USE_STAGING_OAUTH)
-        ? { baseURL: getOauthConfig().BASE_API_URL }
-        : {}),
+    apiKey: apiKey || (poolBaseUrl ? poolApiKey : getAnthropicApiKey()),
+    // Set baseURL from credential pool
+    ...(poolBaseUrl ? { baseURL: poolBaseUrl } : {}),
     ...ARGS,
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }

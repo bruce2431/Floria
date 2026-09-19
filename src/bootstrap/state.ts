@@ -843,10 +843,32 @@ export function getInitialMainLoopModel(): ModelSetting {
   return STATE.initialMainLoopModel
 }
 
+// 2026-09-18 切换同拍化：web 控制消息到达时不立即写 override，先挂起；回合边界
+// （REPL getToolUseContext）applyPendingSessionModelOverride 与 options.mainLoopModel
+// 快照同一拍落地——回合中途的 fork 查询（getMainLoopModel 读本 STATE）与主循环续轮
+// 保持旧值，跨供应商切换不再出现「新端点+旧模型名」同回合错配窗口。
+let pendingSessionModelOverride: ModelSetting | null | undefined
+
+export function setPendingSessionModelOverride(
+  model: ModelSetting | null,
+): void {
+  pendingSessionModelOverride = model
+}
+
+export function applyPendingSessionModelOverride(): void {
+  if (pendingSessionModelOverride === undefined) return
+  const model = pendingSessionModelOverride
+  pendingSessionModelOverride = undefined
+  setMainLoopModelOverride(model ?? undefined)
+}
+
 export function setMainLoopModelOverride(
   model: ModelSetting | undefined,
 ): void {
   STATE.mainLoopModelOverride = model
+  // 立即写（CLI /model、resume、官方 onSetModel 等回合间路径）取消挂起值：
+  // 立即写者恒为最新意图，不允许旧挂起在下一回合回灌覆盖
+  pendingSessionModelOverride = undefined
 }
 
 export function setInitialMainLoopModel(model: ModelSetting): void {

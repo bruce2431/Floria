@@ -15,8 +15,6 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
-import { fetchUltrareviewQuota } from '../../services/api/ultrareviewQuota.js'
-import { fetchUtilization } from '../../services/api/usage.js'
 import type { ToolUseContext } from '../../Tool.js'
 import {
   checkRemoteAgentEligibility,
@@ -24,20 +22,15 @@ import {
   getRemoteTaskSessionUrl,
   registerRemoteAgentTask,
 } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js'
-import { isEnterpriseSubscriber, isTeamSubscriber } from '../../utils/auth.js'
 import { detectCurrentRepositoryWithHost } from '../../utils/detectRepository.js'
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
 import { getDefaultBranch, gitExe } from '../../utils/git.js'
 import { teleportToRemote } from '../../utils/teleport.js'
 
-// One-time session flag: once the user confirms overage billing via the
-// dialog, all subsequent /ultrareview invocations in this session proceed
-// without re-prompting.
-let sessionOverageConfirmed = false
-
-export function confirmOverage(): void {
-  sessionOverageConfirmed = true
-}
+// The overage dialog can no longer appear (no subscriber gate, quota always
+// null), so there is nothing to confirm. Kept as a no-op: the caller in
+// ultrareviewCommand.tsx still invokes it on the now-unreachable path.
+export function confirmOverage(): void {}
 
 export type OverageGate =
   | { kind: 'proceed'; billingNote: string }
@@ -47,69 +40,12 @@ export type OverageGate =
 
 /**
  * Determine whether the user can launch an ultrareview and under what
- * billing terms. Fetches quota and utilization in parallel.
+ * billing terms. Always proceeds: the subscriber gate is gone.
  */
 export async function checkOverageGate(): Promise<OverageGate> {
-  // Team and Enterprise plans include ultrareview — no free-review quota
-  // or Extra Usage dialog. The quota endpoint is scoped to consumer plans
-  // (pro/max); hitting it on team/ent would surface a confusing dialog.
-  if (isTeamSubscriber() || isEnterpriseSubscriber()) {
-    return { kind: 'proceed', billingNote: '' }
-  }
-
-  const [quota, utilization] = await Promise.all([
-    fetchUltrareviewQuota(),
-    fetchUtilization().catch(() => null),
-  ])
-
-  // No quota info (non-subscriber or endpoint down) — let it through,
-  // server-side billing will handle it.
-  if (!quota) {
-    return { kind: 'proceed', billingNote: '' }
-  }
-
-  if (quota.reviews_remaining > 0) {
-    return {
-      kind: 'proceed',
-      billingNote: ` This is free ultrareview ${quota.reviews_used + 1} of ${quota.reviews_limit}.`,
-    }
-  }
-
-  // Utilization fetch failed (transient network error, timeout, etc.) —
-  // let it through, same rationale as the quota fallback above.
-  if (!utilization) {
-    return { kind: 'proceed', billingNote: '' }
-  }
-
-  // Free reviews exhausted — check Extra Usage setup.
-  const extraUsage = utilization.extra_usage
-  if (!extraUsage?.is_enabled) {
-    logEvent('tengu_review_overage_not_enabled', {})
-    return { kind: 'not-enabled' }
-  }
-
-  // Check available balance (null monthly_limit = unlimited).
-  const monthlyLimit = extraUsage.monthly_limit
-  const usedCredits = extraUsage.used_credits ?? 0
-  const available =
-    monthlyLimit === null || monthlyLimit === undefined
-      ? Infinity
-      : monthlyLimit - usedCredits
-
-  if (available < 10) {
-    logEvent('tengu_review_overage_low_balance', { available })
-    return { kind: 'low-balance', available }
-  }
-
-  if (!sessionOverageConfirmed) {
-    logEvent('tengu_review_overage_dialog_shown', {})
-    return { kind: 'needs-confirm' }
-  }
-
-  return {
-    kind: 'proceed',
-    billingNote: ' This review bills as Extra Usage.',
-  }
+  // OAuth subscriber gate is gone: fetchUltrareviewQuota() is always null
+  // and there is no Extra Usage to bill — every ultrareview proceeds free.
+  return { kind: 'proceed', billingNote: '' }
 }
 
 /**

@@ -55,7 +55,6 @@ import {
   splitSysPromptPrefix,
   toolToAPISchema,
 } from '../../utils/api.js'
-import { getOauthAccountInfo } from '../../utils/auth.js'
 import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
@@ -154,7 +153,6 @@ import {
   modelSupportsAdvisor,
 } from 'src/utils/advisor.js'
 import { getAgentContext } from 'src/utils/agentContext.js'
-import { isClaudeAISubscriber } from 'src/utils/auth.js'
 import {
   getToolSearchBetaHeader,
   modelSupportsStructuredOutputs,
@@ -183,6 +181,7 @@ import {
   modelSupportsThinking,
   type ThinkingConfig,
 } from 'src/utils/thinking.js'
+import { getPoolModelEffortLevels } from 'src/utils/model/modelSupportOverrides.js'
 import {
   extractDiscoveredToolNames,
   isDeferredToolsDeltaEnabled,
@@ -405,9 +404,7 @@ function should1hCacheTTL(querySource?: QuerySource): boolean {
   // would bust the server-side prompt cache (~20K tokens per flip).
   let userEligible = getPromptCache1hEligible()
   if (userEligible === null) {
-    userEligible =
-      process.env.USER_TYPE === 'ant' ||
-      (isClaudeAISubscriber() && !currentLimits.isUsingOverage)
+    userEligible = process.env.USER_TYPE === 'ant'
     setPromptCache1hEligible(userEligible)
   }
   if (!userEligible) return false
@@ -520,8 +517,7 @@ export function getAPIMetadata() {
     user_id: jsonStringify({
       ...extra,
       device_id: getOrCreateUserID(),
-      // Only include OAuth account UUID when actively using OAuth authentication
-      account_uuid: getOauthAccountInfo()?.accountUuid ?? '',
+      account_uuid: '',
       session_id: getSessionId(),
     }),
   }
@@ -1027,9 +1023,8 @@ async function* queryModel(
 > {
   // Check cheap conditions first — the off-switch await blocks on GrowthBook
   // init (~10ms). For non-Opus models (haiku, sonnet) this skips the await
-  // entirely. Subscribers don't hit this path at all.
+  // entirely.
   if (
-    !isClaudeAISubscriber() &&
     isNonCustomOpusModel(options.model) &&
     (
       await getDynamicConfig_BLOCKS_ON_INIT<{ activated: boolean }>(
@@ -1456,6 +1451,13 @@ async function* queryModel(
   }
 
   const effort = resolveAppliedEffort(options.model, options.effortValue)
+  // 显式 Off（effortValue===null）且模型凭据池声明含 'off' 档 → 真关思考（2026-09-18）：
+  // 仅发 effort 参数无法表达「关」（GLM/DS 官方档位无 medium/off 一层），DS anthropic 端点
+  // 实证 thinking:{type:'disabled'} 才是真关（不带字段=默认开思考）。GLM 官方不支持禁用思考，
+  // 其 effortLevels 声明不含 'off'，永不触发本分支。
+  const explicitOffThinkingDisabled =
+    options.effortValue === null &&
+    (getPoolModelEffortLevels(options.model)?.includes('off') ?? false)
 
   if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
     // Exclude defer_loading tools from the hash -- the API strips them from the
@@ -1601,7 +1603,9 @@ async function* queryModel(
     // IMPORTANT: Do not change the adaptive-vs-budget thinking selection below
     // without notifying the model launch DRI and research. This is a sensitive
     // setting that can greatly affect model quality and bashing.
-    if (hasThinking && modelSupportsThinking(options.model)) {
+    if (explicitOffThinkingDisabled) {
+      thinking = { type: 'disabled' } satisfies BetaMessageStreamParams['thinking']
+    } else if (hasThinking && modelSupportsThinking(options.model)) {
       if (
         !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING) &&
         modelSupportsAdaptiveThinking(options.model)

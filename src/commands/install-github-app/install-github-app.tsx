@@ -7,7 +7,7 @@ import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithK
 import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
 import { Box } from '../../ink.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { getAnthropicApiKey, isAnthropicAuthEnabled } from '../../utils/auth.js';
+import { getAnthropicApiKey } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';
 import { execFileNoThrow } from '../../utils/execFileNoThrow.js';
 import { getGithubRepo } from '../../utils/git.js';
@@ -20,7 +20,6 @@ import { CreatingStep } from './CreatingStep.js';
 import { ErrorStep } from './ErrorStep.js';
 import { ExistingWorkflowStep } from './ExistingWorkflowStep.js';
 import { InstallAppStep } from './InstallAppStep.js';
-import { OAuthFlowStep } from './OAuthFlowStep.js';
 import { SuccessStep } from './SuccessStep.js';
 import { setupGitHubActions } from './setupGitHubActions.js';
 import type { State, Warning, Workflow } from './types.js';
@@ -50,7 +49,8 @@ function InstallGitHubApp(props: {
   const [state, setState] = useState({
     ...INITIAL_STATE,
     useExistingKey: !!existingApiKey,
-    selectedApiKeyOption: (existingApiKey ? 'existing' : isAnthropicAuthEnabled() ? 'oauth' : 'new') as 'existing' | 'new' | 'oauth'
+    // 'oauth' option unreachable without the Anthropic auth line.
+    selectedApiKeyOption: (existingApiKey ? 'existing' : 'new') as 'existing' | 'new' | 'oauth'
   });
   useExitOnCtrlCDWithKeybindings();
   React.useEffect(() => {
@@ -368,12 +368,6 @@ function InstallGitHubApp(props: {
       }
     } else if (state.step === 'api-key') {
       // In the new flow, api-key step only appears when user has no existing key
-      // They either entered a new key or will create OAuth token
-      if (state.selectedApiKeyOption === 'oauth') {
-        // OAuth flow already handled by handleCreateOAuthToken
-        return;
-      }
-
       // If user selected 'existing' option, use the existing API key
       const apiKeyToUse = state.selectedApiKeyOption === 'existing' ? existingApiKey : state.apiKeyOrOAuthToken;
       if (!apiKeyToUse) {
@@ -445,34 +439,6 @@ function InstallGitHubApp(props: {
       selectedApiKeyOption: option
     }));
   };
-  const handleCreateOAuthToken = useCallback(() => {
-    logEvent('tengu_install_github_app_step_completed', {
-      step: 'api-key' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-    });
-    setState(prev_22 => ({
-      ...prev_22,
-      step: 'oauth-flow'
-    }));
-  }, []);
-  const handleOAuthSuccess = useCallback((token: string) => {
-    logEvent('tengu_install_github_app_step_completed', {
-      step: 'oauth-flow' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-    });
-    setState(prev_23 => ({
-      ...prev_23,
-      apiKeyOrOAuthToken: token,
-      useExistingKey: false,
-      secretName: 'CLAUDE_CODE_OAUTH_TOKEN',
-      authType: 'oauth_token'
-    }));
-    void runSetupGitHubActions(token, 'CLAUDE_CODE_OAUTH_TOKEN');
-  }, [runSetupGitHubActions]);
-  const handleOAuthCancel = useCallback(() => {
-    setState(prev_24 => ({
-      ...prev_24,
-      step: 'api-key'
-    }));
-  }, []);
   const handleSecretNameChange = (value_1: string) => {
     if (value_1 && !/^[a-zA-Z0-9_]+$/.test(value_1)) return;
     setState(prev_25 => ({
@@ -546,7 +512,7 @@ function InstallGitHubApp(props: {
     case 'check-existing-secret':
       return <CheckExistingSecretStep useExistingSecret={state.useExistingSecret} secretName={state.secretName} onToggleUseExistingSecret={handleToggleUseExistingSecret} onSecretNameChange={handleSecretNameChange} onSubmit={handleSubmit} />;
     case 'api-key':
-      return <ApiKeyStep existingApiKey={existingApiKey} useExistingKey={state.useExistingKey} apiKeyOrOAuthToken={state.apiKeyOrOAuthToken} onApiKeyChange={handleApiKeyChange} onToggleUseExistingKey={handleToggleUseExistingKey} onSubmit={handleSubmit} onCreateOAuthToken={isAnthropicAuthEnabled() ? handleCreateOAuthToken : undefined} selectedOption={state.selectedApiKeyOption} onSelectOption={handleApiKeyOptionChange} />;
+      return <ApiKeyStep existingApiKey={existingApiKey} useExistingKey={state.useExistingKey} apiKeyOrOAuthToken={state.apiKeyOrOAuthToken} onApiKeyChange={handleApiKeyChange} onToggleUseExistingKey={handleToggleUseExistingKey} onSubmit={handleSubmit} selectedOption={state.selectedApiKeyOption} onSelectOption={handleApiKeyOptionChange} />;
     case 'creating':
       return <CreatingStep currentWorkflowInstallStep={state.currentWorkflowInstallStep} secretExists={state.secretExists} useExistingSecret={state.useExistingSecret} secretName={state.secretName} skipWorkflow={state.workflowAction === 'skip'} selectedWorkflows={state.selectedWorkflows} />;
     case 'success':
@@ -577,8 +543,8 @@ function InstallGitHubApp(props: {
           }));
         }
       }} />;
-    case 'oauth-flow':
-      return <OAuthFlowStep onSuccess={handleOAuthSuccess} onCancel={handleOAuthCancel} />;
+    default:
+      return null;
   }
 }
 export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNode> {

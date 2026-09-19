@@ -21,6 +21,22 @@ import type {
 
 const CREDENTIALS_FILENAME = 'credentials.json'
 
+/**
+ * 401 停用钥匙的冷却期。exhausted 钥匙冷却期满自动可重试（自愈）——401 可能是上游
+ * 临时故障或误标（跨商错配已于 2026-09-18 在 client.ts 根修为钥匙端点同源，但上游
+ * 抖动无法排除）；永久停用无恢复路径且 /key 命令已移除（2026-08-29）⇒ 供应商永久
+ * 不可用（实证：glm 唯一钥匙 14:54 被误标，13 分钟后仍在报登录失败）。ApiKeyEntry
+ * exhaustedAt 本就注释「for auto-recovery」，此处实际接线。
+ */
+const KEY_EXHAUSTED_COOLDOWN_MS = 10 * 60 * 1000
+
+/** 钥匙可用 = 未停用，或已停用但冷却期满（自动恢复）。 */
+function _isKeyUsable(entry: ApiKeyEntry | undefined, now: number = Date.now()): boolean {
+  if (!entry) return false
+  if (!entry.exhausted) return true
+  return now - (entry.exhaustedAt ?? 0) >= KEY_EXHAUSTED_COOLDOWN_MS
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 function _getCredentialsPath(): string {
@@ -112,9 +128,25 @@ let _bootSnapshotTaken = false
 let _bootProviderSnapshot: string | null = null
 let _bootModelSnapshot: string | null = null
 
-/** 网关按会话路由模型切换时调用；null 清除（回落启动快照）。 */
+// 2026-09-18 切换同拍化：web 路由的供应商绑定先挂起，回合边界 applyPendingSessionProvider
+// 与模型名快照成对落地（同拍原语见 bootstrap/state.ts setPendingSessionModelOverride）。
+let _pendingSessionProvider: string | null | undefined
+
+/** 网关按会话路由模型切换时调用；null 清除（回落启动快照）。立即写取消挂起值。 */
 export function setSessionProviderOverride(name: string | null): void {
   _sessionProviderOverride = name && name.trim() ? name.trim() : null
+  _pendingSessionProvider = undefined
+}
+
+export function setPendingSessionProvider(name: string | null): void {
+  _pendingSessionProvider = name
+}
+
+export function applyPendingSessionProvider(): void {
+  if (_pendingSessionProvider === undefined) return
+  const name = _pendingSessionProvider
+  _pendingSessionProvider = undefined
+  setSessionProviderOverride(name)
 }
 
 /** 本进程当前绑定的供应商名（会话有效），见 _resolveSessionProvider。 */
@@ -174,7 +206,7 @@ export function getActiveApiKey(): string | null {
   const config = getActiveProviderConfig()
   if (!config) return null
   const entry = config.keys[config.activeKeyIndex]
-  if (!entry || entry.exhausted) return null
+  if (!_isKeyUsable(entry)) return null
   return entry.value
 }
 
@@ -360,7 +392,7 @@ export function rotateKey(): string | null {
   let index = (startIndex + 1) % provider.keys.length
 
   while (index !== startIndex) {
-    if (!provider.keys[index].exhausted) {
+    if (_isKeyUsable(provider.keys[index])) {
       provider.activeKeyIndex = index
       saveCredentials(creds)
       return provider.keys[index].value
@@ -369,24 +401,50 @@ export function rotateKey(): string | null {
   }
 
   // All keys exhausted — try the starting position one last time
-  if (!provider.keys[startIndex].exhausted) {
+  if (_isKeyUsable(provider.keys[startIndex])) {
     return provider.keys[startIndex].value
   }
   return null
 }
 
 /**
- * Mark the current key as exhausted (e.g., after a 401).
+ * Retire a pool key after a 401 — but only the key that actually failed.
+ *
+ * 不变量（2026-09-18 根修）：被标记失效的钥匙 = 本次请求实际携带的钥匙。
+ * 旧签名 `markCurrentKeyExhausted()` 无参、标记的恒为 `activeProvider.activeKeyIndex`，于是
+ * 另一套凭据（env ANTHROPIC_API_KEY / apiKeyHelper）或跨商错配（钥匙 A 家 + 端点 B 家）引发的
+ * 401 会把池里那把当时仍在正常工作的钥匙停用；而 `exhausted` 无消费方（无冷却、`/key` 命令
+ * 2026-08-29 已移除）⇒ 该供应商永久不可用，全前端显示「Not logged in · Please run /login」
+ * （2026-09-18 14:54 实证：glm 唯一钥匙被 401 误标，13 分钟后仍在报登录失败）。
+ *
+ * 冷却语义：被标记的钥匙 KEY_EXHAUSTED_COOLDOWN_MS 后自动恢复可重试；冷却期内重复
+ * 401 不刷新时间戳（返回 false 跳过轮换），冷却期满后重试再 401 则重新计时。
+ *
+ * @param usedKey 本次 401 请求实际携带的钥匙（客户端构建处同一解析：池优先，其次 env/apiKeyHelper）
+ * @returns 是否真的把池里当前这把标记失效（false = 该 401 与池钥匙无关，调用方应跳过轮换）
  */
-export function markCurrentKeyExhausted(): void {
+export function markCurrentKeyExhaustedFor(usedKey: string | null): boolean {
   const creds = loadCredentials()
   const provider = creds.providers[creds.activeProvider]
-  if (!provider) return
+  if (!provider) return false
   const entry = provider.keys[provider.activeKeyIndex]
-  if (!entry) return
+  if (!entry) return false
+  if (usedKey === null || usedKey !== entry.value) return false
+  if (entry.exhausted && !_isKeyUsable(entry)) return false
   entry.exhausted = true
   entry.exhaustedAt = Date.now()
   saveCredentials(creds)
+  return true
+}
+
+/**
+ * 本会话绑定供应商「有配置但无可用钥匙」（keys 全 exhausted 或空）——错误文案分流用：
+ * 池无钥匙是配置问题，不能复用指向 Anthropic OAuth 的「Please run /login」。
+ */
+export function isActiveProviderKeyUnavailable(): boolean {
+  const config = getActiveProviderConfig()
+  if (!config) return false
+  return !config.keys.some(k => _isKeyUsable(k))
 }
 
 /**
@@ -421,7 +479,7 @@ export function removeKey(index: number): boolean {
 export function hasUsableKeys(): boolean {
   const config = getActiveProviderConfig()
   if (!config) return false
-  return config.keys.some(k => !k.exhausted)
+  return config.keys.some(k => _isKeyUsable(k))
 }
 
 /** Check if credentials.json exists on disk. */

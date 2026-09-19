@@ -57,12 +57,21 @@ import { modelProviderOf } from '../sidebar/mgr.js'
     if (!id) return null
     return { model: { id, name: id } }
   }
-  // 推理等级名（全局；effortLevel 未设置 = Off）
+  // 推理等级名（全局；effortLevel 未设置 = Off / 无 off 档模型显示「默认」）
   function effLabel() {
     const eff = MODEL_CUR.effortLevel
-    if (eff === undefined || eff === null) return 'Off'
+    if (eff === undefined || eff === null) return modelEffortLevels()?.includes('off') ? 'Off' : '默认'
     const level = EFFORT_LEVELS.find(e => e.id === eff)
     return level ? level.name : String(eff)
+  }
+  // 当前模型的官方思考等级清单（2026-09-18：凭据池 effortLevels 声明经 /gateway/models 下发；
+  // 未声明返回 null → 回退固定 Off+Low/High/Max）。渲染与选择一律以此为准，不写死档位。
+  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' }
+  function modelEffortLevels() {
+    const id = MODEL_CUR.model
+    if (!id || !MODELS || !Array.isArray(MODELS.items)) return null
+    const it = MODELS.items.find(x => x && x.v === id)
+    return it && Array.isArray(it.effortLevels) && it.effortLevels.length ? it.effortLevels.map(String) : null
   }
   function renderModelSeat() {
     // 显示源 = currentChoice()（MODEL_CUR.model，用户切换后即时更新），不用 MODELS.model 缓存——
@@ -112,6 +121,12 @@ import { modelProviderOf } from '../sidebar/mgr.js'
       return rows
     }
     if (msel.pane === 'effort') {
+      // 官方档位动态渲染（2026-09-18）：有 effortLevels 声明=按声明逐档渲染（off→undefined 语义）；
+      // 未声明=回退固定 Off + Low/High/Max。
+      const levels = modelEffortLevels()
+      if (levels) {
+        return levels.map(id => ({ kind: 'effort', effort: id === 'off' ? undefined : id, label: EFFORT_LABELS[id] || id }))
+      }
       const rows = [{ kind: 'effort', effort: undefined, label: 'Off' }]
       for (const e of EFFORT_LEVELS) rows.push({ kind: 'effort', effort: e.id, label: e.name })
       return rows

@@ -15,15 +15,6 @@ type BridgeApiDeps = {
   runnerVersion: string
   onDebug?: (msg: string) => void
   /**
-   * Called on 401 to attempt OAuth token refresh. Returns true if refreshed,
-   * in which case the request is retried once. Injected because
-   * handleOAuth401Error from utils/auth.ts transitively pulls in config.ts →
-   * file.ts → permissions/filesystem.ts → sessionStorage.ts → commands.ts
-   * (~1300 modules). Daemon callers using env-var tokens omit this — their
-   * tokens don't refresh, so 401 goes straight to BridgeFatalError.
-   */
-  onAuth401?: (staleAccessToken: string) => Promise<boolean>
-  /**
    * Returns the trusted device token to send as X-Trusted-Device-Token on
    * bridge API calls. Bridge sessions have SecurityTier=ELEVATED on the
    * server (CCR v2); when the server's enforcement flag is on,
@@ -96,48 +87,6 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     return accessToken
   }
 
-  /**
-   * Execute an OAuth-authenticated request with a single retry on 401.
-   * On 401, attempts token refresh via handleOAuth401Error (same pattern as
-   * withRetry.ts for v1/messages). If refresh succeeds, retries the request
-   * once with the new token. If refresh fails or the retry also returns 401,
-   * the 401 response is returned for handleErrorStatus to throw BridgeFatalError.
-   */
-  async function withOAuthRetry<T>(
-    fn: (accessToken: string) => Promise<{ status: number; data: T }>,
-    context: string,
-  ): Promise<{ status: number; data: T }> {
-    const accessToken = resolveAuth()
-    const response = await fn(accessToken)
-
-    if (response.status !== 401) {
-      return response
-    }
-
-    if (!deps.onAuth401) {
-      debug(`[bridge:api] ${context}: 401 received, no refresh handler`)
-      return response
-    }
-
-    // Attempt token refresh — matches the pattern in withRetry.ts
-    debug(`[bridge:api] ${context}: 401 received, attempting token refresh`)
-    const refreshed = await deps.onAuth401(accessToken)
-    if (refreshed) {
-      debug(`[bridge:api] ${context}: Token refreshed, retrying request`)
-      const newToken = resolveAuth()
-      const retryResponse = await fn(newToken)
-      if (retryResponse.status !== 401) {
-        return retryResponse
-      }
-      debug(`[bridge:api] ${context}: Retry after refresh also got 401`)
-    } else {
-      debug(`[bridge:api] ${context}: Token refresh failed`)
-    }
-
-    // Refresh failed — return 401 for handleErrorStatus to throw
-    return response
-  }
-
   return {
     async registerBridgeEnvironment(
       config: BridgeConfig,
@@ -146,43 +95,39 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         `[bridge:api] POST /v1/environments/bridge bridgeId=${config.bridgeId}`,
       )
 
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.post<{
-            environment_id: string
-            environment_secret: string
-          }>(
-            `${deps.baseUrl}/v1/environments/bridge`,
-            {
-              machine_name: config.machineName,
-              directory: config.dir,
-              branch: config.branch,
-              git_repo_url: config.gitRepoUrl,
-              // Advertise session capacity so claude.ai/code can show
-              // "2/4 sessions" badges and only block the picker when
-              // actually at capacity. Backends that don't yet accept
-              // this field will silently ignore it.
-              max_sessions: config.maxSessions,
-              // worker_type lets claude.ai filter environments by origin
-              // (e.g. assistant picker only shows assistant-mode workers).
-              // Desktop cowork app sends "cowork"; we send a distinct value.
-              metadata: { worker_type: config.workerType },
-              // Idempotent re-registration: if we have a backend-issued
-              // environment_id from a prior session (--session-id resume),
-              // send it back so the backend reattaches instead of creating
-              // a new env. The backend may still hand back a fresh ID if
-              // the old one expired — callers must compare the response.
-              ...(config.reuseEnvironmentId && {
-                environment_id: config.reuseEnvironmentId,
-              }),
-            },
-            {
-              headers: getHeaders(token),
-              timeout: 15_000,
-              validateStatus: status => status < 500,
-            },
-          ),
-        'Registration',
+      const response = await axios.post<{
+        environment_id: string
+        environment_secret: string
+      }>(
+        `${deps.baseUrl}/v1/environments/bridge`,
+        {
+          machine_name: config.machineName,
+          directory: config.dir,
+          branch: config.branch,
+          git_repo_url: config.gitRepoUrl,
+          // Advertise session capacity so claude.ai/code can show
+          // "2/4 sessions" badges and only block the picker when
+          // actually at capacity. Backends that don't yet accept
+          // this field will silently ignore it.
+          max_sessions: config.maxSessions,
+          // worker_type lets claude.ai filter environments by origin
+          // (e.g. assistant picker only shows assistant-mode workers).
+          // Desktop cowork app sends "cowork"; we send a distinct value.
+          metadata: { worker_type: config.workerType },
+          // Idempotent re-registration: if we have a backend-issued
+          // environment_id from a prior session (--session-id resume),
+          // send it back so the backend reattaches instead of creating
+          // a new env. The backend may still hand back a fresh ID if
+          // the old one expired — callers must compare the response.
+          ...(config.reuseEnvironmentId && {
+            environment_id: config.reuseEnvironmentId,
+          }),
+        },
+        {
+          headers: getHeaders(resolveAuth()),
+          timeout: 15_000,
+          validateStatus: status => status < 500,
+        },
       )
 
       handleErrorStatus(response.status, response.data, 'Registration')
@@ -280,18 +225,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST .../work/${workId}/stop force=${force}`)
 
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.post(
-            `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/stop`,
-            { force },
-            {
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
-        'StopWork',
+      const response = await axios.post(
+        `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/stop`,
+        { force },
+        {
+          headers: getHeaders(resolveAuth()),
+          timeout: 10_000,
+          validateStatus: s => s < 500,
+        },
       )
 
       handleErrorStatus(response.status, response.data, 'StopWork')
@@ -303,17 +244,13 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] DELETE /v1/environments/bridge/${environmentId}`)
 
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.delete(
-            `${deps.baseUrl}/v1/environments/bridge/${environmentId}`,
-            {
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
-        'Deregister',
+      const response = await axios.delete(
+        `${deps.baseUrl}/v1/environments/bridge/${environmentId}`,
+        {
+          headers: getHeaders(resolveAuth()),
+          timeout: 10_000,
+          validateStatus: s => s < 500,
+        },
       )
 
       handleErrorStatus(response.status, response.data, 'Deregister')
@@ -327,18 +264,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST /v1/sessions/${sessionId}/archive`)
 
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.post(
-            `${deps.baseUrl}/v1/sessions/${sessionId}/archive`,
-            {},
-            {
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
-        'ArchiveSession',
+      const response = await axios.post(
+        `${deps.baseUrl}/v1/sessions/${sessionId}/archive`,
+        {},
+        {
+          headers: getHeaders(resolveAuth()),
+          timeout: 10_000,
+          validateStatus: s => s < 500,
+        },
       )
 
       // 409 = already archived (idempotent, not an error)
@@ -366,18 +299,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         `[bridge:api] POST /v1/environments/${environmentId}/bridge/reconnect session_id=${sessionId}`,
       )
 
-      const response = await withOAuthRetry(
-        (token: string) =>
-          axios.post(
-            `${deps.baseUrl}/v1/environments/${environmentId}/bridge/reconnect`,
-            { session_id: sessionId },
-            {
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
-        'ReconnectSession',
+      const response = await axios.post(
+        `${deps.baseUrl}/v1/environments/${environmentId}/bridge/reconnect`,
+        { session_id: sessionId },
+        {
+          headers: getHeaders(resolveAuth()),
+          timeout: 10_000,
+          validateStatus: s => s < 500,
+        },
       )
 
       handleErrorStatus(response.status, response.data, 'ReconnectSession')

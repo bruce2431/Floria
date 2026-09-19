@@ -82,10 +82,8 @@ import { stageSync } from '../chat/stage.js'
     // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：rect.top 含 --kb-lift/--vv-pan 的位移与
     // 空态台面定位，与 vv.offsetTop 同为 client 坐标口径 → 两者的差就是「离可视区顶多远」。
     if (wrap) {
-      document.documentElement.style.setProperty(
-        '--bar-room',
-        popRoom(wrap.getBoundingClientRect().top, vv.offsetTop, BAR_ROOM_MARGIN) + 'px',
-      )
+      const barRoom = popRoom(wrap.getBoundingClientRect().top, vv.offsetTop, BAR_ROOM_MARGIN)
+      document.documentElement.style.setProperty('--bar-room', barRoom + 'px')
     }
     stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }

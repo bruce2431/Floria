@@ -12,7 +12,7 @@ import { getSessionId } from '../../bootstrap/state.js'
 import { getErrnoCode } from '../errors.js'
 import { readFileRange, tailFile } from '../fsOperations.js'
 import { logError } from '../log.js'
-import { getProjectTempDir } from '../permissions/filesystem.js'
+import { getProjectRuntimeDir } from '../projectConfig.js'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
 // Without this, an attacker in the sandbox could create symlinks in the tasks directory
@@ -32,7 +32,9 @@ export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '5GB'
 
 /**
  * Get the task output directory for this session.
- * Uses project temp directory so reads are auto-allowed by checkReadableInternalPath.
+ * Lives in the project runtime dir (<projectRoot>/.claude/tasks/<sessionId>/)
+ * so output files stay inside the project workspace instead of the OS temp
+ * dir; reads are auto-allowed by checkReadableInternalPath's tasks-dir rule.
  *
  * The session ID is included so concurrent sessions in the same project don't
  * clobber each other's output files. Startup cleanup in one session previously
@@ -49,7 +51,7 @@ export const MAX_TASK_OUTPUT_BYTES_DISPLAY = '5GB'
 let _taskOutputDir: string | undefined
 export function getTaskOutputDir(): string {
   if (_taskOutputDir === undefined) {
-    _taskOutputDir = join(getProjectTempDir(), getSessionId(), 'tasks')
+    _taskOutputDir = join(getProjectRuntimeDir('tasks'), getSessionId())
   }
   return _taskOutputDir
 }

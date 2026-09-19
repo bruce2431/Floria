@@ -454,16 +454,18 @@ function isDangerousFilePathToAutoEdit(path: string): boolean {
         continue
       }
 
-      // Special case: .claude/worktrees/ is a structural path (where Claude stores
-      // git worktrees), not a user-created dangerous directory. Skip the .claude
-      // segment when it's followed by 'worktrees'. Any nested .claude directories
-      // within the worktree (not followed by 'worktrees') are still blocked.
+      // Special cases: some .claude/ children are structural/content paths, not
+      // harness-executable config. Skip the .claude segment when it's followed by
+      // 'worktrees' (where Claude stores git worktrees) or 'preview' (project
+      // preview deliverables — static pages served by the built-in gateway).
+      // Any nested .claude directories beneath them (not followed by a skipped
+      // child) are still blocked.
       if (dir === '.claude') {
         const nextSegment = pathSegments[i + 1]
-        if (
-          nextSegment &&
-          normalizeCaseForComparison(nextSegment) === 'worktrees'
-        ) {
+        const normalizedNext = nextSegment
+          ? normalizeCaseForComparison(nextSegment)
+          : undefined
+        if (normalizedNext === 'worktrees' || normalizedNext === 'preview') {
           break // Skip this .claude, continue checking other segments
         }
       }

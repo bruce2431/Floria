@@ -1,7 +1,6 @@
 import type { CoordinateMode, CuSubGates } from '@ant/computer-use-mcp/types'
 
 import { getDynamicConfig_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { getSubscriptionType } from '../auth.js'
 import { isEnvTruthy } from '../envUtils.js'
 
 type ChicagoConfig = CuSubGates & {
@@ -33,13 +32,9 @@ function readConfig(): ChicagoConfig {
   }
 }
 
-// Max/Pro only for external rollout. Ant bypass so dogfooding continues
-// regardless of subscription tier — not all ants are max/pro, and per
-// CLAUDE.md:281, USER_TYPE !== 'ant' branches get zero antfooding.
+// OAuth 订阅线路已移除：无订阅档位，仅 ant 内部可用
 function hasRequiredSubscription(): boolean {
-  if (process.env.USER_TYPE === 'ant') return true
-  const tier = getSubscriptionType()
-  return tier === 'max' || tier === 'pro'
+  return process.env.USER_TYPE === 'ant'
 }
 
 export function getChicagoEnabled(): boolean {

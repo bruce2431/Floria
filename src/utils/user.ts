@@ -1,12 +1,7 @@
 import { execa } from 'execa'
 import memoize from 'lodash-es/memoize.js'
 import { getSessionId } from '../bootstrap/state.js'
-import {
-  getOauthAccountInfo,
-  getRateLimitTier,
-  getSubscriptionType,
-} from './auth.js'
-import { getGlobalConfig, getOrCreateUserID } from './config.js'
+import { getOrCreateUserID } from './config.js'
 import { getCwd } from './cwd.js'
 import { type env, getHostPlatformForAnalytics } from './env.js'
 import { isEnvTruthy } from './envUtils.js'
@@ -78,28 +73,6 @@ export function resetUserCache(): void {
 export const getCoreUserData = memoize(
   (includeAnalyticsMetadata?: boolean): CoreUserData => {
     const deviceId = getOrCreateUserID()
-    const config = getGlobalConfig()
-
-    let subscriptionType: string | undefined
-    let rateLimitTier: string | undefined
-    let firstTokenTime: number | undefined
-    if (includeAnalyticsMetadata) {
-      subscriptionType = getSubscriptionType() ?? undefined
-      rateLimitTier = getRateLimitTier() ?? undefined
-      if (subscriptionType && config.claudeCodeFirstTokenDate) {
-        const configFirstTokenTime = new Date(
-          config.claudeCodeFirstTokenDate,
-        ).getTime()
-        if (!isNaN(configFirstTokenTime)) {
-          firstTokenTime = configFirstTokenTime
-        }
-      }
-    }
-
-    // Only include OAuth account data when actively using OAuth authentication
-    const oauthAccount = getOauthAccountInfo()
-    const organizationUuid = oauthAccount?.organizationUuid
-    const accountUuid = oauthAccount?.accountUuid
 
     return {
       deviceId,
@@ -107,12 +80,7 @@ export const getCoreUserData = memoize(
       email: getEmail(),
       appVersion: MACRO.VERSION,
       platform: getHostPlatformForAnalytics(),
-      organizationUuid,
-      accountUuid,
       userType: process.env.USER_TYPE,
-      subscriptionType,
-      rateLimitTier,
-      firstTokenTime,
       ...(isEnvTruthy(process.env.GITHUB_ACTIONS) && {
         githubActionsMetadata: {
           actor: process.env.GITHUB_ACTOR,
@@ -140,12 +108,6 @@ function getEmail(): string | undefined {
     return cachedEmail
   }
 
-  // Only include OAuth email when actively using OAuth authentication
-  const oauthAccount = getOauthAccountInfo()
-  if (oauthAccount?.emailAddress) {
-    return oauthAccount.emailAddress
-  }
-
   // Ant-only fallbacks below (no execSync)
   if (process.env.USER_TYPE !== 'ant') {
     return undefined
@@ -160,12 +122,6 @@ function getEmail(): string | undefined {
 }
 
 async function getEmailAsync(): Promise<string | undefined> {
-  // Only include OAuth email when actively using OAuth authentication
-  const oauthAccount = getOauthAccountInfo()
-  if (oauthAccount?.emailAddress) {
-    return oauthAccount.emailAddress
-  }
-
   // Ant-only fallbacks below
   if (process.env.USER_TYPE !== 'ant') {
     return undefined

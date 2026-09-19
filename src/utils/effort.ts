@@ -1,7 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { isUltrathinkEnabled } from './thinking.js'
 import { getInitialSettings } from './settings/settings.js'
-import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
@@ -154,7 +153,10 @@ export function resolveAppliedEffort(
   appStateEffortValue: EffortValue | undefined,
 ): EffortValue | undefined {
   const envOverride = getEffortEnvOverride()
-  if (envOverride === null) {
+  // null = 用户显式 Off（web 网关广播 'off'→null）：与 env unset 同语义，显式关闭时
+  // 不发 effort 参数也不落默认链——默认链激活（如凭据池能力声明使 modelSupportsEffort
+  // 变 true）后 undefined 与显式 Off 语义分叉，null 拦截保住 Off 的「不发」承诺。
+  if (envOverride === null || appStateEffortValue === null) {
     return undefined
   }
   const resolved =
@@ -303,20 +305,6 @@ export function getDefaultEffortForModel(
   // IMPORTANT: Do not change the default effort level without notifying
   // the model launch DRI and research. Default effort is a sensitive setting
   // that can greatly affect model quality and bashing.
-
-  // Default effort on Opus 4.6 to medium for Pro.
-  // Max/Team also get medium when the tengu_grey_step2 config is enabled.
-  if (model.toLowerCase().includes('opus-4-6')) {
-    if (isProSubscriber()) {
-      return 'medium'
-    }
-    if (
-      getOpusDefaultEffortConfig().enabled &&
-      (isMaxSubscriber() || isTeamSubscriber())
-    ) {
-      return 'medium'
-    }
-  }
 
   // When ultrathink feature is on, default effort to medium (ultrathink bumps to high)
   if (isUltrathinkEnabled() && modelSupportsEffort(model)) {

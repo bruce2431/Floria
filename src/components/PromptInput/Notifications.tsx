@@ -16,7 +16,7 @@ import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import { calculateTokenWarningState } from '../../services/compact/autoCompact.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { Message } from '../../types/message.js';
-import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper, getSubscriptionType } from '../../utils/auth.js';
+import { getApiKeyHelperElapsedMs, getConfiguredApiKeyHelper } from '../../utils/auth.js';
 import type { AutoUpdaterResult } from '../../utils/autoUpdater.js';
 import { getExternalEditor } from '../../utils/editor.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
@@ -127,15 +127,6 @@ export function Notifications(t0) {
   const shouldShowIdeSelection = ideStatus === "connected" && (ideSelection?.filePath || ideSelection?.text && ideSelection.lineCount > 0);
   const shouldShowAutoUpdater = !shouldShowIdeSelection || isAutoUpdating || autoUpdaterResult?.status !== "success";
   const isInOverageMode = claudeAiLimits.isUsingOverage;
-  let t7;
-  if ($[8] === Symbol.for("react.memo_cache_sentinel")) {
-    t7 = getSubscriptionType();
-    $[8] = t7;
-  } else {
-    t7 = $[8];
-  }
-  const subscriptionType = t7;
-  const isTeamOrEnterprise = subscriptionType === "team" || subscriptionType === "enterprise";
   let t8;
   if ($[9] === Symbol.for("react.memo_cache_sentinel")) {
     t8 = getExternalEditor();
@@ -176,7 +167,7 @@ export function Notifications(t0) {
   const t12 = isInOverageMode ?? false;
   let t13;
   if ($[15] !== apiKeyStatus || $[16] !== autoUpdaterResult || $[17] !== debug || $[18] !== ideSelection || $[19] !== isAutoUpdating || $[20] !== isShowingCompactMessage || $[21] !== mainLoopModel || $[22] !== mcpClients || $[23] !== notifications || $[24] !== onAutoUpdaterResult || $[25] !== onChangeIsUpdating || $[26] !== shouldShowAutoUpdater || $[27] !== t12 || $[28] !== tokenUsage || $[29] !== verbose) {
-    t13 = <NotificationContent ideSelection={ideSelection} mcpClients={mcpClients} notifications={notifications} isInOverageMode={t12} isTeamOrEnterprise={isTeamOrEnterprise} apiKeyStatus={apiKeyStatus} debug={debug} verbose={verbose} tokenUsage={tokenUsage} mainLoopModel={mainLoopModel} shouldShowAutoUpdater={shouldShowAutoUpdater} autoUpdaterResult={autoUpdaterResult} isAutoUpdating={isAutoUpdating} isShowingCompactMessage={isShowingCompactMessage} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} />;
+    t13 = <NotificationContent ideSelection={ideSelection} mcpClients={mcpClients} notifications={notifications} isInOverageMode={t12} apiKeyStatus={apiKeyStatus} debug={debug} verbose={verbose} tokenUsage={tokenUsage} mainLoopModel={mainLoopModel} shouldShowAutoUpdater={shouldShowAutoUpdater} autoUpdaterResult={autoUpdaterResult} isAutoUpdating={isAutoUpdating} isShowingCompactMessage={isShowingCompactMessage} onAutoUpdaterResult={onAutoUpdaterResult} onChangeIsUpdating={onChangeIsUpdating} />;
     $[15] = apiKeyStatus;
     $[16] = autoUpdaterResult;
     $[17] = debug;
@@ -218,7 +209,6 @@ function NotificationContent({
   mcpClients,
   notifications,
   isInOverageMode,
-  isTeamOrEnterprise,
   apiKeyStatus,
   debug,
   verbose,
@@ -238,7 +228,6 @@ function NotificationContent({
     queue: Notification[];
   };
   isInOverageMode: boolean;
-  isTeamOrEnterprise: boolean;
   apiKeyStatus: VerificationStatus;
   debug: boolean;
   verbose: boolean;
@@ -290,7 +279,7 @@ function NotificationContent({
           </Text> : <Text color={notifications.current.color} dimColor={!notifications.current.color} wrap="truncate">
             {notifications.current.text}
           </Text>)}
-      {isInOverageMode && !isTeamOrEnterprise && <Box>
+      {isInOverageMode && <Box>
           <Text dimColor wrap="truncate">
             Now using extra usage
           </Text>

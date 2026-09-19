@@ -70,13 +70,3 @@ export function parseSessionMessage(
   if (!close || close.index < open[0].length) return null
   return { source: sourceOf(open), body: text.slice(open[0].length, close.index) }
 }
-
-/**
- * 只取来源会话（不要求正文闭合）：暴露集合的反向判定用（sessionExposure）。
- * 开标签锚定文本开头——来件的落盘/入队值恒为整条包装，而 `@file` 等附件会把文件内容
- * 读进 user 记录，锚定开头可确保**授权不可能由文件内容产生**（授权只来自用户键盘或真实来件）。
- */
-export function extractSessionSource(text: string): SessionSource | null {
-  const open = OPEN_RE.exec(text)
-  return open ? sourceOf(open) : null
-}

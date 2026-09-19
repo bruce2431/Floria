@@ -9,7 +9,6 @@ import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, mention, serializeInput, clo
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
-import { isArchived } from '../sidebar/recent.js'
   // ---------- 命令菜单 + 模型选择（2026-08-21 dsh 输入栏逻辑移植）----------
   // ⚠️ 数据源 = 本地内置展示数据（⚠️ 非 dsh 真实注册表、非网关接口）：
   // 网关暂无 /gateway/commands 与 /gateway/models，命令列表/模型目录先本地内置供 UI 审阅——
@@ -59,7 +58,7 @@ import { isArchived } from '../sidebar/recent.js'
   projSeatEl.querySelector('.chevron').innerHTML = I.dshChevDown
   function projList() {
     const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
     return Object.keys(byProject).sort((a, b) => {
       const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
       const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))

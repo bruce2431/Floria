@@ -36,9 +36,8 @@
     dshCheck: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M15.0498 3.92579L8.49512 12.3818C8.25774 12.6881 8.04517 12.9645 7.84668 13.1689C7.63957 13.3823 7.38732 13.5841 7.04492 13.6719C6.86373 13.7183 6.6757 13.7346 6.48926 13.7197C6.13666 13.6915 5.8528 13.5355 5.6123 13.3604C5.38201 13.1926 5.12573 12.9567 4.83984 12.6953L1.03125 9.21289L1.96875 8.1875L5.77734 11.6699C6.08684 11.9529 6.27773 12.1249 6.43066 12.2363C6.50183 12.2882 6.54699 12.3135 6.57324 12.3252C6.58525 12.3305 6.59269 12.3322 6.5957 12.333C6.59802 12.3336 6.59961 12.334 6.59961 12.334C6.63317 12.3367 6.66758 12.3335 6.7002 12.3252C6.7002 12.3252 6.70211 12.3251 6.7041 12.3242C6.70698 12.3229 6.71348 12.319 6.72461 12.3115C6.74849 12.2956 6.78843 12.2642 6.84961 12.2012C6.98138 12.0654 7.13957 11.8628 7.39648 11.5313L13.9502 3.07422L15.0498 3.92579Z"/></svg>',
     dshWarn: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M6.3002 3.32843L7.69986 3.32843L7.69986 7.79657H6.3002L6.3002 3.32843Z"/><path d="M6.3002 9.01935H7.69986V10.6711H6.3002V9.01935Z"/><path d="M12.6328 6.99976C12.6328 3.88874 10.111 1.36694 7 1.36694C3.88899 1.36695 1.3672 3.88875 1.36719 6.99976C1.36719 10.1108 3.88899 12.6326 7 12.6326C10.111 12.6326 12.6328 10.1108 12.6328 6.99976ZM13.8582 6.99976C13.8582 10.7873 10.7876 13.8579 7 13.8579C3.21244 13.8579 0.141846 10.7873 0.141846 6.99976C0.141857 3.2122 3.21245 0.141612 7 0.141602C10.7876 0.141602 13.8581 3.21219 13.8582 6.99976Z"/></svg>',
     dshClose: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg>',
-    // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline / 归档=ArchiveOutline20）
+    // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline）
     dshEdit: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.9482 1.97949L13.9253 4.95508L5.51453 13.3659L2.53613 12.6157L2.18896 9.24414L10.9482 1.97949ZM8.2951 4.63011L4.75226 8.17207L7.71064 9.1084L11.2535 5.56544L8.2951 4.63011ZM3.60287 10.1729L3.78518 12.1367L5.7417 12.5674L6.2064 12.1027L4.06812 11.4503L3.60287 10.1729Z"/></svg>',
-    dshArchive: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.6494 4.0498V12.3994C13.6494 12.9541 13.2041 13.3994 12.6494 13.3994H3.35059C2.7959 13.3994 2.35059 12.9541 2.35059 12.3994V4.0498C1.95534 4.0498 1.63281 3.72727 1.63281 3.33203V1.73242C1.63281 1.33718 1.95534 1.01465 2.35059 1.01465H13.6494C14.0447 1.01465 14.3672 1.33718 14.3672 1.73242V3.33203C14.3672 3.72727 14.0447 4.0498 13.6494 4.0498ZM3.35059 5.0498V12.3994H12.6494V5.0498H3.35059ZM6.35059 6.39941H9.64941V7.39941H6.35059V6.39941ZM2.63281 2.01465V3.0498H13.3672V2.01465H2.63281Z"/></svg>',
     // 新建独立会话（web 与 CLI 等权并行）：终端窗口 + 提示符
     web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
   }
@@ -323,8 +322,25 @@ function setConnUp(v) { connUp = v }
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可
   const findSession = (hash) => ALL.find((s) => hashOf(s) === hash)
-  // 2026-08-24 归档过滤：统一数据源过滤已归档会话（isArchived 声明在下方行菜单区，函数提升可用）
-  const sorted = () => [...ALL].filter((s) => !isArchived(s)).sort((a, b) => b.updatedAt - a.updatedAt)
+  // 侧栏会话 tab 排序（2026-09-18 定案）：有状态（CLI 在线：busy/waiting/idle 状态点在场）置顶，
+  // 组内按创建时间新→旧（createdAt = 网关透传的 jsonl 创建时刻）；无状态组同按创建时间。
+  const sessCmp = (a, b) => {
+    const pa = a.state ? 0 : 1
+    const pb = b.state ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return b.createdAt - a.createdAt
+  }
+  const sorted = () => [...ALL].sort(sessCmp)
+  // 合成条目保全（2026-09-18 新建会话 tab 闪现→消失→再现根治）：newWebSession 本地先插的合成
+  // tab 在 jsonl 落盘前，/gateway/sessions 权威列表尚不含它——权威拉取整体替换 ALL 会洗掉 tab，
+  // 落盘后下次刷新再出现（三次闪变根因）。不变量：用户刚建的会话 tab 不因权威刷新窗口消失。
+  // 凡权威列表写 ALL 的出口（loadSessions/refreshList）统一过此函数：synthetic 条目在权威条目
+  // 出现前保留，出现后由真实条目自然取代（真实条目无 synthetic 标）；创建失败由 ws-failed 显式移除。
+  function withSynthetic(fetched) {
+    const known = new Set(fetched.map((s) => hashOf(s)))
+    const kept = ALL.filter((s) => s.synthetic && !known.has(hashOf(s)))
+    return kept.length ? fetched.concat(kept) : fetched
+  }
 
   // ---------- 数据 ----------
   // 列表签名（2026-08-29 状态点偶发观测不到修复）：数量+最新 updatedAt+标题+各会话状态点。
@@ -346,7 +362,7 @@ function setConnUp(v) { connUp = v }
       const res = await fetch(apiUrl('/gateway/sessions'))
       const data = await res.json()
       if (!Array.isArray(data.sessions)) throw new Error(data.error || 'bad response')
-      setAll(data.sessions)
+      setAll(withSynthetic(data.sessions))
       applyTurnEndAt(ALL)
       live.listSig = listSigOf(data.sessions)
     } catch (e) {
@@ -1501,14 +1517,14 @@ function setLastNavHash(v) { lastNavHash = v }
   }
   function toolLine(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
   // 提问在消息流里的紧凑行（DSH 工具行语义）：icon + 「提问」+ 状态（等待回答 / 已回答）。
   // 2026-09-11 ④ 用户定案移除只读提问卡（`questionCardHtml` 静态不可交互的输入栏接管卡，
   // 「有一个静态的提问卡不可交互的…直接移除就好」）——AskUserQuestion 在 web 只留本紧凑行，
   // 作答在 CLI 窗口；web 可交互提问走 CLI 经审批链下发的 question 分支（renderQuestionApproval）。
   function askLineHtml(answered) {
-    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 · ${answered ? '已回答' : '等待回答'}</span>`
+    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 ${answered ? '已回答' : '等待回答'}</span>`
   }
   // 工具类型 → 概括短语（连续工具折叠的 summary 标签）
   const TOOL_VERB = {
@@ -1651,7 +1667,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // 根治：唯一行容器 .fold-state 同时承载「运行行（可收缩，.tl-text 省略号收尾）+ 状态尾缀（原子）」，
         // 收缩压力落在工具文本上、尾缀恒完整 → 几何上不可能再出现逐字换行。
         const cur = toolMeta(running[running.length - 1].block)
-        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' · ' + esc(cur.detail) : ''}</span></span>`
+        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' ' + esc(cur.detail) : ''}</span></span>`
         if (isTail && vacuumState) {
           sumInner = `<span class="fold-state">${runLine}${stateSpan(true, false)}</span>`
           stateAppend = '' // 已并入本行，防下方 ${stateAppend} 二次追加
@@ -1711,7 +1727,7 @@ function setLastNavHash(v) { lastNavHash = v }
   // 光泽扫动标识运行态（无蓝点、无 <details> 提示行、无输入 JSON，用户 2026-08-26 定案）。
   function toolCurHtml(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
 
   // ---- 文件变更汇总卡片（Codex 风格：+N 绿 / -N 红）----
@@ -2079,7 +2095,12 @@ function setLastNavHash(v) { lastNavHash = v }
   // refreshSession 对处理中末段只替换该段 DOM（applySegDelta），头部历史消息保留不动——消除整页重建闪烁。
   let lastSegInfo = null
 
-  function messagesHtml(messages) {
+  // lazy（2026-09-18 web 卡顿根治）：true = 惰性两段式——切段循环照跑（桶分配 O(N) 轻量）但
+  // 历史段不生成 HTML（think/ask/tool/reply 行的 html 置空）、closeSeg 只封存不渲染（按渲染同序
+  // 静态推进 lastNode 供末段 prev 锚点链）；仅末段（isFinal）真渲染并在入口补齐置空行。调用方
+  // live.js renderSessionBody 增量帧据此把「每帧全会话 MB 级序列化」降为「O(N) 切段 + 末段渲染」；
+  // 判定不可增量时再跑一次全量（lazy=false）付全额，行为与原等价。
+  function messagesHtml(messages, lazy) {
     // 按「用户消息 → AI 处理 → 回复」切段：
     // 真实 user 消息开新段；assistant/tool 的 thinking 与 tool_use 归入「已处理」折叠，
     // 段内最后一个带文本的 assistant 消息 = 回复（主内容），其余文本（过程旁白）也折进去。
@@ -2132,9 +2153,34 @@ function setLastNavHash(v) { lastNavHash = v }
       const processing = isFinal && !s.finished && !turnEnded // 最后一段且末尾还没收到纯文本回复 = 处理中
       // 末段仍在处理中（未出正式回复）且段内最近有工具调用 → 按该工具选形象；否则（回复已发布/空闲）默认 1
       if (isFinal) charNote = (!(s.finished || turnEnded) && s.lastTool) ? toolToChar(s.lastTool) : 1
+      // 惰性收口（2026-09-18）：非末段不渲染——历史段 DOM/内容自上轮以来不变，增量路径只消费
+      // 末段 html。按渲染同序静态推进 lastNode（u→f→a→c）供末段 prev 锚点链；节点存在性与渲染
+      // 路径等价：u=有开启气泡；f=非 reply 项非空（groupTools/liveFoldBody 有行必有折叠，skip 段
+      // processing 恒 false）；a=每条 reply 项；c=变更卡。texts 回填（重 markdown）一并跳过。
+      if (lazy && !isFinal) {
+        if (s.user) lastNode = { key: s.key, type: 'u' }
+        let nFold = s.guides ? s.guides.length : 0
+        for (const it of s.items) if (it.kind !== 'reply') nFold++
+        if (nFold) lastNode = { key: s.key, type: 'f' }
+        for (const it of s.items) if (it.kind === 'reply') lastNode = { key: s.key, type: 'a' }
+        if (s.changes && s.changes.size) lastNode = { key: s.key, type: 'c' }
+        return
+      }
       // 旁白 text 原位回填（与其后的动作交错，不再统一沉到段尾）；正式回复（end_turn）已在切段时
       // 气泡化（reply 项 → 折叠体外），不进 texts
       for (const t of s.texts) s.items[t.idx].html = processTextHtml(t.text)
+      // 惰性帧渲染段补生成（2026-09-18）：lazy 切段置空的行在此补齐（仅末段真渲染会走到）。
+      // ask 按吸附后的 answer 终态生成（切段时 false 缓存失效）；tool 行 html 恒为完成行基线
+      //（toolLine 产物，运行态由 flushTools 按改写分派 toolCurHtml，与原切段即生成等价）。
+      if (lazy) {
+        for (const it of s.items) {
+          if (it.html) continue
+          if (it.kind === 'think') it.html = thinkRowHtml(it.text, false)
+          else if (it.kind === 'ask') it.html = askLineHtml(it.answer != null)
+          else if (it.kind === 'reply') it.html = replyBubbleHtml(s.key, it.text)
+          else if (it.kind === 'tool') it.html = toolLine(it.block)
+        }
+      }
       // 思考行不做 running 态回填（思考永不独立成行：真空态=liveFoldBody 工具行内 .fold-state
       // 状态显示行，2026-09-09 用户定案「状态标识与工具调用行在一起」，v267 summary 轮转方案废弃）
 
@@ -2262,13 +2308,13 @@ function setLastNavHash(v) { lastNavHash = v }
       for (const b of m.blocks) {
         // 思考块进 items 并记索引（s.thinks 供处理中段 running 态定位）；单块放行由数据层保证
         //（prompt 全剔/transcript 单全局/prompt-tail-think 尾巴单块），前端不再二次折叠（P2 删留尾兜底）
-        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
+        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: lazy ? '' : thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
         else if (b.kind === 'text' && hasTool && b.text && b.text.trim()) {
           // 工具消息里的旁白文本：按块原位插入 items（保持 content 数组顺序——旁白在其对应工具调用之上），
           // 不统一沉到段尾；纯文本消息（无 tool_use）仍在循环后整体追加（保持同消息多 text 块拼接为一条的语义）。
           // end_turn/stop_sequence 正式回复（理论不带 tool_use，防御分支）→ 流内 reply 气泡，不进 texts
           if (isEndStop(m.stopReason)) {
-            seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, b.text), text: b.text })
+            seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, b.text), text: b.text })
             seg.replyTs = m.timestamp
           } else {
             seg.items.push({ kind: 'text', html: '', text: b.text })
@@ -2279,12 +2325,12 @@ function setLastNavHash(v) { lastNavHash = v }
         else if (b.kind === 'tool_use') {
           if (b.name === 'AskUserQuestion') {
             // 提问块 → DSH 风格提问卡（答案由后续 tool_result 文本吸附）
-            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: askLineHtml(false) }
+            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: lazy ? '' : askLineHtml(false) }
             seg.items.push(it)
             seg.lastAsk = it
             seg.lastStep = 'ask'
           } else {
-            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
+            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: lazy ? '' : toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
           }
         }
         else if (b.kind === 'tool_result') {
@@ -2310,7 +2356,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // closeSeg 时原位填充。
         const text = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
         if (m.stopReason === undefined || isEndStop(m.stopReason)) {
-          seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, text), text })
+          seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, text), text })
           seg.replyTs = m.timestamp
         } else {
           seg.items.push({ kind: 'text', html: '', text })
@@ -2390,7 +2436,7 @@ function setLastNavHash(v) { lastNavHash = v }
     // 平铺时项目会话混在根会话里，用短编号（Pj16）标识所属项目；项目文件夹视图已有文件夹名，不重复显示。
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
-    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/归档）
+    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/关闭）
     const more = '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
       <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}${more}</button>`
@@ -2564,7 +2610,6 @@ function setLastNavHash(v) { lastNavHash = v }
     m.innerHTML =
       '<div class="sess-menu-in">' +
       `<button type="button" class="rm-item" data-a="rename">${I.dshEdit}<span>重命名</span></button>` +
-      `<button type="button" class="rm-item" data-a="archive">${I.dshArchive}<span>归档会话</span></button>` +
       `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>` +
       '</div>'
     row.appendChild(m)
@@ -2578,10 +2623,6 @@ function setLastNavHash(v) { lastNavHash = v }
     m.querySelector('.rm-item[data-a="rename"]').addEventListener('click', () => {
       closeRowMenu()
       openRenameDialog(hash)
-    })
-    m.querySelector('.rm-item[data-a="archive"]').addEventListener('click', () => {
-      closeRowMenu()
-      archiveSession(hash)
     })
     m.querySelector('.rm-item[data-a="close"]').addEventListener('click', () => {
       closeRowMenu()
@@ -2613,34 +2654,6 @@ function setLastNavHash(v) { lastNavHash = v }
     // … 按钮上的按下不关菜单，交给 click 的 toggle（否则 mousedown 关 → click 重开 = 三点永远关不掉菜单）
     if (rowMenu && !rowMenu.contains(e.target) && !e.target.closest('.sess-more')) closeRowMenu()
   })
-
-  // ---------- 归档会话（2026-08-24 DSH archiveSession 移植）----------
-  // 归档 = 从侧栏/搜索列表隐藏（本地 localStorage 持久化，与 DSH「归档集」语义一致：
-  // 日志/转录保留，只是不在分组表面出现）。不提供恢复入口（对齐 DSH 当前行为）。
-  const ARCHIVED_KEY = 'floria-archived-v1'
-  let archivedSet = null
-  function loadArchived() {
-    if (archivedSet) return archivedSet
-    try {
-      const raw = JSON.parse(localStorage.getItem(ARCHIVED_KEY) || '[]')
-      archivedSet = new Set(Array.isArray(raw) ? raw.map(String) : [])
-    } catch {
-      archivedSet = new Set()
-    }
-    return archivedSet
-  }
-  function saveArchived() {
-    try { localStorage.setItem(ARCHIVED_KEY, JSON.stringify([...loadArchived()])) } catch { /* 忽略 */ }
-  }
-  function isArchived(s) { return loadArchived().has(hashOf(s)) }
-  function archiveSession(hash) {
-    loadArchived().add(hash)
-    saveArchived()
-    // 若当前正打开该会话 → 回首页（归档会话不再展示）
-    if (state.currentHash === hash) navigate('#/')
-    renderRecent()
-    toast('会话已归档')
-  }
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
   // 第一击 interrupt（网关按 sessionId 精确路由 → CLI onCancel：回合进行中即打断，空闲为 no-op）；
@@ -2768,7 +2781,7 @@ function setLastNavHash(v) { lastNavHash = v }
       // 2026-08-24 用户定案：未指定项目（笔/首页消息发送）→ 会话落全局根（@WrokSpace 散装区，
       // projectScope:'global'）；指定项目 → 该项目组（projectScope:'project'）。不再落启动服务器的项目根。
       const isGlobal = !projectLabel
-      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
+      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), createdAt: Date.now(), synthetic: true, projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
       renderRecent()
       navigate('#/' + encodeURIComponent(d.hash))
       if (isMobile()) setPanel(false)
@@ -2829,7 +2842,7 @@ function setLastNavHash(v) { lastNavHash = v }
       if (el) {
         liftStart(el, { anim: false })
         el.appendChild(rowMenu) // 菜单重挂到新行内（内嵌高度态随节点保留，无需重定位/不重播展开动画）
-      } else closeRowMenu() // 行已不在（归档/删除/换视图）→ 菜单一并关
+      } else closeRowMenu() // 行已不在（删除/换视图）→ 菜单一并关
     } else if (reLiftHash) {
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
@@ -2845,7 +2858,7 @@ function setLastNavHash(v) { lastNavHash = v }
         mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
         mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
         // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-        // 行已不存在（归档/删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
+        // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
         const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
         if (el) liftStart(el, { anim: false })
       }
@@ -3707,19 +3720,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     st.raf = requestAnimationFrame(frame)
     bindNeuPointer(st)
     st.frame = frame
-    // 认知层缺失照实提示（库只有记忆层：cog_graph.json/community.json 由认知管线产出，未跑即无）
-    const cog = data.cognition || {}
-    if (!cog.graph || !cog.communities) {
-      const old = box.querySelector('.neu-note')
-      if (old) old.remove()
-      const note = document.createElement('div')
-      note.className = 'neu-note'
-      note.textContent = !cog.graph
-        ? '该库尚无认知图（未跑认知管线 recall → fill_precog → build_graph），当前仅呈现记忆层 ' + data.mems.length + ' 条'
-        : '该库尚未检测社群（未跑 detect_communities），认知节点暂未归群'
-      box.appendChild(note)
-      st.note = note
-    }
   }
 
   /** 屏幕坐标 → 图坐标 */
@@ -4202,8 +4202,16 @@ function setFirstSendHash(v) { firstSendHash = v }
   })
   inputEl.addEventListener('paste', (e) => {
     if (gateAwait) return
-    const files = Array.from((e.clipboardData && e.clipboardData.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) { e.preventDefault(); addImageFiles(files) }
+    const cd = e.clipboardData
+    const files = Array.from((cd && cd.files) || []).filter(f => /^image\//.test(f.type))
+    if (files.length) { e.preventDefault(); addImageFiles(files); return }
+    // 2026-09-18 纯文本粘贴：contentEditable 默认吃剪贴板 text/html（从网页/IDE/Office 复制
+    // 粘入会保留颜色/粗体/背景等原格式），拦截改只取 text/plain 于光标处插入——与上方
+    // 2026-09-06「纯文本复制」copy 方向对称；insertText 保留 undo 栈且不破坏 mention chip
+    const text = cd ? cd.getData('text/plain') : ''
+    if (!text) return
+    e.preventDefault()
+    document.execCommand('insertText', false, text)
   })
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
   // 4 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
@@ -4511,7 +4519,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     document.head.appendChild(s)
   }
 
-  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「插件/技能 + 近48h 会话」浮窗，选中插入内联 chip ----------
+  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
@@ -4522,7 +4530,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
-  // 见 src/utils/sessionExposure.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
   function splitSessionToken(v) {
     const i = String(v).indexOf('|')
     return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
@@ -4609,14 +4617,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     const ql = (q || '').trim().toLowerCase()
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
-    if (MGR) {
-      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
-      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
-    }
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
+    }
+    if (MGR) {
+      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
+      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
     }
     return items
   }
@@ -4841,7 +4849,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   projSeatEl.querySelector('.chevron').innerHTML = I.dshChevDown
   function projList() {
     const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
     return Object.keys(byProject).sort((a, b) => {
       const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
       const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
@@ -5091,12 +5099,21 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!id) return null
     return { model: { id, name: id } }
   }
-  // 推理等级名（全局；effortLevel 未设置 = Off）
+  // 推理等级名（全局；effortLevel 未设置 = Off / 无 off 档模型显示「默认」）
   function effLabel() {
     const eff = MODEL_CUR.effortLevel
-    if (eff === undefined || eff === null) return 'Off'
+    if (eff === undefined || eff === null) return modelEffortLevels()?.includes('off') ? 'Off' : '默认'
     const level = EFFORT_LEVELS.find(e => e.id === eff)
     return level ? level.name : String(eff)
+  }
+  // 当前模型的官方思考等级清单（2026-09-18：凭据池 effortLevels 声明经 /gateway/models 下发；
+  // 未声明返回 null → 回退固定 Off+Low/High/Max）。渲染与选择一律以此为准，不写死档位。
+  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' }
+  function modelEffortLevels() {
+    const id = MODEL_CUR.model
+    if (!id || !MODELS || !Array.isArray(MODELS.items)) return null
+    const it = MODELS.items.find(x => x && x.v === id)
+    return it && Array.isArray(it.effortLevels) && it.effortLevels.length ? it.effortLevels.map(String) : null
   }
   function renderModelSeat() {
     // 显示源 = currentChoice()（MODEL_CUR.model，用户切换后即时更新），不用 MODELS.model 缓存——
@@ -5146,6 +5163,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       return rows
     }
     if (msel.pane === 'effort') {
+      // 官方档位动态渲染（2026-09-18）：有 effortLevels 声明=按声明逐档渲染（off→undefined 语义）；
+      // 未声明=回退固定 Off + Low/High/Max。
+      const levels = modelEffortLevels()
+      if (levels) {
+        return levels.map(id => ({ kind: 'effort', effort: id === 'off' ? undefined : id, label: EFFORT_LABELS[id] || id }))
+      }
       const rows = [{ kind: 'effort', effort: undefined, label: 'Off' }]
       for (const e of EFFORT_LEVELS) rows.push({ kind: 'effort', effort: e.id, label: e.name })
       return rows
@@ -5643,9 +5666,9 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
             const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
-            // 来源行在 q-body 首行（排队项是单行 flex，标签塞同一行会挤压正文；行内首行即视觉上方）
+            // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)
@@ -6394,7 +6417,7 @@ function setApprovalPending(v) { approvalPending = v }
         if (msg.session_id && msg.session_id !== state.currentHash) return
         if (approvalPending) { setApprovalPending(null) }
         if (takeover === 'approval') clearTakeover()
-      } else if (msg.type === 'status') addSystem('· ' + msg.state)
+      } else if (msg.type === 'status') addSystem(msg.state)
     }
   }
 
@@ -6535,7 +6558,7 @@ function setApprovalPending(v) { approvalPending = v }
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
     if (state.preview) route()
-    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true) }
+    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true); if (state.mgr === 'neurons') loadNeuronsData(true) }
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、
@@ -6649,17 +6672,6 @@ function setApprovalPending(v) { approvalPending = v }
     }
     renderImgPills()
   }
-
-// 排队图片点击催办（2026-09-19）：点击排队图片触发催办，发送 queue-nudge
-document.addEventListener('click', (e) => {
-  const pendingImg = e.target.closest?.('.pending-img')
-  if (!pendingImg) return
-  // 如果点击的是删除按钮，不触发催办
-  if (e.target.classList.contains('img-x')) return
-  if (!state.currentHash || !gws || gws.readyState !== 1) return
-  gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
-  toast('已催办：本条并入当前轮次')
-})
 
   async function gwSend() {
     if (!GATEWAY) return false
@@ -6787,113 +6799,6 @@ document.addEventListener('click', (e) => {
     return sessionCwd ? relPath(sessionCwd, abs) : abs
   }
 
-
-  // ---------- 键盘弹出适配（2026-09-19）----------
-  // 不变量：应用锚定「可视视口顶」，键盘只压缩「消息流底界 + 底栏」两处——侧栏与空态 Floria
-  // 背景（#empty-hint 绝对铺满 #chat-area，本身不参与位移）零移动，标题栏/URL 栏也不参与。
-  // 几何：L = html clientHeight（=100dvh，移动端键盘不改变布局视口，只压可视视口）→
-  // 键盘高 kb = L − vv.height；该值就是「底栏从版底抬到键盘上沿」所需的位移（应用局部坐标系
-  // 与可视视口顶对齐，故抬 kb 即贴键盘上沿，见 styles.css 键盘节）。
-  // pan = vv.offsetTop：浏览器为露出焦点元素会把可视视口整体上顶（本页 body overflow:hidden、
-  // 内容不溢出 ⇒ 文档无可滚余量，位移只可能来自可视视口上顶，不会来自文档滚动）——不反向抵消
-  // 则整界面（含侧栏/背景）被顶起，即用户上报现象；--vv-pan 交 #app 以 top 锚回。
-  // 相位（2026-09-19 二轮，用户「侧栏还是会被顶起一瞬间后回弹」）：上顶是帧级动作，补偿必须与
-  // 事件同帧落地——经 requestAnimationFrame 转手必然晚一帧，那一帧就是可见的「顶起」。故
-  // --kb / --vv-pan / kb-open 类 / 文档滚动归零全部在事件回调里**同步**写（只写样式属性，
-  // 不读取布局、不触发布局）；仅「空态底栏抬升量实测 + stageSync 占位重算」走 rAF 合帧
-  // （连续量、晚一帧不可见；且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。
-  // 空态底栏钉在 .g-stage 台面 76.75%（不贴版底），只需抬「露出键盘」的量（--kb-lift，实测）。
-  // 底栏子件（2026-09-19 三轮，用户「底栏的子部件也要适配」）：底栏上所有向上弹出的子件
-  // （@提及 / 命令菜单 / 任务浮窗 / 项目·模型·上下文弹层）都贴在栏体上沿外展开，旧写法的高度
-  // 上限是 vh 或定值——vh 是布局视口，键盘在场不缩，键盘越高弹层上半截越落在可视区外（够不着）。
-  // 统一出口 = settle 实测「底栏上沿到可视视口顶」的余量写 --bar-room（纯几何 popRoom），子件
-  // 一律 max-height: min(<设计上限>, var(--bar-room, <设计上限>))：键盘起落、底栏多行长高、空态↔
-  // 会话态迁移全由这一条量算吸收，弹层不再各自复刻视口公式。以**底栏上沿**量 = 对所有子件都是
-  // 安全上界（栏内 chip 系锚点更低、实际可用更多；取本值只会让内容多滚一点，绝不越出可视区）。
-  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → 键盘高与上顶量。
-  function kbGeometry(L, vvH, vvTop, scale, editing) {
-    // 捏合缩放不是键盘：scale≠1 时 vv 同样变矮，必须排除（否则缩放会误当键盘抬底栏）
-    if (!editing || scale > 1.01) return { kb: 0, pan: 0 }
-    return { kb: Math.max(0, L - vvH), pan: Math.max(0, vvTop) }
-  }
-
-  // 弹层可用高度（纯几何，探针直测本函数，勿复制公式）：底栏上沿在可视视口内的 y − 呼吸常量。
-  // barTop 是 client 坐标（含 #app 的 --vv-pan 位移），vvTop = 可视视口上顶（同 client 坐标口径），
-  // 相减才是「离用户看到的顶边多远」；margin 含弹层底距锚点的 gap(4~10px) 与顶部呼吸余量。
-  function popRoom(barTop, vvTop, margin) {
-    return Math.max(0, Math.round(barTop - vvTop - margin))
-  }
-
-  // 编辑中判定：只有文本输入在场才会弹键盘（非文本聚焦不应触发任何位移）
-  function isEditing() {
-    const el = document.activeElement
-    return !!el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
-  }
-
-  // 弹层顶部呼吸余量：一并吃下「弹层底距锚点 4~10px 的 gap」+ 与可视区顶的留白（常量在量算侧，
-  // 故 --bar-room 已直接是「弹层可安全占用的高度」，消费点不必各自再减间距）
-  const BAR_ROOM_MARGIN = 20
-
-  let lastKb = 0      // 同步段算得的键盘高，供延迟段量算复用（避免回读 CSS 变量）
-  let settleRaf = 0
-
-  // 同步段：与视觉变化同帧的几何（事件回调内直调，接合视觉视口上顶/键盘起落）
-  function syncKeyboard() {
-    const vv = window.visualViewport
-    if (!vv) return
-    const root = document.documentElement
-    const { kb, pan } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, vv.scale, isEditing())
-    lastKb = kb
-    root.style.setProperty('--kb', kb + 'px')
-    root.style.setProperty('--vv-pan', pan + 'px')
-    document.body.classList.toggle('kb-open', kb > 0)
-    if (window.scrollY) window.scrollTo(0, 0) // 键盘引起的文档滚动与上顶同理，须同帧归零
-    scheduleSettle()
-  }
-
-  // 延迟段（rAF 合帧）：空态底栏抬升量实测 + 消息流占位/跟随按新几何重算
-  function settle() {
-    if (settleRaf) { cancelAnimationFrame(settleRaf); settleRaf = 0 } // 直接调用时撤销在途帧，保幂等
-    const vv = window.visualViewport
-    if (!vv) return
-    const wrap = document.getElementById('input-wrap')
-    const stageEl = wrap && wrap.parentElement && wrap.parentElement.classList.contains('g-stage') ? wrap.parentElement : null
-    // offsetTop/offsetHeight 是布局位（不受 transform 与过渡影响，无中间态读数），台面几何零常数
-    // 依赖——自然底 = stage 顶 + 底栏 offsetTop + 半高；抬到键盘上沿上方 22px（与会话态 docked 同口径）。
-    let lift = 0
-    if (lastKb > 0 && stageEl) {
-      const naturalBottom = stageEl.getBoundingClientRect().top + wrap.offsetTop + wrap.offsetHeight / 2
-      lift = Math.max(0, Math.round(naturalBottom + 22 - vv.height))
-    }
-    document.documentElement.style.setProperty('--kb-lift', lift + 'px')
-    // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：rect.top 含 --kb-lift/--vv-pan 的位移与
-    // 空态台面定位，与 vv.offsetTop 同为 client 坐标口径 → 两者的差就是「离可视区顶多远」。
-    if (wrap) {
-      document.documentElement.style.setProperty(
-        '--bar-room',
-        popRoom(wrap.getBoundingClientRect().top, vv.offsetTop, BAR_ROOM_MARGIN) + 'px',
-      )
-    }
-    stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
-  }
-
-  function scheduleSettle() { if (!settleRaf) settleRaf = requestAnimationFrame(settle) }
-
-  // 启动注册（app.js 启动序列调用）；无 visualViewport（旧浏览器）时零行为
-  function initViewport() {
-    const vv = window.visualViewport
-    if (!vv) return
-    vv.addEventListener('resize', syncKeyboard)
-    vv.addEventListener('scroll', syncKeyboard) // 缩放/上顶改变 offsetTop，同样要同帧重算
-    window.addEventListener('orientationchange', syncKeyboard)
-    // 底栏自身几何变化（多行长高 / 接管卡换高 / 空态↔会话态迁移 / 窗口缩放的回流）同样要重量：
-    // --bar-room 与 --kb-lift 都取自底栏位置，只挂 vv 事件会漏掉这些帧。写入的是位移与上限变量，
-    // 不回改底栏盒模型 → 观察者自触发一次即收敛（幂等，非回环）。
-    const wrap = document.getElementById('input-wrap')
-    if (wrap) new ResizeObserver(scheduleSettle).observe(wrap)
-    syncKeyboard()
-    settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
-  }
   function initGateway() {
     gatewayCss()
     // 连接状态徽章已改为 Floria 品牌名后的浅灰小字（index.html #floria-conn），不再动态建 #conn-badge。
@@ -6928,7 +6833,6 @@ function setGateVerified(v) { gateVerified = v }
     await detectGateway()
     await loadSessions()
     initLive()
-    initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)
     setChar(1) // 启动默认形象
     // 2026-08-30 改定案（用户）：刷新保留当前界面——/session/<hash> 直进恢复，boot 不再把会话路径

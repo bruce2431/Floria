@@ -15,6 +15,10 @@ import type { ToolUseContext } from '../../Tool.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
+import {
+  fileModifierSuffix,
+  recordFileModifier,
+} from '../../utils/fileModifierRegistry.js'
 import { countLinesChanged, sumLinesChanged } from '../../utils/diff.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isENOENT } from '../../utils/errors.js'
@@ -302,11 +306,13 @@ export const FileEditTool = buildTool({
         if (isFullRead && fileContent === readTimestamp.content) {
           // Content unchanged, safe to proceed
         } else {
+          const suffix = fileModifierSuffix(fullFilePath, readTimestamp.timestamp)
           return {
             result: false,
             behavior: 'ask',
-            message:
-              'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+            message: suffix
+              ? `File has been modified since read${suffix}. Read it again before attempting to write it.`
+              : 'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
             errorCode: 7,
           }
         }
@@ -465,7 +471,12 @@ export const FileEditTool = buildTool({
         const contentUnchanged =
           isFullRead && originalFileContents === lastRead.content
         if (!contentUnchanged) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          throw new Error(
+            FILE_UNEXPECTEDLY_MODIFIED_ERROR +
+              (lastRead
+                ? fileModifierSuffix(absoluteFilePath, lastRead.timestamp)
+                : ''),
+          )
         }
       }
     }
@@ -526,6 +537,7 @@ export const FileEditTool = buildTool({
       offset: undefined,
       limit: undefined,
     })
+    recordFileModifier(absoluteFilePath)
 
     // 7. Log events
     if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {

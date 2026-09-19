@@ -94,35 +94,38 @@ export type ReactiveCompactOutcome =
 
 /**
  * Entry point called by query.ts after the API loop withholds a PTL / media
- * error. Returns a CompactionResult to rebuild context and retry, or null when
- * no recovery is possible (error should surface).
+ * error. `errorMsg` is the withheld synthetic error message itself (the
+ * caller's `assistantMessages.at(-1)` — it never lives in `messages`, whose
+ * tail stays the last user/tool_result; sniffing it out of `messages.at(-1)`
+ * was the bug that kept every recovery path dead at this first guard).
+ * Returns a CompactionResult to rebuild context and retry, or null when no
+ * recovery is possible (error should surface).
  */
 export async function tryReactiveCompact({
   hasAttempted,
   querySource,
   aborted,
   messages,
+  errorMsg,
   cacheSafeParams,
 }: {
   hasAttempted: boolean
   querySource?: string
   aborted: boolean
   messages: Message[]
+  errorMsg: AssistantMessage
   cacheSafeParams: CacheSafeParams
 }): Promise<CompactionResult | null> {
   if (aborted || hasAttempted) return null
   if (querySource === 'compact' || querySource === 'session_memory') return null
 
-  const last = messages.at(-1)
-  if (!last || last.type !== 'assistant') return null
-
-  if (isMediaSizeErrorMessage(last)) {
+  if (isMediaSizeErrorMessage(errorMsg)) {
     // Media rejection: strip the offending blocks in memory and retry — no
     // summary API call required.
-    return stripRetry(messages, last, cacheSafeParams)
+    return stripRetry(messages, errorMsg, cacheSafeParams)
   }
 
-  if (isUsagePolicyRefusalMessage(last)) {
+  if (isUsagePolicyRefusalMessage(errorMsg)) {
     // Usage-policy refusal: the API refuses the whole request because of
     // conversation content it will re-see verbatim on every retry — most
     // commonly a policy-violating image in history. Strip ALL media in
@@ -131,7 +134,7 @@ export async function tryReactiveCompact({
     return policyStripRetry(messages, cacheSafeParams)
   }
 
-  if (isPromptTooLongMessage(last)) {
+  if (isPromptTooLongMessage(errorMsg)) {
     const outcome = await runSummary(messages, cacheSafeParams, {
       customInstructions: undefined,
       trigger: 'auto',

@@ -5,13 +5,29 @@ import { needToken, apiUrl } from './gateway.js'
 import { refreshList } from './live.js'
 import { bodyEl, state, ALL, live, toast } from './state.js'
 import { saveModelCur, MODEL_CUR, modelUserPicked, renderModelSeat } from '../inputbar/model-select.js'
-import { isArchived } from '../sidebar/recent.js'
   // ---------- 会话映射 ----------
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可
   const findSession = (hash) => ALL.find((s) => hashOf(s) === hash)
-  // 2026-08-24 归档过滤：统一数据源过滤已归档会话（isArchived 声明在下方行菜单区，函数提升可用）
-  const sorted = () => [...ALL].filter((s) => !isArchived(s)).sort((a, b) => b.updatedAt - a.updatedAt)
+  // 侧栏会话 tab 排序（2026-09-18 定案）：有状态（CLI 在线：busy/waiting/idle 状态点在场）置顶，
+  // 组内按创建时间新→旧（createdAt = 网关透传的 jsonl 创建时刻）；无状态组同按创建时间。
+  const sessCmp = (a, b) => {
+    const pa = a.state ? 0 : 1
+    const pb = b.state ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return b.createdAt - a.createdAt
+  }
+  const sorted = () => [...ALL].sort(sessCmp)
+  // 合成条目保全（2026-09-18 新建会话 tab 闪现→消失→再现根治）：newWebSession 本地先插的合成
+  // tab 在 jsonl 落盘前，/gateway/sessions 权威列表尚不含它——权威拉取整体替换 ALL 会洗掉 tab，
+  // 落盘后下次刷新再出现（三次闪变根因）。不变量：用户刚建的会话 tab 不因权威刷新窗口消失。
+  // 凡权威列表写 ALL 的出口（loadSessions/refreshList）统一过此函数：synthetic 条目在权威条目
+  // 出现前保留，出现后由真实条目自然取代（真实条目无 synthetic 标）；创建失败由 ws-failed 显式移除。
+  function withSynthetic(fetched) {
+    const known = new Set(fetched.map((s) => hashOf(s)))
+    const kept = ALL.filter((s) => s.synthetic && !known.has(hashOf(s)))
+    return kept.length ? fetched.concat(kept) : fetched
+  }
 
   // ---------- 数据 ----------
   // 列表签名（2026-08-29 状态点偶发观测不到修复）：数量+最新 updatedAt+标题+各会话状态点。
@@ -33,7 +49,7 @@ import { isArchived } from '../sidebar/recent.js'
       const res = await fetch(apiUrl('/gateway/sessions'))
       const data = await res.json()
       if (!Array.isArray(data.sessions)) throw new Error(data.error || 'bad response')
-      setAll(data.sessions)
+      setAll(withSynthetic(data.sessions))
       applyTurnEndAt(ALL)
       live.listSig = listSigOf(data.sessions)
     } catch (e) {
@@ -79,6 +95,8 @@ export {
   hashOf,
   listSigOf,
   loadSessions,
+  sessCmp,
   sessionCwd,
   sorted,
+  withSynthetic,
 }

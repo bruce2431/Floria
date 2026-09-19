@@ -423,8 +423,9 @@ export type AppState = DeepImmutable<{
   fastMode?: boolean
   // Advisor model for server-side advisor tool (undefined = disabled).
   advisorModel?: string
-  // Effort value
-  effortValue?: EffortValue
+  // Effort value（null = 用户显式 Off：web 网关广播 'off'→null 经 GatewayControlBridge
+  // 透传，resolveAppliedEffort 据此显式不发 effort 参数；undefined = 未设置，跟随模型默认链）
+  effortValue?: EffortValue | null
   // Set synchronously in launchUltraplan before the detached flow starts.
   // Prevents duplicate launches during the ~5s window before
   // ultraplanSessionUrl is set by teleportToRemote. Cleared by launchDetached

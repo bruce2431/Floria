@@ -80,7 +80,9 @@ function getVersionChangelog(): string {
 // 无需再显式 --feature=PRIVATE_GATEWAY（build:dev:gateway 显式传入仍按显式代号命名产物）
 // 2026-09-15 用户定案：SESSION_LINK（会话间协作 session_send）进默认特性——工具未暴露任何会话时
 // 完全惰性（isEnabled 恒真但 checkPermissions 无授权目标即拒），进默认收益 = 免专用 flag 构建即可实测。
-const defaultFeatures = ['VOICE_MODE', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'PRIVATE_GATEWAY', 'REACTIVE_COMPACT', 'SESSION_LINK']
+// 2026-09-17 用户定案：NEURON_RAG（神经元内置检索/记忆）进默认特性——认知全链已实测闭环，
+// 不再需要专用 flag 构建（--feature=NEURON_RAG 显式传入仅剩命名作用）。
+const defaultFeatures = ['VOICE_MODE', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'PRIVATE_GATEWAY', 'REACTIVE_COMPACT', 'SESSION_LINK', 'NEURON_RAG']
 const featureSet = new Set(defaultFeatures)
 // 显式 --feature=X 的代号集合：用于输出 exe 以 feature 代号命名（feature 构建不复用默认 cli-dev 名，避免互相覆盖）
 const explicitFeatures = new Set<string>()
@@ -122,9 +124,9 @@ for (let i = 0; i < args.length; i += 1) {
 const features = [...featureSet]
 
 // 2026-08-25 用户定案：dev 构建（build:dev / build:dev:gateway）产物直接输出到项目根
-// （_agent-src 的上一级 = 便携项目根，免手动复制部署）。基于脚本位置推导
-// （import.meta.url = <项目根>/_agent-src/scripts/build.ts → 上两级），不依赖 cwd。
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url)) // <项目根>/_agent-src/scripts
+// （仓库根 Floria 的上一级 = 便携项目根，免手动复制部署）。基于脚本位置推导
+// （import.meta.url = <项目根>/Floria/scripts/build.ts → 上两级），不依赖 cwd。
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url)) // <项目根>/Floria/scripts
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..') // <项目根>
 
 // 产物命名 = <前缀>-<YYYYMMDDHHMMSS>[-<显式 feature 代号>]，Windows 输出 .exe；

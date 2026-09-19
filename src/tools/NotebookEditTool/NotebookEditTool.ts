@@ -10,6 +10,10 @@ import type { NotebookCell, NotebookContent } from '../../types/notebook.js'
 import { getCwd } from '../../utils/cwd.js'
 import { isENOENT } from '../../utils/errors.js'
 import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
+import {
+  fileModifierSuffix,
+  recordFileModifier,
+} from '../../utils/fileModifierRegistry.js'
 import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { lazySchema } from '../../utils/lazySchema.js'
@@ -228,10 +232,12 @@ export const NotebookEditTool = buildTool({
       }
     }
     if (getFileModificationTime(fullPath) > readTimestamp.timestamp) {
+      const suffix = fileModifierSuffix(fullPath, readTimestamp.timestamp)
       return {
         result: false,
-        message:
-          'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+        message: suffix
+          ? `File has been modified since read${suffix}. Read it again before attempting to write it.`
+          : 'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
         errorCode: 10,
       }
     }
@@ -440,6 +446,7 @@ export const NotebookEditTool = buildTool({
         offset: undefined,
         limit: undefined,
       })
+      recordFileModifier(fullPath)
       const data = {
         new_source,
         cell_type: cell_type ?? 'code',

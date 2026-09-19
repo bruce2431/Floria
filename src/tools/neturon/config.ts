@@ -110,8 +110,9 @@ interface ScanResult {
   pending: NeuronEntry[]
 }
 
-/** 扫描给定根列表的 neurons/ 子目录，目录即注册。id 冲突抛 ConfigError。 */
-function scanRoots(roots: string[]): ScanResult {
+/** 扫描给定根列表的 neurons/ 子目录，目录即注册。id 冲突：缺省 throw（CLI 双根语义）；
+ *  'keep-first' 时先到先得（roots 顺序即优先级，网关多根枚举用）。 */
+function scanRoots(roots: string[], onDuplicate: 'throw' | 'keep-first' = 'throw'): ScanResult {
   const reg = new Map<string, NeuronEntry>()
   const pending: NeuronEntry[] = []
   for (const root of roots) {
@@ -152,6 +153,7 @@ function scanRoots(roots: string[]): ScanResult {
       const nid = String(person.id ?? '').trim()
       if (!nid) continue // person.id 必填，缺则跳过
       if (reg.has(nid)) {
+        if (onDuplicate === 'keep-first') continue
         throw new ConfigError(
           `Neuron id 冲突: '${nid}' 同时发现于 ${reg.get(nid)!.path} 与 ${path}（person.id 须跨根唯一，起独特小代号）`,
         )
@@ -222,7 +224,28 @@ export function listPendingMigration(cwd?: string): NeuronEntry[] {
   return scanRegistry(cwd).pending
 }
 
-/** 双根全查：所有发现 Neuron 的元数据 + 实时统计 */
+/** 多根扫描全查（keep-first：同 id 先到先得，roots 顺序即优先级；一次性，不动缓存） */
+export function listNeuronsInRoots(roots: string[]): NeuronInfo[] {
+  const infos: NeuronInfo[] = []
+  for (const entry of scanRoots(roots, 'keep-first').reg.values()) {
+    const stats = getNeuronStats(entry.path)
+    infos.push({ ...entry, ...stats })
+  }
+  return infos.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/** neuron_id → 绝对路径（多根一次性扫描，keep-first；网关扩展根用） */
+export function resolveNeuronPathInRoots(neuronId: string, roots: string[]): string {
+  const reg = scanRoots(roots, 'keep-first').reg
+  const entry = reg.get(neuronId)
+  if (!entry) throw new ConfigError(`Neuron '${neuronId}' 未发现。可用: ${[...reg.keys()].join(', ')}`)
+  if (!existsSync(entry.path)) {
+    throw new ConfigError(`Neuron 路径不存在: ${entry.path}`)
+  }
+  return entry.path
+}
+
+/** 内置根全查：所有发现 Neuron 的元数据 + 实时统计 */
 export function listNeurons(cwd?: string): NeuronInfo[] {
   const infos: NeuronInfo[] = []
   for (const entry of scanRegistry(cwd).reg.values()) {

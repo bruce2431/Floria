@@ -139,8 +139,16 @@ import { setPanel } from '../sidebar/recent.js'
   })
   inputEl.addEventListener('paste', (e) => {
     if (gateAwait) return
-    const files = Array.from((e.clipboardData && e.clipboardData.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) { e.preventDefault(); addImageFiles(files) }
+    const cd = e.clipboardData
+    const files = Array.from((cd && cd.files) || []).filter(f => /^image\//.test(f.type))
+    if (files.length) { e.preventDefault(); addImageFiles(files); return }
+    // 2026-09-18 纯文本粘贴：contentEditable 默认吃剪贴板 text/html（从网页/IDE/Office 复制
+    // 粘入会保留颜色/粗体/背景等原格式），拦截改只取 text/plain 于光标处插入——与上方
+    // 2026-09-06「纯文本复制」copy 方向对称；insertText 保留 undo 栈且不破坏 mention chip
+    const text = cd ? cd.getData('text/plain') : ''
+    if (!text) return
+    e.preventDefault()
+    document.execCommand('insertText', false, text)
   })
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
   // 4 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；

@@ -29,7 +29,8 @@ import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js
 import { useTerminalNotification } from '../ink/useTerminalNotification.js';
 import { hasCursorUpViewportYankBug } from '../ink/terminal.js';
 import { createFileStateCacheWithSizeLimit, mergeFileStateCaches, READ_FILE_STATE_CACHE_SIZE } from '../utils/fileStateCache.js';
-import { updateLastInteractionTime, getLastInteractionTime, getOriginalCwd, getProjectRoot, getSessionId, switchSession, setCostStateForRestore, getTurnHookDurationMs, getTurnHookCount, resetTurnHookDuration, getTurnToolDurationMs, getTurnToolCount, resetTurnToolDuration, getTurnClassifierDurationMs, getTurnClassifierCount, resetTurnClassifierDuration } from '../bootstrap/state.js';
+import { updateLastInteractionTime, getLastInteractionTime, getOriginalCwd, getProjectRoot, getSessionId, switchSession, setCostStateForRestore, getTurnHookDurationMs, getTurnHookCount, resetTurnHookDuration, getTurnToolDurationMs, getTurnToolCount, resetTurnToolDuration, getTurnClassifierDurationMs, getTurnClassifierCount, resetTurnClassifierDuration, applyPendingSessionModelOverride } from '../bootstrap/state.js';
+import { applyPendingSessionProvider } from '../utils/credentials/pool.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
@@ -2569,6 +2570,11 @@ export function REPL({
     // render between turns); decouples freshness from React's render cycle for
     // a future headless conversation loop. Same pattern refreshTools() uses.
     const s = store.getState();
+    // 2026-09-18 切换同拍化：回合边界先把挂起的「模型覆盖+供应商绑定」成对落地，
+    // 与本回合 options.mainLoopModel 快照同一拍——回合中途所有请求（主循环续轮/
+    // 催办 drain 续轮/fork 查询）保持旧模型+旧凭据，切换完整落在下一轮循环
+    applyPendingSessionModelOverride();
+    applyPendingSessionProvider();
 
     // Compute tools fresh from store.getState() rather than the closure-
     // captured `tools`. useManageMCPConnections populates appState.mcp

@@ -147,14 +147,6 @@ export type BridgeCoreParams = {
    */
   toSDKMessages?: (messages: Message[]) => SDKMessage[]
   /**
-   * OAuth 401 refresh handler passed to createBridgeApiClient. REPL wrapper
-   * passes handleOAuth401Error; daemon passes its AuthManager's handler.
-   * Injected because utils/auth.ts transitively pulls in the command
-   * registry via config.ts → file.ts → permissions/filesystem.ts →
-   * sessionStorage.ts → commands.ts.
-   */
-  onAuth401?: (staleAccessToken: string) => Promise<boolean>
-  /**
    * Poll interval config getter for the work-poll heartbeat loop. REPL
    * wrapper passes the GrowthBook-backed getPollIntervalConfig (allows ops
    * to live-tune poll rates fleet-wide). Daemon passes a static config
@@ -278,7 +270,6 @@ export async function initBridgeCore(
         'BridgeCoreParams.toSDKMessages not provided. Pass it if you use writeMessages() or initialMessages — daemon callers that only use writeSdkMessages() never hit this path.',
       )
     },
-    onAuth401,
     getPollIntervalConfig = () => DEFAULT_POLL_CONFIG,
     initialHistoryCap = 200,
     initialMessages,
@@ -321,7 +312,6 @@ export async function initBridgeCore(
     getAccessToken,
     runnerVersion: MACRO.VERSION,
     onDebug: logForDebugging,
-    onAuth401,
     getTrustedDeviceToken,
   })
   // Ant-only: interpose so /bridge-kick can inject poll/register/heartbeat

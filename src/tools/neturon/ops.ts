@@ -6,6 +6,7 @@ import { listNeurons, listNeuronsInRoot, getBuiltinRoots, listPendingMigration }
 import { getRetriever } from './retriever.js'
 import { fillPrecog, listUnfilled } from './precog.js'
 import { buildCogGraph, detectCommunities } from './coggraph.js'
+import { nameCommunities } from './cogname.js'
 import { USAGE_HINT_SOURCE } from './usageHint.js'
 
 // ── neuron_list — 名册外的主动发现（root 参数扫任意目录） ──
@@ -227,8 +228,10 @@ export const NeuronFillPrecogTool = buildTool({
 const cogInput = lazySchema(() =>
   z.strictObject({
     action: z
-      .enum(['build_graph', 'detect_communities'])
-      .describe('build_graph=折叠 precog 记录建认知图；detect_communities=多分辨率 Leiden 社群检测'),
+      .enum(['build_graph', 'detect_communities', 'name_communities'])
+      .describe(
+        'build_graph=折叠 precog 记录建认知图；detect_communities=多分辨率 Leiden 社群检测；name_communities=LLM 给社群命名写 cog2.json（概念层；需 config llm 段，凭据走 credentials.json provider）',
+      ),
     neuron: z.string().describe('Neuron id'),
   }),
 )
@@ -238,10 +241,10 @@ export const NeuronCogTool = buildTool({
   name: 'neuron_cog',
   searchHint: 'cognition graph build fold communities leiden detect',
   async description() {
-    return '认知图维护：折叠 precog 记录建图 / Leiden 社群检测'
+    return '认知图维护：折叠 precog 记录建图 / Leiden 社群检测 / LLM 社群命名'
   },
   async prompt() {
-    return `Maintain a neuron's cognition graph. action=build_graph: fold annotated precog records into l1.cog/cog_graph.json (TTL cleanup of consumed records, batch fold/merge by similarity, phase-2 edge recompute) and mark records consumed — run after neuron_fill_precog. action=detect_communities: multi-resolution Leiden over the current graph, rewrites l1.cog/community.json (core/context roles used at recall time) — run after build_graph. Chain: recall → fill_precog → build_graph → detect_communities.`
+    return `Maintain a neuron's cognition graph. action=build_graph: fold annotated precog records into l1.cog/cog_graph.json (TTL cleanup of consumed records, batch fold/merge by similarity, phase-2 edge recompute) and mark records consumed — run after neuron_fill_precog. action=detect_communities: multi-resolution Leiden over the current graph, rewrites l1.cog/community.json (core/context roles used at recall time) — run after build_graph. action=name_communities: LLM names each community at the default resolution into l1.cog/cog2.json (the concept layer consumed by recall; rejected/heterogeneous communities are skipped by the model itself) — run after detect_communities, requires config llm section (provider/model; the API key comes from credentials.json). Chain: recall → fill_precog → build_graph → detect_communities → name_communities.`
   },
   get inputSchema(): CogInput {
     return cogInput()
@@ -268,6 +271,9 @@ export const NeuronCogTool = buildTool({
   async call(input: CogInput) {
     if (input.action === 'build_graph') {
       return { data: await buildCogGraph(input.neuron) }
+    }
+    if (input.action === 'name_communities') {
+      return { data: await nameCommunities(input.neuron) }
     }
     return { data: detectCommunities(input.neuron) }
   },

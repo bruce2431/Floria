@@ -21,7 +21,6 @@ import {
 } from '../../bootstrap/state.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isOfficialMcpUrl } from '../mcp/officialRegistry.js'
-import { isClaudeAISubscriber, getSubscriptionType } from '../../utils/auth.js'
 import { getRepoRemoteHash } from '../../utils/git.js'
 import {
   getWslVersion,
@@ -488,7 +487,6 @@ export type EventMetadata = {
   parentSessionId?: string // CLAUDE_CODE_PARENT_SESSION_ID (team lead's session)
   agentType?: 'teammate' | 'subagent' | 'standalone' // Distinguishes swarm teammates, Agent tool subagents, and standalone agents
   teamName?: string // Team name for swarm agents (from env var or AsyncLocalStorage)
-  subscriptionType?: string // OAuth subscription tier (max, pro, enterprise, team)
   rh?: string // Hashed repo remote URL (first 16 chars of SHA256), for joining with server-side data
   kairosActive?: true // KAIROS assistant mode active (ant-only; set in main.tsx after gate check)
   skillMode?: 'discovery' | 'coach' | 'discovery_and_coach' // Which skill surfacing mechanism(s) are gated on (ant-only; for BQ session segmentation)
@@ -616,7 +614,7 @@ const buildEnvContext = memoize(async (): Promise<EnvContext> => {
     }),
     isGithubAction: isEnvTruthy(process.env.GITHUB_ACTIONS),
     isClaudeCodeAction: isEnvTruthy(process.env.CLAUDE_CODE_ACTION),
-    isClaudeAiAuth: isClaudeAISubscriber(),
+    isClaudeAiAuth: false,
     version: MACRO.VERSION,
     versionBase: getVersionBase(),
     buildTime: MACRO.BUILD_TIME,
@@ -725,10 +723,6 @@ export async function getEventMetadata(
     // Swarm/team agent identification
     // Priority: AsyncLocalStorage context (subagents) > env vars (swarm teammates)
     ...getAgentIdentification(),
-    // Subscription tier for DAU-by-tier analytics
-    ...(getSubscriptionType() && {
-      subscriptionType: getSubscriptionType()!,
-    }),
     // Assistant mode tag — lives outside memoized buildEnvContext() because
     // setKairosActive() runs at main.tsx:~1648, after the first event may
     // have already fired and memoized the env. Read fresh per-event instead.

@@ -222,7 +222,7 @@ import { syncGwSend } from '../inputbar/send.js'
         if (msg.session_id && msg.session_id !== state.currentHash) return
         if (approvalPending) { setApprovalPending(null) }
         if (takeover === 'approval') clearTakeover()
-      } else if (msg.type === 'status') addSystem('· ' + msg.state)
+      } else if (msg.type === 'status') addSystem(msg.state)
     }
   }
 

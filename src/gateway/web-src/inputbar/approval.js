@@ -102,9 +102,9 @@ import { firstSendHash } from '../sidebar/recent.js'
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
             const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
-            // 来源行在 q-body 首行（排队项是单行 flex，标签塞同一行会挤压正文；行内首行即视觉上方）
+            // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)

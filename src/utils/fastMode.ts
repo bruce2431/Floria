@@ -10,12 +10,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
-import {
-  getAnthropicApiKey,
-  getClaudeAIOAuthTokens,
-  handleOAuth401Error,
-  hasProfileScope,
-} from './auth.js'
+import { getAnthropicApiKey } from './auth.js'
 import { isInBundledMode } from './bundledMode.js'
 import { getGlobalConfig, saveGlobalConfig } from './config.js'
 import { logForDebugging } from './debug.js'
@@ -46,7 +41,7 @@ export function isFastModeAvailable(): boolean {
   return getFastModeUnavailableReason() === null
 }
 
-type AuthType = 'oauth' | 'api-key'
+type AuthType = 'api-key'
 
 function getDisabledReasonMessage(
   disabledReason: FastModeDisabledReason,
@@ -129,8 +124,7 @@ export function getFastModeUnavailableReason(): string | null {
         return null
       }
     }
-    const authType: AuthType =
-      getClaudeAIOAuthTokens() !== null ? 'oauth' : 'api-key'
+    const authType: AuthType = 'api-key'
     const reason = getDisabledReasonMessage(orgStatus.reason, authType)
     logForDebugging(`Fast mode unavailable: ${reason}`)
     return reason
@@ -421,13 +415,10 @@ export async function prefetchFastModeStatus(): Promise<void> {
     return inflightPrefetch
   }
 
-  // Service key OAuth sessions lack user:profile scope → endpoint 403s.
-  // Resolve orgStatus from cache and bail before burning the throttle window.
-  // API key auth is unaffected.
+  // Resolve orgStatus from cache and bail before burning the throttle window
+  // when no API key is available.
   const apiKey = getAnthropicApiKey()
-  const hasUsableOAuth =
-    getClaudeAIOAuthTokens()?.accessToken && hasProfileScope()
-  if (!hasUsableOAuth && !apiKey) {
+  if (!apiKey) {
     const isAnt = process.env.USER_TYPE === 'ant'
     const cachedEnabled = getGlobalConfig().penguinModeOrgEnabled === true
     orgStatus =
@@ -445,43 +436,15 @@ export async function prefetchFastModeStatus(): Promise<void> {
   lastPrefetchAt = now
 
   const fetchWithCurrentAuth = async (): Promise<FastModeResponse> => {
-    const currentTokens = getClaudeAIOAuthTokens()
-    const auth =
-      currentTokens?.accessToken && hasProfileScope()
-        ? { accessToken: currentTokens.accessToken }
-        : apiKey
-          ? { apiKey }
-          : null
-    if (!auth) {
+    if (!apiKey) {
       throw new Error('No auth available')
     }
-    return fetchFastModeStatus(auth)
+    return fetchFastModeStatus({ apiKey })
   }
 
   async function doFetch(): Promise<void> {
     try {
-      let status: FastModeResponse
-      try {
-        status = await fetchWithCurrentAuth()
-      } catch (err) {
-        const isAuthError =
-          axios.isAxiosError(err) &&
-          (err.response?.status === 401 ||
-            (err.response?.status === 403 &&
-              typeof err.response?.data === 'string' &&
-              err.response.data.includes('OAuth token has been revoked')))
-        if (isAuthError) {
-          const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
-          if (failedAccessToken) {
-            await handleOAuth401Error(failedAccessToken)
-            status = await fetchWithCurrentAuth()
-          } else {
-            throw err
-          }
-        } else {
-          throw err
-        }
-      }
+      const status: FastModeResponse = await fetchWithCurrentAuth()
 
       const previousEnabled =
         orgStatus.status !== 'pending'

@@ -117,7 +117,10 @@ function readYaml(path: string): Record<string, unknown> {
   return (parseYaml(readFileSync(path, 'utf-8')) as Record<string, unknown>) ?? {}
 }
 
-function writeJsonAtomic(path: string, data: unknown): void {
+export { readJson, readYaml }
+
+/** 原子写 JSON（tmp + rename）；cogname.ts 共用 */
+export function writeJsonAtomic(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
   writeFileSync(tmp, `${JSON.stringify(data, null, 1)}\n`, 'utf-8')
@@ -148,7 +151,8 @@ function resKey(res: number): string {
   return Number.isInteger(res) ? `${res}.0` : `${res}`
 }
 
-function nowStampCompact(): string {
+/** 紧凑时间戳 YYYYMMDDHHMMSS（cog2_id 等共用） */
+export function nowStampCompact(): string {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`

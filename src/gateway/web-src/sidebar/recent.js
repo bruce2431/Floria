@@ -63,7 +63,7 @@ import { renderList, renderProject } from './mgr.js'
     // 平铺时项目会话混在根会话里，用短编号（Pj16）标识所属项目；项目文件夹视图已有文件夹名，不重复显示。
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
-    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/归档）
+    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/关闭）
     const more = '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
       <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}${more}</button>`
@@ -237,7 +237,6 @@ import { renderList, renderProject } from './mgr.js'
     m.innerHTML =
       '<div class="sess-menu-in">' +
       `<button type="button" class="rm-item" data-a="rename">${I.dshEdit}<span>重命名</span></button>` +
-      `<button type="button" class="rm-item" data-a="archive">${I.dshArchive}<span>归档会话</span></button>` +
       `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>` +
       '</div>'
     row.appendChild(m)
@@ -251,10 +250,6 @@ import { renderList, renderProject } from './mgr.js'
     m.querySelector('.rm-item[data-a="rename"]').addEventListener('click', () => {
       closeRowMenu()
       openRenameDialog(hash)
-    })
-    m.querySelector('.rm-item[data-a="archive"]').addEventListener('click', () => {
-      closeRowMenu()
-      archiveSession(hash)
     })
     m.querySelector('.rm-item[data-a="close"]').addEventListener('click', () => {
       closeRowMenu()
@@ -286,34 +281,6 @@ import { renderList, renderProject } from './mgr.js'
     // … 按钮上的按下不关菜单，交给 click 的 toggle（否则 mousedown 关 → click 重开 = 三点永远关不掉菜单）
     if (rowMenu && !rowMenu.contains(e.target) && !e.target.closest('.sess-more')) closeRowMenu()
   })
-
-  // ---------- 归档会话（2026-08-24 DSH archiveSession 移植）----------
-  // 归档 = 从侧栏/搜索列表隐藏（本地 localStorage 持久化，与 DSH「归档集」语义一致：
-  // 日志/转录保留，只是不在分组表面出现）。不提供恢复入口（对齐 DSH 当前行为）。
-  const ARCHIVED_KEY = 'floria-archived-v1'
-  let archivedSet = null
-  function loadArchived() {
-    if (archivedSet) return archivedSet
-    try {
-      const raw = JSON.parse(localStorage.getItem(ARCHIVED_KEY) || '[]')
-      archivedSet = new Set(Array.isArray(raw) ? raw.map(String) : [])
-    } catch {
-      archivedSet = new Set()
-    }
-    return archivedSet
-  }
-  function saveArchived() {
-    try { localStorage.setItem(ARCHIVED_KEY, JSON.stringify([...loadArchived()])) } catch { /* 忽略 */ }
-  }
-  function isArchived(s) { return loadArchived().has(hashOf(s)) }
-  function archiveSession(hash) {
-    loadArchived().add(hash)
-    saveArchived()
-    // 若当前正打开该会话 → 回首页（归档会话不再展示）
-    if (state.currentHash === hash) navigate('#/')
-    renderRecent()
-    toast('会话已归档')
-  }
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
   // 第一击 interrupt（网关按 sessionId 精确路由 → CLI onCancel：回合进行中即打断，空闲为 no-op）；
@@ -441,7 +408,7 @@ import { renderList, renderProject } from './mgr.js'
       // 2026-08-24 用户定案：未指定项目（笔/首页消息发送）→ 会话落全局根（@WrokSpace 散装区，
       // projectScope:'global'）；指定项目 → 该项目组（projectScope:'project'）。不再落启动服务器的项目根。
       const isGlobal = !projectLabel
-      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
+      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), createdAt: Date.now(), synthetic: true, projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
       renderRecent()
       navigate('#/' + encodeURIComponent(d.hash))
       if (isMobile()) setPanel(false)
@@ -502,7 +469,7 @@ import { renderList, renderProject } from './mgr.js'
       if (el) {
         liftStart(el, { anim: false })
         el.appendChild(rowMenu) // 菜单重挂到新行内（内嵌高度态随节点保留，无需重定位/不重播展开动画）
-      } else closeRowMenu() // 行已不在（归档/删除/换视图）→ 菜单一并关
+      } else closeRowMenu() // 行已不在（删除/换视图）→ 菜单一并关
     } else if (reLiftHash) {
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
@@ -518,7 +485,7 @@ import { renderList, renderProject } from './mgr.js'
         mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
         mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
         // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-        // 行已不存在（归档/删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
+        // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
         const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
         if (el) liftStart(el, { anim: false })
       }
@@ -534,10 +501,7 @@ import { renderList, renderProject } from './mgr.js'
 export function setFirstSendHash(v) { firstSendHash = v }
 
 export {
-  ARCHIVED_KEY,
   IS_TOUCH_DEVICE,
-  archiveSession,
-  archivedSet,
   bindSessClicks,
   bindSessLift,
   closeRenameDialog,
@@ -545,7 +509,6 @@ export {
   closeSession,
   confirmRename,
   firstSendHash,
-  isArchived,
   itemHtml,
   liftBound,
   liftClear,
@@ -553,7 +516,6 @@ export {
   liftEl,
   liftSpacer,
   liftStart,
-  loadArchived,
   mouseXY,
   newWebSession,
   openRenameDialog,
@@ -565,7 +527,6 @@ export {
   renameTarget,
   renderRecent,
   rowMenu,
-  saveArchived,
   setPanel,
   toggleRowMenu,
   webCreating,

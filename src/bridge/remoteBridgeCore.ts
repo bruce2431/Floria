@@ -91,7 +91,6 @@ export type EnvLessBridgeParams = {
   orgUUID: string
   title: string
   getAccessToken: () => string | undefined
-  onAuth401?: (staleAccessToken: string) => Promise<boolean>
   /**
    * Converts internal Message[] → SDKMessage[] for writeMessages() and the
    * initial-flush/drain paths. Injected rather than imported — mappers.ts
@@ -145,7 +144,6 @@ export async function initEnvLessBridgeCore(
     orgUUID,
     title,
     getAccessToken,
-    onAuth401,
     toSDKMessages,
     initialHistoryCap,
     initialMessages,
@@ -317,13 +315,10 @@ export async function initEnvLessBridgeCore(
   const refresh = createTokenRefreshScheduler({
     refreshBufferMs: cfg.token_refresh_buffer_ms,
     getAccessToken: async () => {
-      // Unconditionally refresh OAuth before calling /bridge — getAccessToken()
-      // returns expired tokens as non-null strings (doesn't check expiresAt),
-      // so truthiness doesn't mean valid. Pass the stale token to onAuth401
-      // so handleOAuth401Error's keychain-comparison can detect parallel refresh.
-      const stale = getAccessToken()
-      if (onAuth401) await onAuth401(stale ?? '')
-      return getAccessToken() ?? stale
+      // Re-read before each /bridge call — getAccessToken() returns expired
+      // tokens as non-null strings (doesn't check expiresAt), so truthiness
+      // doesn't mean valid.
+      return getAccessToken()
     },
     onRefresh: (sid, oauthToken) => {
       void (async () => {
@@ -536,13 +531,9 @@ export async function initEnvLessBridgeCore(
     onStateChange?.('reconnecting', 'JWT expired — refreshing')
     logForDebugging('[remote-bridge] 401 on SSE — attempting JWT refresh')
     try {
-      // Unconditionally try OAuth refresh — getAccessToken() returns expired
+      // Unconditionally re-read the token — getAccessToken() returns expired
       // tokens as non-null strings, so !oauthToken doesn't catch expiry.
-      // Pass the stale token so handleOAuth401Error's keychain-comparison
-      // can detect if another tab already refreshed.
-      const stale = getAccessToken()
-      if (onAuth401) await onAuth401(stale ?? '')
-      const oauthToken = getAccessToken() ?? stale
+      const oauthToken = getAccessToken()
       if (!oauthToken || tornDown) {
         if (!tornDown) {
           onStateChange?.('failed', 'JWT refresh failed: no OAuth token')
@@ -660,7 +651,6 @@ export async function initEnvLessBridgeCore(
   // against a 2s cap before forceExit kills the process. Budget accordingly:
   //   - archive: teardown_archive_timeout_ms (default 1500, cap 2000)
   //   - result write: fire-and-forget, archive latency covers the drain
-  //   - 401 retry: only if first archive 401s, shares the same budget
   async function teardown(): Promise<void> {
     if (tornDown) return
     tornDown = true
@@ -677,41 +667,13 @@ export async function initEnvLessBridgeCore(
     transport.reportState('idle')
     void transport.write(makeResultMessage(sessionId))
 
-    let token = getAccessToken()
-    let status = await archiveSession(
+    const status = await archiveSession(
       sessionId,
       baseUrl,
-      token,
+      getAccessToken(),
       orgUUID,
       cfg.teardown_archive_timeout_ms,
     )
-
-    // Token is usually fresh (refresh scheduler runs 5min before expiry) but
-    // laptop-wake past the refresh window leaves getAccessToken() returning a
-    // stale string. Retry once on 401 — onAuth401 (= handleOAuth401Error)
-    // clears keychain cache + force-refreshes. No proactive refresh on the
-    // happy path: handleOAuth401Error force-refreshes even valid tokens,
-    // which would waste budget 99% of the time. try/catch mirrors
-    // recoverFromAuthFailure: keychain reads can throw (macOS locked after
-    // wake); an uncaught throw here would skip transport.close + telemetry.
-    if (status === 401 && onAuth401) {
-      try {
-        await onAuth401(token ?? '')
-        token = getAccessToken()
-        status = await archiveSession(
-          sessionId,
-          baseUrl,
-          token,
-          orgUUID,
-          cfg.teardown_archive_timeout_ms,
-        )
-      } catch (err) {
-        logForDebugging(
-          `[remote-bridge] Teardown 401 retry threw: ${errorMessage(err)}`,
-          { level: 'error' },
-        )
-      }
-    }
 
     transport.close()
 

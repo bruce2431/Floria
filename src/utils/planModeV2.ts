@@ -1,5 +1,4 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { getRateLimitTier, getSubscriptionType } from './auth.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 export function getPlanModeV2AgentCount(): number {
@@ -11,20 +10,7 @@ export function getPlanModeV2AgentCount(): number {
     }
   }
 
-  const subscriptionType = getSubscriptionType()
-  const rateLimitTier = getRateLimitTier()
-
-  if (
-    subscriptionType === 'max' &&
-    rateLimitTier === 'default_claude_max_20x'
-  ) {
-    return 3
-  }
-
-  if (subscriptionType === 'enterprise' || subscriptionType === 'team') {
-    return 3
-  }
-
+  // OAuth 订阅线路已移除：无订阅档位，非 ant 恒 1
   return 1
 }
 

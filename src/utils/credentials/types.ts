@@ -38,6 +38,24 @@ export interface ProviderConfig {
    * Absent entirely (old credentials.json) = same as empty.
    */
   modelVision?: Record<string, boolean>
+  /**
+   * Model capabilities this provider's endpoint actually accepts, consumed by
+   * get3PModelCapabilityOverride (modelSupportOverrides.ts): 'effort' |
+   * 'max_effort' | 'thinking' | 'adaptive_thinking' | 'interleaved_thinking'.
+   * Declaring the array takes over completely for this provider (a capability
+   * absent from the list = explicitly unsupported); absent entirely = fall
+   * back to upstream env/name heuristics. Takes effect on session restart.
+   */
+  capabilities?: string[]
+  /**
+   * Official thinking/effort levels this provider's models expose, declared
+   * per the vendor docs (2026-09-18). Consumed by getPoolModelEffortLevels
+   * (engine Off→thinking-disabled branch) and broadcast per-item via
+   * GET /gateway/models so the web effort menu renders from the vendor's
+   * actual level list instead of the hardcoded default. Values: 'off' | 'low'
+   * | 'medium' | 'high' | 'max'. Absent = web falls back to Off/Low/High/Max.
+   */
+  effortLevels?: string[]
 }
 
 export interface CredentialsFile {

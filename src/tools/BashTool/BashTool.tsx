@@ -22,6 +22,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isENOENT, ShellError } from '../../utils/errors.js';
 import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from '../../utils/file.js';
 import { fileHistoryEnabled, fileHistoryTrackEdit } from '../../utils/fileHistory.js';
+import { recordFileModifier } from '../../utils/fileModifierRegistry.js';
 import { truncate } from '../../utils/format.js';
 import { getFsImplementation } from '../../utils/fsOperations.js';
 import { lazySchema } from '../../utils/lazySchema.js';
@@ -407,6 +408,7 @@ async function applySedEdit(simulatedEdit: {
     offset: undefined,
     limit: undefined
   });
+  recordFileModifier(absoluteFilePath);
 
   // Return success result matching sed output format (sed produces no output on success)
   return {

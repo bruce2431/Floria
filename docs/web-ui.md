@@ -339,6 +339,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **层级2 三级节点图**：卡片点击 → `state.mgrView.neuronSel = id` → `renderNeuGraphView`（`neu-head`：返回钮 + 标题 + 三枚 meta chips + 图例，`#neu-graph` 全高画布区，`.mgr-pane.neu-pane` 走 `#messages:has(.neu-graph)` 满高规则、`#chat-scroll` 去 padding/hidden overflow）。图包按 `neuron.id` 缓存一份（`NEU_GRAPH`），切库/重进 force 重拉。
 
+- **认知层可缺省（照实呈现）**：`cog_graph.json`/`community.json` 是认知管线产物，只迁入 LOG 的新库尚无——网关照常出记忆层图（`cognition.graph/communities` 两标志为 false），前端 `startNeuGraph` 在 `#neu-graph` 顶部挂 `.neu-note` 提示条（绝对定位贴顶、`pointer-events:none` 不吃指针、z-index 3 低于浮窗）说明缺哪一层并附记忆条数；缺认知层不画成错误态、不显示「加载失败」。
 - **节点与尺寸**：mem 点 `neuMemR` 2.5–5（∝内容 chars）；cog `neuCogR` 7–24（∝挂载 mem/rel 数 + 内容）；社群 `neuCommR` 11–34（∝cog 数 + 内容）。社群色 = `MGR_PALETTE` 按 i 循环；未入群 cog 灰 `#8a94a6`。
 - **布局**：确定性同心初始位（社群 r=170 环、cog 贴 host 社群外圈、未入群 cog r=300 环、mem 贴首 host cog；孤儿 mem 落中心环），无随机 → 探针可复现；手写 d3-force 同型仿真（`neuTick`：O(n²) 斥力按类型 charge **12/72/360** + 弹簧目标距=两端半径和 + pad（**力 ∝ alpha 无地板**）+ **向心引力 `NEU_G = 0.01` 统一外场**：指向画布中心、**与类型/尺寸完全无关**——向心只负责整图约束，径向分层语义全交斥力（charge 大者被推得远，**comm 外圈 / cog 中带 / mem 内带**）+ 碰撞推挤；**渐缓收尾**：速度上限 `14·min(1, alpha/0.3)` 随 alpha 线性收缩 + 停机阈值 0.003 + 弹簧地板移除——末段速度渐近归零不再急刹；衰减 0.985 reheat，ResizeObserver 轻重排，画布离场 `isConnected` 停帧）。
 - **连边（事实闭合）**：cog→社群（kind:comm）+ cog→mem/rel（kind:mem/rel）全量，同一 mem 挂多 cog 每 cog 各一条。

@@ -37,10 +37,17 @@ import { stageSync } from '../chat/stage.js'
     return Math.max(0, Math.round(barTop - vvTop - margin))
   }
 
-  // 编辑中判定：只有文本输入在场才会弹键盘（非文本聚焦不应触发任何位移）
+  // 编辑中判定：只有文本输入在场才会弹键盘（非文本聚焦不应触发任何位移）。
+  // （2026-09-19）补「焦点在子框架内」：项目预览的站点页面跑在 .preview-frame 里，焦点进入 iframe
+  // 文档时父文档 activeElement 就是那个 <iframe> 元素本身（浏览器标准行为，实测 parent activeElement
+  // === 'IFRAME'）。旧判定只认 INPUT/TEXTAREA → 预览 iframe 内打字恒 editing=false → kbGeometry 直接
+  // 返回 {0,0}：键盘上顶无人锚回、#chat-scroll 也不为键盘让位，整个界面随每次输入被顶起再弹回。
+  // iframe 在场即算编辑中——位移量仍由可视视口实测得出，无键盘时 kb/pan 天然为 0，放宽判定不引入空位移。
   function isEditing() {
     const el = document.activeElement
-    return !!el && (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+    if (!el) return false
+    if (el.tagName === 'IFRAME') return true
+    return !!(el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
   }
 
   // 弹层顶部呼吸余量：一并吃下「弹层底距锚点 4~10px 的 gap」+ 与可视区顶的留白（常量在量算侧，

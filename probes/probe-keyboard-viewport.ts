@@ -106,8 +106,11 @@ ok('B2 对话框高度上限用容器百分比（vh=布局视口，键盘在场�
 
 // ---------- ③c 底栏子件（向上弹出的六个弹层，七处上限声明）：上限一律收 --bar-room ----------
 // 底栏上沿到可视视口顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。
+// 实测式：barRoom 由 popRoom(底栏上沿, 可视视口上顶, 呼吸常量) 得出后写入 --bar-room
+// （实现取 barTop = wrap.getBoundingClientRect().top，与 vv.offsetTop 同为 client 坐标口径）
 ok('B3 余量由「底栏上沿 − 可视视口上顶」实测（同为 client 坐标口径）',
-  /setProperty\(\s*'--bar-room',\s*popRoom\(wrap\.getBoundingClientRect\(\)\.top, vv\.offsetTop, BAR_ROOM_MARGIN\)/.test(viewportJs))
+  /popRoom\(wrap\.getBoundingClientRect\(\)\.top, vv\.offsetTop, BAR_ROOM_MARGIN\)/.test(viewportJs) &&
+    /setProperty\('--bar-room', barRoom \+ 'px'\)/.test(viewportJs))
 ok('B3 底栏自身几何变化（多行长高/接管卡换高/空态↔会话态迁移）也触发重量',
   /new ResizeObserver\(scheduleSettle\)\.observe\(wrap\)/.test(viewportJs))
 const BAR_POPS: [string, RegExp][] = [
@@ -128,6 +131,7 @@ ok('B3 底栏弹层不再有布局视口口径的 vh 上限残留（键盘在场
 // ---------- ④ 产物与版本同步 ----------
 ok('C1 产物 app.js 含定义与调用点', ['function kbGeometry(', 'function syncKeyboard(', 'function settle(', 'function initViewport(', 'initViewport()'].every((s) => appJs.includes(s)))
 ok('C1 产物 app.js 未引用模块 import 语法（拼接已剥壳）', !/^\s*import .*viewport\.js/m.test(appJs))
+ok('C1 产物 app.js 含「焦点在子框架内」判定（预览 iframe 内输入，构建须同步）', /tagName === 'IFRAME'/.test(appJs))
 const swV = /const CACHE = 'floria-v(\d+)'/.exec(swJs)?.[1]
 const appV = /\/app\.js\?v=(\d+)/.exec(indexHtml)?.[1]
 ok('C2 sw CACHE 与 index.html app.js ?v= 同步', !!swV && swV === appV, `sw=v${swV} app=v${appV}`)
@@ -180,6 +184,32 @@ if (prBody) {
     ok(`D5 ${name}`, got === want, `期望 ${want} 实得 ${got}`)
   }
   ok('D5 弹层余量真值行全部一致', wrong2 === 0, `${wrong2} 行不符`)
+}
+
+// ---------- ⑤c 行为真值表：编辑中判定（项目预览 iframe 内输入必须算「编辑中」） ----------
+// 焦点进 iframe 文档时父文档 activeElement 就是该 <iframe> 元素本身——不认它则预览内打字恒
+// editing=false，kbGeometry 直接返回 {0,0}，键盘上顶无人锚回 → 每次输入整页上下跳（2026-09-19）。
+const ieBody = body(viewportJs, 'function isEditing()')
+ok('D6 isEditing 可从源码提取', ieBody.length > 0, 'viewport.js 函数签名被改写？')
+if (ieBody) {
+  // document 由形参注入（打桩），不触碰全局；函数体原文求值，非手抄
+  const withDoc = new Function('document', `return (${ieBody})`) as (d: { activeElement: unknown }) => () => boolean
+  const run = (active: unknown) => withDoc({ activeElement: active })()
+  const T3: [string, unknown, boolean][] = [
+    ['焦点在预览 iframe 内输入（父文档 activeElement=IFRAME）→ 编辑中', { tagName: 'IFRAME' }, true],
+    ['INPUT 聚焦 → 编辑中', { tagName: 'INPUT' }, true],
+    ['TEXTAREA 聚焦 → 编辑中', { tagName: 'TEXTAREA' }, true],
+    ['contentEditable 元素聚焦 → 编辑中', { tagName: 'DIV', isContentEditable: true }, true],
+    ['按钮等非文本聚焦 → 非编辑中（不触发位移）', { tagName: 'BUTTON' }, false],
+    ['无焦点（activeElement=null）→ 非编辑中', null, false],
+  ]
+  let wrong3 = 0
+  for (const [name, active, want] of T3) {
+    const got = run(active)
+    if (got !== want) wrong3++
+    ok(`D7 ${name}`, got === want, `期望 ${want} 实得 ${got}`)
+  }
+  ok('D7 编辑中判定真值行全部一致', wrong3 === 0, `${wrong3} 行不符`)
 }
 
 console.log(`\n${pass}/${fail}`)

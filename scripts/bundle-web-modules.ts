@@ -34,6 +34,9 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'core/auth.js', ranges: [[4965, 4968], [5048, 5053], [5054, 5194]], first: ['  function deviceHint() {', '  let finishGateTimer = null // 阶段3 停留后 hideGate 的定时器', '  // ---------- 设备认证配对（2026-08-28，浏览器侧完全删除 token 授权链） ----------'] },
   { file: 'inputbar/images.js', ranges: [[5195, 5258]], first: ['  // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，'] },
   { file: 'inputbar/send.js', ranges: [[5259, 5351]], first: ['  async function gwSend() {'] },
+  // 区间号仅作执行序排序（拼接按锚点检索切片，非定长行数）：键盘适配置于启动序列（5379）之前，
+  // 保证 initViewport 被调用时模块顶层 let 已完成初始化
+  { file: 'core/viewport.js', ranges: [[5351, 5351]], first: [''] },
 ]
 
 // ---------- 读取模块文件并剥离切割壳（头注释/import/setter 注释/export 块） ----------

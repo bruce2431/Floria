@@ -1,11 +1,12 @@
-// probe-keyboard-viewport.ts —— 「底栏恒贴可视区底界」不变量探针（只读，2026-09-19）
-// 背景：移动端（iPad/手机）底栏聚焦弹键盘时，浏览器把整个可视视口上顶。定案（四轮）：不抵消
-// 这个上顶（主线程写样式抵消合成器位移必晚一帧 ⇒ 「先向上→立即下拉→恢复」抖动），应用随之上移，
-// 只把「浏览器没顶掉的那部分」抬给底栏与消息流底界（--kb = L − pan − vv.height）。
+// probe-keyboard-viewport.ts —— 「整页平移 + 底栏恒贴键盘上沿」不变量探针（只读，2026-09-19）
+// 背景：移动端（iPad/手机）底栏聚焦弹键盘时，浏览器把整个可视视口上顶。定案（五轮）：应用是一块
+// 刚性板，整体上移一个键盘高——我们只写自己那份 kb = L − pan − vv.height，浏览器那份 pan 由它
+// 自己叠加，两者之和恒等于屏幕上的完整键盘高 total = L − vv.height（与浏览器怎么分配无关 ⇒ pan
+// 瞬时抖动被吸收，画面不动）。**不抵消 pan**（四轮教训：主线程写样式抵消合成器位移必晚一帧 ⇒
+// 「先向上→立即下拉→恢复」）。app 内可视窗 = [total, L]：消息流窗口 margin-top、三个覆盖层 top
+// 同取 --kb-total；底栏钉在 app 底边 22px、空态底栏随台面比例走——都不再各自补位移。
 // 断言分两类：① 源码/产物结构（唯一真源接线、三个 CSS 变量消费点、版本同步）；
 // ② 行为真值表——几何函数 kbGeometry / popRoom 从 web-src 源码**提取**（非手抄），喂真实维度组合。
-// 覆盖三批现象：pan 抵消抖动（--vv-pan 退役）、覆盖层随键盘下移/溢出（--kb）、底栏子件弹层伸到
-// 可视区外（--bar-room，见 B3 族）。
 // 用法：bun run ./probe-keyboard-viewport.ts   （输出 pass/fail，末行 N/M）
 
 const SRC = `${import.meta.dir}/../src/gateway/web-src`
@@ -61,10 +62,13 @@ ok('A3 键盘高只由布局视口与可视视口差得出', /root\.clientHeight
 // pan 不再抵消（2026-09-19 四轮）：--vv-pan 整个退役，应用随浏览器上顶一起走。
 ok('A3 上顶量 pan 不再反向抵消（--vv-pan 写入已删除）', !/setProperty\('--vv-pan'/.test(viewportJs))
 ok('A3 kb 扣掉浏览器上顶已吃掉的部分（L − pan − vvH）',
-  /Math\.max\(0, L - pan - vvH\)/.test(viewportJs) && /const pan = Math\.max\(0, vvTop\)/.test(viewportJs))
-ok('A3 空态底栏抬升量独立计算（--kb-lift）', /setProperty\('--kb-lift'/.test(viewportJs))
-ok('A3 空态抬升量按「可视区底界」比较（含上顶量，两坐标口径不混用）',
-  /naturalBottom \+ 22 - \(vv\.offsetTop \+ vv\.height\)/.test(viewportJs))
+  /const kb = Math\.max\(0, L - pan - vvH\)/.test(viewportJs) && /const pan = Math\.max\(0, vvTop\)/.test(viewportJs))
+// 整页平移（五轮）：我们那份 kb + 浏览器那份 pan = 屏幕上的完整键盘高，谁分摊多少都不影响画面。
+ok('A3 完整键盘高 = kb + pan（与浏览器怎么分配位移无关）', /return \{ kb, total: kb \+ pan \}/.test(viewportJs))
+ok('A3 --kb-total 与 --kb 同帧写入（app 内可视窗顶偏移）',
+  /setProperty\('--kb-total', total \+ 'px'\)/.test(body(viewportJs, 'function syncKeyboard()')))
+ok('A3 不再有「浏览器位移归零」迎战代码（scrollTo 已删——位移由 total 恒等式吸收）',
+  !/scrollTo\(/.test(viewportJs))
 ok('A3 键盘在场重算消息流占位几何（stageSync）', /stageSync\(\)/.test(viewportJs) && /import \{ stageSync \}/.test(viewportJs))
 
 // ---------- ②b 相位：补偿必须与视觉变化同帧（rAF 转手必晚一帧 = 侧栏被顶起一瞬间） ----------
@@ -78,26 +82,39 @@ const layoutReads = [...syncBody.matchAll(/([\w.$]+)\.offsetTop/g)].map((m) => m
 ok('A4 同步段内不读元素布局（getBoundingClientRect/offset* 会强制布局，拖累上顶过程）',
   syncBody.length > 0 && !/getBoundingClientRect|offsetHeight|offsetWidth/.test(syncBody) && layoutReads.length === 0,
   layoutReads.join(','))
-ok('A4 键盘高经变量交接延迟段（lastKb，不回读 CSS 变量）', /lastKb = kb/.test(syncBody) && /lastKb > 0/.test(body(viewportJs, 'function settle()')))
+ok('A4 键盘高经变量交接延迟段（lastTotal，不回读 CSS 变量）',
+  /lastTotal = total/.test(syncBody) && /popRoom\(barTop, lastTotal, BAR_ROOM_MARGIN\)/.test(body(viewportJs, 'function settle()')))
 ok('A4 仅「量算 + 占位重算」走 rAF 合帧', /requestAnimationFrame\(settle\)/.test(viewportJs) && /stageSync\(\)/.test(body(viewportJs, 'function settle()')))
-ok('A4 文档滚动归零也在同步段（与上顶同理须同帧）', /scrollTo\(0, 0\)/.test(syncBody))
+// 弹层余量的两个输入都是「位移无关量」：barTop 由 app 与底栏两个 rect 相减（位移在差里抵消），
+// lift = total 是纯数字交接——不再有「rect 含位移却拿去跟 vv.offsetTop 比」的口径赌注。
+ok('A4 弹层余量输入位移无关（rect 相减得 app 内布局 y）',
+  /wrap\.getBoundingClientRect\(\)\.top - app\.getBoundingClientRect\(\)\.top/.test(body(viewportJs, 'function settle()')))
 
 // ---------- ③ CSS 消费点（三个变量缺一即「被顶起」或「抬头/漏出」） ----------
-ok('B1 #app 无任何 top 位移残留（pan 抵消会与合成器上顶抢位移 ⇒ 一帧错位=抖动）',
-  /#app \{[^}]*\}/.test(css) && !/#app \{[^}]*top:\s*var\(--vv-pan/.test(css))
-ok('B1 消息流底界收 --kb（margin-bottom，缩小滚动视窗本身）', /#chat-scroll \{[^}]*margin-bottom:\s*var\(--kb, 0px\)/.test(css))
-ok('B1 docked 底栏抬 --kb（底边距 22px 口径不变）', /#input-wrap\.docked \{[^}]*top:\s*calc\(100% - 22px - var\(--kb, 0px\)\)/.test(css))
-ok('B1 空态底栏抬 --kb-lift（Floria 背景层零位移）', /#empty-hint #input-wrap \{[^}]*transform:\s*translate\(-50%, calc\(-50% - var\(--kb-lift, 0px\)\)\)/.test(css))
+ok('B1 整页平移本体：键盘在场 #app 收 --kb 整体位移',
+  /body\.kb-open #app \{\s*transform: translateY\(calc\(-1 \* var\(--kb, 0px\)\)\); \}/.test(css))
+// transform 非 none 会让 #app 成为 fixed 后代的包含块（#img-lightbox/#drop-overlay/.toast 的
+// inset 基准随之改）⇒ 规则必须挂在 kb-open 下，无键盘时 #app 无位移、基准不变。
+ok('B1 #app 本体无 transform（位移只在键盘在场时落，无键盘时不改 fixed 后代基准）',
+  !/^#app \{[^}]*transform:/m.test(css))
+ok('B1 消息流窗口顶偏移收 --kb-total（窗口 = [kb-total, L] = 可视窗）',
+  /#chat-scroll \{[^}]*margin-top:\s*var\(--kb-total, 0px\)/.test(css))
+ok('B1 消息流不再收 --kb（整页平移下再收一次即双重让位）',
+  !/#chat-scroll \{[^}]*margin-bottom:\s*var\(--kb/.test(css))
+ok('B1 docked 底栏钉 app 底边 22px（不再自补 --kb：平移已把底边送到键盘上沿）',
+  /#input-wrap\.docked \{[^}]*top:\s*calc\(100% - 22px\);[^}]*transform: translate\(-50%, -100%\)/.test(css) &&
+    !/#input-wrap\.docked \{[^}]*var\(--kb/.test(css))
+ok('B1 空态底栏随台面比例走（--kb-lift 退役，不再单独抬）',
+  /#empty-hint #input-wrap \{[^}]*transform:\s*translate\(-50%, -50%\)/.test(css) &&
+    !/--kb-lift/.test(css) && !/--kb-lift/.test(viewportJs))
 ok('B1 键盘在场底栏不做缓动（否则整程拖尾在键盘后）', /body\.kb-open #input-wrap \{\s*transition: none; \}/.test(css))
-ok('B1 无残留的写死 docked top（旧 calc(100% - 22px) 应已并入 --kb 表达式）',
-  !/top:\s*calc\(100% - 22px\);\s*\n\s*transform: translate\(-50%, -100%\)/.test(css))
 ok('B1 #empty-hint 自身不含任何位移/收缩（背景层不参与）',
   !/#empty-hint \{[^}]*var\(--kb/.test(css))
 
 // ---------- ③b 覆盖层（搜索层/风险门/重命名弹窗）：定位源须与 app 壳体同一 ----------
 for (const [name, id] of [['搜索层', 'search-overlay'], ['风险门', 'risk-modal'], ['重命名弹窗', 'rename-modal']] as const) {
-  const re = new RegExp(`#${id} \\{[^}]*position: absolute;[^}]*bottom: var\\(--kb, 0px\\)`)
-  ok(`B2 ${name} #${id} 在 app 壳体内 absolute 且 bottom 收 --kb`, re.test(css))
+  const re = new RegExp(`#${id} \\{[^}]*position: absolute;[^}]*top: var\\(--kb-total, 0px\\); right: 0; bottom: 0; left: 0;`)
+  ok(`B2 ${name} #${id} 在 app 壳体内 absolute 且遮罩 = 可视窗（top 收 --kb-total、bottom 0）`, re.test(css))
   ok(`B2 ${name} 不再 position:fixed 挂 body（会与 app 视口锚定脱钩）`, !new RegExp(`#${id} \\{[^}]*position: fixed`).test(css))
 }
 const appOpen = indexHtml.indexOf('<div id="app">')
@@ -120,11 +137,11 @@ for (const id of ['rename-modal', 'risk-modal'] as const) {
 }
 
 // ---------- ③c 底栏子件（向上弹出的六个弹层，七处上限声明）：上限一律收 --bar-room ----------
-// 底栏上沿到可视视口顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。
-// 实测式：barRoom 由 popRoom(底栏上沿, 可视视口上顶, 呼吸常量) 得出后写入 --bar-room
-// （实现取 barTop = wrap.getBoundingClientRect().top，与 vv.offsetTop 同为 client 坐标口径）
-ok('B3 余量由「底栏上沿 − 可视视口上顶」实测（同为 client 坐标口径）',
-  /popRoom\(wrap\.getBoundingClientRect\(\)\.top, vv\.offsetTop, BAR_ROOM_MARGIN\)/.test(viewportJs) &&
+// 底栏上沿到屏顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。
+// 实测式：barRoom 由 popRoom(底栏上沿在 app 内的布局 y, 整体上移量, 呼吸常量) 得出后写 --bar-room。
+ok('B3 余量由「底栏上沿(rect 相减得 app 内布局 y) − 整体上移量」实测',
+  /popRoom\(barTop, lastTotal, BAR_ROOM_MARGIN\)/.test(viewportJs) &&
+    /barTop = wrap\.getBoundingClientRect\(\)\.top - app\.getBoundingClientRect\(\)\.top/.test(viewportJs) &&
     /setProperty\('--bar-room', barRoom \+ 'px'\)/.test(viewportJs))
 ok('B3 底栏自身几何变化（多行长高/接管卡换高/空态↔会话态迁移）也触发重量',
   /new ResizeObserver\(scheduleSettle\)\.observe\(wrap\)/.test(viewportJs))
@@ -160,27 +177,28 @@ ok('C2 index.html 引用 styles.css 且带 cache-bust', /\/styles\.css\?v=\d+/.t
 const geoBody = body(viewportJs, 'function kbGeometry(')
 ok('D1 kbGeometry 可从源码提取', geoBody.length > 0, 'viewport.js 函数签名被改写？')
 if (geoBody) {
-  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scale: number, editing: boolean) => { kb: number }
-  // [名称, L, vvH, vvTop, scale, editing, 期望 kb]——kb = 浏览器上顶之后**仍需自行抬升**的量
-  const T: [string, number, number, number, number, boolean, number][] = [
-    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 1, false, 0],
-    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 1, true, 0],
-    ['iPad 键盘 300 无上顶：抬 300', 834, 534, 0, 1, true, 300],
-    ['iPad 键盘 300 + 浏览器上顶 100：只抬浏览器没顶掉的 200', 834, 534, 100, 1, true, 200],
-    ['上顶已吃掉全部空缺（pan=键盘高）：不再抬（应用整体顶起）', 834, 272, 562, 1, true, 0],
-    ['上顶超过键盘高 → kb 不为负', 834, 272, 700, 1, true, 0],
-    ['安卓（布局视口同步缩）：不重复抬', 534, 534, 0, 1, true, 0],
-    ['捏合缩放（非编辑）：不抬', 834, 500, 0, 1, false, 0],
-    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 2, true, 0],
-    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 1.005, true, 300],
-    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 1, true, 0],
-    ['异常：offsetTop 为负 → 上顶量夹到 0', 834, 534, -5, 1, true, 300],
+  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scale: number, editing: boolean) => { kb: number; total: number }
+  // [名称, L, vvH, vvTop, scale, editing, 期望 kb, 期望 total]
+  // kb = 浏览器上顶之后**仍需我们自行补**的位移；total = 屏幕上的完整键盘高 = kb + pan = L − vvH
+  const T: [string, number, number, number, number, boolean, number, number][] = [
+    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 1, false, 0, 0],
+    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 1, true, 0, 0],
+    ['iPad 键盘 300 无上顶：全由我们补 300', 834, 534, 0, 1, true, 300, 300],
+    ['iPad 键盘 300 + 浏览器上顶 100：我们补 200，合计仍需 300', 834, 534, 100, 1, true, 200, 300],
+    ['上顶已吃掉全部空缺（pan=键盘高）：我们补 0，合计仍 562', 834, 272, 562, 1, true, 0, 562],
+    ['上顶超过键盘高 → kb 不为负（total 仍为 app 被推出去的条带高）', 834, 272, 700, 1, true, 0, 700],
+    ['安卓（布局视口同步缩）：不重复补', 534, 534, 0, 1, true, 0, 0],
+    ['捏合缩放（非编辑）：不补', 834, 500, 0, 1, false, 0, 0],
+    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 2, true, 0, 0],
+    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 1.005, true, 300, 300],
+    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 1, true, 0, 0],
+    ['异常：offsetTop 为负 → 上顶量夹到 0', 834, 534, -5, 1, true, 300, 300],
   ]
   let wrong = 0
-  for (const [name, L, vvH, vvTop, scale, editing, kb] of T) {
+  for (const [name, L, vvH, vvTop, scale, editing, kb, total] of T) {
     const got = kbGeometry(L, vvH, vvTop, scale, editing)
-    if (got.kb !== kb) wrong++
-    ok(`D2 ${name}`, got.kb === kb, `期望 kb=${kb} 实得 kb=${got.kb}`)
+    if (got.kb !== kb || got.total !== total) wrong++
+    ok(`D2 ${name}`, got.kb === kb && got.total === total, `期望 kb=${kb}/total=${total} 实得 kb=${got.kb}/total=${got.total}`)
   }
   ok('D3 全部真值行一致', wrong === 0, `${wrong} 行不符`)
 }
@@ -189,18 +207,18 @@ if (geoBody) {
 const prBody = body(viewportJs, 'function popRoom(')
 ok('D4 popRoom 可从源码提取', prBody.length > 0, 'viewport.js 函数签名被改写？')
 if (prBody) {
-  const popRoom = new Function(`return ${prBody}`)() as (barTop: number, vvTop: number, margin: number) => number
-  // [名称, 底栏上沿(client), 可视视口上顶(client), 呼吸常量, 期望余量]
+  const popRoom = new Function(`return ${prBody}`)() as (barTop: number, lift: number, margin: number) => number
+  // [名称, 底栏上沿在 app 内的布局 y, 整体上移量, 呼吸常量, 期望余量]
   const T2: [string, number, number, number, number][] = [
-    ['无键盘：底栏上沿 700、可视顶 0、呼吸 20 → 680', 700, 0, 20, 680],
-    ['iPad 键盘 300 + 上顶 100：底栏上沿 480 → 360', 480, 100, 20, 360],
-    ['上顶量已经吃掉全部空间：余量 0（不为负）', 100, 100, 20, 0],
-    ['底栏落到可视区顶之上：钳到 0（不产生负 max-height）', 80, 100, 20, 0],
+    ['无键盘：底栏上沿 700、上移 0、呼吸 20 → 680', 700, 0, 20, 680],
+    ['iPad 键盘 300：底栏上沿在 app 内 480、上移 300 → 160', 480, 300, 20, 160],
+    ['上移量已吃掉全部余量：钳到 0（不产生负 max-height）', 100, 100, 20, 0],
+    ['底栏落在屏顶之上：钳到 0', 80, 100, 20, 0],
     ['子像素取整', 480.6, 100, 20, 361],
   ]
   let wrong2 = 0
-  for (const [name, barTop, vvTop, margin, want] of T2) {
-    const got = popRoom(barTop, vvTop, margin)
+  for (const [name, barTop, lift, margin, want] of T2) {
+    const got = popRoom(barTop, lift, margin)
     if (got !== want) wrong2++
     ok(`D5 ${name}`, got === want, `期望 ${want} 实得 ${got}`)
   }

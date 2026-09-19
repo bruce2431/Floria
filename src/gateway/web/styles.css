@@ -51,20 +51,25 @@ a { text-decoration: none; color: inherit; }
 
 /* ================= 键盘弹出（移动端）=================
    唯一真源 = visualViewport（core/viewport.js 写入三个变量，缺省全 0 = 无键盘行为）：
-     --kb       仍需自行抬升的键盘高（= html 高 − 可视视口上顶 − 可视视口高；浏览器上顶 pan 已
-                吃掉的位移不计入）——键盘只压缩「消息流底界 + 底栏」
-     --kb-lift  空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出可视区底界）
-     --bar-room 底栏上沿到可视视口顶的余量（实测，已含顶部呼吸常量）= 底栏子件弹层的安全高度上界
-   不抵消 pan：浏览器为露出焦点元素会把可视视口整体上顶（合成器线程瞬时生效），用主线程写样式去
-   抵消天生晚一帧 ⇒ 可见「先向上→立即下拉→恢复」的往复。故应用整体随之上移（用户定案「直接整个
-   顶起」），我们只保证底栏与消息流底界贴住可视区底界；#app 恒无 top 位移，--vv-pan 已退役。
-   覆盖层（#search-overlay / #risk-modal / #rename-modal）同在 #app 内 absolute 定位并收 --kb，
-   故键盘压缩对它们与 app 壳体同源，不必各自复刻视口公式。
+     --kb       我们写给 #app 的整体位移（= html 高 − 浏览器上顶 − 可视视口高；浏览器已顶掉的那份
+                不再补，由浏览器自己施加）
+     --kb-total 屏幕上完整键盘高（= --kb + 浏览器上顶 = app 顶部被推出屏外的条带高）= app 内可视窗
+                的顶偏移——消息流窗口与三个覆盖层都按它收口
+     --bar-room 底栏上沿到屏顶的余量（实测，已含顶部呼吸常量）= 底栏子件弹层的安全高度上界
+   整页平移（五轮定案，用户「整个界面连侧栏一起上下」要「整页平移」）：应用是一块刚性板，整体上移
+   一个键盘高——#app 写 translateY(−--kb)，浏览器那份上顶（合成器线程瞬时生效）自己叠加，两者之和
+   恒等于 --kb-total ⇒ 侧栏/背景/底栏连成一体走、内部零重排，pan 怎么变画面都不动（不抖）。
+   不抵消 pan（四轮教训）：用主线程写样式去抵消合成器位移天生晚一帧 ⇒「先向上→立即下拉→恢复」。
+   覆盖层（#search-overlay / #risk-modal / #rename-modal）同在 #app 内 absolute 定位并收 --kb-total，
+   故键盘所见的可视窗对它们与 app 壳体同源，不必各自复刻视口公式。
    底栏子件（#mention-pop / #cmd-pop / #task-dock .td-panel / #proj-pop / #model-pop / #ctx-panel
    六个向上弹出的弹层）同款做法：高度上限一律 min(<设计上限>, var(--bar-room, <设计上限>))。
    勿改回 vh/裸定值——vh 是布局视口且键盘在场不缩，键盘越高弹层上半截越落在可视区外；
    也勿各自复刻「100vh − 键盘」之类的公式（状态源会变多，见 CLAUDE 根本原则 5）。 */
 #app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; }
+/* 整页平移本体（键盘在场才落这条规则：transform 非 none 会让 #app 成为 fixed 后代的包含块，
+   #img-lightbox / #drop-overlay / .toast 的 inset 会改基准——无键盘时保持原基准不动） */
+body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 
 /* ================= 主聊天区 ================= */
 #chat-area { flex: 1; position: relative; background: var(--chat-bg); min-width: 0; display: flex; flex-direction: column; transition: padding-left 0.28s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -74,9 +79,10 @@ a { text-decoration: none; color: inherit; }
    洗 DOM）时自行调整 scrollTop 保持锚点视觉位置——隐式 scrollTop 写入者与 stage 跟随体系
    竞争=随机中间态跳源。两层消息流下 scrollTop 写入者必须收敛（stageFollow/唤出动画/吸底
    三处，全部自管几何），浏览器锚定干预关闭。 */
-/* margin-bottom = 键盘高（键盘节）：键盘在场时消息流可视底界收到键盘上沿，最后几条不被压在键盘下
-   （缩小的是滚动视窗本身，stageSync 读 clientHeight 自动重算两层占位几何）。 */
-#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; scrollbar-gutter: stable; overflow-anchor: none; padding: 24px 20px 8px; margin-bottom: var(--kb, 0px); transition: opacity 0.25s ease; }
+/* margin-top = 完整键盘高（键盘节）：整页平移后 app 顶部有 --kb-total 落到屏外，消息流窗口随之收到
+   [--kb-total, L] —— 窗口顶 = 屏顶、窗口底 = 键盘上沿，滚动视窗本身=可视视窗（stageSync 读
+   clientHeight 的贴顶/占位几何口径不变）。 */
+#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; scrollbar-gutter: stable; overflow-anchor: none; padding: 24px 20px 8px; margin-top: var(--kb-total, 0px); transition: opacity 0.25s ease; }
 /* padding-bottom 无过渡（2026-09-10 根修）：pad 写入必须与 .pin-stage 占位高度同帧一致
    （app.js syncTakeoverPad 写 pad 后同帧 stageSync 对账）→ scrollHeight 对 pad 写入不变
    → maxScroll=贴顶位 恒成立 → 视口零钳制零移动。旧 0.32s pad 过渡让占位与 pad 在过渡期
@@ -724,8 +730,8 @@ body.kb-open #input-wrap { transition: none; }
    translate(-50%,-50%) 让任意高度的高胶囊都精确居中于台面，任意窗口精确贴图） */
 #empty-hint #input-wrap {
   top: 76.75%;
-  /* 键盘节：只抬底栏（--kb-lift 实测抬到键盘上沿上方 22px），Floria 背景层零位移 */
-  transform: translate(-50%, calc(-50% - var(--kb-lift, 0px)));
+  /* 键盘节：不单独抬底栏——整页平移已把台面 76.75% 处的底栏连带顶起（键盘高 ≤ 台面留白时仍可见） */
+  transform: translate(-50%, -50%);
   /* 2026-09-07 用户定案：空态输入栏稍宽于趴栏 stage（每侧超出 20px），仍以视口宽 −32px 封顶
      （手机 stage=88vw 时该封顶生效，与 docked 手机档 calc(100% - 32px) 一致） */
   width: min(calc(100% + 40px), calc(100vw - 32px));
@@ -737,7 +743,7 @@ body.kb-open #input-wrap { transition: none; }
    首版 max(780px,70vw)+1100 封顶方向搞反（大窗口变宽）被用户否决已回滚。
    空态（#empty-hint #input-wrap）不受影响：输入栏绑定趴栏画面，维持 stage 比例） */
 #input-wrap.docked {
-  top: calc(100% - 22px - var(--kb, 0px)); /* 键盘节：底栏从版底抬到键盘上沿上方 22px（同底边距口径） */
+  top: calc(100% - 22px); /* 键盘节：底栏钉在 app 底边上方 22px——整页平移已把 app 底边送到键盘上沿 */
   transform: translate(-50%, -100%);
   width: min(780px, 70vw, calc(100% - 40px));
 }
@@ -1110,10 +1116,10 @@ body.kb-open #input-wrap { transition: none; }
 /* 风险确认门（dsh RiskConfirmation + Modal 完全移植：全屏遮罩 + 居中 r24 对话框，
    warning 行 + checkbox 认可 + footer[outline 取消 / primary 确认]） */
 #risk-modal {
-  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
-     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
-     的视口锚定脱钩，随键盘下移）。*/
-  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0; z-index: 1000;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，top 收
+     --kb-total ⇒ 遮罩恒等于 app 的可视窗（屏顶到键盘上沿），对话框在可视窗内居中；
+     勿改回 position:fixed（挂 body 会与 app 的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: var(--kb-total, 0px); right: 0; bottom: 0; left: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 #risk-modal[hidden] { display: none; }
@@ -1644,10 +1650,10 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 
 /* 搜索覆盖层 */
 #search-overlay {
-  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
-     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
-     的视口锚定脱钩，随键盘下移）。*/
-  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，top 收
+     --kb-total ⇒ 遮罩恒等于 app 的可视窗（屏顶到键盘上沿），对话框在可视窗内居中；
+     勿改回 position:fixed（挂 body 会与 app 的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: var(--kb-total, 0px); right: 0; bottom: 0; left: 0;
   background: rgba(0, 0, 0, 0.18); z-index: 100; display: none;
   align-items: center; justify-content: center;
 }
@@ -1832,10 +1838,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·
    body mt20 px24 · footer px24 右对齐 gap8 · Button outline/primary r18 h36 */
 #rename-modal {
-  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，
-     bottom 收 --kb ⇒ 键盘在场时只在可视区内居中；勿改回 position:fixed（挂 body 会与 app
-     的视口锚定脱钩，随键盘下移）。*/
-  position: absolute; top: 0; right: 0; bottom: var(--kb, 0px); left: 0; z-index: 1000;
+  /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，top 收
+     --kb-total ⇒ 遮罩恒等于 app 的可视窗（屏顶到键盘上沿），对话框在可视窗内居中；
+     勿改回 position:fixed（挂 body 会与 app 的视口锚定脱钩，随键盘下移）。*/
+  position: absolute; top: var(--kb-total, 0px); right: 0; bottom: 0; left: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 #rename-modal[hidden] { display: none; }

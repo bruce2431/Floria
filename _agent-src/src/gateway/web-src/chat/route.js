@@ -155,30 +155,38 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
     }, 580)
   }
 
-  function renderHome() {
-    stopLiveFoldTimer()
-    setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
-    stageRelease()
-    clearTakeover() // 导航离开：清掉残留的提问/审批 takeover（输入栏恢复）
-    state.currentHash = null
-    messagesEl.innerHTML = ''
-    // 2026-09-08 新会话界面串行根治：回首页（空态）同样必须清「当前会话」全局槽——与
-    // renderSession 切会话清理（「切会话即清全局槽」定案）同一清单的对称延伸。不变量：
-    // live.curUuid 非空 ⇔ 当前视图正展示该会话；session-delta（419）/queue-state（405）守卫
-    // 都以它为前提。renderHome 原先只清 messagesEl 不清槽 → 上一会话的 delta 靠残留
-    // curUuid/deltaSeq 通过守卫，renderSessionBody 整页重建把该会话转录连同「正在处理/
-    // 正在思考」实时尾灌进首页消息区（实测：新会话界面显示别的会话完整消息流）。
+  // 切视图即清全局槽（离开会话视图的唯一出口；2026-09-19 收敛）：
+  // 不变量 = live.curUuid 非空 ⇔ 当前视图正展示该会话。session-delta/queue-state/task-state/
+  // compact-state/turn-state/stream-text 六条 SSE 守卫全部以它为前提。**任何离开会话视图的入口
+  // 都必须清槽**——漏一处，残留 curUuid 就让该会话的实时流继续命中守卫：renderSessionBody 整页
+  // 重建 #messages 把非会话视图洗成会话消息流（renderHome 08-29「新会话界面串行」、
+  // openProjectPreview 09-16「项目页被洗成 chat」、renderMgr 09-19「神经 tab 跳 chat 有宽度
+  // 没底栏」三次实证同一根因，前两次都是就地补清单、漏了下一个入口）。
+  // 清槽清单：curUuid/deltaSeq/localMessages（SSE 匹配与增量基线）、lastMsgLen（增量守卫）、
+  // queueRemote/tasks（跨会话快照串染）、streamText（流式暂态）、接管卡与上下文环（视图级 UI 态）。
+  // 会话视图的重新接线由 renderSession/refreshSession 负责（唯一重建点，不在此处）。
+  function clearSessionSlots() {
     live.lastMsgLen = null
     live.localMessages = null
     live.deltaSeq = null
     live.queueRemote = []
     live.curUuid = null
-    live.tasks = [] // 2026-09-10 任务浮窗：首页空态清任务快照（切会话即清全局槽定案）
+    live.tasks = [] // 任务浮窗快照（空数组 = 浮窗整体不出现）
     renderTaskDock()
-    live.streamText = '' // 2026-09-08 流式字符通道：首页空态清流式暂态（切会话即清全局槽定案）
+    live.streamText = '' // 流式字符通道暂态
+    clearTakeover() // 清残留的提问/审批 takeover（输入栏恢复）
+    renderCtxMeter(null) // 无会话上下文：隐藏上下文环
+  }
+
+  function renderHome() {
+    stopLiveFoldTimer()
+    setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
+    stageRelease()
+    state.currentHash = null
+    messagesEl.innerHTML = ''
+    clearSessionSlots() // 回首页（空态）同样清「当前会话」全局槽（不变量见上）
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
-    renderCtxMeter(null) // 首页空态 → 隐藏上下文环
     renderProjSeat()
     chatArea.classList.remove('mgr-on')
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
@@ -339,6 +347,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
 export function setLastNavHash(v) { lastNavHash = v }
 
 export {
+  clearSessionSlots,
   emptyStageEl,
   flipInput,
   flipInputTimer,

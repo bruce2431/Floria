@@ -1,30 +1,37 @@
 // 管理三界面渲染（插件/项目/模型）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { route, navigate } from '../chat/route.js'
+import { route, navigate, clearSessionSlots } from '../chat/route.js'
 import { stageRelease } from '../chat/stage.js'
 import { hideGate } from '../core/auth.js'
 import { gToken, needToken } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { stopLiveFoldTimer } from '../core/live.js'
-import { hashOf, sorted } from '../core/sessions.js'
+import { hashOf, sessCmp, sorted } from '../core/sessions.js'
 import { chatArea, messagesEl, inputWrap, bodyEl, overlay, state, saveMgrView, ALL, esc, toast, isMobile } from '../core/state.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { apiSetModel } from '../inputbar/model-select.js'
 import { gwSend } from '../inputbar/send.js'
 import { MGR, MGR_LOADING, MGR_ERR, loadMgrData, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, mgrColor } from './mgr-data.js'
-import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from './recent.js'
+import { renderMgrNeurons } from './neurons.js'
+import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
   function renderMgr() {
     closeMentionPop()
     stopLiveFoldTimer()
     stageRelease()
     state.currentHash = null
     state.preview = null
+    // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
+    // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
+    // 清槽，会话 A 的 session-delta 到达时按残留 curUuid 命中守卫 → renderSessionBody 整页重建
+    // #messages 把管理视图（如神经元图）洗成会话消息流；#chat-area.mgr-on 仍在位（CSS 隐藏
+    // #input-wrap）=「跳到 chat、有宽度没底栏」。清槽清单与不变量见 route.js clearSessionSlots。
+    clearSessionSlots()
     const scrollEl = document.querySelector('#chat-scroll')
     const prevTop = scrollEl ? scrollEl.scrollTop : 0
     // 「项目」入口：仿照插件布设，每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
     if (state.mgr === 'projects') {
       // 顶部结构与插件视图完全同构（mgr-top mgr-kind + mgr-cats 占位），避免切换跳动；无刷新/设置按钮
-      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel && !isArchived(s)).map((s) => s.projectLabel)).size
+      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
       messagesEl.innerHTML =
         '<div class="mgr-pane">' +
         // 空 mgr-top 占位：与插件视图「插件/技能」切换行等高（.mgr-top min-height），避免切换时标题跳动
@@ -59,6 +66,11 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
       chatArea.classList.add('mgr-on')
       renderMgrModels()
       loadModelsData(false)
+      return
+    }
+    // 「神经」入口：层级1 神经元选择卡片，层级2 三级节点图（neurons.js，数据源 /gateway/neurons[/graph]）
+    if (state.mgr === 'neurons') {
+      renderMgrNeurons()
       return
     }
     const v = state.mgrView
@@ -156,7 +168,7 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
     if (!list) return
     const q = (state.mgrView.q || '').trim().toLowerCase()
     const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
     const labels = Object.keys(byProject).filter((l) => !q || l.toLowerCase().includes(q))
     // 按项目最近活跃时间降序（同 renderProject 排序）
     labels.sort((a, b) => {
@@ -325,22 +337,41 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
   function openProjectPreview(label, hasPreview) {
     // 2026-09-04 预览重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
     // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
-    // 同 label 且 iframe 仍挂载（且非 default 兜底误挂，previewMounted=null）→ 幂等跳过，保留站内位置。
-    if (state.preview === label && state.previewMounted === label && messagesEl.querySelector('.preview-frame')) return
-    state.currentHash = null
-    stopLiveFoldTimer()
-    stageRelease()
-    state.preview = label
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
-    messagesEl.innerHTML =
-      '<div class="preview-shell">' +
-      '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
-      '</div>'
+    // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
+    // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
+    // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat（时间相关性=会话活跃期
+    // 用户切屏频繁 → WS 重连频繁 → 重挂频繁）。改两级重入：同 label 且 iframe 在场（data-label 锚定）=
+    // 软重入——不重写 shell、不清槽，三级链照跑但 mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航
+    // 扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；异 label 或 iframe 不在场 = 硬挂载。
+    const curFrame = messagesEl.querySelector('.preview-frame')
+    const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
+    if (!soft) {
+      state.currentHash = null
+      stopLiveFoldTimer()
+      stageRelease()
+      // 2026-09-16 项目页被实时流洗成 chat 根治：离开会话视图必须清全局槽（清槽清单与不变量
+      // 见 route.js clearSessionSlots；2026-09-19 收敛为共享出口，管理视图同款）。
+      clearSessionSlots()
+      state.preview = label
+      inputWrap.classList.remove('docked')
+      chatArea.classList.remove('in-session')
+      chatArea.classList.add('mgr-on')
+      messagesEl.innerHTML =
+        '<div class="preview-shell">' +
+        '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
+        '</div>'
+    }
     const mount = (src, name, already) => {
       const body = document.querySelector('.preview-body')
       if (!body) return
+      // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
+      // 一律不走下方整区重建
+      const cur = body.querySelector('.preview-frame')
+      if (cur) {
+        if (cur.getAttribute('src') !== src) cur.setAttribute('src', src)
+        state.previewMounted = src.includes('/default-preview/') ? null : label
+        return
+      }
       // 覆盖层遮住后端前端加载时的深色初始化画面（2026-08-20 三轮反馈后定稿 v81）：
       // ① 纯遮罩无指令/按钮（用户「弹出的指令框」= 带指令文字的提示层，已去指令）；
       // ② 文案由 backend name 驱动（可插拔：preview.json backend.name，缺省「项目服务」）；
@@ -350,13 +381,13 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       body.innerHTML =
-        `<iframe class="preview-frame" title="${esc(label)} 项目主页" src="${src}"></iframe>` +
+        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already
           ? ''
           : `<div class="preview-overlay"><div class="preview-overlay-spin"></div>` +
             `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
             `<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div></div>`)
-      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底误挂不算已挂载，hideGate 解锁后重挂
+      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底 default 记 null：真源升级由软重入 src 校正驱动
       const frame = body.querySelector('.preview-frame')
       const overlay = body.querySelector('.preview-overlay')
       if (!frame) return
@@ -420,7 +451,7 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
     bodyEl.innerHTML = ''
     if (state.pt === 'projects') {
       const byProject = {}
-      for (const s of ALL) if (s.projectScope === 'project' && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+      for (const s of ALL) if (s.projectScope === 'project') (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
       const labels = Object.keys(byProject).sort((a, b) => {
         const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
         const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
@@ -433,7 +464,7 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
       const box = document.createElement('div')
       box.innerHTML = labels
         .map((label) => {
-          const chats = [...byProject[label]].sort((a, b) => b.updatedAt - a.updatedAt)
+          const chats = [...byProject[label]].sort(sessCmp)
           // 2026-08-24 项目新建会话：项目文件夹行 + 按钮 → 在指定项目下新建 web 会话
           // （与「笔」新建会话并存，两者指向不同 exe——见 newWebSession 注释）
           return `<div class="folder" data-f="${esc(label)}"><button class="folder-head">
@@ -460,7 +491,7 @@ import { setPanel, itemHtml, bindSessClicks, isArchived, newWebSession } from '.
       bindSessClicks(box)
       bodyEl.appendChild(box)
     } else {
-      const root = ALL.filter((s) => s.projectScope !== 'project' && !isArchived(s))
+      const root = ALL.filter((s) => s.projectScope !== 'project')
       const box = document.createElement('div')
       box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
       bindSessClicks(box)

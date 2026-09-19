@@ -352,7 +352,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 用户症状「打开项目预览页有概率跳回 chat」「在 chat 状态行更新时跳」。两轮根修互补：
 
-- **一轮**：`openProjectPreview` 进预览时清 `live.curUuid`/`localMessages`/`deltaSeq`/`queueRemote`/`tasks`/`streamText` 全局槽 + `clearTakeover` + `renderCtxMeter(null)`，补齐 §3「切视图即清全局槽」不变量在预览态的实例——堵「实时流（session-delta 等六类 SSE 守卫全押在 `live.curUuid` 上）洗预览成 chat」。
+- **一轮**：`openProjectPreview` 进预览时清全局槽（现走共享出口 `clearSessionSlots`，见 §34），补齐 §3「切视图即清全局槽」不变量在预览态的实例——堵「实时流（session-delta 等六类 SSE 守卫全押在 `live.curUuid` 上）洗预览成 chat」。
 - **二轮（根修本尊）**：旧幂等守卫要求 `previewMounted === label`，而兜底 default-preview 恒记 `null`（「兜底误挂不算已挂载」定案）→ 每次断连重连/门解锁的 `hideGate` 恢复链（`if (state.preview) route()`）都整区重写 shell + iframe 重载；iOS 上 iframe 二次导航污染主历史诱发自发后退落到 `/session/<hash>` 即弹回会话 chat。「状态行更新时跳」= 同因相关：会话活跃期切屏频繁 → WS 重连频繁 → 重挂频繁。
 - **修法**：`openProjectPreview` 改两级重入——同 label 且 iframe 在场（`data-label` 锚定）= **软重入**：不重写 shell、不清槽，mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航扰动；异 src 只换 src，覆盖 backend 就绪升级/default 换真源），软重入分支统一 return 不落整区重建；异 label 或 iframe 不在场 = 硬挂载（原全流程）。一轮清槽修复仍必要（SSE 守卫的前提不变量）。
 - **取证注意**：bytecode exe 内嵌资产不可 grep（字符串经编码），验证资产版本直接 `curl http://127.0.0.1:8124/sw.js` 与 `/app.js`。
@@ -393,4 +393,11 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 - **根因**（§30 的残留缺口）：`applySegDelta` 的状态保持只覆盖 `[data-t="u"]` 段首用户气泡——段内其余 `data-m=key` 节点（尤其**引导气泡 `data-t="g<gi>"`**，见 `chat/messages.js` `weave`）每增量仍整段重建。回合中上传的图片若经排队注入（`queued_command`）落成引导气泡，就与旁白行（`.done-think`）同段；每次旁白/状态行到达 → 引导气泡 `<img>` 重建 → image-cache `private,no-cache` 必回源 → 新节点在 paint 时尚未解码 = 0 高塌缩再回弹。用户口径「旁白消息的图片没修复」即此。
 - **修法**（`core/live.js` `applySegDelta`）：照搬 §31 整页重建的 img 换血语义——删旧节点**前**从「本次将被删除」的节点按其 `img[src]` 采池（同一 src 多图用数组 shift），插入新段后同 src 的新 `<img>` 一律 `replaceWith` 换回旧节点（旧节点持已解码位图，零回源零重解码）。保留的 `[data-t="u"]` 旧气泡**不采池**：引导气泡与其可能同 src，采走会让保留气泡丢图。同一不变量：已落盘图片字节不可变（image-cache 单调 id）→ img 节点不跨帧重建。
+
+## 34. 切视图即清全局槽收敛为共享出口：管理视图（神经 tab）不再被实时流洗成 chat
+
+- **症状**：从侧栏切到「神经」等管理视图后，该会话一有新消息就可能被拉回 chat 消息流界面——**有宽度、没底栏**（`#chat-area.mgr-on` 仍在位：避让 padding 生效、`#input-wrap { display:none }` 隐藏输入栏）。
+- **根因**（同一不变量第三次复发）：`live.curUuid` 非空 ⇔ 当前视图正展示该会话，六条 SSE 守卫（session-delta / queue-state / task-state / compact-state / turn-state / stream-text）全押在它上面。`renderMgr`（插件/项目/模型/神经四分支）**只清 `state.currentHash` 不清槽** → 会话 A 的 `session-delta` 到达时按残留 `curUuid` 命中守卫 → `renderSessionBody` 整页重建 `#messages`，把管理视图（如神经元 canvas 图）洗成会话消息流；`mgr-on` 未摘故输入栏仍隐藏。前两次同类（`renderHome` 串会话、`openProjectPreview` 洗预览）都是就地补清单，漏了下一个入口，本次一并收敛。
+- **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
+- **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口请调它，勿就地补行）。**探针**：`_agent-src/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 源码提取后喂 `(curUuid, ev.session)` 四组合，验证清槽后残留 delta 必被丢弃）。
 

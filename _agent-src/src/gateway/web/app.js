@@ -36,9 +36,8 @@
     dshCheck: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M15.0498 3.92579L8.49512 12.3818C8.25774 12.6881 8.04517 12.9645 7.84668 13.1689C7.63957 13.3823 7.38732 13.5841 7.04492 13.6719C6.86373 13.7183 6.6757 13.7346 6.48926 13.7197C6.13666 13.6915 5.8528 13.5355 5.6123 13.3604C5.38201 13.1926 5.12573 12.9567 4.83984 12.6953L1.03125 9.21289L1.96875 8.1875L5.77734 11.6699C6.08684 11.9529 6.27773 12.1249 6.43066 12.2363C6.50183 12.2882 6.54699 12.3135 6.57324 12.3252C6.58525 12.3305 6.59269 12.3322 6.5957 12.333C6.59802 12.3336 6.59961 12.334 6.59961 12.334C6.63317 12.3367 6.66758 12.3335 6.7002 12.3252C6.7002 12.3252 6.70211 12.3251 6.7041 12.3242C6.70698 12.3229 6.71348 12.319 6.72461 12.3115C6.74849 12.2956 6.78843 12.2642 6.84961 12.2012C6.98138 12.0654 7.13957 11.8628 7.39648 11.5313L13.9502 3.07422L15.0498 3.92579Z"/></svg>',
     dshWarn: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M6.3002 3.32843L7.69986 3.32843L7.69986 7.79657H6.3002L6.3002 3.32843Z"/><path d="M6.3002 9.01935H7.69986V10.6711H6.3002V9.01935Z"/><path d="M12.6328 6.99976C12.6328 3.88874 10.111 1.36694 7 1.36694C3.88899 1.36695 1.3672 3.88875 1.36719 6.99976C1.36719 10.1108 3.88899 12.6326 7 12.6326C10.111 12.6326 12.6328 10.1108 12.6328 6.99976ZM13.8582 6.99976C13.8582 10.7873 10.7876 13.8579 7 13.8579C3.21244 13.8579 0.141846 10.7873 0.141846 6.99976C0.141857 3.2122 3.21245 0.141612 7 0.141602C10.7876 0.141602 13.8581 3.21219 13.8582 6.99976Z"/></svg>',
     dshClose: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg>',
-    // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline / 归档=ArchiveOutline20）
+    // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline）
     dshEdit: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.9482 1.97949L13.9253 4.95508L5.51453 13.3659L2.53613 12.6157L2.18896 9.24414L10.9482 1.97949ZM8.2951 4.63011L4.75226 8.17207L7.71064 9.1084L11.2535 5.56544L8.2951 4.63011ZM3.60287 10.1729L3.78518 12.1367L5.7417 12.5674L6.2064 12.1027L4.06812 11.4503L3.60287 10.1729Z"/></svg>',
-    dshArchive: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M13.6494 4.0498V12.3994C13.6494 12.9541 13.2041 13.3994 12.6494 13.3994H3.35059C2.7959 13.3994 2.35059 12.9541 2.35059 12.3994V4.0498C1.95534 4.0498 1.63281 3.72727 1.63281 3.33203V1.73242C1.63281 1.33718 1.95534 1.01465 2.35059 1.01465H13.6494C14.0447 1.01465 14.3672 1.33718 14.3672 1.73242V3.33203C14.3672 3.72727 14.0447 4.0498 13.6494 4.0498ZM3.35059 5.0498V12.3994H12.6494V5.0498H3.35059ZM6.35059 6.39941H9.64941V7.39941H6.35059V6.39941ZM2.63281 2.01465V3.0498H13.3672V2.01465H2.63281Z"/></svg>',
     // 新建独立会话（web 与 CLI 等权并行）：终端窗口 + 提示符
     web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
   }
@@ -320,8 +319,25 @@ function setConnUp(v) { connUp = v }
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可
   const findSession = (hash) => ALL.find((s) => hashOf(s) === hash)
-  // 2026-08-24 归档过滤：统一数据源过滤已归档会话（isArchived 声明在下方行菜单区，函数提升可用）
-  const sorted = () => [...ALL].filter((s) => !isArchived(s)).sort((a, b) => b.updatedAt - a.updatedAt)
+  // 侧栏会话 tab 排序（2026-09-18 定案）：有状态（CLI 在线：busy/waiting/idle 状态点在场）置顶，
+  // 组内按创建时间新→旧（createdAt = 网关透传的 jsonl 创建时刻）；无状态组同按创建时间。
+  const sessCmp = (a, b) => {
+    const pa = a.state ? 0 : 1
+    const pb = b.state ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return b.createdAt - a.createdAt
+  }
+  const sorted = () => [...ALL].sort(sessCmp)
+  // 合成条目保全（2026-09-18 新建会话 tab 闪现→消失→再现根治）：newWebSession 本地先插的合成
+  // tab 在 jsonl 落盘前，/gateway/sessions 权威列表尚不含它——权威拉取整体替换 ALL 会洗掉 tab，
+  // 落盘后下次刷新再出现（三次闪变根因）。不变量：用户刚建的会话 tab 不因权威刷新窗口消失。
+  // 凡权威列表写 ALL 的出口（loadSessions/refreshList）统一过此函数：synthetic 条目在权威条目
+  // 出现前保留，出现后由真实条目自然取代（真实条目无 synthetic 标）；创建失败由 ws-failed 显式移除。
+  function withSynthetic(fetched) {
+    const known = new Set(fetched.map((s) => hashOf(s)))
+    const kept = ALL.filter((s) => s.synthetic && !known.has(hashOf(s)))
+    return kept.length ? fetched.concat(kept) : fetched
+  }
 
   // ---------- 数据 ----------
   // 列表签名（2026-08-29 状态点偶发观测不到修复）：数量+最新 updatedAt+标题+各会话状态点。
@@ -343,7 +359,7 @@ function setConnUp(v) { connUp = v }
       const res = await fetch(apiUrl('/gateway/sessions'))
       const data = await res.json()
       if (!Array.isArray(data.sessions)) throw new Error(data.error || 'bad response')
-      setAll(data.sessions)
+      setAll(withSynthetic(data.sessions))
       applyTurnEndAt(ALL)
       live.listSig = listSigOf(data.sessions)
     } catch (e) {
@@ -383,6 +399,27 @@ function setSessionCwd(v) { sessionCwd = v }
   // ---------- 实时同步（阶段1：SSE 监听 jsonl 变化，自动刷新会话/列表）----------
   // 兼容：刷新只替换 messagesEl 内层，折叠开合（含网关实时折叠）与滚动位置尽量保留；
   // 只读视图下最后一段「处理中（尚无回复）」的已处理折叠默认展开，回复落地后自动收起。
+
+  // 前端资产版本自愈（2026-09-17）：守护不变量 = 运行中的前端代码 = 网关当前资产版本。
+  // 换 exe/新构建后旧标签页只重连 WS/SSE、不重载 JS（代码还是页面加载时那份），修复永远
+  // 送达不了常开标签页（三轮「修复没生效」实报的交付根因）。hello（每次 SSE 建连/重连都发）
+  // 时拉服务器 sw.js 的 CACHE 版本与页面加载时基线比对：漂移即自动刷新（输入栏有内容则只
+  // 提示不强刷，不毁用户正在输入的内容）。重载后新基线同版本 → 无回环。
+  let bootSwVer = null
+  async function checkAssetFresh() {
+    try {
+      const res = await fetch('/sw.js', { cache: 'no-store' })
+      const m = /CACHE\s*=\s*'([^']+)'/.exec(await res.text())
+      if (!m) return
+      if (bootSwVer == null) { bootSwVer = m[1]; return }
+      if (m[1] === bootSwVer) return
+      bootSwVer = m[1]
+      if (inputEl.textContent.trim()) { toast('前端有新版本，请手动刷新页面'); return }
+      toast('前端已更新，正在刷新…')
+      setTimeout(() => location.reload(), 800)
+    } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
+  }
+
   function initLive() {
     if (!('EventSource' in window)) return
     if (needToken()) return // token 门锁定态：不建 SSE（避免 401 重连刷屏，hideGate 解锁后再建）
@@ -393,7 +430,7 @@ function setSessionCwd(v) { sessionCwd = v }
       live.lastSseAt = Date.now() // 任何事件到达=链活（parse 失败同样是活性证明，先记再解析）
       let ev
       try { ev = JSON.parse(e.data) } catch { return }
-      if (ev.type === 'hello') { refreshList(); refreshSession() }
+      if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
       else if (ev.type === 'activity') {
         // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）。
         // 2026-09-07 断连感知：state=null（CLI /clients 断开 → 网关 detach 群发）= 会话进程
@@ -594,7 +631,7 @@ function setSessionCwd(v) { sessionCwd = v }
         live.listSig = sig
         // 保留展开中的项目文件夹
         const openF = [...bodyEl.querySelectorAll('.folder.open')].map((f) => f.dataset.f)
-        setAll(data.sessions)
+        setAll(withSynthetic(data.sessions))
         applyTurnEndAt(ALL)
         renderRecent()
         if (openF.length) {
@@ -722,8 +759,12 @@ function setSessionCwd(v) { sessionCwd = v }
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
     // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
-    // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）
-    live.maxImgId = 0
+    // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）。
+    // 2026-09-16 单调不回卷根修：视图（localMessages）在压缩归档/delta 重写窗口会丢历史块，
+    // 清零重扫会把 maxImgId 回卷 → 下张图复用旧 id → CLI storeImage('w') 覆写字节 + 网关
+    // max-age=86400 把首次取到的旧字节钉在该 URL 上 = 新图显示成旧图（b5bd1265 实证 A/B/C
+    // 三图全 1 号互覆）。id 不复用是分配器不变量，不依赖视图完整：重扫只增不减（跨会话切回
+    // 基准偏高无害，image-cache 按会话分目录，id 只需会话内唯一）。
     for (const m of messages) {
       for (const b of m.blocks || []) {
         if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
@@ -768,7 +809,13 @@ function setSessionCwd(v) { sessionCwd = v }
     // 重建的闪烁，且 tool-running 光泽动画不再被重建打断（2.6s 扫光能完整播放）。
     // 条件：上次渲染存在 + 消息数只增不减（SSE 纯追加；回退/压缩等减少则整页）+ 有处理中末段。
     // 回复落地（段结束）/新回合/消息数减少 → 整页重建一次（低频，带「已处理」收拢可接受）。
-    const html = messagesHtml(messages)
+    // 2026-09-18 卡顿根治（增量帧省历史段渲染）：原实现每帧无条件全量 messagesHtml 序列化整个
+    // 会话，而历史段自上轮渲染以来内容不变、增量路径只消费末段 html——长会话下每条 session-delta
+    //（引擎变化合帧最高 ~10 次/秒）都付 MB 级字符串拼接 + md 全文重解析 = 主线程卡顿主根。改惰性
+    // 两段式：先 lazy 切段（历史段只切段不生成 HTML，O(N) 轻量；末段真渲染产出本轮 lastSegInfo/
+    // charNote）→ 判定可增量直接 applySegDelta（历史段零渲染成本）；不可增量（切段边界/回合收口/
+    // 锚点缺失）再跑全量渲染付全额——行为与原等价，全量频次=切段边界（低频）。
+    messagesHtml(messages, true)
     // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
     // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
     // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
@@ -783,6 +830,7 @@ function setSessionCwd(v) { sessionCwd = v }
       applySegDelta(lastSegInfo)
       renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
     } else {
+      const html = messagesHtml(messages)
       // 折叠开合恢复改用**结构稳定键**（2026-09-11 根治）：原实现按 querySelectorAll('details')
       // 的数组下标采集/回填，注释假定「索引稳定」——但整页重建时 details 序列本就会变：处理中段的
       // liveFoldBody 尾组数随工具增长、think-row 数随思考块增长、回合收口时处理中段转已完成段
@@ -802,7 +850,23 @@ function setSessionCwd(v) { sessionCwd = v }
       const doneLivePrev = new Set([...messagesEl.querySelectorAll('details')].filter((d) => d.classList.contains('done-live')).map(foldKey))
       // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
       const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
+      // img 换血（2026-09-18 内存峰值/闪烁根治）：整页 innerHTML 重建全部节点 → 全部 <img> 重建且
+      // image-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
+      // 「先塌后弹」闪烁）。src 相同的图内容不变 → 重建前按 src 采池，重建后同 src 换回旧节点
+      //（池 shift 支持同 src 多图），零回源零重解码；池剩余节点随 GC 回收。
+      const imgPools = new Map()
+      for (const im of messagesEl.querySelectorAll('img')) {
+        const k = im.getAttribute('src')
+        if (!k) continue
+        let pool = imgPools.get(k)
+        if (!pool) { pool = []; imgPools.set(k, pool) }
+        pool.push(im)
+      }
       messagesEl.innerHTML = html
+      for (const im of messagesEl.querySelectorAll('img')) {
+        const pool = imgPools.get(im.getAttribute('src'))
+        if (pool && pool.length) im.replaceWith(pool.shift())
+      }
       if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
       // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
       // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
@@ -855,11 +919,61 @@ function setSessionCwd(v) { sessionCwd = v }
   // （该段输出前的最后一个 data-m 元素）插回原位；无锚点（末段即首条）则追加到末尾。
   function applySegDelta(info) {
     const key = String(info.key)
-    messagesEl.querySelectorAll(`[data-m="${key}"]`).forEach((n) => n.remove())
+    // 增量替换状态保持（2026-09-18「状态行更新/旁白行新增→界面跳动」根治）：段替换以段为粒度
+    // 整段换血，段内有两类 HTML 再生不出来的状态——
+    // ① details 开合态（段折叠用户手动关上 / tool-fold 用户手动展开）：按 HTML 默认值重建
+    //    （处理中=open、tool-fold=收起）意味着每次状态行更新/旁白行新增都把折叠态拍回默认 =
+    //    整段高度每增量跳一次。全量重建路径已按 foldKey 恢复开合（2026-09-11 定案「用户手动
+    //    展开的折叠照常恢复」），增量路径同受此不变量约束——此处按同一键语义捕获并恢复
+    //    （键不在旧集的新增折叠保留 HTML 默认：处理中展开、工具行收起）。
+    // ② 用户气泡及其图片：气泡在段内不变（who/图/文件/复制钮落盘后皆静态），重建节点令 imgs
+    //    重新请求/解码（image-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
+    //    的跳动。DOM 已有同 key 气泡时保留旧节点、丢弃新段气泡节点只换其余（气泡=段首元素，
+    //    其余部分删后插回流末锚点前=文档序不变；处理中段恒为末段，旧气泡与流末锚点之间不存在
+    //    他段节点）。
+    const oldNodes = [...messagesEl.querySelectorAll(`[data-m="${key}"]`)]
+    const foldKeyOf = (d) => {
+      const cls = d.className.split(' ')[0]
+      if (d.dataset.m) return `@${d.dataset.m}|${d.dataset.t || ''}|${cls}`
+      const host = d.closest('[data-m]')
+      const scope = host || messagesEl
+      const idx = [...scope.querySelectorAll('details.' + cls)].indexOf(d)
+      return `${host ? host.dataset.m + '|' + (host.dataset.t || '') : 'root'}|${cls}#${idx}`
+    }
+    const prevOpen = new Map()
+    for (const n of oldNodes) {
+      for (const d of (n.matches('details') ? [n] : []).concat([...n.querySelectorAll('details')])) {
+        prevOpen.set(foldKeyOf(d), d.open)
+      }
+    }
     const tmp = document.createElement('div')
     tmp.innerHTML = info.html
     const frag = document.createDocumentFragment()
     for (const n of [...tmp.children]) frag.appendChild(n)
+    const oldBubble = oldNodes.find((n) => n.matches('[data-t="u"]'))
+    const newBubble = [...frag.children].find((n) => n.matches('[data-t="u"]')) || null
+    const keepBubble = !!(oldBubble && newBubble && oldBubble.isConnected)
+    if (keepBubble) newBubble.remove()
+    // img 换血（2026-09-18「旁白消息的图片仍闪」根治）：段内除段首用户气泡外的节点（尤其
+    // 引导气泡 data-t="g<gi>"——上传图片经排队注入后正是落在这里，与旁白行同段）每帧重建，
+    // 新 <img> 到 paint 时尚未解码（image-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
+    // 再回弹。与全量重建路径同一不变量：已落盘图片字节不可变 → 同 src 的旧节点直接换回，
+    // 零回源零重解码。只从「本次将被删除」的节点采池——保留的旧气泡节点不动（引导气泡与
+    // 用户气泡可能同 src，采走会让保留气泡丢图）。
+    const imgsOf = (n) => (n.matches('img') ? [n] : []).concat([...n.querySelectorAll('img')])
+    const imgPools = new Map()
+    for (const n of oldNodes) {
+      if (keepBubble && n === oldBubble) continue
+      for (const im of imgsOf(n)) {
+        const k = im.getAttribute('src')
+        if (!k) continue
+        let pool = imgPools.get(k)
+        if (!pool) { pool = []; imgPools.set(k, pool) }
+        pool.push(im)
+      }
+    }
+    for (const n of oldNodes) if (!(keepBubble && n === oldBubble)) n.remove()
+    const inserted = [...frag.children]
     let anchor = null
     if (info.prev) {
       // 同 data-t 多元素时（如多轮 end_turn 的多个 reply 气泡、同 key 多 fold）取文档序最后一个
@@ -870,16 +984,31 @@ function setSessionCwd(v) { sessionCwd = v }
     // 插入点恒避让暂态区与 .pin-stage（暂态区子元素/两层占位必须是流末）：段尾无后继或无锚点
     //（首段处理中）时都插到 #live-zone 之前——否则新段节点越过暂态区/落到占位块后面，
     // 占位错位到内容中间持续到刷新（2026-08-28 钉顶占位突然死亡根因一；2026-09-07 排队区
-    // 插到新消息上一行同根因，暂态区结构化消除）。
+    // 插到新消息上一行同根因，暂态区结构化消除）。气泡保留旧节点时同样插流末锚点前
+    //（见上：旧行为按 prev 锚点插会把新折叠体插到保留气泡之前，文档序颠倒）。
     const zone = document.getElementById('live-zone')
     const spacer = messagesEl.querySelector('.pin-stage')
     const tail = zone || spacer
-    if (anchor && anchor.isConnected) {
+    let ref = tail
+    if (!keepBubble && anchor && anchor.isConnected) {
       let after = anchor.nextSibling
       while (after && after.nodeType !== 1) after = after.nextSibling
-      messagesEl.insertBefore(frag, after || tail)
-    } else {
-      messagesEl.insertBefore(frag, tail)
+      ref = after || tail
+    }
+    messagesEl.insertBefore(frag, ref)
+    // 同 src 的新 <img> 换回旧节点（见上方「img 换血」；此时新图尚未解码，换回即沿用已解码位图）
+    for (const n of inserted) {
+      for (const im of imgsOf(n)) {
+        const pool = imgPools.get(im.getAttribute('src'))
+        if (pool && pool.length) im.replaceWith(pool.shift())
+      }
+    }
+    // ① 开合态恢复（仅旧集已有的折叠；新增折叠不在集内=保留 HTML 默认）
+    for (const n of inserted) {
+      for (const d of (n.matches('details') ? [n] : []).concat([...n.querySelectorAll('details')])) {
+        const k = foldKeyOf(d)
+        if (prevOpen.has(k)) d.open = prevOpen.get(k)
+      }
     }
   }
 
@@ -943,31 +1072,38 @@ function setSessionCwd(v) { sessionCwd = v }
       // .tool-line.tool-running——running 分支 summary 与 toolCurHtml 两条出口同款类，单一判据。
       const awaitingApproval = takeover === 'approval'
       const toolRunning = !!fold.querySelector('.tool-line.tool-running')
-      // 单状态槽（2026-09-11 用户定案「一次应该只有一个状态，现在是无响应，应该只有无响应」）：
-      // 红标在场时它**独占**状态槽——stEl 所在状态显示行挂 .is-flagged，styles.css 隐去同行
-      // .think-state（含并发尾缀「并思考」）与 .think-stream（流式预览=引擎产出的暂态，引擎无产出
-      // 即过期，留着与红标互相打脸）。旧形态是并排注解（「正在思考 · 2m57s · 无响应 2m51s」两个
-      // 状态同时在场），信号恢复即整行复原（每秒重算，无残留态）。
-      // 豁免规则（审批等待/工具在飞 = 已知阻塞）→ 本帧不参与僵死判定，传 0 表达「判据不适用」；
-      // 阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造（优先级：连接中断 > 无响应）。
-      const flags = statusFlags(connUp, awaitingApproval || toolRunning ? 0 : staleSec)
+      // ④ 2026-09-18 用户定案：无响应降为**最底层优先级**——状态行有任意状态在场（正在思考/
+      // 正在生成/正在压缩/正在运行）即不判，仅当无任何状态时才允许红标。压缩期误标实证根修：
+      // 压缩是一次大 LLM 调用，零增量产出 → beat 恒停超 150s 被判「无响应」，且单状态槽挤掉
+      // 「正在压缩」。状态判据 = .think-state 的 data-label（messages.js vacuumOf 单源渲染，
+      // 压缩实证档 compact-state 同源 TTL 5min）；stEl 查询提前至此，下方计时复用同一节点。
+      const stEl = fold.querySelector('.think-state')
+      const hasStatus = !!(stEl && (stEl.dataset.label || '').trim())
+      // 单状态槽（2026-09-11 用户定案「一次应该只有一个状态」）：红标在场时它**独占**状态槽——
+      // stEl 所在状态显示行挂 .is-flagged，styles.css 隐去同行 .think-state（含并发尾缀「并思考」）
+      // 与 .think-stream（流式预览=引擎产出的暂态，引擎无产出即过期，留着与红标互相打脸）。
+      // 信号恢复即整行复原（每秒重算，无残留态）。
+      // 豁免规则（审批等待/工具在飞/任意状态在场 = 已知阻塞或已有状态表达）→ 本帧不参与僵死
+      // 判定，传 0 表达「判据不适用」；阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造
+      // （优先级：连接中断 > 无响应，无响应为最底层）。
+      const flags = statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
       // 两行各自独立跳字（2026-09-09 用户定案「折叠顶只留正在处理/已处理，状态标识归工具行层」；
       // 二轮定案：工具调用行=折叠体，状态显示行是其内暂态层 .fold-state——有工具组并入 summary
       // 同行、无工具组独立行，动画展示不留存）：① 折叠顶 summary 恒「正在处理 + d-dur 总时长」；
-      // ② 思考/压缩状态 .think-state 落 .fold-state 暂态层，tick 原地续「· Ns」。全程节点级
+      // ② 思考/压缩状态 .think-state 落 .fold-state 暂态层，tick 原地续「 Ns」（2026-09-18 分隔点
+      // 全撤：用户定案状态行不用「·」，空格分隔）。全程节点级
       // textContent 更新、不 innerHTML 重建——重建会每秒重启扫光动画并洗掉 applyStreamPreview
       // 挂的流式预览节点。
       // 状态行文本节点独立（2026-09-11）：.think-state 首子节点恒为 .t-ico 行首槽（与工具行同款
       // 16px 槽 + 5px gap，文字左缘同基准）——整节点 textContent 赋值会连图标槽一并洗掉，槽一没
       // 文字左缘即回跳（用户实测的「跳动」），故 tick 只写 .ts-text 文本节点。
-      const stEl = fold.querySelector('.think-state')
       if (stEl) {
         // 文案由 messages.js vacuumLabel 单一映射后写进 data-label（含并发尾缀「并思考」形态）；
         // tick 只补计时，不复刻 mode→label 映射（旧实现在此处重复一份三元链，改文案要改两处）。
         const label = stEl.dataset.label || ''
         const ts = Number(stEl.dataset.ts) || 0
         const dsec = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
-        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} · ${fmtDur(dsec)}` : label
+        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${fmtDur(dsec)}` : label
       }
       const durEl = sum.querySelector('.d-dur')
       if (durEl) durEl.textContent = ' ' + fmtDur(sec)
@@ -982,7 +1118,7 @@ function setSessionCwd(v) { sessionCwd = v }
         if (!fhost) return
         fhost.appendChild(flEl)
       }
-      flEl.innerHTML = flags
+      if (flEl.innerHTML !== flags) flEl.innerHTML = flags // 值不变不重写：每秒空写会打断子动画并触发无谓样式重算（2026-09-18 卡顿小刀）
       // 状态槽独占判定（同帧、同一判据 flags 非空）：宿主是状态显示行 .fold-state 时才挂标
       //（回退宿主 .done-body 里本就没有 .think-state，无需隐）。信号恢复 → 摘标 = 状态文字复原。
       const frow = flEl.parentElement
@@ -1163,30 +1299,38 @@ function setSessionCwd(v) { sessionCwd = v }
     }, 580)
   }
 
-  function renderHome() {
-    stopLiveFoldTimer()
-    setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
-    stageRelease()
-    clearTakeover() // 导航离开：清掉残留的提问/审批 takeover（输入栏恢复）
-    state.currentHash = null
-    messagesEl.innerHTML = ''
-    // 2026-09-08 新会话界面串行根治：回首页（空态）同样必须清「当前会话」全局槽——与
-    // renderSession 切会话清理（「切会话即清全局槽」定案）同一清单的对称延伸。不变量：
-    // live.curUuid 非空 ⇔ 当前视图正展示该会话；session-delta（419）/queue-state（405）守卫
-    // 都以它为前提。renderHome 原先只清 messagesEl 不清槽 → 上一会话的 delta 靠残留
-    // curUuid/deltaSeq 通过守卫，renderSessionBody 整页重建把该会话转录连同「正在处理/
-    // 正在思考」实时尾灌进首页消息区（实测：新会话界面显示别的会话完整消息流）。
+  // 切视图即清全局槽（离开会话视图的唯一出口；2026-09-19 收敛）：
+  // 不变量 = live.curUuid 非空 ⇔ 当前视图正展示该会话。session-delta/queue-state/task-state/
+  // compact-state/turn-state/stream-text 六条 SSE 守卫全部以它为前提。**任何离开会话视图的入口
+  // 都必须清槽**——漏一处，残留 curUuid 就让该会话的实时流继续命中守卫：renderSessionBody 整页
+  // 重建 #messages 把非会话视图洗成会话消息流（renderHome 08-29「新会话界面串行」、
+  // openProjectPreview 09-16「项目页被洗成 chat」、renderMgr 09-19「神经 tab 跳 chat 有宽度
+  // 没底栏」三次实证同一根因，前两次都是就地补清单、漏了下一个入口）。
+  // 清槽清单：curUuid/deltaSeq/localMessages（SSE 匹配与增量基线）、lastMsgLen（增量守卫）、
+  // queueRemote/tasks（跨会话快照串染）、streamText（流式暂态）、接管卡与上下文环（视图级 UI 态）。
+  // 会话视图的重新接线由 renderSession/refreshSession 负责（唯一重建点，不在此处）。
+  function clearSessionSlots() {
     live.lastMsgLen = null
     live.localMessages = null
     live.deltaSeq = null
     live.queueRemote = []
     live.curUuid = null
-    live.tasks = [] // 2026-09-10 任务浮窗：首页空态清任务快照（切会话即清全局槽定案）
+    live.tasks = [] // 任务浮窗快照（空数组 = 浮窗整体不出现）
     renderTaskDock()
-    live.streamText = '' // 2026-09-08 流式字符通道：首页空态清流式暂态（切会话即清全局槽定案）
+    live.streamText = '' // 流式字符通道暂态
+    clearTakeover() // 清残留的提问/审批 takeover（输入栏恢复）
+    renderCtxMeter(null) // 无会话上下文：隐藏上下文环
+  }
+
+  function renderHome() {
+    stopLiveFoldTimer()
+    setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
+    stageRelease()
+    state.currentHash = null
+    messagesEl.innerHTML = ''
+    clearSessionSlots() // 回首页（空态）同样清「当前会话」全局槽（不变量见上）
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
-    renderCtxMeter(null) // 首页空态 → 隐藏上下文环
     renderProjSeat()
     chatArea.classList.remove('mgr-on')
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
@@ -1370,14 +1514,14 @@ function setLastNavHash(v) { lastNavHash = v }
   }
   function toolLine(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
   // 提问在消息流里的紧凑行（DSH 工具行语义）：icon + 「提问」+ 状态（等待回答 / 已回答）。
   // 2026-09-11 ④ 用户定案移除只读提问卡（`questionCardHtml` 静态不可交互的输入栏接管卡，
   // 「有一个静态的提问卡不可交互的…直接移除就好」）——AskUserQuestion 在 web 只留本紧凑行，
   // 作答在 CLI 窗口；web 可交互提问走 CLI 经审批链下发的 question 分支（renderQuestionApproval）。
   function askLineHtml(answered) {
-    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 · ${answered ? '已回答' : '等待回答'}</span>`
+    return `<span class="tool-line" data-name="AskUserQuestion"><span class="t-ico">${toolIcon('AskUserQuestion')}</span>提问 ${answered ? '已回答' : '等待回答'}</span>`
   }
   // 工具类型 → 概括短语（连续工具折叠的 summary 标签）
   const TOOL_VERB = {
@@ -1520,7 +1664,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // 根治：唯一行容器 .fold-state 同时承载「运行行（可收缩，.tl-text 省略号收尾）+ 状态尾缀（原子）」，
         // 收缩压力落在工具文本上、尾缀恒完整 → 几何上不可能再出现逐字换行。
         const cur = toolMeta(running[running.length - 1].block)
-        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' · ' + esc(cur.detail) : ''}</span></span>`
+        const runLine = `<span class="tool-line tool-running" data-name="${esc(cur.name)}"><span class="t-ico">${toolIcon(cur.name)}</span><span class="tl-text">正在运行：${esc(cur.zh)}${cur.detail ? ' ' + esc(cur.detail) : ''}</span></span>`
         if (isTail && vacuumState) {
           sumInner = `<span class="fold-state">${runLine}${stateSpan(true, false)}</span>`
           stateAppend = '' // 已并入本行，防下方 ${stateAppend} 二次追加
@@ -1580,7 +1724,7 @@ function setLastNavHash(v) { lastNavHash = v }
   // 光泽扫动标识运行态（无蓝点、无 <details> 提示行、无输入 JSON，用户 2026-08-26 定案）。
   function toolCurHtml(block) {
     const t = toolMeta(block)
-    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' · ' + esc(t.detail) : ''}</span></span>`
+    return `<span class="tool-line tool-running" data-name="${esc(t.name)}"><span class="t-ico">${toolIcon(t.name)}</span><span class="tl-text">${esc(t.zh)}${t.detail ? ' ' + esc(t.detail) : ''}</span></span>`
   }
 
   // ---- 文件变更汇总卡片（Codex 风格：+N 绿 / -N 红）----
@@ -1929,7 +2073,12 @@ function setLastNavHash(v) { lastNavHash = v }
   // refreshSession 对处理中末段只替换该段 DOM（applySegDelta），头部历史消息保留不动——消除整页重建闪烁。
   let lastSegInfo = null
 
-  function messagesHtml(messages) {
+  // lazy（2026-09-18 web 卡顿根治）：true = 惰性两段式——切段循环照跑（桶分配 O(N) 轻量）但
+  // 历史段不生成 HTML（think/ask/tool/reply 行的 html 置空）、closeSeg 只封存不渲染（按渲染同序
+  // 静态推进 lastNode 供末段 prev 锚点链）；仅末段（isFinal）真渲染并在入口补齐置空行。调用方
+  // live.js renderSessionBody 增量帧据此把「每帧全会话 MB 级序列化」降为「O(N) 切段 + 末段渲染」；
+  // 判定不可增量时再跑一次全量（lazy=false）付全额，行为与原等价。
+  function messagesHtml(messages, lazy) {
     // 按「用户消息 → AI 处理 → 回复」切段：
     // 真实 user 消息开新段；assistant/tool 的 thinking 与 tool_use 归入「已处理」折叠，
     // 段内最后一个带文本的 assistant 消息 = 回复（主内容），其余文本（过程旁白）也折进去。
@@ -1982,9 +2131,34 @@ function setLastNavHash(v) { lastNavHash = v }
       const processing = isFinal && !s.finished && !turnEnded // 最后一段且末尾还没收到纯文本回复 = 处理中
       // 末段仍在处理中（未出正式回复）且段内最近有工具调用 → 按该工具选形象；否则（回复已发布/空闲）默认 1
       if (isFinal) charNote = (!(s.finished || turnEnded) && s.lastTool) ? toolToChar(s.lastTool) : 1
+      // 惰性收口（2026-09-18）：非末段不渲染——历史段 DOM/内容自上轮以来不变，增量路径只消费
+      // 末段 html。按渲染同序静态推进 lastNode（u→f→a→c）供末段 prev 锚点链；节点存在性与渲染
+      // 路径等价：u=有开启气泡；f=非 reply 项非空（groupTools/liveFoldBody 有行必有折叠，skip 段
+      // processing 恒 false）；a=每条 reply 项；c=变更卡。texts 回填（重 markdown）一并跳过。
+      if (lazy && !isFinal) {
+        if (s.user) lastNode = { key: s.key, type: 'u' }
+        let nFold = s.guides ? s.guides.length : 0
+        for (const it of s.items) if (it.kind !== 'reply') nFold++
+        if (nFold) lastNode = { key: s.key, type: 'f' }
+        for (const it of s.items) if (it.kind === 'reply') lastNode = { key: s.key, type: 'a' }
+        if (s.changes && s.changes.size) lastNode = { key: s.key, type: 'c' }
+        return
+      }
       // 旁白 text 原位回填（与其后的动作交错，不再统一沉到段尾）；正式回复（end_turn）已在切段时
       // 气泡化（reply 项 → 折叠体外），不进 texts
       for (const t of s.texts) s.items[t.idx].html = processTextHtml(t.text)
+      // 惰性帧渲染段补生成（2026-09-18）：lazy 切段置空的行在此补齐（仅末段真渲染会走到）。
+      // ask 按吸附后的 answer 终态生成（切段时 false 缓存失效）；tool 行 html 恒为完成行基线
+      //（toolLine 产物，运行态由 flushTools 按改写分派 toolCurHtml，与原切段即生成等价）。
+      if (lazy) {
+        for (const it of s.items) {
+          if (it.html) continue
+          if (it.kind === 'think') it.html = thinkRowHtml(it.text, false)
+          else if (it.kind === 'ask') it.html = askLineHtml(it.answer != null)
+          else if (it.kind === 'reply') it.html = replyBubbleHtml(s.key, it.text)
+          else if (it.kind === 'tool') it.html = toolLine(it.block)
+        }
+      }
       // 思考行不做 running 态回填（思考永不独立成行：真空态=liveFoldBody 工具行内 .fold-state
       // 状态显示行，2026-09-09 用户定案「状态标识与工具调用行在一起」，v267 summary 轮转方案废弃）
 
@@ -2112,13 +2286,13 @@ function setLastNavHash(v) { lastNavHash = v }
       for (const b of m.blocks) {
         // 思考块进 items 并记索引（s.thinks 供处理中段 running 态定位）；单块放行由数据层保证
         //（prompt 全剔/transcript 单全局/prompt-tail-think 尾巴单块），前端不再二次折叠（P2 删留尾兜底）
-        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
+        if (b.kind === 'thinking') { seg.thinks.push(seg.items.length); seg.items.push({ kind: 'think', text: b.text, html: lazy ? '' : thinkRowHtml(b.text, false) }); seg.lastStep = 'thinking' } // 思考块：lastStep='thinking'（旁白走 text 分支，严格分流）
         else if (b.kind === 'text' && hasTool && b.text && b.text.trim()) {
           // 工具消息里的旁白文本：按块原位插入 items（保持 content 数组顺序——旁白在其对应工具调用之上），
           // 不统一沉到段尾；纯文本消息（无 tool_use）仍在循环后整体追加（保持同消息多 text 块拼接为一条的语义）。
           // end_turn/stop_sequence 正式回复（理论不带 tool_use，防御分支）→ 流内 reply 气泡，不进 texts
           if (isEndStop(m.stopReason)) {
-            seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, b.text), text: b.text })
+            seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, b.text), text: b.text })
             seg.replyTs = m.timestamp
           } else {
             seg.items.push({ kind: 'text', html: '', text: b.text })
@@ -2129,12 +2303,12 @@ function setLastNavHash(v) { lastNavHash = v }
         else if (b.kind === 'tool_use') {
           if (b.name === 'AskUserQuestion') {
             // 提问块 → DSH 风格提问卡（答案由后续 tool_result 文本吸附）
-            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: askLineHtml(false) }
+            const it = { kind: 'ask', name: 'AskUserQuestion', zh: '提问', input: b.input, answer: null, html: lazy ? '' : askLineHtml(false) }
             seg.items.push(it)
             seg.lastAsk = it
             seg.lastStep = 'ask'
           } else {
-            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
+            const t = toolMeta(b); seg.items.push({ kind: 'tool', html: lazy ? '' : toolLine(b), block: b, name: t.name, zh: t.zh }); seg.lastTool = b.name; seg.pendingTools.push(seg.items.length - 1); seg.lastStep = 'tool' // 待完成工具队列（FIFO：连续多个 tool_use 全部登记，tool_result 按序逐个标记 done）
           }
         }
         else if (b.kind === 'tool_result') {
@@ -2160,7 +2334,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // closeSeg 时原位填充。
         const text = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
         if (m.stopReason === undefined || isEndStop(m.stopReason)) {
-          seg.items.push({ kind: 'reply', html: replyBubbleHtml(seg.key, text), text })
+          seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, text), text })
           seg.replyTs = m.timestamp
         } else {
           seg.items.push({ kind: 'text', html: '', text })
@@ -2240,7 +2414,7 @@ function setLastNavHash(v) { lastNavHash = v }
     // 平铺时项目会话混在根会话里，用短编号（Pj16）标识所属项目；项目文件夹视图已有文件夹名，不重复显示。
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
-    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/归档）
+    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/关闭）
     const more = '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
       <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}${more}</button>`
@@ -2414,7 +2588,6 @@ function setLastNavHash(v) { lastNavHash = v }
     m.innerHTML =
       '<div class="sess-menu-in">' +
       `<button type="button" class="rm-item" data-a="rename">${I.dshEdit}<span>重命名</span></button>` +
-      `<button type="button" class="rm-item" data-a="archive">${I.dshArchive}<span>归档会话</span></button>` +
       `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>` +
       '</div>'
     row.appendChild(m)
@@ -2428,10 +2601,6 @@ function setLastNavHash(v) { lastNavHash = v }
     m.querySelector('.rm-item[data-a="rename"]').addEventListener('click', () => {
       closeRowMenu()
       openRenameDialog(hash)
-    })
-    m.querySelector('.rm-item[data-a="archive"]').addEventListener('click', () => {
-      closeRowMenu()
-      archiveSession(hash)
     })
     m.querySelector('.rm-item[data-a="close"]').addEventListener('click', () => {
       closeRowMenu()
@@ -2463,34 +2632,6 @@ function setLastNavHash(v) { lastNavHash = v }
     // … 按钮上的按下不关菜单，交给 click 的 toggle（否则 mousedown 关 → click 重开 = 三点永远关不掉菜单）
     if (rowMenu && !rowMenu.contains(e.target) && !e.target.closest('.sess-more')) closeRowMenu()
   })
-
-  // ---------- 归档会话（2026-08-24 DSH archiveSession 移植）----------
-  // 归档 = 从侧栏/搜索列表隐藏（本地 localStorage 持久化，与 DSH「归档集」语义一致：
-  // 日志/转录保留，只是不在分组表面出现）。不提供恢复入口（对齐 DSH 当前行为）。
-  const ARCHIVED_KEY = 'floria-archived-v1'
-  let archivedSet = null
-  function loadArchived() {
-    if (archivedSet) return archivedSet
-    try {
-      const raw = JSON.parse(localStorage.getItem(ARCHIVED_KEY) || '[]')
-      archivedSet = new Set(Array.isArray(raw) ? raw.map(String) : [])
-    } catch {
-      archivedSet = new Set()
-    }
-    return archivedSet
-  }
-  function saveArchived() {
-    try { localStorage.setItem(ARCHIVED_KEY, JSON.stringify([...loadArchived()])) } catch { /* 忽略 */ }
-  }
-  function isArchived(s) { return loadArchived().has(hashOf(s)) }
-  function archiveSession(hash) {
-    loadArchived().add(hash)
-    saveArchived()
-    // 若当前正打开该会话 → 回首页（归档会话不再展示）
-    if (state.currentHash === hash) navigate('#/')
-    renderRecent()
-    toast('会话已归档')
-  }
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
   // 第一击 interrupt（网关按 sessionId 精确路由 → CLI onCancel：回合进行中即打断，空闲为 no-op）；
@@ -2618,7 +2759,7 @@ function setLastNavHash(v) { lastNavHash = v }
       // 2026-08-24 用户定案：未指定项目（笔/首页消息发送）→ 会话落全局根（@WrokSpace 散装区，
       // projectScope:'global'）；指定项目 → 该项目组（projectScope:'project'）。不再落启动服务器的项目根。
       const isGlobal = !projectLabel
-      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
+      ALL.unshift({ id: d.id, file: d.hash + '.jsonl', title: '新会话', state: 'busy', updatedAt: Date.now(), createdAt: Date.now(), synthetic: true, projectScope: isGlobal ? 'global' : 'project', projectLabel: projectLabel || '', messageCount: 0 })
       renderRecent()
       navigate('#/' + encodeURIComponent(d.hash))
       if (isMobile()) setPanel(false)
@@ -2679,7 +2820,7 @@ function setLastNavHash(v) { lastNavHash = v }
       if (el) {
         liftStart(el, { anim: false })
         el.appendChild(rowMenu) // 菜单重挂到新行内（内嵌高度态随节点保留，无需重定位/不重播展开动画）
-      } else closeRowMenu() // 行已不在（归档/删除/换视图）→ 菜单一并关
+      } else closeRowMenu() // 行已不在（删除/换视图）→ 菜单一并关
     } else if (reLiftHash) {
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
@@ -2695,7 +2836,7 @@ function setLastNavHash(v) { lastNavHash = v }
         mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
         mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
         // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-        // 行已不存在（归档/删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
+        // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
         const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
         if (el) liftStart(el, { anim: false })
       }
@@ -2714,12 +2855,18 @@ function setFirstSendHash(v) { firstSendHash = v }
     stageRelease()
     state.currentHash = null
     state.preview = null
+    // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
+    // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
+    // 清槽，会话 A 的 session-delta 到达时按残留 curUuid 命中守卫 → renderSessionBody 整页重建
+    // #messages 把管理视图（如神经元图）洗成会话消息流；#chat-area.mgr-on 仍在位（CSS 隐藏
+    // #input-wrap）=「跳到 chat、有宽度没底栏」。清槽清单与不变量见 route.js clearSessionSlots。
+    clearSessionSlots()
     const scrollEl = document.querySelector('#chat-scroll')
     const prevTop = scrollEl ? scrollEl.scrollTop : 0
     // 「项目」入口：仿照插件布设，每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
     if (state.mgr === 'projects') {
       // 顶部结构与插件视图完全同构（mgr-top mgr-kind + mgr-cats 占位），避免切换跳动；无刷新/设置按钮
-      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel && !isArchived(s)).map((s) => s.projectLabel)).size
+      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
       messagesEl.innerHTML =
         '<div class="mgr-pane">' +
         // 空 mgr-top 占位：与插件视图「插件/技能」切换行等高（.mgr-top min-height），避免切换时标题跳动
@@ -2754,6 +2901,11 @@ function setFirstSendHash(v) { firstSendHash = v }
       chatArea.classList.add('mgr-on')
       renderMgrModels()
       loadModelsData(false)
+      return
+    }
+    // 「神经」入口：层级1 神经元选择卡片，层级2 三级节点图（neurons.js，数据源 /gateway/neurons[/graph]）
+    if (state.mgr === 'neurons') {
+      renderMgrNeurons()
       return
     }
     const v = state.mgrView
@@ -2851,7 +3003,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!list) return
     const q = (state.mgrView.q || '').trim().toLowerCase()
     const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
     const labels = Object.keys(byProject).filter((l) => !q || l.toLowerCase().includes(q))
     // 按项目最近活跃时间降序（同 renderProject 排序）
     labels.sort((a, b) => {
@@ -3020,22 +3172,41 @@ function setFirstSendHash(v) { firstSendHash = v }
   function openProjectPreview(label, hasPreview) {
     // 2026-09-04 预览重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
     // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
-    // 同 label 且 iframe 仍挂载（且非 default 兜底误挂，previewMounted=null）→ 幂等跳过，保留站内位置。
-    if (state.preview === label && state.previewMounted === label && messagesEl.querySelector('.preview-frame')) return
-    state.currentHash = null
-    stopLiveFoldTimer()
-    stageRelease()
-    state.preview = label
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
-    messagesEl.innerHTML =
-      '<div class="preview-shell">' +
-      '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
-      '</div>'
+    // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
+    // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
+    // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat（时间相关性=会话活跃期
+    // 用户切屏频繁 → WS 重连频繁 → 重挂频繁）。改两级重入：同 label 且 iframe 在场（data-label 锚定）=
+    // 软重入——不重写 shell、不清槽，三级链照跑但 mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航
+    // 扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；异 label 或 iframe 不在场 = 硬挂载。
+    const curFrame = messagesEl.querySelector('.preview-frame')
+    const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
+    if (!soft) {
+      state.currentHash = null
+      stopLiveFoldTimer()
+      stageRelease()
+      // 2026-09-16 项目页被实时流洗成 chat 根治：离开会话视图必须清全局槽（清槽清单与不变量
+      // 见 route.js clearSessionSlots；2026-09-19 收敛为共享出口，管理视图同款）。
+      clearSessionSlots()
+      state.preview = label
+      inputWrap.classList.remove('docked')
+      chatArea.classList.remove('in-session')
+      chatArea.classList.add('mgr-on')
+      messagesEl.innerHTML =
+        '<div class="preview-shell">' +
+        '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
+        '</div>'
+    }
     const mount = (src, name, already) => {
       const body = document.querySelector('.preview-body')
       if (!body) return
+      // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
+      // 一律不走下方整区重建
+      const cur = body.querySelector('.preview-frame')
+      if (cur) {
+        if (cur.getAttribute('src') !== src) cur.setAttribute('src', src)
+        state.previewMounted = src.includes('/default-preview/') ? null : label
+        return
+      }
       // 覆盖层遮住后端前端加载时的深色初始化画面（2026-08-20 三轮反馈后定稿 v81）：
       // ① 纯遮罩无指令/按钮（用户「弹出的指令框」= 带指令文字的提示层，已去指令）；
       // ② 文案由 backend name 驱动（可插拔：preview.json backend.name，缺省「项目服务」）；
@@ -3045,13 +3216,13 @@ function setFirstSendHash(v) { firstSendHash = v }
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       body.innerHTML =
-        `<iframe class="preview-frame" title="${esc(label)} 项目主页" src="${src}"></iframe>` +
+        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already
           ? ''
           : `<div class="preview-overlay"><div class="preview-overlay-spin"></div>` +
             `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
             `<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div></div>`)
-      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底误挂不算已挂载，hideGate 解锁后重挂
+      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底 default 记 null：真源升级由软重入 src 校正驱动
       const frame = body.querySelector('.preview-frame')
       const overlay = body.querySelector('.preview-overlay')
       if (!frame) return
@@ -3115,7 +3286,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     bodyEl.innerHTML = ''
     if (state.pt === 'projects') {
       const byProject = {}
-      for (const s of ALL) if (s.projectScope === 'project' && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+      for (const s of ALL) if (s.projectScope === 'project') (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
       const labels = Object.keys(byProject).sort((a, b) => {
         const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
         const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
@@ -3128,7 +3299,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const box = document.createElement('div')
       box.innerHTML = labels
         .map((label) => {
-          const chats = [...byProject[label]].sort((a, b) => b.updatedAt - a.updatedAt)
+          const chats = [...byProject[label]].sort(sessCmp)
           // 2026-08-24 项目新建会话：项目文件夹行 + 按钮 → 在指定项目下新建 web 会话
           // （与「笔」新建会话并存，两者指向不同 exe——见 newWebSession 注释）
           return `<div class="folder" data-f="${esc(label)}"><button class="folder-head">
@@ -3155,12 +3326,627 @@ function setFirstSendHash(v) { firstSendHash = v }
       bindSessClicks(box)
       bodyEl.appendChild(box)
     } else {
-      const root = ALL.filter((s) => s.projectScope !== 'project' && !isArchived(s))
+      const root = ALL.filter((s) => s.projectScope !== 'project')
       const box = document.createElement('div')
       box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
       bindSessClicks(box)
       bodyEl.appendChild(box)
     }
+  }
+
+  // ---------- 神经元视图（web「神经」tab）----------
+
+  // 脑图标（层级1 卡片 + index.html tab 同款内联 svg）
+  const NEU_ICON =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/>' +
+    '<path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/>' +
+    '<path d="M12 4.5v13.5M12 18v1.5"/></svg>'
+
+  // ---------- 数据源：神经元清单（层级1） ----------
+  let NEU = null
+  let NEU_LOADING = false
+  let NEU_ERR = ''
+  async function loadNeuronsData(force) {
+    if (NEU && !force) return NEU
+    if (needToken()) return null
+    NEU_LOADING = true
+    NEU_ERR = ''
+    renderNeuGrid()
+    try {
+      const res = await fetch(apiUrl('/gateway/neurons'))
+      const data = await res.json()
+      if (!data || !Array.isArray(data.neurons)) throw new Error(data.error || 'bad response')
+      NEU = data.neurons
+    } catch (e) {
+      NEU_ERR = e.message || String(e)
+    } finally {
+      NEU_LOADING = false
+      renderNeuGrid()
+    }
+    return NEU
+  }
+
+  // ---------- 数据源：图数据包（层级2） ----------
+  let NEU_GRAPH = null // 当前已加载图包（按 neuron.id 缓存一份；切换/重进 force 重拉）
+  let NEU_GRAPH_LOADING = false
+  let NEU_GRAPH_ERR = ''
+  async function loadNeuronGraph(id, force) {
+    if (NEU_GRAPH && NEU_GRAPH.neuron.id === id && !force) return NEU_GRAPH
+    if (needToken()) return null
+    if (NEU_GRAPH_LOADING) return null
+    NEU_GRAPH_LOADING = true
+    NEU_GRAPH_ERR = ''
+    try {
+      const res = await fetch(apiUrl('/gateway/neurons/graph?id=' + encodeURIComponent(id)))
+      const data = await res.json()
+      if (!data || !data.neuron || !Array.isArray(data.cogs)) throw new Error(data.error || 'bad response')
+      NEU_GRAPH = data
+    } catch (e) {
+      NEU_GRAPH_ERR = e.message || String(e)
+    } finally {
+      NEU_GRAPH_LOADING = false
+      if (state.mgrView.neuronSel) renderMgrNeurons() // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态
+    }
+    return NEU_GRAPH
+  }
+
+  /** 神经元视图统一分发（mgr.js renderMgr 的 neurons 分支入口）：有选中 = 图视图，无 = 选择界面 */
+  function renderMgrNeurons() {
+    if (state.mgrView.neuronSel) renderNeuGraphView()
+    else renderNeuPicker()
+  }
+
+  // ---------- 层级1：神经元选择界面 ----------
+  function renderNeuPicker() {
+    messagesEl.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-top"></div>' +
+      '<div class="mgr-head"><h2 class="mgr-title">神经元</h2>' +
+      '<div class="mgr-sub">记忆神经元库 · mem→认知→社群三级节点图（数据源 .claude/neturon/neurons）</div></div>' +
+      '<div class="mgr-grid" id="neu-grid"></div>' +
+      '<div class="mgr-foot">数据源：网关 /gateway/neurons 实时扫描</div>' +
+      '</div>'
+    inputWrap.classList.remove('docked')
+    chatArea.classList.remove('in-session')
+    chatArea.classList.add('mgr-on')
+    renderNeuGrid()
+    loadNeuronsData(false)
+  }
+
+  function renderNeuGrid() {
+    const grid = $('neu-grid')
+    if (!grid) return
+    if (NEU_LOADING) {
+      grid.innerHTML = '<div class="mgr-empty">扫描神经元库中…</div>'
+      return
+    }
+    if (NEU_ERR) {
+      grid.innerHTML =
+        '<div class="mgr-empty">清单加载失败：' + esc(NEU_ERR) +
+        '<br><button class="mgr-retry" id="neu-retry">重试</button></div>'
+      const retry = $('neu-retry')
+      if (retry) retry.addEventListener('click', () => loadNeuronsData(true))
+      return
+    }
+    const list = NEU || []
+    grid.innerHTML = list.length
+      ? list.map(neuCardHtml).join('')
+      : '<div class="mgr-empty">未发现神经元库（各根 .claude/neturon/neurons/ 下含 config.yaml + l2.mem/mem.db 的目录即注册）</div>'
+    grid.querySelectorAll('.neu-card').forEach((c) =>
+      c.addEventListener('click', () => {
+        state.mgrView.neuronSel = c.dataset.id
+        saveMgrView()
+        renderMgr()
+        if (isMobile()) setPanel(false)
+      }),
+    )
+  }
+
+  function neuCardHtml(n) {
+    return (
+      `<div class="mgr-card neu-card" data-id="${esc(n.id)}" title="进入 ${esc(n.name || n.id)} 节点图">` +
+      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${NEU_ICON}</div>` +
+      '<div class="mgr-meta">' +
+      `<div class="mgr-name">${esc(n.name || n.id)}<span class="inst-badge">${esc(n.id)}</span></div>` +
+      `<div class="mgr-desc">${esc(n.description || '（无触发说明）')}</div>` +
+      '<div class="neu-stats">' +
+      `<span>记忆 ${n.mem_count}</span><span>认知 ${n.cog_count}</span><span>社群 ${n.community_count}</span>` +
+      (n.last_updated ? `<span>更新 ${esc(String(n.last_updated).slice(0, 10))}</span>` : '') +
+      '</div></div>' +
+      '<span class="mgr-more" title="进入">›</span></div>'
+    )
+  }
+
+  // ---------- 层级2：节点图视图 ----------
+  function renderNeuGraphView() {
+    const sel = state.mgrView.neuronSel
+    const meta = (NEU || []).find((n) => n.id === sel)
+    messagesEl.innerHTML =
+      '<div class="mgr-pane neu-pane">' +
+      '<div class="neu-head">' +
+      '<button class="neu-back" id="neu-back" title="返回神经元选择">‹ 神经元</button>' +
+      `<span class="neu-title">${esc((meta && (meta.name || meta.id)) || sel)}</span>` +
+      (meta ? `<span class="neu-meta-chip">记忆 ${meta.mem_count}</span><span class="neu-meta-chip">认知 ${meta.cog_count}</span><span class="neu-meta-chip">社群 ${meta.community_count}</span>` : '') +
+      '<span class="neu-legend"><i class="lg lg-mem"></i>记忆<i class="lg lg-cog"></i>认知<i class="lg lg-comm"></i>社群</span>' +
+      '</div>' +
+      '<div class="neu-graph" id="neu-graph"><canvas id="neu-canvas"></canvas><div class="neu-pop" id="neu-pop" hidden></div></div>' +
+      '<div class="mgr-foot">滚轮缩放 · 空白处拖拽平移 · 节点可拖拽 · 悬停/点击弹浮窗 · 数据源 /gateway/neurons/graph</div>' +
+      '</div>'
+    inputWrap.classList.remove('docked')
+    chatArea.classList.remove('in-session')
+    chatArea.classList.add('mgr-on')
+    const back = $('neu-back')
+    if (back)
+      back.addEventListener('click', () => {
+        state.mgrView.neuronSel = null
+        saveMgrView()
+        renderMgr()
+      })
+    if (NEU_GRAPH_LOADING) {
+      const box = $('neu-graph')
+      if (box) box.innerHTML = '<canvas id="neu-canvas"></canvas><div class="neu-hint">加载图数据…</div>'
+      return
+    }
+    if (NEU_GRAPH_ERR) {
+      const box = $('neu-graph')
+      if (box) {
+        box.innerHTML =
+          '<canvas id="neu-canvas"></canvas><div class="neu-hint">图数据加载失败：' + esc(NEU_GRAPH_ERR) +
+          '<br><button class="mgr-retry" id="neu-graph-retry">重试</button></div>'
+        const retry = $('neu-graph-retry')
+        if (retry) retry.addEventListener('click', () => loadNeuronGraph(sel, true))
+      }
+      return
+    }
+    if (NEU_GRAPH && NEU_GRAPH.neuron.id === sel) startNeuGraph(NEU_GRAPH)
+    else loadNeuronGraph(sel, false)
+  }
+
+  // ---------- 三级图模型（纯函数，探针覆盖） ----------
+
+  // 半径公式：mem 小点（内容量微调）；cog ∝ 挂载记忆数 + 内容量；社群 ∝ cog 数 + 内容量
+  function neuMemR(chars) {
+    return 2.5 + Math.min(2.5, chars / 600)
+  }
+  function neuCogR(nMems, chars) {
+    return Math.min(24, 7 + 2.4 * Math.sqrt(nMems) + Math.min(7, chars / 1200))
+  }
+  function neuCommR(nCogs, chars) {
+    return Math.min(34, 11 + 3.2 * Math.sqrt(nCogs * 2) + Math.min(9, chars / 2500))
+  }
+  function neuHue(i) {
+    return MGR_PALETTE[i % MGR_PALETTE.length]
+  }
+
+  /** payload → 仿真模型：nodes（x/y 初始化为确定性同心布局，无随机 → 探针可复现）+ links */
+  function neuBuildModel(d) {
+    const nodes = []
+    const links = []
+    const idxOf = {}
+    const C = d.communities
+    for (let i = 0; i < C.length; i++) {
+      const c = C[i]
+      const ang = (2 * Math.PI * i) / Math.max(1, C.length) - Math.PI / 2
+      idxOf['c' + c.i] = nodes.length
+      nodes.push({
+        key: 'comm' + c.i, type: 'comm', r: neuCommR(c.size, c.chars), ref: c,
+        x: Math.cos(ang) * 170, y: Math.sin(ang) * 170, vx: 0, vy: 0,
+      })
+    }
+    for (const g of d.cogs) {
+      idxOf['g' + g.id] = nodes.length
+      const comm = g.community >= 0 ? C[g.community] : null
+      const host = comm ? idxOf['c' + comm.i] : -1
+      // 初始位：社群节点近旁外圈（未入群 cog 落外围 300 环）
+      const k = nodes.length
+      const ang = 0.7 * k
+      const rad = host >= 0 ? nodes[host].r + 60 + (k % 7) * 9 : 300
+      const cx = host >= 0 ? nodes[host].x : 0
+      const cy = host >= 0 ? nodes[host].y : 0
+      nodes.push({
+        key: 'cog' + g.id, type: 'cog', r: neuCogR(g.mem_ids.length + g.rel_ids.length, g.chars), ref: g,
+        x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad, vx: 0, vy: 0,
+      })
+    }
+    for (const m of d.mems) {
+      idxOf['m' + m.id] = nodes.length
+      // 初始位：挂靠首个 cog 近旁；孤儿 mem（不挂任何 cog）落中心环
+      const hostCog = d.cogs.find((g) => g.mem_ids.includes(m.id) || g.rel_ids.includes(m.id))
+      const host = hostCog ? idxOf['g' + hostCog.id] : -1
+      const k = nodes.length
+      const ang = 1.3 * k
+      const rad = host >= 0 ? nodes[host].r + 10 + (k % 5) * 5 : 120 + (k % 9) * 8
+      const cx = host >= 0 ? nodes[host].x : 0
+      const cy = host >= 0 ? nodes[host].y : 0
+      nodes.push({
+        key: 'mem' + m.id, type: 'mem', r: neuMemR(m.chars), ref: m,
+        x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad, vx: 0, vy: 0,
+      })
+    }
+    // 连边（事实闭合）：cog→社群 + cog→mem/rel 全量连边（同一 mem 挂多 cog 时每 cog 各一条）
+    for (const g of d.cogs) {
+      const gi = idxOf['g' + g.id]
+      if (g.community >= 0 && idxOf['c' + g.community] !== undefined) links.push({ s: idxOf['c' + g.community], t: gi, kind: 'comm' })
+      for (const mid of g.mem_ids) { const mi = idxOf['m' + mid]; if (mi !== undefined) links.push({ s: gi, t: mi, kind: 'mem' }) }
+      for (const mid of g.rel_ids) { const mi = idxOf['m' + mid]; if (mi !== undefined) links.push({ s: gi, t: mi, kind: 'rel' }) }
+    }
+    return { nodes, links, neuron: d.neuron, resolution: d.resolution }
+  }
+
+  // ---------- 力导向仿真（d3-force 同型：斥力 + 弹簧 + 向心引力 + 碰撞） ----------
+  // 2026-09-16 用户实测「节点间斥力太大」：整体 ÷2.5（mem 卫星平衡距 49→32px，mem 云不再被吹散）
+  const NEU_CHARGE = { mem: 12, cog: 72, comm: 360 }
+  const NEU_PAD = { mem: 6, rel: 6, comm: 16 }
+  const NEU_KLINK = { mem: 0.06, rel: 0.04, comm: 0.09 }
+  // 向心引力（2026-09-16 二次定案：18:32 回退曾误恢复 15:47 首版分级值——16:12 定案本就是废弃
+  // 分级、改统一外场，d3 forceCenter 同型）：向心只负责把整图约束在画布内，与类型/尺寸完全无关；
+  // 径向分层语义全部交斥力——charge 大者被推得远（comm 外圈 / cog 中带 / mem 内带）。
+  const NEU_G = 0.01
+
+  function neuTick(model, alpha) {
+    const ns = model.nodes
+    // 斥力（O(n²)，数百节点规模足够；d² 衰减 + 位移上限防爆）
+    for (let i = 0; i < ns.length; i++) {
+      const a = ns[i]
+      for (let j = i + 1; j < ns.length; j++) {
+        const b = ns[j]
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let d2 = dx * dx + dy * dy
+        if (d2 < 1) { dx = (i % 3) - 1 || 0.5; dy = (j % 3) - 1 || 0.5; d2 = 1 }
+        const f = (NEU_CHARGE[a.type] * NEU_CHARGE[b.type] * alpha) / d2
+        const d = Math.sqrt(d2)
+        const fx = (dx / d) * f
+        const fy = (dy / d) * f
+        a.vx -= fx; a.vy -= fy
+        b.vx += fx; b.vy += fy
+      }
+    }
+    // 弹簧（目标距离 = 两端半径和 + 余量）
+    for (const lk of model.links) {
+      const a = ns[lk.s]
+      const b = ns[lk.t]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const d = Math.sqrt(dx * dx + dy * dy) || 1
+      const L = a.r + b.r + NEU_PAD[lk.kind]
+      // 弹簧无地板：力 ∝ alpha 随仿真衰减自然归零（旧 max(alpha,0.15) 地板令末段速度恒定、停机像急刹）
+      const f = (d - L) * NEU_KLINK[lk.kind] * alpha
+      const fx = (dx / d) * f
+      const fy = (dy / d) * f
+      a.vx += fx; a.vy += fy
+      b.vx -= fx; b.vy -= fy
+    }
+    // 向心引力（统一外场指向画布中心，与类型/尺寸无关）
+    for (const n of ns) {
+      const g = NEU_G
+      n.vx += (0 - n.x) * g * alpha
+      n.vy += (0 - n.y) * g * alpha
+      n.vx *= 0.85
+      n.vy *= 0.85
+      const sp = Math.sqrt(n.vx * n.vx + n.vy * n.vy)
+      // 速度上限随 alpha 线性收缩（alpha≤0.3 后渐缓趋停，2026-09-16 用户「中止过于突然，应该是速度逐渐变缓」）
+      const cap = 14 * Math.min(1, alpha / 0.3)
+      if (sp > cap) { n.vx = (n.vx / sp) * cap; n.vy = (n.vy / sp) * cap }
+      if (!n.fixed) { n.x += n.vx; n.y += n.vy } else { n.vx = 0; n.vy = 0 }
+    }
+    // 碰撞去重叠（按半径和推出；单趟即可，斥力会接力）
+    for (let i = 0; i < ns.length; i++) {
+      const a = ns[i]
+      for (let j = i + 1; j < ns.length; j++) {
+        const b = ns[j]
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const min = a.r + b.r + 1.5
+        const d2 = dx * dx + dy * dy
+        if (d2 >= min * min || d2 === 0) continue
+        const d = Math.sqrt(d2)
+        const push = ((min - d) / d) * 0.5
+        const fx = dx * push
+        const fy = dy * push
+        if (!a.fixed) { a.x -= fx; a.y -= fy }
+        if (!b.fixed) { b.x += fx; b.y += fy }
+      }
+    }
+  }
+
+  // ---------- 渲染与交互（实例态挂在闭包，画布离场即停帧） ----------
+  let NEU_VIEW = null // {model, view:{x,y,k}, raf, pinned, canvas, ctx, box, pop, alpha, drag}
+
+  function startNeuGraph(data) {
+    const canvas = $('neu-canvas')
+    const box = $('neu-graph')
+    const pop = $('neu-pop')
+    if (!canvas || !box || !pop) return
+    const model = neuBuildModel(data)
+    NEU_VIEW = { model, view: { x: 0, y: 0, k: 1 }, raf: 0, pinned: null, canvas, ctx: canvas.getContext('2d'), box, pop, alpha: 1, drag: null }
+    const st = NEU_VIEW
+    const resize = () => {
+      const w = box.clientWidth
+      const h = box.clientHeight
+      if (!w || !h) return
+      const dpr = window.devicePixelRatio || 1
+      canvas.width = Math.round(w * dpr)
+      canvas.height = Math.round(h * dpr)
+      canvas.style.width = w + 'px'
+      canvas.style.height = h + 'px'
+      st.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      st.w = w
+      st.h = h
+      st.alpha = Math.max(st.alpha, 0.3) // 尺寸变化轻 reheating 重排
+    }
+    resize()
+    st.ro = new ResizeObserver(resize)
+    st.ro.observe(box)
+
+    const frame = () => {
+      if (!canvas.isConnected) {
+        if (st.ro) st.ro.disconnect()
+        if (st.raf) cancelAnimationFrame(st.raf)
+        if (NEU_VIEW === st) NEU_VIEW = null
+        return
+      }
+      if (st.alpha > 0.003) {
+        neuTick(st.model, st.alpha)
+        st.alpha *= 0.985
+      }
+      drawNeu(st)
+      if (st.pinned) positionPop(st)
+      st.raf = requestAnimationFrame(frame)
+    }
+    st.raf = requestAnimationFrame(frame)
+    bindNeuPointer(st)
+    st.frame = frame
+    // 认知层缺失照实提示（库只有记忆层：cog_graph.json/community.json 由认知管线产出，未跑即无）
+    const cog = data.cognition || {}
+    if (!cog.graph || !cog.communities) {
+      const old = box.querySelector('.neu-note')
+      if (old) old.remove()
+      const note = document.createElement('div')
+      note.className = 'neu-note'
+      note.textContent = !cog.graph
+        ? '该库尚无认知图（未跑认知管线 recall → fill_precog → build_graph），当前仅呈现记忆层 ' + data.mems.length + ' 条'
+        : '该库尚未检测社群（未跑 detect_communities），认知节点暂未归群'
+      box.appendChild(note)
+      st.note = note
+    }
+  }
+
+  /** 屏幕坐标 → 图坐标 */
+  function neuToGraph(st, sx, sy) {
+    return { x: (sx - st.w / 2 - st.view.x) / st.view.k, y: (sy - st.h / 2 - st.view.y) / st.view.k }
+  }
+  function neuHit(st, sx, sy) {
+    const p = neuToGraph(st, sx - st.box.getBoundingClientRect().left, sy - st.box.getBoundingClientRect().top)
+    let best = null
+    for (const n of st.model.nodes) {
+      const d = Math.sqrt((n.x - p.x) ** 2 + (n.y - p.y) ** 2)
+      const hit = n.type === 'mem' ? n.r + 4 : n.r + 2
+      if (d <= hit && (!best || n.r > best.r)) best = n
+    }
+    return best
+  }
+
+  function drawNeu(st) {
+    const { ctx, model, view } = st
+    const w = st.w || 0
+    const h = st.h || 0
+    ctx.clearRect(0, 0, w, h)
+    ctx.save()
+    ctx.translate(w / 2 + view.x, h / 2 + view.y)
+    ctx.scale(view.k, view.k)
+    // 边：mem 实线淡 / rel 更淡 / comm 稍深
+    for (const lk of model.links) {
+      const a = model.nodes[lk.s]
+      const b = model.nodes[lk.t]
+      const hue = a.type === 'comm' ? neuHue(a.ref.i) : cogHue(a)
+      ctx.strokeStyle =
+        lk.kind === 'comm' ? hexA(hue, 0.4) : lk.kind === 'rel' ? hexA(hue, 0.1) : hexA(hue, 0.22)
+      ctx.lineWidth = lk.kind === 'comm' ? 1.6 : lk.kind === 'rel' ? 0.6 : 1
+      ctx.beginPath()
+      ctx.moveTo(a.x, a.y)
+      ctx.lineTo(b.x, b.y)
+      ctx.stroke()
+    }
+    // 节点：mem 小点 → cog 彩点 → 社群大节点（描边 + 标签）
+    for (const n of model.nodes) {
+      ctx.beginPath()
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
+      if (n.type === 'mem') {
+        ctx.fillStyle = '#9aa7b8'
+      } else if (n.type === 'cog') {
+        ctx.fillStyle = cogHue(n)
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+        ctx.lineWidth = 1.2
+        ctx.stroke()
+      } else {
+        ctx.fillStyle = cogHue(n)
+        ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+        ctx.lineWidth = 2
+        ctx.stroke()
+      }
+      ctx.fill()
+      if (n.type === 'comm') {
+        ctx.fillStyle = 'rgba(40,50,70,0.85)'
+        ctx.font = '10px system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText((n.ref.name || '群' + (n.ref.i + 1)) + '·' + n.ref.size, n.x, n.y + n.r + 12)
+      }
+    }
+    ctx.restore()
+  }
+  function cogHue(n) {
+    return n.type === 'comm' ? neuHue(n.ref.i) : n.ref.community >= 0 ? neuHue(n.ref.community) : '#8a94a6'
+  }
+  function hexA(hex, a) {
+    const h = hex.replace('#', '')
+    const r = parseInt(h.slice(0, 2), 16)
+    const g = parseInt(h.slice(2, 4), 16)
+    const b = parseInt(h.slice(4, 6), 16)
+    return `rgba(${r},${g},${b},${a})`
+  }
+
+  // ---------- 指针交互（悬停浮窗 / 点击钉住 / 拖节点 / 平移 / 缩放） ----------
+  function bindNeuPointer(st) {
+    const cv = st.canvas
+    let moved = 0
+    cv.addEventListener('pointerdown', (e) => {
+      cv.setPointerCapture(e.pointerId)
+      moved = 0
+      const hit = neuHit(st, e.clientX, e.clientY)
+      st.drag = { hit, sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y }
+      if (hit) hit.fixed = true
+    })
+    cv.addEventListener('pointermove', (e) => {
+      if (st.drag) {
+        const dx = e.clientX - st.drag.sx
+        const dy = e.clientY - st.drag.sy
+        moved = Math.max(moved, Math.abs(dx) + Math.abs(dy))
+        if (st.drag.hit) {
+          const p = neuToGraph(st, e.clientX - st.box.getBoundingClientRect().left, e.clientY - st.box.getBoundingClientRect().top)
+          st.drag.hit.x = p.x
+          st.drag.hit.y = p.y
+          st.alpha = Math.max(st.alpha, 0.35)
+        } else {
+          st.view.x = st.drag.vx + dx
+          st.view.y = st.drag.vy + dy
+        }
+        return
+      }
+      const hit = neuHit(st, e.clientX, e.clientY)
+      if (hit) showNeuPop(st, hit, e.clientX, e.clientY)
+      else if (!st.pinned) hideNeuPop(st)
+    })
+    const up = (e) => {
+      if (st.drag) {
+        if (st.drag.hit) {
+          st.drag.hit.fixed = false
+          if (moved < 5) {
+            st.pinned = st.pinned === st.drag.hit ? null : st.drag.hit
+            if (st.pinned) showNeuPop(st, st.pinned, e.clientX, e.clientY)
+            else hideNeuPop(st)
+          }
+        } else if (moved < 5) {
+          st.pinned = null
+          hideNeuPop(st)
+        }
+      }
+      st.drag = null
+    }
+    cv.addEventListener('pointerup', up)
+    cv.addEventListener('pointercancel', () => { st.drag = null })
+    cv.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault()
+        const k = Math.min(3, Math.max(0.25, st.view.k * Math.exp(-e.deltaY * 0.0012)))
+        st.view.k = k
+      },
+      { passive: false },
+    )
+    cv.addEventListener('pointerleave', () => { if (!st.pinned) hideNeuPop(st) })
+  }
+
+  // ---------- 浮窗（美化卡片：标题行 + 统计 chips + 成员/内容区） ----------
+  function showNeuPop(st, node, clientX, clientY) {
+    st.hover = node
+    const pop = st.pop
+    pop.innerHTML = neuPopHtml(node)
+    pop.hidden = false
+    st.popAt = { x: clientX, y: clientY }
+    positionPop(st)
+  }
+  function positionPop(st) {
+    const node = st.pinned || st.hover
+    const pop = st.pop
+    if (!node || pop.hidden) return
+    // 钉住态跟随节点图→屏坐标；悬停态用最近指针位
+    let sx
+    let sy
+    if (st.pinned === node) {
+      const rect = st.box.getBoundingClientRect()
+      sx = rect.left + st.w / 2 + st.view.x + node.x * st.view.k
+      sy = rect.top + st.h / 2 + st.view.y + node.y * st.view.k
+    } else if (st.popAt) {
+      sx = st.popAt.x
+      sy = st.popAt.y
+    } else return
+    const pw = pop.offsetWidth || 300
+    const ph = pop.offsetHeight || 160
+    const rect = st.box.getBoundingClientRect()
+    let left = sx - rect.left + 14
+    let top = sy - rect.top + 14
+    left = Math.max(6, Math.min(left, rect.width - pw - 6))
+    top = Math.max(6, Math.min(top, rect.height - ph - 6))
+    pop.style.left = left + 'px'
+    pop.style.top = top + 'px'
+  }
+  function hideNeuPop(st) {
+    st.hover = null
+    st.pop.hidden = true
+  }
+
+  function neuPopHtml(node) {
+    if (node.type === 'comm') return neuCommHtml(node.ref)
+    if (node.type === 'cog') return neuCogHtml(node.ref)
+    return neuMemHtml(node.ref)
+  }
+
+  function chipsHtml(arr) {
+    return '<div class="neu-chips">' + arr.map((x) => `<span class="neu-chip">${x}</span>`).join('') + '</div>'
+  }
+
+  function neuCommHtml(c) {
+    const hue = neuHue(c.i)
+    const rows = c.members
+      .map(
+        (m) =>
+          `<div class="neu-mrow"><span class="neu-role ${esc(m.role)}" style="--hue:${hue}"></span>` +
+          `<span class="neu-mq" title="${esc(m.query)}">${esc(m.query)}</span>` +
+          `<span class="neu-score">${m.core_score.toFixed(2)}</span></div>`,
+      )
+      .join('')
+    return (
+      `<div class="neu-pop-h"><span class="neu-dot" style="background:${hue}"></span>` +
+      (c.name ? `${esc(c.name)} · 认知 ${c.size}` : `群 ${c.i + 1} · 认知 ${c.size}`) +
+      '</div>' +
+      (c.description ? `<div class="neu-q">${esc(c.description)}</div>` : '') +
+      chipsHtml([`记忆 ${c.mem_count}`, `密度 ${c.density.toFixed(2)}`, `内容 ${fmtChars(c.chars)}`]) +
+      `<div class="neu-members">${rows || '<div class="neu-nomember">（无成员）</div>'}</div>`
+    )
+  }
+
+  function neuCogHtml(g) {
+    const hue = g.community >= 0 ? neuHue(g.community) : '#8a94a6'
+    const kws = g.keywords
+      .slice(0, 6)
+      .map((k) => `<span class="neu-kw">${esc(k)}</span>`)
+      .join('')
+    return (
+      `<div class="neu-pop-h"><span class="neu-dot" style="background:${hue}"></span>认知节点${g.community >= 0 ? ` · 群 ${g.community + 1}` : ' · 游离'}</div>` +
+      `<div class="neu-q">${esc(g.query)}</div>` +
+      (kws ? `<div class="neu-kws">${kws}</div>` : '') +
+      chipsHtml([
+        `记忆 ${g.mem_ids.length}`,
+        g.rel_ids.length ? `关联 ${g.rel_ids.length}` : '',
+        `内容 ${fmtChars(g.chars)}`,
+      ].filter(Boolean))
+    )
+  }
+
+  function neuMemHtml(m) {
+    return (
+      '<div class="neu-pop-h"><span class="neu-dot" style="background:#9aa7b8"></span>记忆' +
+      (m.time ? ` · ${esc(m.time)}` : '') +
+      '</div>' +
+      `<div class="neu-prev">${esc(m.preview || '（无文本）')}</div>` +
+      chipsHtml([`内容 ${fmtChars(m.chars)}`, m.source ? '来源 ' + esc(m.source) : ''].filter(Boolean))
+    )
+  }
+
+  function fmtChars(n) {
+    return n >= 1000 ? (n / 1000).toFixed(1) + 'k 字' : n + ' 字'
   }
 
   // ---------- 气泡弹层 ----------
@@ -3407,8 +4193,16 @@ function setFirstSendHash(v) { firstSendHash = v }
   })
   inputEl.addEventListener('paste', (e) => {
     if (gateAwait) return
-    const files = Array.from((e.clipboardData && e.clipboardData.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) { e.preventDefault(); addImageFiles(files) }
+    const cd = e.clipboardData
+    const files = Array.from((cd && cd.files) || []).filter(f => /^image\//.test(f.type))
+    if (files.length) { e.preventDefault(); addImageFiles(files); return }
+    // 2026-09-18 纯文本粘贴：contentEditable 默认吃剪贴板 text/html（从网页/IDE/Office 复制
+    // 粘入会保留颜色/粗体/背景等原格式），拦截改只取 text/plain 于光标处插入——与上方
+    // 2026-09-06「纯文本复制」copy 方向对称；insertText 保留 undo 栈且不破坏 mention chip
+    const text = cd ? cd.getData('text/plain') : ''
+    if (!text) return
+    e.preventDefault()
+    document.execCommand('insertText', false, text)
   })
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
   // 4 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
@@ -3716,7 +4510,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     document.head.appendChild(s)
   }
 
-  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「插件/技能 + 近48h 会话」浮窗，选中插入内联 chip ----------
+  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
@@ -3727,7 +4521,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
-  // 见 src/utils/sessionExposure.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
   function splitSessionToken(v) {
     const i = String(v).indexOf('|')
     return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
@@ -3814,14 +4608,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     const ql = (q || '').trim().toLowerCase()
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
-    if (MGR) {
-      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
-      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
-    }
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
+    }
+    if (MGR) {
+      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
+      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
     }
     return items
   }
@@ -4046,7 +4840,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   projSeatEl.querySelector('.chevron').innerHTML = I.dshChevDown
   function projList() {
     const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel && !isArchived(s)) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
     return Object.keys(byProject).sort((a, b) => {
       const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
       const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
@@ -4296,12 +5090,21 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!id) return null
     return { model: { id, name: id } }
   }
-  // 推理等级名（全局；effortLevel 未设置 = Off）
+  // 推理等级名（全局；effortLevel 未设置 = Off / 无 off 档模型显示「默认」）
   function effLabel() {
     const eff = MODEL_CUR.effortLevel
-    if (eff === undefined || eff === null) return 'Off'
+    if (eff === undefined || eff === null) return modelEffortLevels()?.includes('off') ? 'Off' : '默认'
     const level = EFFORT_LEVELS.find(e => e.id === eff)
     return level ? level.name : String(eff)
+  }
+  // 当前模型的官方思考等级清单（2026-09-18：凭据池 effortLevels 声明经 /gateway/models 下发；
+  // 未声明返回 null → 回退固定 Off+Low/High/Max）。渲染与选择一律以此为准，不写死档位。
+  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' }
+  function modelEffortLevels() {
+    const id = MODEL_CUR.model
+    if (!id || !MODELS || !Array.isArray(MODELS.items)) return null
+    const it = MODELS.items.find(x => x && x.v === id)
+    return it && Array.isArray(it.effortLevels) && it.effortLevels.length ? it.effortLevels.map(String) : null
   }
   function renderModelSeat() {
     // 显示源 = currentChoice()（MODEL_CUR.model，用户切换后即时更新），不用 MODELS.model 缓存——
@@ -4351,6 +5154,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       return rows
     }
     if (msel.pane === 'effort') {
+      // 官方档位动态渲染（2026-09-18）：有 effortLevels 声明=按声明逐档渲染（off→undefined 语义）；
+      // 未声明=回退固定 Off + Low/High/Max。
+      const levels = modelEffortLevels()
+      if (levels) {
+        return levels.map(id => ({ kind: 'effort', effort: id === 'off' ? undefined : id, label: EFFORT_LABELS[id] || id }))
+      }
       const rows = [{ kind: 'effort', effort: undefined, label: 'Off' }]
       for (const e of EFFORT_LEVELS) rows.push({ kind: 'effort', effort: e.id, label: e.name })
       return rows
@@ -4848,9 +5657,9 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
             const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
-            // 来源行在 q-body 首行（排队项是单行 flex，标签塞同一行会挤压正文；行内首行即视觉上方）
+            // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
-            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div><div class="q-tag">排队中</div></div>'
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + '<p>' + renderUserText(txt) + '</p>' + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)
@@ -5599,7 +6408,7 @@ function setApprovalPending(v) { approvalPending = v }
         if (msg.session_id && msg.session_id !== state.currentHash) return
         if (approvalPending) { setApprovalPending(null) }
         if (takeover === 'approval') clearTakeover()
-      } else if (msg.type === 'status') addSystem('· ' + msg.state)
+      } else if (msg.type === 'status') addSystem(msg.state)
     }
   }
 
@@ -5740,7 +6549,7 @@ function setApprovalPending(v) { approvalPending = v }
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
     if (state.preview) route()
-    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true) }
+    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true); if (state.mgr === 'neurons') loadNeuronsData(true) }
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、

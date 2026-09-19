@@ -60,7 +60,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
       const sess = findSession(r.hash)
       r.hash = sess ? hashOf(sess) : r.hash
     }
-    state.currentHash = r.name === 'session' ? r.hash : null
+    state.currentHash = r.name === 'session' ? r.hash : ''
     renderRecent()
     if (r.name === 'home') renderHome()
     else if (r.name === 'mgr') { state.mgr = r.mgr; loadMgrView(); renderMgr() }
@@ -182,7 +182,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
     stopLiveFoldTimer()
     setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
     stageRelease()
-    state.currentHash = null
+    state.currentHash = ''
     messagesEl.innerHTML = ''
     clearSessionSlots() // 回首页（空态）同样清「当前会话」全局槽（不变量见上）
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）

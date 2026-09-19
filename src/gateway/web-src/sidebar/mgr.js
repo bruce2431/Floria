@@ -18,7 +18,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     closeMentionPop()
     stopLiveFoldTimer()
     stageRelease()
-    state.currentHash = null
+    state.currentHash = ''
     state.preview = null
     // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
     // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
@@ -346,7 +346,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     const curFrame = messagesEl.querySelector('.preview-frame')
     const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
     if (!soft) {
-      state.currentHash = null
+      state.currentHash = ''
       stopLiveFoldTimer()
       stageRelease()
       // 2026-09-16 项目页被实时流洗成 chat 根治：离开会话视图必须清全局槽（清槽清单与不变量

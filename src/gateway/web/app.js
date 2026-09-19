@@ -130,7 +130,10 @@
   const modeTabsEl = $('mode-tabs')
 
   // ---------- 状态 ----------
-  const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: null, mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' } }
+  // currentHash 无会话态 = ''（与 recent.js firstSendHash 同一表示，禁止再引入 null）：乐观项
+  // pendingUserMsgs.hash 的「未归属」判定（p.hash === ''）依赖此约定——两套空值表示会让首页
+  // 发送的乐观气泡在 navigate 进会话时被 renderSession 的归属守卫判为异类而丢弃（消息先闪现后消失）。
+  const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' } }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -1204,7 +1207,7 @@ function setSessionCwd(v) { sessionCwd = v }
       const sess = findSession(r.hash)
       r.hash = sess ? hashOf(sess) : r.hash
     }
-    state.currentHash = r.name === 'session' ? r.hash : null
+    state.currentHash = r.name === 'session' ? r.hash : ''
     renderRecent()
     if (r.name === 'home') renderHome()
     else if (r.name === 'mgr') { state.mgr = r.mgr; loadMgrView(); renderMgr() }
@@ -1326,7 +1329,7 @@ function setSessionCwd(v) { sessionCwd = v }
     stopLiveFoldTimer()
     setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
     stageRelease()
-    state.currentHash = null
+    state.currentHash = ''
     messagesEl.innerHTML = ''
     clearSessionSlots() // 回首页（空态）同样清「当前会话」全局槽（不变量见上）
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
@@ -2853,7 +2856,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     closeMentionPop()
     stopLiveFoldTimer()
     stageRelease()
-    state.currentHash = null
+    state.currentHash = ''
     state.preview = null
     // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
     // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
@@ -3181,7 +3184,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const curFrame = messagesEl.querySelector('.preview-frame')
     const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
     if (!soft) {
-      state.currentHash = null
+      state.currentHash = ''
       stopLiveFoldTimer()
       stageRelease()
       // 2026-09-16 项目页被实时流洗成 chat 根治：离开会话视图必须清全局槽（清槽清单与不变量

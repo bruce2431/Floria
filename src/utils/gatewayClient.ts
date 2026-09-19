@@ -5,7 +5,7 @@
  * 进程（非网关宿主）启动后由本模块：
  *  1. 探测本机网关（GET /gateway/health，地址 = FLOIRA_GATEWAY 或回退 127.0.0.1:8124）；
  *     网关未起则后台定时重试（网关后起也能连上），全程静默不打扰；
- *  2. 读盘 token（网关进程启动时写入便携根 .claude/gateway-token）→ setGatewayToken，
+ *  2. 读盘 token（网关进程启动时写入便携根 .claude/gateway/token）→ setGatewayToken，
  *     让 conversationDisplay 的 HTTP 上报（/gateway/conversation、/gateway/activity）也带 token；
  *  3. 以 WebSocket 客户端连 /clients?token=&session=<getSessionId()> 注册自己的会话；
  *  4. 收到网关转发来的遥测端消息（{type:'send', text}）→ enqueue 注入本进程 REPL
@@ -38,7 +38,7 @@ const RECONNECT_MAX_MS = 60_000
 
 /**
  * 网关 HTTP 基地址：FLOIRA_GATEWAY env 优先；缺失（wt 直并入旧 WT 窗口时 env 不达子进程）
- * 读盘 .claude/gateway-port（网关启动写）；再缺失回退默认 8124。
+ * 读盘 .claude/gateway/port（网关启动写）；再缺失回退默认 8124。
  * 2026-09-15 导出（gatewayBaseUrl）：会话目录查询（fetchSessionDirectory）共用本解析，
  * 不再复制一份地址规则（env → 落盘端口 → 8124 的回退序是 wt spawn 会话能连上网关的关键）。
  */

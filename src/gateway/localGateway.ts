@@ -5,7 +5,7 @@
  * detached spawn 自身 exe），本模块即该网关进程的主体。CLI 进程（非网关宿主）启动后作为
  * WS 客户端连 /clients 注册自己的 sessionId（见 src/utils/gatewayClient.ts）；遥测端（浏览器）
  * 经 /ws 发消息，网关按 sessionId 跨进程路由转发给对应 CLI，由 CLI 侧 enqueue 注入其 REPL
- * （与打字同路径）。token 落盘便携根 .claude/gateway-token，供各 CLI 进程读取后上报/连接。
+ * （与打字同路径）。token 落盘便携根 .claude/gateway/token，供各 CLI 进程读取后上报/连接。
  *
  * 生命周期（2026-08-17）：网关以独立进程长驻，不随任何 CLI 退出而消失；「无客户端空闲自动回收」
  * ——CLI 注册(cliClients)/遥测 WS(sockets)/SSE(sseClients) 三集合全空持续 GATEWAY_IDLE_MINUTES
@@ -49,6 +49,7 @@ import {
   loadGatewayTokenFromDisk,
   isGatewayTicket,
   touchGatewayTicket,
+  gatewayDir,
 } from '../utils/gatewayToken.js'
 
 // 复用官方凭据池：模型校验与 CLI 同一来源（credentials.json activeProvider.models），
@@ -114,7 +115,7 @@ let idleTimer: NodeJS.Timeout | null = null
 // preview.json 声明 backend 的项目 → 网关懒加载 spawn 后端进程 + 动态端口分配，
 // 前端 iframe 本机直连 http://127.0.0.1:<port>/；远程宿主走同源代理 /backend/<label>/。
 // 生命周期（2026-08-28 解耦定案）：后端进程不再随网关关停（/server off/restart、空闲退出、
-// 网关硬杀均不 kill）——注册表落盘 .claude/backend-registry.json，网关重启后 ensureBackend
+// 网关硬杀均不 kill）——注册表落盘 .claude/gateway/backends.json，网关重启后 ensureBackend
 // 按注册表收养存活进程（pid 活着 + 端口就绪），预览页刷新/重进秒开不再冷启动；后端仅由
 // 空闲回收（preview.json idleMinutes）与用户手动关闭管理。根治「网关重启 → 后端冷启动 + 孤儿占端口漂移」。
 // ============================================================================
@@ -125,6 +126,9 @@ interface BackendCfg {
   port: number // 0 = 动态分配（网关从 8130 起探测顺延）
   idleMinutes?: number // 空闲回收阈值，缺省继承 GATEWAY_IDLE_MINUTES
   readyPath?: string // 就绪探测路径，缺省 /api/system_stats（项目后端自身 API，非网关前缀）
+  // 该项目 .claude/preview 目录（readBackendCfg 回填，非 preview.json 字段）：后端日志
+  // 落该目录下的 backend.log（2026-09-19 定案「一个文件就直接放」，不建 logs/ 子目录）。
+  previewDir?: string
 }
 interface BackendProc {
   pid: number
@@ -140,7 +144,7 @@ const backendProcesses = new Map<string, BackendProc>()
 // 后端注册表落盘（2026-08-28 生命周期解耦）：label → {pid, port, startedAt}。
 // 写点 = Map 变化处（spawn 就绪/收养/kill/异常退出）；网关死后记录仍在，重启后收养。
 function backendRegistryPath(): string {
-  return join(getPortableRoot(), '.claude', 'backend-registry.json')
+  return join(gatewayDir(), 'backends.json')
 }
 function readBackendRegistry(): Record<string, { pid: number; port: number; startedAt: number }> {
   if (!existsSync(backendRegistryPath())) return {}
@@ -153,7 +157,9 @@ function persistBackendRegistry(): void {
   try {
     const reg: Record<string, { pid: number; port: number; startedAt: number }> = {}
     for (const [label, p] of backendProcesses) reg[label] = { pid: p.pid, port: p.port, startedAt: p.startedAt }
-    writeFileSync(backendRegistryPath(), JSON.stringify(reg, null, 2))
+    const p = backendRegistryPath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, JSON.stringify(reg, null, 2))
   } catch {
     /* 忽略：磁盘瞬时故障由下个写点重试 */
   }
@@ -228,14 +234,16 @@ const webSessions = new Map<string, WebSessionProc>()
 // （spawnWebSession 防双进程写同一 jsonl）失效，故注册表落盘（变更即写，防 kill -9 留脏），
 // 网关启动时收养 pid 仍存活的条目。
 // ============================================================================
-const webSessionsRegistryPath = (): string => join(getPortableRoot(), '.claude', 'gateway-websessions.json')
+const webSessionsRegistryPath = (): string => join(gatewayDir(), 'websessions.json')
 function persistWebSessions(): void {
   const entries: Array<{ sessionId: string; pid: number; startedAt: number }> = []
   for (const p of webSessions.values()) {
     if (p.pid) entries.push({ sessionId: p.sessionId, pid: p.pid, startedAt: p.startedAt })
   }
   try {
-    writeFileSync(webSessionsRegistryPath(), JSON.stringify(entries), 'utf8')
+    const p = webSessionsRegistryPath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, JSON.stringify(entries), 'utf8')
   } catch {
     /* 落盘失败不影响运行：最坏情况重启后收养不到，退化为 resume 重开窗口 */
   }
@@ -353,15 +361,17 @@ function normalizeGatewayTasks(raw: unknown): GatewayTaskItem[] {
 // 2026-09-06 web 打断收口二轮：回合被中止的网关权威时刻（per-session）。打断后 jsonl 零写入，
 // 本时刻是刷新后恢复收口判定的唯一持久源（turn-state SSE 只覆盖不刷新的实时路径）；无 TTL、
 // 不入 sweepStaleMaps——被打断的回合永无回复，语义同前端 turnEndFlags「无 TTL 防运行态复活」。
-// 2026-09-07 落盘持久化（gateway-turnend.json，变更即写、启动恢复）：重启不杀 CLI 进程（09-05
+// 2026-09-07 落盘持久化（.claude/gateway/turnend.json，变更即写、启动恢复）：重启不杀 CLI 进程（09-05
 // 不杀定案），重启前被打断的回合其收口信号必须跨重启存活——否则 CLI 重连重报 activity 后 state
 // 恢复非 null，两收口信号全失，「正在处理」无限计时复活（09-06 2h26m 挂死的重启回归路径）。
 // 旧注释「重启连坐杀全部 CLI 进程 → state=null 先行收口」系不杀定案前的时代残留，已作废。
 const turnEndAt = new Map<string, number>()
-const turnEndAtPath = (): string => join(getPortableRoot(), '.claude', 'gateway-turnend.json')
+const turnEndAtPath = (): string => join(gatewayDir(), 'turnend.json')
 function persistTurnEndAt(): void {
   try {
-    writeFileSync(turnEndAtPath(), JSON.stringify(Object.fromEntries(turnEndAt)), 'utf8')
+    const p = turnEndAtPath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, JSON.stringify(Object.fromEntries(turnEndAt)), 'utf8')
   } catch {
     /* 落盘失败不影响运行：最坏情况重启后该次打断收口退化为内存态丢失 */
   }
@@ -980,6 +990,7 @@ function readBackendCfg(previewDir: string): BackendCfg | undefined {
     port: typeof b.port === 'number' ? b.port : 0,
     idleMinutes: typeof b.idleMinutes === 'number' ? b.idleMinutes : GATEWAY_IDLE_MINUTES,
     readyPath: typeof b.readyPath === 'string' && b.readyPath ? b.readyPath : '/api/system_stats', // 项目后端(如 ComfyUI)自身 API,勿随网关前缀迁移
+    previewDir, // 供 backendLogPath 定位该项目 .claude/preview/backend.log（非 preview.json 字段）
   }
 }
 
@@ -1782,7 +1793,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // 2026-08-28 设备认证配对（用户定案：浏览器侧完全删除 token 授权链）：
   //  - 浏览器授权只走 floria_auth cookie 票证（手动配对：设备门显示请求码 → PC `/server auth add`
   //    → 设备 GET /gateway/activate?code=<码> 种 cookie）→ 授权设备 URL 干净、永久免认证。
-  //  - query token 仅剩 gateway-token（CLI 上报/内部链路），只放行请求、不种 cookie（浏览器不可用
+  //  - query token 仅剩网关 token（CLI 上报/内部链路），只放行请求、不种 cookie（浏览器不可用
   //    它获得授权；浏览器 URL 也不再出现 token）。
   const qToken = url.searchParams.get('token')
   const qOk = qToken != null && qToken !== '' && qToken === currentToken
@@ -2955,9 +2966,10 @@ async function allocBackendPort(): Promise<number> {
 // 进行中的 spawn（防并发重复拉起）：同一 label 探测期间，后续请求复用同一 Promise
 const backendPending = new Map<string, Promise<BackendProc>>()
 
-function backendLogPath(label: string): string {
-  const safe = label.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return join(getPortableRoot(), '.claude', `backend-${safe}.log`)
+// 后端日志落「该项目自己的」<previewDir>/backend.log（2026-09-19 定案：一个项目一份 preview.json
+// = 一个后端 = 单文件 ⇒ 直接放 preview/ 根，不建 logs/ 子目录）。
+function backendLogPath(cfg: BackendCfg): string {
+  return join(cfg.previewDir ?? resolve(getPortableRoot(), '.claude'), 'backend.log')
 }
 
 // O3：backend 日志轮转 —— 超过上限截断重写，防长期运行无限增长（stdout/stderr 落盘只追加）
@@ -3014,9 +3026,10 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
   const cmd = cfg.cmd.map((a) => (a.includes('{port}') ? a.replaceAll('{port}', String(port)) : a))
   // cmd[0] 若是相对路径（含 / 或 \），node spawn 按进程 cwd 而非选项 cwd 解析 → 手动 resolve 到 cfg.cwd
   if (cmd[0] && !isAbsolute(cmd[0]) && /[\\/]/.test(cmd[0])) cmd[0] = resolve(cfg.cwd, cmd[0])
-  // 子进程 stdout/stderr 落盘到便携根 .claude/backend-<label>.log（stdio ignore 会丢启动报错，难诊断）
-  const logPath = backendLogPath(label)
+  // 子进程 stdout/stderr 落盘到该项目自己的 .claude/preview/backend.log（stdio ignore 会丢启动报错，难诊断）
+  const logPath = backendLogPath(cfg)
   rotateBackendLogIfNeeded(logPath)
+  mkdirSync(join(logPath, '..'), { recursive: true })
   const logFd = openSync(logPath, 'a')
   const child = spawn(cmd[0], cmd.slice(1), {
     cwd: cfg.cwd,
@@ -3054,7 +3067,7 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
       /* 忽略 */
     }
     if (child.pid) killTree(child.pid)
-    throw new Error(`backend ${label}: 端口 ${port} 就绪探测失败（${cfg.readyPath}），详见日志 ${backendLogPath(label)}`)
+    throw new Error(`backend ${label}: 端口 ${port} 就绪探测失败（${cfg.readyPath}），详见日志 ${backendLogPath(cfg)}`)
   }
   backendProcesses.set(label, proc)
   persistBackendRegistry()
@@ -3318,7 +3331,7 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
     // conhost 老式黑窗——用户所见「管理员指令框」置顶抢眼、多窗不合并），配置层无解；原 powershell
     // Start-Process 链依赖 defterm 托管，系统更新随时可能再坏。改为网关直接调 wt.exe，行为不再随
     // defterm 配置漂移。配套：①真实 CLI pid 由 cli-hello 上报补填（wt 自身即退拿不到）；
-    // ②端口落盘 .claude/gateway-port（并入已存在 WT 窗口时新标签继承旧 WT 进程环境，FLOIRA_GATEWAY
+    // ②端口落盘 .claude/gateway/port（并入已存在 WT 窗口时新标签继承旧 WT 进程环境，FLOIRA_GATEWAY
     // 传不到 → CLI env 缺失时读盘发现，见 gatewayToken.ts）。
     // 2026-08-31 根修不变：exe 一律网关自身（协议必然匹配；目录扫描旧案已废，见 webSessionExe 注释）
     const exe = webSessionExe()
@@ -3587,7 +3600,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   setGatewayToken(currentToken)
   // 落盘移至 listen 成功回调（下方）：不变量「盘上 token/port 恒描述现网关，只有端口持有者可发布」。
   // 旧序（先写盘后 bind）下 bind 失败者（EADDRINUSE）会把败者 token 覆盖盘上胜者 token——即 12:48
-  // 事故的直接成因。2026-09-07 wt 直并配套的 gateway-port 落盘（env 缺失时 CLI 的发现通道）同批迁移。
+  // 事故的直接成因。2026-09-07 wt 直并配套的端口落盘（env 缺失时 CLI 的发现通道）同批迁移。
   const root = getPortableRoot()
   // 收养上一代网关遗留的存活 web 会话窗口（注册表落盘，重启不杀窗 → 必须收养，否则 resume 幂等失效双开进程）
   adoptWebSessions()
@@ -3630,7 +3643,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   })
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`)
-    // 2026-08-28 与 HTTP 一致：gateway-token（CLI 内部链路）或 floria_auth cookie 票证二选一；
+    // 2026-08-28 与 HTTP 一致：网关 token（CLI 内部链路）或 floria_auth cookie 票证二选一；
     // 浏览器授权全靠 cookie（/gateway/activate 配对激活时种下），URL 无 token。
     const wsToken = url.searchParams.get('token') || ''
     const qOk = wsToken !== '' && wsToken === currentToken
@@ -4054,7 +4067,7 @@ export function stopLocalGateway(): boolean {
   clearGatewayTokenFromDisk()
   clearGatewayPortFromDisk()
   // 2026-08-28 修订：/server off|restart 不再清设备授权票证（用户实测「重启后授权全没了」）——
-  // 授权名单是手动配对的持久资产，只由 /server auth add / auth off 管理；gateway-token（内部）
+  // 授权名单是手动配对的持久资产，只由 /server auth add / auth off 管理；网关 token（内部）
   // 照旧清盘（重启随机新生成）。设备 cookie 的票证在名单里始终有效，跨重启免重配。
   try {
     wss?.close()

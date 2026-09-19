@@ -2,7 +2,7 @@
  * /server 指令实现（内置私有化网关开关）。
  * 2026-08-17 网关独立化：网关以「同一 exe 的 --gateway 模式」作为独立进程运行（/server on
  * detached spawn 自身 exe），父 CLI 退出不影响网关；任何 CLI 进程均可连接共用（token 落盘
- * 便携根 .claude/gateway-token，各进程读盘共享）。
+ * 便携根 .claude/gateway/token，各进程读盘共享）。
  *  on      → spawn 独立网关进程（--gateway，detached + unref），绑定 HOST，等待端口就绪并回显统一地址
  *            （2026-08-28 设备认证配对：浏览器侧完全删除 token 授权链，授权只走 /server auth 手动配对）
  *  off     → POST /gateway/shutdown 优雅关闭独立网关；兜底 netstat + taskkill 清理端口残留
@@ -16,7 +16,7 @@
  */
 import { spawnSync, spawn } from 'child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, openSync, closeSync, statSync, truncateSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, closeSync, statSync, truncateSync } from 'node:fs'
 import { join } from 'node:path'
 import type { LocalCommandCall } from '../../types/command.js'
 import {
@@ -24,8 +24,8 @@ import {
   listGatewayTickets,
   addGatewayTicket,
   removeGatewayTicket,
+  gatewayDir,
 } from '../../utils/gatewayToken.js'
-import { getPortableRoot } from '../../utils/envUtils.js'
 
 const PORT = Number(process.env.GATEWAY_PORT || 8124)
 
@@ -137,15 +137,20 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 // 网关进程日志落盘 + spawn 共用（2026-08-28）
 // 此前 /server on spawn 独立网关用 stdio:'ignore'，网关 crash（如系统 commit 内存
 // 耗尽连锁崩溃）无任何痕迹可查——2026-08-28 遥测端断连事故的最大取证盲区。
-// 照 backend-<label>.log 先例：stdout/stderr 落盘便携根 .claude/gateway.log，5MB 截断轮转。
+// 照 backend 日志先例：stdout/stderr 落盘便携根 .claude/gateway/gateway.log，5MB 截断轮转。
 // ============================================================================
 const GATEWAY_LOG_MAX_BYTES = 5 * 1024 * 1024
 function gatewayLogPath(): string {
-  return join(getPortableRoot(), '.claude', 'gateway.log')
+  return join(gatewayDir(), 'gateway.log')
 }
 
 function openGatewayLogFd(): number | null {
   const p = gatewayLogPath()
+  try {
+    mkdirSync(join(p, '..'), { recursive: true })
+  } catch {
+    /* 忽略 */
+  }
   try {
     if (existsSync(p) && statSync(p).size > GATEWAY_LOG_MAX_BYTES) truncateSync(p, 0)
   } catch {

@@ -7,7 +7,7 @@
  * filterConversationForDisplay），token 存到本小模块，双方各自读写即可。
  *
  * 2026-08-17 网关独立化：token 跨进程落盘。网关进程（同一 exe 的 --gateway 模式）启动时
- * 把 token 写到便携根 `.claude/gateway-token`；其它 CLI 进程（非网关宿主）探测到网关后读盘
+ * 把 token 写到便携根 `.claude/gateway/token`；其它 CLI 进程（非网关宿主）探测到网关后读盘
  * 获得 token，才能向网关上报 / 连接。内存优先级高于磁盘：本进程自己管理网关时
  * setGatewayToken 写入内存值；否则 getGatewayToken 惰性读盘兜底。
  */
@@ -35,9 +35,19 @@ export function setGatewayToken(token: string): void {
   currentTokenTime = token ? Date.now() : 0
 }
 
-/** 便携根 .claude/gateway-token 的绝对路径（相对便携根，符合全相对路径红线）。 */
+/**
+ * 网关运行时目录：便携根 `.claude/gateway/`（相对便携根，符合全相对路径红线）。
+ * 2026-09-19 定案：网关全部落盘件收拢进本目录——port / token / tickets / devices /
+ * websessions.json / turnend.json / gateway.log / backends.json，不再散落 `.claude/` 根。
+ * 各路径一律经本函数拼装（单一路径源），写盘点各自 mkdirSync 递归建目录。
+ */
+export function gatewayDir(): string {
+  return join(getPortableRoot(), '.claude', 'gateway')
+}
+
+/** 网关 token 文件绝对路径（`.claude/gateway/token`）。 */
 function tokenFilePath(): string {
-  return join(getPortableRoot(), '.claude', 'gateway-token')
+  return join(gatewayDir(), 'token')
 }
 
 /**
@@ -94,10 +104,10 @@ export function clearGatewayTokenFromDisk(): void {
 
 // ---------- 2026-09-07 网关端口落盘发现（wt 直并配套） ----------
 // spawn 链改 wt.exe 直并后，并入「已存在 WT 窗口」的新标签继承的是旧 WT 进程的环境变量，
-// FLOIRA_GATEWAY 传不到 CLI 子进程 → 网关端口发现补磁盘通道：网关启动写 .claude/gateway-port，
-// CLI 探测在 env 缺失时读盘（与 gateway-token 同「读写路径分离 + TTL 缓存」模式）。
+// FLOIRA_GATEWAY 传不到 CLI 子进程 → 网关端口发现补磁盘通道：网关启动写 .claude/gateway/port，
+// CLI 探测在 env 缺失时读盘（与 token 同「读写路径分离 + TTL 缓存」模式）。
 // 网关换端口（占用顺延）后新起的 CLI 仍能找到网关。
-const portFilePath = () => join(getPortableRoot(), '.claude', 'gateway-port')
+const portFilePath = () => join(gatewayDir(), 'port')
 let diskPortCache = 0
 let diskPortLoadedAt = 0
 const DISK_PORT_TTL_MS = 3000
@@ -164,14 +174,14 @@ export function getGatewayToken(): string {
 // 浏览器侧不再有任何 token 授权：设备访问若未授权 → 前端门显示「设备请求码」（localStorage 持久，
 // 同一设备恒定）；用户在 PC `/server auth add <请求码>` 手动授权（不可自动化）→ 设备端
 // GET /gateway/activate?code=<码>（网关校验该码在授权名单 → 种 HttpOnly floria_auth cookie，票证=码
-// 本身）→ 永久通过统一地址 floria.home 连接。票证落盘 `.claude/gateway-tickets`（{id,created} 数组，
-// 存量 string 兼容），/server off 清盘全设备掉线。CLI 内部链路的 gateway-token（上报/WS/关闭）
+// 本身）→ 永久通过统一地址 floria.home 连接。票证落盘 `.claude/gateway/tickets`（{id,created} 数组，
+// 存量 string 兼容），/server off 清盘全设备掉线。CLI 内部链路的 gateway token（上报/WS/关闭）
 // 与浏览器认证无关，保留不动。
-const ticketsFilePath = () => join(getPortableRoot(), '.claude', 'gateway-tickets')
+const ticketsFilePath = () => join(gatewayDir(), 'tickets')
 let tickets: GatewayTicket[] = []
 let ticketsLoaded = false
 let ticketsLoadedAt = 0
-// 2026-08-28 修复「auth add 后设备一直未授权」：票证读盘一次性缓存改 TTL 刷新（照 gateway-token
+// 2026-08-28 修复「auth add 后设备一直未授权」：票证读盘一次性缓存改 TTL 刷新（照 token
 // 2026-08-22 同构先例）。根因=CLI 命令进程（/server auth add）与独立网关进程是两个进程，网关启动后
 // 首次校验读盘拿到空名单即永久缓存，之后 CLI 写盘的新票证网关永不重读 → /gateway/activate 永远 403。
 const TICKETS_TTL_MS = 3000
@@ -244,11 +254,11 @@ export function listGatewayTickets(): (GatewayTicket & DeviceInfo)[] {
   return tickets.map((t) => ({ ...t, ...(devices[t.id] ?? {}) }))
 }
 
-// ---------- 2026-09-01 设备情况（独立文件 gateway-devices，跨进程竞态根修） ----------
-// 首版把 ua/lastIp/lastSeen 塞进 gateway-tickets：网关进程 touch 写盘后，常驻 CLI 进程
+// ---------- 2026-09-01 设备情况（独立文件 .claude/gateway/devices，跨进程竞态根修） ----------
+// 首版把 ua/lastIp/lastSeen 塞进 tickets：网关进程 touch 写盘后，常驻 CLI 进程
 // （add/off）用自己 3s TTL 过期的内存副本整体覆盖写回，把设备情况抹掉——用户实测见到
 // 「Windows · Chrome」一瞬即逝、落盘又回退成裸 {id,created}。根修=读写路径分离：
-// 授权名单（gateway-tickets，CLI 写）与设备情况（gateway-devices，仅网关进程写）各存各的，
+// 授权名单（tickets，CLI 写）与设备情况（devices，仅网关进程写）各存各的，
 // 展示时按 id 合并。devices 文件两进程都读（TTL 3s 刷新），只有网关进程写（内存副本权威）。
 interface DeviceInfo {
   ua?: string // 最近一次见到的 User-Agent 原文（截断 200；展示层渲染成「iPad · Safari」摘要）
@@ -257,7 +267,7 @@ interface DeviceInfo {
   lastSeen?: number // 最近一次活跃时间戳
 }
 
-const devicesFilePath = () => join(getPortableRoot(), '.claude', 'gateway-devices')
+const devicesFilePath = () => join(gatewayDir(), 'devices')
 const DEVICES_TTL_MS = 3000
 let devices: Record<string, DeviceInfo> = {}
 let devicesLoaded = false

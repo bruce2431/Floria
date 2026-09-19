@@ -103,6 +103,14 @@ ok('B2 三件覆盖层的 DOM 真在 #app 内（不靠 CSS 假装）',
     }))
 ok('B2 对话框高度上限用容器百分比（vh=布局视口，键盘在场会溢出可视区）',
   !/max-height: calc\(100vh - 48px\)/.test(css) && !/max-height: 74vh/.test(css))
+// 百分比解析到**内容盒**：容器的 padding:24px 已表达上下呼吸，对话框再减一次 48 等于扣两遍
+// ⇒ 上限比实际可用矮 48px，键盘在场（可视区仅 ~272 CSS）时 footer 按钮被 overflow:hidden 裁掉。
+// 不变量：对话框上限 == 容器内容盒（呼吸只在容器 padding 一处表达）。
+for (const id of ['rename-modal', 'risk-modal'] as const) {
+  const block = new RegExp(`#${id} \\.dialog \\{[^}]*\\}`).exec(css)?.[0] ?? ''
+  ok(`B2 对话框 #${id} 上限 = 容器内容盒（不得再 calc(100% - 48px) 双扣 padding）`,
+    /max-height: 100%/.test(block) && !/max-height: calc\(100% - 48px\)/.test(block))
+}
 
 // ---------- ③c 底栏子件（向上弹出的六个弹层，七处上限声明）：上限一律收 --bar-room ----------
 // 底栏上沿到可视视口顶的余量（实测）——子件弹层高于它就会伸到可视区外（够不着）。

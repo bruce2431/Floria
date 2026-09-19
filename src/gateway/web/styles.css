@@ -1122,7 +1122,9 @@ body.kb-open #input-wrap { transition: none; }
   position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 20px;
   width: min(440px, 100%); max-width: 100%;
-  max-height: calc(100% - 48px);
+  /* 同 #rename-modal .dialog：上限 = 容器内容盒（呼吸由 #risk-modal 的 padding:24px 提供），
+     旧 calc(100% - 48px) 把 48 扣两次 ⇒ 键盘在场时内容被裁。 */
+  max-height: 100%;
   padding: 0 0 24px; overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0); border-radius: 24px;
   background: #fff;
@@ -1841,7 +1843,12 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 20px;
   width: min(380px, 100%); max-width: 100%;
-  max-height: calc(100% - 48px);
+  /* 高度上限 = 容器**内容盒**，即「可视区高 − 上下各 24px 呼吸」（呼吸由 #rename-modal 自身
+     padding:24px 提供）。旧值 calc(100% - 48px) 把 48 扣了两次——百分比的 100% 本身就解析到
+     内容盒（272−48=224），再减 48 = 176 < 内容自然高 222 ⇒ 键盘在场时 footer 两枚按钮被
+     overflow:hidden 裁掉一半（iPad 实测：弹窗 173.5 CSS、内容 222 CSS）。不变量：上限恒等于
+     容器内容盒高，呼吸只在容器 padding 一处表达，消费点不再各扣一次。 */
+  max-height: 100%;
   padding: 0 0 24px; overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 24px;
   background: #fff;
@@ -1892,28 +1899,35 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    最后一个折叠体「正在思考/正在生成」状态显示行之下；注入后转入折叠体，dequeue 落盘后变开启气泡）
    2026-09-10 催办：可点击（点击 = 结束当前思考并立即并入本轮），hover 浮起同消息气泡口径 */
 .queue-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 4px 0 8px; }
+/* 气泡归属文字、不归属图片（2026-09-19 用户定案「总是文字有气泡而图片没有」）：气泡壳挂在
+   .q-text 上，不在 .q-item 上——纯文本项=一个气泡（宽度按文字 shrink-to-fit，同旧观感）；
+   纯图项无 .q-text ⇒ 无气泡、整张图即点击体（点图触发催办，委托在 approval.js 的 .q-item 上）；
+   文字+图项=文字带气泡、图片在气泡外裸渲染。.q-item 退化为纯命中盒，自身不出任何壳。 */
 .queue-dock .q-item {
   display: flex; align-items: center; gap: 8px;
   max-width: 78%; box-sizing: border-box;
-  padding: 7px 12px; border-radius: 12px;
-  background: rgba(38, 49, 72, 0.05); border: 1px dashed rgba(38, 49, 72, 0.18);
   font-size: 13px; line-height: 20px; color: #43454a;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.queue-dock .q-text {
+  width: fit-content;
+  padding: 7px 12px; border-radius: 12px;
+  background: rgba(38, 49, 72, 0.05); border: 1px dashed rgba(38, 49, 72, 0.18);
   transition: background 0.12s ease, border-color 0.12s ease;
 }
-.queue-dock .q-item:hover { background: rgba(38, 49, 72, 0.09); border-color: rgba(38, 49, 72, 0.32); }
+.queue-dock .q-item:hover .q-text { background: rgba(38, 49, 72, 0.09); border-color: rgba(38, 49, 72, 0.32); }
 .queue-dock .q-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .queue-dock .q-body p { margin: 0; }
 /* 跨会话来件的来源行（2026-09-15 会话间协作）：排队项里同样标出来源（正文首行灰字）。
    与 .msg .who 同一语义、同一视觉体系（12px→11px 随排队项字号收一档），不做绝对定位 */
 .queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
 .queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
-/* 排队图片（2026-09-19 用户定案「排队图片不要气泡」）：带图的排队项去掉气泡壳（虚线框/灰底/
-   内边距全撤），图片按已发送图片的尺寸裸渲染——整张图即点击体，点图触发催办（委托在 approval.js
-   的 .q-item 上），不走大图预览（大图只属已发送图片：lightbox 只认 .msg-img，此处恒 .q-img）。 */
-.queue-dock .q-item.has-img,
-.queue-dock .q-item.has-img:hover { background: none; border: none; padding: 0; }
-.queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+/* 排队图片：按已发送图片的尺寸裸渲染（无壳无内边距），恒 .q-img 不换 .msg-img
+   （lightbox 委托只认 .msg-img）⇒ 点排队图只走 .q-item 的 queue-nudge 委托、永不开大图。 */
+.queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 图片上方有件（文字气泡或来源行）才留间距；纯图项上方不留空，否则多出 6px 空白命中区 */
+.queue-dock .q-text + .q-imgs,
+.queue-dock .q-who + .q-imgs { margin-top: 6px; }
 .queue-dock .q-imgs .q-img { display: block; max-width: min(160px, 100%); max-height: 160px; width: auto; height: auto; border-radius: 10px; margin: 0; cursor: pointer; }
 
 /* ===== 神经元视图（2026-09-16「神经」tab）：层级1 选择卡片 + 层级2 Canvas 三级节点图 ===== */

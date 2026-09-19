@@ -5711,11 +5711,12 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
             // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
-            const body = txt ? '<p>' + renderUserText(txt) + '</p>' : ''
-            // has-img：带图排队项去气泡壳（styles.css）。2026-09-19 用户定案「排队图片不要气泡，
-            // 整张图即点击体，点图催办而不开大图（大图只属已发送图片）」——故此处仍用 .q-img
-            // （不是 .msg-img），绝不落进 messages.js 的 lightbox 委托。
-            return '<div class="q-item' + (imgs ? ' has-img' : '') + '" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + body + imgs + '</div></div>'
+            // 气泡归属文字、不归属图片（2026-09-19 用户定案「总是文字有气泡而图片没有」）：
+            // 气泡壳挂在 .q-text 上（styles.css），不在 .q-item 上——纯文本项=一个气泡；纯图项无
+            // .q-text ⇒ 无气泡、整张图即点击体（点图催办不开大图；大图只认 .msg-img，此处恒 .q-img）；
+            // 文字+图项=文字带气泡、图片在气泡外裸渲染。归属由 DOM 结构本身决定，无额外类/状态源。
+            const body = txt ? '<div class="q-text"><p>' + renderUserText(txt) + '</p></div>' : ''
+            return '<div class="q-item" role="button" title="点击催办：结束当前思考，本条立即并入本轮"><div class="q-body">' + who + body + imgs + '</div></div>'
           }).join('') + '</div>'
         : '')
     claimTimerSet(bubble.length > 0)

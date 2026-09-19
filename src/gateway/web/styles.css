@@ -50,20 +50,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 a { text-decoration: none; color: inherit; }
 
 /* ================= 键盘弹出（移动端）=================
-   唯一真源 = visualViewport（core/viewport.js 写入四个变量，缺省全 0 = 无键盘行为）：
-     --kb       键盘高（应用局部坐标，与应用顶同一坐标系）——键盘只压缩「消息流底界 + 底栏」
-     --vv-pan   浏览器为露出焦点元素对可视视口的上顶量——#app 反向锚回，否则整界面（含侧栏与
-                空态 Floria 背景）被一起顶起
-     --kb-lift  空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出键盘）
+   唯一真源 = visualViewport（core/viewport.js 写入三个变量，缺省全 0 = 无键盘行为）：
+     --kb       仍需自行抬升的键盘高（= html 高 − 可视视口上顶 − 可视视口高；浏览器上顶 pan 已
+                吃掉的位移不计入）——键盘只压缩「消息流底界 + 底栏」
+     --kb-lift  空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出可视区底界）
      --bar-room 底栏上沿到可视视口顶的余量（实测，已含顶部呼吸常量）= 底栏子件弹层的安全高度上界
-   不变量：侧栏与 #empty-hint（绝对铺满 #chat-area 的 Floria 背景层）不参与任何位移。
+   不抵消 pan：浏览器为露出焦点元素会把可视视口整体上顶（合成器线程瞬时生效），用主线程写样式去
+   抵消天生晚一帧 ⇒ 可见「先向上→立即下拉→恢复」的往复。故应用整体随之上移（用户定案「直接整个
+   顶起」），我们只保证底栏与消息流底界贴住可视区底界；#app 恒无 top 位移，--vv-pan 已退役。
    覆盖层（#search-overlay / #risk-modal / #rename-modal）同在 #app 内 absolute 定位并收 --kb，
-   故「上顶补偿 + 键盘压缩」对它们与 app 壳体同源，不必各自复刻视口公式。
+   故键盘压缩对它们与 app 壳体同源，不必各自复刻视口公式。
    底栏子件（#mention-pop / #cmd-pop / #task-dock .td-panel / #proj-pop / #model-pop / #ctx-panel
    六个向上弹出的弹层）同款做法：高度上限一律 min(<设计上限>, var(--bar-room, <设计上限>))。
    勿改回 vh/裸定值——vh 是布局视口且键盘在场不缩，键盘越高弹层上半截越落在可视区外；
    也勿各自复刻「100vh − 键盘」之类的公式（状态源会变多，见 CLAUDE 根本原则 5）。 */
-#app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; top: var(--vv-pan, 0px); }
+#app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; }
 
 /* ================= 主聊天区 ================= */
 #chat-area { flex: 1; position: relative; background: var(--chat-bg); min-width: 0; display: flex; flex-direction: column; transition: padding-left 0.28s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -1900,9 +1901,12 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    2026-09-10 催办：可点击（点击 = 结束当前思考并立即并入本轮），hover 浮起同消息气泡口径 */
 .queue-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 4px 0 8px; }
 /* 气泡归属文字、不归属图片（2026-09-19 用户定案「总是文字有气泡而图片没有」）：气泡壳挂在
-   .q-text 上，不在 .q-item 上——纯文本项=一个气泡（宽度按文字 shrink-to-fit，同旧观感）；
+   .q-text 上，不在 .q-item 上——纯文本项=一个气泡（宽度按文字收缩，同旧观感）；
    纯图项无 .q-text ⇒ 无气泡、整张图即点击体（点图触发催办，委托在 approval.js 的 .q-item 上）；
-   文字+图项=文字带气泡、图片在气泡外裸渲染。.q-item 退化为纯命中盒，自身不出任何壳。 */
+   文字+图项=文字带气泡、图片在气泡外裸渲染。.q-item 退化为纯命中盒，自身不出任何壳。
+   对齐：.q-body **保持普通块流**（图片按块宽正常撑满，`.q-img` 的 `max-width:100%` 才有确定基），
+   只给气泡加 `margin-left:auto` 令其右靠——三者右缘一致；若把 .q-body 改成 flex 列，.q-imgs 会
+   退化为收缩宽度的 flex 子项，`max-width:100%` 循环解析、图片塌成细条。 */
 .queue-dock .q-item {
   display: flex; align-items: center; gap: 8px;
   max-width: 78%; box-sizing: border-box;
@@ -1910,7 +1914,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .queue-dock .q-text {
-  width: fit-content;
+  width: fit-content; margin-left: auto;
   padding: 7px 12px; border-radius: 12px;
   background: rgba(38, 49, 72, 0.05); border: 1px dashed rgba(38, 49, 72, 0.18);
   transition: background 0.12s ease, border-color 0.12s ease;
@@ -1920,7 +1924,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .queue-dock .q-body p { margin: 0; }
 /* 跨会话来件的来源行（2026-09-15 会话间协作）：排队项里同样标出来源（正文首行灰字）。
    与 .msg .who 同一语义、同一视觉体系（12px→11px 随排队项字号收一档），不做绝对定位 */
-.queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
+.queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); text-align: right; }
 .queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
 /* 排队图片：按已发送图片的尺寸裸渲染（无壳无内边距），恒 .q-img 不换 .msg-img
    （lightbox 委托只认 .msg-img）⇒ 点排队图只走 .q-item 的 queue-nudge 委托、永不开大图。 */

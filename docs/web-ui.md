@@ -401,3 +401,14 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
 - **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口请调它，勿就地补行）。**探针**：`_agent-src/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 源码提取后喂 `(curUuid, ev.session)` 四组合，验证清槽后残留 delta 必被丢弃）。
 
+
+## 35. 键盘弹出适配：应用锚定可视视口顶，键盘只压缩「消息流底界 + 底栏」
+
+- **症状**（移动端 iPad/手机）：聚焦底栏弹系统键盘时**整个界面被向上顶起**——侧栏与空态 Floria 背景（`#empty-hint` 内的 `state-newchat.webp`）跟着移动、顶部被裁。
+- **根因**：`html` 高 = `100dvh`，键盘**不改变布局视口**（只压可视视口），故应用几何全程不动；浏览器为把焦点底栏露出键盘，把**可视视口整体上顶**（页面不可滚时亦然，`visualViewport.offsetTop > 0`）——移动的是视口而非布局，所以连侧栏/背景一起顶。
+- **修法**（唯一真源 `visualViewport`，三条链，前端新增 `core/viewport.js`）：
+  - **应用锚回**：`--vv-pan = vv.offsetTop` → `#app { position: relative; top: var(--vv-pan) }`，应用恒贴可视视口顶（侧栏、背景层零位移）。
+  - **消息流底界**：`--kb = html.clientHeight − vv.height`（键盘高，与应用顶同一坐标系）→ `#chat-scroll { margin-bottom: var(--kb) }` 收的是滚动视窗本身，最后几条不再压在键盘下；键盘在场时调 `stageSync()` 按新几何重算两层占位。
+  - **底栏**：会话态 `#input-wrap.docked { top: calc(100% - 22px - var(--kb)) }`（底边距口径不变，抬到键盘上沿上方 22px）；空态底栏钉在 `.g-stage` 台面 76.75% 不贴版底，按实测自然底算 `--kb-lift`（`stageEl.top + wrap.offsetTop + wrap.offsetHeight/2 + 22 − vv.height`，`offsetTop/offsetHeight` 是布局位，不受 transform 与过渡影响）→ `#empty-hint #input-wrap { transform: translate(-50%, calc(-50% - var(--kb-lift))) }`。键盘在场 `body.kb-open #input-wrap { transition: none }`（0.55s 缓动会整程拖尾在键盘后）。
+  - **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA` 且 `vv.scale ≤ 1.01`——捏合缩放同样压低 `vv.height`，必须排除（否则缩放会误当键盘）。安卓布局视口随键盘同步缩（`L − vv.height ≈ 0`）→ 自然不重复抬。事件：`vv.resize`/`vv.scroll`/`orientationchange`，rAF 合帧。
+- **边界**：无 `visualViewport`（旧浏览器）时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前保证顶层 `let` 先初始化）。**探针**：`_agent-src/probe-keyboard-viewport.ts`（只读，31/0）——结构断言（拼接表接线/启动序列调用/五个 CSS 消费点/无残留写死 `calc(100% - 22px)`/`#empty-hint` 自身不含 `--kb` 位移）+ 行为真值表（`kbGeometry` 从 `core/viewport.js` 源码提取后喂桌面/聚焦瞬间/iPad 有上顶/安卓/捏合/异常共 10 组）。

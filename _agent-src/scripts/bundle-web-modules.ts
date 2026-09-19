@@ -21,11 +21,12 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'chat/messages.js', ranges: [[1206, 1947], [4349, 4418]], first: ['  // ---------- 消息渲染 ----------', '  let pendingUserMsgs = []'] },
   { file: 'sidebar/recent.js', ranges: [[1948, 2438]], first: ['  // ---------- 侧栏 ----------'] },
   { file: 'sidebar/mgr.js', ranges: [[2439, 2893]], first: ['  function renderMgr() {'] },
+  { file: 'sidebar/neurons.js', ranges: [[2893, 2893]], first: ['  // ---------- 神经元视图（web「神经」tab）----------'] },
   { file: 'sidebar/bubble-search.js', ranges: [[2894, 2932]], first: ['  // ---------- 气泡弹层 ----------'] },
   { file: '__app__', ranges: [[2933, 3011], [5379, 5398]], first: ['  // ---------- 事件绑定 ----------', '  // ---------- 启动 ----------'] },
   { file: 'inputbar/ctx-meter.js', ranges: [[3012, 3303]], first: ['  // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------'] },
   { file: 'core/gateway.js', ranges: [[3304, 3420], [4154, 4161], [4969, 5047], [5352, 5378]], first: ['  // ---------- 网关模式（SubPj2 私有化网关）----------', '  function setConn(on, label) {', '  function connect() {', '  function initGateway() {'] },
-  { file: 'inputbar/mention.js', ranges: [[3421, 3644]], first: ['  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「插件/技能 + 近48h 会话」浮窗，选中插入内联 chip ----------'] },
+  { file: 'inputbar/mention.js', ranges: [[3421, 3644]], first: ['  // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------'] },
   { file: 'inputbar/commands.js', ranges: [[3645, 3674], [3718, 3974]], first: ['  // ---------- 命令菜单 + 模型选择（2026-08-21 dsh 输入栏逻辑移植）----------', '  const cmd = { open: false, status: \'pending\', items: [], search: \'\', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }'] },
   { file: 'inputbar/model-select.js', ranges: [[3675, 3717], [3975, 4153]], first: ['  function modelDir() {', '  function currentChoice() {'] },
   { file: 'chat/stage.js', ranges: [[4162, 4348]], first: ['  function scrollBottom() {'] },
@@ -33,6 +34,9 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'core/auth.js', ranges: [[4965, 4968], [5048, 5053], [5054, 5194]], first: ['  function deviceHint() {', '  let finishGateTimer = null // 阶段3 停留后 hideGate 的定时器', '  // ---------- 设备认证配对（2026-08-28，浏览器侧完全删除 token 授权链） ----------'] },
   { file: 'inputbar/images.js', ranges: [[5195, 5258]], first: ['  // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，'] },
   { file: 'inputbar/send.js', ranges: [[5259, 5351]], first: ['  async function gwSend() {'] },
+  // 区间号仅作执行序排序（拼接按锚点检索切片，非定长行数）：键盘适配置于启动序列（5379）之前，
+  // 保证 initViewport 被调用时模块顶层 let 已完成初始化
+  { file: 'core/viewport.js', ranges: [[5351, 5351]], first: [''] },
 ]
 
 // ---------- 读取模块文件并剥离切割壳（头注释/import/setter 注释/export 块） ----------
@@ -40,7 +44,8 @@ async function loadModuleBodies(): Promise<Map<string, string[]>> {
   const bodies = new Map<string, string[]>()
   for (const m of MODULES) {
     const path = m.file === '__app__' ? `${WEB_SRC}/app.js` : `${WEB_SRC}/${m.file}`
-    const lines = (await Bun.file(path).text()).split('\n')
+    // CRLF 归一（2026-09-16 实证：Windows 编辑链会把工作区源码写成 CRLF，\r 残留撞首行锚点防呆）
+    const lines = (await Bun.file(path).text()).replace(/\r\n/g, '\n').split('\n')
     if (lines.length && lines[lines.length - 1] === '') lines.pop()
 
     // 剥切割壳（emit 结构=cut-web-modules.ts 304-314 取证）：/*块*/（仅入口件）→ 0 缩进 // 标题 →
@@ -115,7 +120,7 @@ for (const m of MODULES) {
 pieces.sort((x, y) => x.start - y.start)
 
 // 骨架：原版头注释（1-7 行）+ IIFE 开 + use strict + 顶部 `const $`（原 11 行，切割区间外，必须注回）
-const appLines = (await Bun.file(`${WEB_SRC}/app.js`).text()).split('\n')
+const appLines = (await Bun.file(`${WEB_SRC}/app.js`).text()).replace(/\r\n/g, '\n').split('\n')
 const head = appLines.slice(0, 7)
 if (!head[0].startsWith('/* floria')) throw new Error('web-src/app.js 头注释被改动？前 7 行应为原版权头')
 

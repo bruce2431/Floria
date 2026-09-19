@@ -49,7 +49,14 @@ button { font-family: inherit; background: none; border: none; padding: 0; color
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 6px; }
 a { text-decoration: none; color: inherit; }
 
-#app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+/* ================= 键盘弹出（移动端）=================
+   唯一真源 = visualViewport（core/viewport.js 写入三个变量，缺省全 0 = 无键盘行为）：
+     --kb      键盘高（应用局部坐标，与应用顶同一坐标系）——键盘只压缩「消息流底界 + 底栏」
+     --vv-pan  浏览器为露出焦点元素对可视视口的上顶量——#app 反向锚回，否则整界面（含侧栏与
+               空态 Floria 背景）被一起顶起
+     --kb-lift 空态底栏抬升量（底栏钉在 .g-stage 台面 76.75% 不贴版底，只需抬到露出键盘）
+   不变量：侧栏与 #empty-hint（绝对铺满 #chat-area 的 Floria 背景层）不参与任何位移。 */
+#app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; top: var(--vv-pan, 0px); }
 
 /* ================= 主聊天区 ================= */
 #chat-area { flex: 1; position: relative; background: var(--chat-bg); min-width: 0; display: flex; flex-direction: column; transition: padding-left 0.28s cubic-bezier(0.22, 0.61, 0.36, 1); }
@@ -59,7 +66,9 @@ a { text-decoration: none; color: inherit; }
    洗 DOM）时自行调整 scrollTop 保持锚点视觉位置——隐式 scrollTop 写入者与 stage 跟随体系
    竞争=随机中间态跳源。两层消息流下 scrollTop 写入者必须收敛（stageFollow/唤出动画/吸底
    三处，全部自管几何），浏览器锚定干预关闭。 */
-#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; scrollbar-gutter: stable; overflow-anchor: none; padding: 24px 20px 8px; transition: opacity 0.25s ease; }
+/* margin-bottom = 键盘高（键盘节）：键盘在场时消息流可视底界收到键盘上沿，最后几条不被压在键盘下
+   （缩小的是滚动视窗本身，stageSync 读 clientHeight 自动重算两层占位几何）。 */
+#chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; scrollbar-gutter: stable; overflow-anchor: none; padding: 24px 20px 8px; margin-bottom: var(--kb, 0px); transition: opacity 0.25s ease; }
 /* padding-bottom 无过渡（2026-09-10 根修）：pad 写入必须与 .pin-stage 占位高度同帧一致
    （app.js syncTakeoverPad 写 pad 后同帧 stageSync 对账）→ scrollHeight 对 pad 写入不变
    → maxScroll=贴顶位 恒成立 → 视口零钳制零移动。旧 0.32s pad 过渡让占位与 pad 在过渡期
@@ -668,6 +677,8 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
               width 0.45s cubic-bezier(0.22, 0.61, 0.36, 1),
               transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
+/* 键盘在场不做缓动（键盘节）：底栏位移/抬升必须与键盘同步，0.55s 过渡会整程拖尾在键盘后面 */
+body.kb-open #input-wrap { transition: none; }
 /* 拓展/收回动画期（类挂 #input-wrap）：#input-bar 裁溢出并成为卡片定位上下文——卡片 absolute
    bottom:0 贴输入栏底（输入栏底边经 docked translateY(-100%) 固定）=底边锚定：出现=按钮行钉在
    原输入栏位置不动、卡片顶部向上展开；收回=按钮行不动、卡片向下收短（2026-09-08 二轮定案）。 */
@@ -704,7 +715,8 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
    translate(-50%,-50%) 让任意高度的高胶囊都精确居中于台面，任意窗口精确贴图） */
 #empty-hint #input-wrap {
   top: 76.75%;
-  transform: translate(-50%, -50%);
+  /* 键盘节：只抬底栏（--kb-lift 实测抬到键盘上沿上方 22px），Floria 背景层零位移 */
+  transform: translate(-50%, calc(-50% - var(--kb-lift, 0px)));
   /* 2026-09-07 用户定案：空态输入栏稍宽于趴栏 stage（每侧超出 20px），仍以视口宽 −32px 封顶
      （手机 stage=88vw 时该封顶生效，与 docked 手机档 calc(100% - 32px) 一致） */
   width: min(calc(100% + 40px), calc(100vw - 32px));
@@ -716,7 +728,7 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
    首版 max(780px,70vw)+1100 封顶方向搞反（大窗口变宽）被用户否决已回滚。
    空态（#empty-hint #input-wrap）不受影响：输入栏绑定趴栏画面，维持 stage 比例） */
 #input-wrap.docked {
-  top: calc(100% - 22px);
+  top: calc(100% - 22px - var(--kb, 0px)); /* 键盘节：底栏从版底抬到键盘上沿上方 22px（同底边距口径） */
   transform: translate(-50%, -100%);
   width: min(780px, 70vw, calc(100% - 40px));
 }
@@ -1867,12 +1879,58 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .queue-dock .q-item:hover { background: rgba(38, 49, 72, 0.09); border-color: rgba(38, 49, 72, 0.32); }
 .queue-dock .q-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .queue-dock .q-body p { margin: 0; }
-/* 跨会话来件的来源行（2026-09-15 会话间协作）：排队项里同样标出来源（正文首行，灰字同 .q-tag 口径）。
+/* 跨会话来件的来源行（2026-09-15 会话间协作）：排队项里同样标出来源（正文首行灰字）。
    与 .msg .who 同一语义、同一视觉体系（12px→11px 随排队项字号收一档），不做绝对定位 */
 .queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
 .queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
-.queue-dock .q-tag { flex: none; font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); }
-.queue-dock .q-item:hover .q-tag { color: rgba(38, 49, 72, 0.68); }
 /* 排队项图片缩略图（2026-08-30）：48px 小图随文本行堆叠（q-body 内），object-fit cover 同输入栏胶囊 */
 .queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .queue-dock .q-imgs .q-img { display: block; width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); }
+
+/* ===== 神经元视图（2026-09-16「神经」tab）：层级1 选择卡片 + 层级2 Canvas 三级节点图 ===== */
+/* 层级1 卡片统计行（复用 .mgr-card 外观，仅加统计 chips 行） */
+.neu-stats { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.neu-stats span { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 8px; font-size: 11.5px; }
+.neu-card { cursor: pointer; }
+/* 层级2：图区充满视口剩余高度（镜像 .preview-shell 全高规则），头部 + 图容器纵向排布 */
+#chat-area.mgr-on #messages:has(.neu-graph) { max-width: none; height: 100%; }
+#chat-area.mgr-on #chat-scroll:has(.neu-graph) { padding: 0; scrollbar-gutter: auto; overflow: hidden; }
+.neu-pane { display: flex; flex-direction: column; height: 100%; padding: 20px 24px 14px; }
+.neu-head { display: flex; align-items: center; gap: 10px; flex: none; margin-bottom: 12px; }
+.neu-back { flex: none; padding: 6px 14px; border-radius: 999px; font-size: 13px; background: var(--active); color: var(--text-2); transition: background 0.15s, color 0.15s; }
+.neu-back:hover { background: var(--hover); color: var(--text); }
+.neu-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.neu-meta-chip { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; }
+.neu-legend { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.neu-legend .lg { display: inline-block; border-radius: 50%; }
+.neu-legend .lg-mem { width: 8px; height: 8px; background: #9aa7b8; }
+.neu-legend .lg-cog { width: 12px; height: 12px; background: #5b8ff9; }
+.neu-legend .lg-comm { width: 15px; height: 15px; background: #7b6bd6; }
+/* 图容器：relative 承载 canvas 与浮窗；canvas 满铺 + touch-action none（自管指针手势） */
+.neu-graph { position: relative; flex: 1; min-height: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+#neu-canvas { position: absolute; inset: 0; touch-action: none; cursor: grab; }
+#neu-canvas:active { cursor: grabbing; }
+.neu-hint { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-2); font-size: 13px; text-align: center; padding: 0 20px; }
+/* 认知层缺失提示条（库只有记忆层）：贴顶、不遮图、不吃指针（悬停/拖拽穿透到 canvas） */
+.neu-note { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 3; pointer-events: none; background: var(--active); color: var(--text-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.5; }
+/* 悬停/钉住浮窗：白卡 + 描边 + 柔和投影；容器外禁指针（悬停穿透，成员列表单独放开可滚） */
+.neu-pop { position: absolute; z-index: 6; width: 300px; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 32px rgba(20, 30, 60, 0.16); padding: 11px 12px 10px; font-size: 12.5px; pointer-events: none; }
+.neu-pop-h { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
+.neu-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.neu-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.neu-chip { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 8px; font-size: 11.5px; }
+.neu-members { pointer-events: auto; margin-top: 9px; border-top: 1px solid var(--border); padding-top: 8px; max-height: 190px; overflow: auto; display: flex; flex-direction: column; gap: 5px; }
+.neu-mrow { display: flex; align-items: center; gap: 6px; }
+.neu-role { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--hue, #8a94a6); }
+.neu-role.context { background: transparent; border: 1.5px solid var(--hue, #8a94a6); }
+.neu-mq { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.neu-score { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.neu-nomember { color: var(--text-3); }
+.neu-q { margin-top: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
+.neu-kws { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.neu-kw { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--text-2); }
+.neu-prev { margin-top: 8px; color: var(--text-2); line-height: 1.55; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 720px) {
+  .neu-legend { display: none; }
+  .neu-pane { padding: 14px 14px 10px; }
+}

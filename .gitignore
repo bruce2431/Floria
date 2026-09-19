@@ -1,0 +1,8 @@
+node_modules/
+.codegraph/
+dist/
+temp/
+*.exe
+.env
+.env.*
+CLAUDE.md

@@ -5,8 +5,8 @@
 // ② 行为真值表——几何函数 kbGeometry 从 web-src 源码**提取**（非手抄），喂真实维度组合。
 // 用法：bun run ./probe-keyboard-viewport.ts   （输出 pass/fail，末行 N/M）
 
-const SRC = `${import.meta.dir}/src/gateway/web-src`
-const WEB = `${import.meta.dir}/src/gateway/web`
+const SRC = `${import.meta.dir}/../src/gateway/web-src`
+const WEB = `${import.meta.dir}/../src/gateway/web`
 
 let pass = 0
 let fail = 0
@@ -22,7 +22,7 @@ const css = await Bun.file(`${WEB}/styles.css`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
 const swJs = await Bun.file(`${WEB}/sw.js`).text()
 const indexHtml = await Bun.file(`${WEB}/index.html`).text()
-const bundler = await Bun.file(`${import.meta.dir}/scripts/bundle-web-modules.ts`).text()
+const bundler = await Bun.file(`${import.meta.dir}/../scripts/bundle-web-modules.ts`).text()
 
 // ---------- 函数体按大括号配对提取 ----------
 function body(file: string, header: string): string {

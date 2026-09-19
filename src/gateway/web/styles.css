@@ -1927,8 +1927,14 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .queue-dock .q-who { font-size: 11px; line-height: 16px; color: rgba(38, 49, 72, 0.45); text-align: right; }
 .queue-dock .q-item:hover .q-who { color: rgba(38, 49, 72, 0.68); }
 /* 排队图片：按已发送图片的尺寸裸渲染（无壳无内边距），恒 .q-img 不换 .msg-img
-   （lightbox 委托只认 .msg-img）⇒ 点排队图只走 .q-item 的 queue-nudge 委托、永不开大图。 */
-.queue-dock .q-imgs { display: flex; flex-wrap: wrap; gap: 6px; }
+   （lightbox 委托只认 .msg-img）⇒ 点排队图只走 .q-item 的 queue-nudge 委托、永不开大图。
+   `justify-content:flex-end` = 图片组**右靠**，与 .q-text 的 `margin-left:auto` 同向：
+   `.q-img` 的 `max-width:min(160px,100%)` 含百分比，在内在尺寸计算阶段 `100%` 不可解析 ⇒
+   `.q-imgs` 的 max-content 会被按图片**原始宽**高估，`.q-body`（flex:1）随之被撑得比实渲染的
+   图片宽（实测 259 vs 160 CSS）⇒ 只给气泡 `margin-left:auto` 时气泡落在 body 右缘、图片却留在
+   body 左缘，右缘错开成阶梯。本行让图片不管 body 多宽都贴其右缘 ⇒ 气泡/图片右缘恒一致；
+   不改 .q-body 布局（改成 flex 列会让 .q-imgs 退化收缩宽、图片塌成细条，见上条注释）。 */
+.queue-dock .q-imgs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 /* 图片上方有件（文字气泡或来源行）才留间距；纯图项上方不留空，否则多出 6px 空白命中区 */
 .queue-dock .q-text + .q-imgs,
 .queue-dock .q-who + .q-imgs { margin-top: 6px; }

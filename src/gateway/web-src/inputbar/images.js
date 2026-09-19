@@ -104,6 +104,17 @@ import { syncGwSend } from './send.js'
     renderImgPills()
   }
 
+// 排队图片点击催办（2026-09-19）：点击排队图片触发催办，发送 queue-nudge
+document.addEventListener('click', (e) => {
+  const pendingImg = e.target.closest?.('.pending-img')
+  if (!pendingImg) return
+  // 如果点击的是删除按钮，不触发催办
+  if (e.target.classList.contains('img-x')) return
+  if (!state.currentHash || !gws || gws.readyState !== 1) return
+  gws.send(JSON.stringify({ type: 'queue-nudge', sessionId: state.currentHash }))
+  toast('已催办：本条并入当前轮次')
+})
+
 export {
   addImageFiles,
   addUploadFiles,

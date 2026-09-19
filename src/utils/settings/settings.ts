@@ -298,11 +298,16 @@ export function getSettingsFilePathForSource(
 export function getRelativeSettingsFilePathForSource(
   source: 'projectSettings' | 'localSettings',
 ): string {
+  // 2026-09-19: project and local scope are merged into one project-scoped
+  // file, <cwd>/.claude/settings.json. The shared-vs-personal split is
+  // meaningless in this portable, single-user workspace, and keeping a second
+  // file made the project/local layers leak into the global config home
+  // whenever cwd was the portable root (cwd/.claude === config home).
+  // `settings.local.json` is no longer read or written anywhere.
   switch (source) {
     case 'projectSettings':
-      return join('.claude', 'settings.json')
     case 'localSettings':
-      return join('.claude', 'settings.local.json')
+      return join('.claude', 'settings.json')
   }
 }
 

@@ -22,6 +22,7 @@ import { logForDebugging } from '../utils/debug.js';
 import { getDisplayedEffortLevel, type EffortValue } from '../utils/effort.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js';
+import { renderBuiltinStatusLine } from '../utils/statusLineBuiltin.js';
 import { getLastAssistantMessage } from '../utils/messages.js';
 import { getRuntimeMainLoopModel, type ModelName, renderModelName } from '../utils/model/model.js';
 import { getCurrentSessionTitle } from '../utils/sessionStorage.js';
@@ -32,7 +33,10 @@ export function statusLineShouldDisplay(settings: ReadonlySettings): boolean {
   // Assistant mode: statusline fields (model, permission mode, cwd) reflect the
   // REPL/daemon process, not what the agent child is actually running. Hide it.
   if (feature('KAIROS') && getKairosActive()) return false;
-  return settings?.statusLine !== undefined;
+  // The renderer is built in, so a configured settings.statusLine command is no
+  // longer required for the row to exist. A user-provided command still takes
+  // precedence when present (see doUpdate); disableAllHooks still suppresses it.
+  return settings?.disableAllHooks !== true;
 }
 type StatusLineInputWithCache = StatusLineCommandInput & {
   context_window: StatusLineCommandInput['context_window'] & {
@@ -230,7 +234,8 @@ function StatusLineInner({
         previousStateRef.current.exceeds200kTokens = exceeds200kTokens;
       }
       const statusInput = buildStatusLineCommandInput(permissionModeRef.current, exceeds200kTokens, settingsRef.current, msgs, Array.from(addedDirsRef.current.keys()), mainLoopModelRef.current, effortValueRef.current, vimModeRef.current);
-      const text = await executeStatusLineCommand(statusInput, controller.signal, undefined, logResult);
+      // A user-configured command wins; otherwise render in-process (built-in).
+      const text = settingsRef.current?.statusLine ? await executeStatusLineCommand(statusInput, controller.signal, undefined, logResult) : renderBuiltinStatusLine(statusInput);
       if (!controller.signal.aborted) {
         setAppState(prev => {
           if (prev.statusLineText === text) return prev;

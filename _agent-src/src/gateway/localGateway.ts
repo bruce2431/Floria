@@ -5,7 +5,7 @@
  * detached spawn 自身 exe），本模块即该网关进程的主体。CLI 进程（非网关宿主）启动后作为
  * WS 客户端连 /clients 注册自己的 sessionId（见 src/utils/gatewayClient.ts）；遥测端（浏览器）
  * 经 /ws 发消息，网关按 sessionId 跨进程路由转发给对应 CLI，由 CLI 侧 enqueue 注入其 REPL
- * （与打字同路径）。token 落盘便携根 .claude/gateway-token，供各 CLI 进程读取后上报/连接。
+ * （与打字同路径）。token 落盘便携根 .claude/gateway/token，供各 CLI 进程读取后上报/连接。
  *
  * 生命周期（2026-08-17）：网关以独立进程长驻，不随任何 CLI 退出而消失；「无客户端空闲自动回收」
  * ——CLI 注册(cliClients)/遥测 WS(sockets)/SSE(sseClients) 三集合全空持续 GATEWAY_IDLE_MINUTES
@@ -46,8 +46,10 @@ import {
   clearGatewayTokenFromDisk,
   saveGatewayPortToDisk,
   clearGatewayPortFromDisk,
+  loadGatewayTokenFromDisk,
   isGatewayTicket,
   touchGatewayTicket,
+  gatewayDir,
 } from '../utils/gatewayToken.js'
 
 // 复用官方凭据池：模型校验与 CLI 同一来源（credentials.json activeProvider.models），
@@ -55,6 +57,9 @@ import {
 // 设为默认模型 = switchModel 写凭据池 activeModel（全局默认，2026-08-23）。
 import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, loadCredentials, switchModelAuto } from '../utils/credentials/pool.js'
 import { modelSupportsVision } from '../utils/model/vision.js'
+// 神经元可视化数据源（/gateway/neurons[/graph]，只读）：复用 neturon config/db 读取层
+import { buildNeuronGraph, listNeuronsForGateway } from './neuronViz.js'
+import { getCwdRoot, getGlobalRoot } from '../tools/neturon/config.js'
 // 上下文占用（dsh ContextMeter 数据源）：复用 auto-compact 同源的模型上下文窗口解析，不本地复刻。
 import { getContextWindowForModel } from '../utils/context.js'
 // 会话重命名（2026-08-24 修复）：直接复用 CLI /rename 的落盘函数（saveCustomTitle + saveAgentName），
@@ -66,6 +71,9 @@ import { webAssets } from './web-assets.generated.js'
 // userSettings 在便携模式下解析到便携根 .claude/settings.json。
 import { getSettingsFilePathForSource, getSettingsForSource, updateSettingsForSource } from '../utils/settings/settings.js'
 import type { SettingsJson } from '../utils/settings/types.js'
+// effort 持久化守卫（2026-09-18）：与 CLI 同源——parseEffortValue 做边界解析，toPersistableEffort
+// 保证落盘值合法（'max' 是 session-scoped，非 ant 不持久化；settings schema 非 ant 无 max，写进即整文件作废）。
+import { parseEffortValue, toPersistableEffort } from '../utils/effort.js'
 // P2 探活收敛（2026-08-27）：signal-0 探活唯一实现在官方 genericProcessUtils，不再保留本文件第二份
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
 
@@ -107,7 +115,7 @@ let idleTimer: NodeJS.Timeout | null = null
 // preview.json 声明 backend 的项目 → 网关懒加载 spawn 后端进程 + 动态端口分配，
 // 前端 iframe 本机直连 http://127.0.0.1:<port>/；远程宿主走同源代理 /backend/<label>/。
 // 生命周期（2026-08-28 解耦定案）：后端进程不再随网关关停（/server off/restart、空闲退出、
-// 网关硬杀均不 kill）——注册表落盘 .claude/backend-registry.json，网关重启后 ensureBackend
+// 网关硬杀均不 kill）——注册表落盘 .claude/gateway/backends.json，网关重启后 ensureBackend
 // 按注册表收养存活进程（pid 活着 + 端口就绪），预览页刷新/重进秒开不再冷启动；后端仅由
 // 空闲回收（preview.json idleMinutes）与用户手动关闭管理。根治「网关重启 → 后端冷启动 + 孤儿占端口漂移」。
 // ============================================================================
@@ -118,6 +126,7 @@ interface BackendCfg {
   port: number // 0 = 动态分配（网关从 8130 起探测顺延）
   idleMinutes?: number // 空闲回收阈值，缺省继承 GATEWAY_IDLE_MINUTES
   readyPath?: string // 就绪探测路径，缺省 /api/system_stats（项目后端自身 API，非网关前缀）
+  previewDir: string // preview.json 所在目录绝对路径（readBackendCfg 填入的解析结果，非 preview.json 字段）——后端日志落此处
 }
 interface BackendProc {
   pid: number
@@ -133,7 +142,7 @@ const backendProcesses = new Map<string, BackendProc>()
 // 后端注册表落盘（2026-08-28 生命周期解耦）：label → {pid, port, startedAt}。
 // 写点 = Map 变化处（spawn 就绪/收养/kill/异常退出）；网关死后记录仍在，重启后收养。
 function backendRegistryPath(): string {
-  return join(getPortableRoot(), '.claude', 'backend-registry.json')
+  return join(gatewayDir(), 'backends.json')
 }
 function readBackendRegistry(): Record<string, { pid: number; port: number; startedAt: number }> {
   if (!existsSync(backendRegistryPath())) return {}
@@ -146,7 +155,9 @@ function persistBackendRegistry(): void {
   try {
     const reg: Record<string, { pid: number; port: number; startedAt: number }> = {}
     for (const [label, p] of backendProcesses) reg[label] = { pid: p.pid, port: p.port, startedAt: p.startedAt }
-    writeFileSync(backendRegistryPath(), JSON.stringify(reg, null, 2))
+    const p = backendRegistryPath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    writeFileSync(p, JSON.stringify(reg, null, 2))
   } catch {
     /* 忽略：磁盘瞬时故障由下个写点重试 */
   }
@@ -221,14 +232,16 @@ const webSessions = new Map<string, WebSessionProc>()
 // （spawnWebSession 防双进程写同一 jsonl）失效，故注册表落盘（变更即写，防 kill -9 留脏），
 // 网关启动时收养 pid 仍存活的条目。
 // ============================================================================
-const webSessionsRegistryPath = (): string => join(getPortableRoot(), '.claude', 'gateway-websessions.json')
+const webSessionsRegistryPath = (): string => join(gatewayDir(), 'websessions.json')
 function persistWebSessions(): void {
   const entries: Array<{ sessionId: string; pid: number; startedAt: number }> = []
   for (const p of webSessions.values()) {
     if (p.pid) entries.push({ sessionId: p.sessionId, pid: p.pid, startedAt: p.startedAt })
   }
   try {
-    writeFileSync(webSessionsRegistryPath(), JSON.stringify(entries), 'utf8')
+    const path = webSessionsRegistryPath()
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, JSON.stringify(entries), 'utf8')
   } catch {
     /* 落盘失败不影响运行：最坏情况重启后收养不到，退化为 resume 重开窗口 */
   }
@@ -296,6 +309,8 @@ const conversationDisplays = new Map<string, { messages: unknown[]; updatedAt: n
 const sessionActivity = new Map<string, { status: string; pid: number; cwd?: string; updatedAt: number }>()
 // 2026-08-24 模型 web/CLI 同步：CLI 侧 reportCurrentModel 上报的每会话实际模型（内存，进程退出即消失）。
 // 每会话模型 override 只存在于 CLI 进程内存，web 端 /gateway/session 据此读取校准模型 seat。
+// 纯引擎内存态镜像，CLI 断开随 detach 删除（重连由 open reportCurrentModel 补报对齐）。
+// 无时间 TTL（09-16：与 CLI「载荷不变不发」矛盾，见 sweepStaleMaps 注）。
 const sessionModels = new Map<string, { model: string; updatedAt: number }>()
 // 2026-08-30 共同后端队列快照（接力文档清单#2）：CLI 侧 /clients WS queue-state 上报的当前
 // 排队项（仅用户 prompt）。web 排队区置底数据源：/gateway/session.queued 首载 + SSE queue-state 增量。
@@ -344,15 +359,17 @@ function normalizeGatewayTasks(raw: unknown): GatewayTaskItem[] {
 // 2026-09-06 web 打断收口二轮：回合被中止的网关权威时刻（per-session）。打断后 jsonl 零写入，
 // 本时刻是刷新后恢复收口判定的唯一持久源（turn-state SSE 只覆盖不刷新的实时路径）；无 TTL、
 // 不入 sweepStaleMaps——被打断的回合永无回复，语义同前端 turnEndFlags「无 TTL 防运行态复活」。
-// 2026-09-07 落盘持久化（gateway-turnend.json，变更即写、启动恢复）：重启不杀 CLI 进程（09-05
+// 2026-09-07 落盘持久化（.claude/gateway/turnend.json，变更即写、启动恢复）：重启不杀 CLI 进程（09-05
 // 不杀定案），重启前被打断的回合其收口信号必须跨重启存活——否则 CLI 重连重报 activity 后 state
 // 恢复非 null，两收口信号全失，「正在处理」无限计时复活（09-06 2h26m 挂死的重启回归路径）。
 // 旧注释「重启连坐杀全部 CLI 进程 → state=null 先行收口」系不杀定案前的时代残留，已作废。
 const turnEndAt = new Map<string, number>()
-const turnEndAtPath = (): string => join(getPortableRoot(), '.claude', 'gateway-turnend.json')
+const turnEndAtPath = (): string => join(gatewayDir(), 'turnend.json')
 function persistTurnEndAt(): void {
   try {
-    writeFileSync(turnEndAtPath(), JSON.stringify(Object.fromEntries(turnEndAt)), 'utf8')
+    const path = turnEndAtPath()
+    mkdirSync(join(path, '..'), { recursive: true })
+    writeFileSync(path, JSON.stringify(Object.fromEntries(turnEndAt)), 'utf8')
   } catch {
     /* 落盘失败不影响运行：最坏情况重启后该次打断收口退化为内存态丢失 */
   }
@@ -390,9 +407,11 @@ const detachTimers = new Map<string, ReturnType<typeof setTimeout>>()
 // [] 当权威 → web 任务浮窗/排队区消失（09-12「任务浮窗不刷新」实证：回合 2h4m 长工具期清单未变
 // 被清）。生命周期不变量收敛为「清单态只属于在线 CLI 进程」：上报 upsert + detach 删除 + 重连
 // open 补发 + 网关重启空表由 CLI 重连补发对齐（gatewayClient openSocket sendQueueState/sendTaskState）。
+// 2026-09-16：sessionModels 同构退出时间 TTL（原 SESSION_MODEL_TTL_MS 删除）——reportCurrentModel
+// 只在 WS open + 切模型时上报，模型 10 分钟不变即被清 → /gateway/session model=null → web seat
+// 校准跳过停在 localStorage 旧值（09-16「iPad 显示 deepseek 实际 glm」实证）。
 const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新视为过期
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
-const SESSION_MODEL_TTL_MS = 10 * 60 * 1000 // sessionModels 10 分钟无上报视为过期
 const MAX_REPORT_BODY_BYTES = 1024 * 1024
 
 // ============================================================================
@@ -463,8 +482,12 @@ function lanAddress(): string | null {
 const MDNS_NAME = 'floria.local'
 const MDNS_PORT = 5353
 const MDNS_GROUP = '224.0.0.251'
-// 120s：IP 变化后旧缓存两分钟过期，设备重新查询即拿新地址
-const MDNS_RECORD_TTL = 120
+// 300s：设备侧缓存时长。旧值 120s 太短——TTL 一到期设备就必须重新走一次「查询→应答」，
+// 而该链路任一环丢包（5353 被 msedge/svchost 多进程复用抢包、AP 多播抑制）即解析失败，
+// 表现为「floria.local 概率性打不开」。拉长到 300s 把重查询频率降到 1/2.5，再配合 60s
+// 多播 announce 保活（见 mdnsAnnounceOne），正常网络下设备缓存永不过期、根本不再重查询；
+// IP 变化时旧缓存最多多留 3 分钟，由 30s watch 重绑 + 保活推新地址覆盖。
+const MDNS_RECORD_TTL = 300
 // 2026-08-31 多接口根修：旧版单 socket bind 首个 LAN 地址，Windows 上绑定具体单播 IP 的
 // socket 只收该接口的组播（addMembership 指定其它接口对其无效）——热点（移动热点虚拟适配器
 // 192.168.137.1）与 WLAN 并存时，热点侧 iPad 的查询 WLAN socket 收不到 → floria.local 永不
@@ -476,11 +499,11 @@ const mdnsPendingBinds = new Set<string>() // bind 异步期间占位，防 watc
 // 网络切换自愈（2026-08-30 热点根修）：30s 轮询实时读网卡，LAN 地址集合变化即全量重建。
 let mdnsWatchTimer: ReturnType<typeof setInterval> | null = null
 const MDNS_WATCH_INTERVAL = 30_000
-// 单播 announce（2026-09-01 iPhone 热点根修）：iPhone 个人热点/AP 隔离网络吞 mDNS 多播，
-// 设备查询永远到不了 PC（现场实测：iPad↔PC IP 直连通、floria.local 恒不解析）——应答器
-// 空转。不再等查询：周期性向各 LAN IP 所在子网全部主机地址单播推送 announce（cache-flush
-// A 记录，目的端口 5353），单播穿多播抑制，iOS mDNSResponder 收到即建/刷缓存，floria.local
-// 免查询恒可解析；设备接入/锁屏唤醒后最多一个周期自动恢复。周期取 TTL 之半保无断档。
+// 周期 announce 保活（2026-09-01 起为 iPhone 热点根修的主动推送；2026-09-16 扩为「多播为主、
+// 子网单播枚举为辅」）：不等设备查询，周期性主动推 floria.local A 记录，让设备侧缓存常新。
+// 多播路径刷新网段内全部设备（标准 announce），单播枚举路径覆盖吞多播的热点/AP 网络——
+// 设备接入、锁屏唤醒、以及 TTL 到期后都无需再走「查询→应答」（该链路丢包即解析失败）。
+// 周期 60s 远小于 TTL(300s)，抗连续丢包；设备接入/唤醒后最多一个周期自动恢复。
 let mdnsAnnounceTimer: ReturnType<typeof setInterval> | null = null
 const MDNS_ANNOUNCE_INTERVAL = 60_000
 // 查询触发回推的节流表（源 IP → 上次回推时刻）
@@ -544,6 +567,22 @@ function mdnsReadName(buf: Buffer, offset: number): { name: string; next: number
   return null
 }
 
+// A 资源记录（TYPE A + CLASS + TTL + RDLENGTH 4 + IP）。nameField = 名字字段字节：
+// 查询应答里传压缩指针 0xc00c（指向应答包偏移 12 的问题段），announce 里传内联全名
+// MDNS_NAME_ENC（QD=0 的包没有可指的问题段，指针无目标）。cls 传 1（普通）/0x8001
+// （多播 announce 的 cache-flush 位；RFC 6762 §18.11 规定单播应答中该位必须为 0）。
+function mdnsAddrRecord(nameField: Buffer, ip: string, cls: number): Buffer {
+  const rec = Buffer.alloc(nameField.length + 14)
+  nameField.copy(rec, 0)
+  rec.writeUInt16BE(1, nameField.length) // TYPE A
+  rec.writeUInt16BE(cls, nameField.length + 2)
+  rec.writeUInt32BE(MDNS_RECORD_TTL, nameField.length + 4)
+  rec.writeUInt16BE(4, nameField.length + 8) // RDLENGTH
+  const octets = ip.split('.').map(Number)
+  for (let i = 0; i < 4; i++) rec[nameField.length + 10 + i] = octets[i] & 0xff
+  return rec
+}
+
 function mdnsStart(): void {
   if (mdnsSockets.size) return
   // 每个 LAN IP 一个 socket（多接口根修，见 mdnsSockets 注释）。Meta TUN（198.18.0.1）等
@@ -594,7 +633,7 @@ function mdnsStartOne(ip: string): void {
       // RFC 6762 §8.3 announce 应连发 ≥2 次（间隔 ≥1s）：三连发覆盖新设备刚入网窗口，
       // UDP 丢包不必等 60s 周期（周期轮保持单发）
       for (const delay of [0, 1000, 2000]) setTimeout(() => mdnsAnnounceOne(ip, false), delay)
-      console.log(`[gateway] mDNS 单播 announce 推发启动：floria.local → ${ip}（3 连发）`)
+      console.log(`[gateway] mDNS announce 保活启动：floria.local → ${ip}（多播 + 子网单播，3 连发）`)
     } catch (e) {
       try {
         sock.close()
@@ -655,41 +694,45 @@ function mdnsHandleQuery(sock: ReturnType<typeof createSocket>, bindIp: string, 
   // 旧逻辑只读首个 QNAME → 整包忽略 → iPad 侧永不解析成功（现场取证：iPad 5 连查零应答，
   // 同窗本机单问题查询秒应答）。取首个匹配 floria.local 的问题（A/ANY）作答。
   let off = 12
-  let hitStart = -1
-  let hitEnd = -1
+  let hit = -1 // 匹配问题的序号；-1 = 无
+  let hitType = 1
+  let hitClass = 1
   for (let qi = 0; qi < qdcount && off + 1 < msg.length; qi++) {
     const parsed = mdnsReadName(msg, off)
     if (!parsed || parsed.next + 4 > msg.length) return
     const qtype = msg.readUInt16BE(parsed.next)
-    if (hitStart < 0 && parsed.name.toLowerCase() === MDNS_NAME && (qtype === 1 || qtype === 255)) {
-      hitStart = off
-      hitEnd = parsed.next + 4
+    const qclass = msg.readUInt16BE(parsed.next + 2)
+    if (hit < 0 && parsed.name.toLowerCase() === MDNS_NAME && (qtype === 1 || qtype === 255)) {
+      hit = qi
+      hitType = qtype
+      hitClass = qclass & 0x7fff // 清 QU 位（RFC 6762 §5.4：应答中部不应带 unicast-response 位）
     }
     off = parsed.next + 4
   }
-  if (hitStart < 0) return
+  if (hit < 0) return
   // A 记录只回查询到达接口的 bind IP（多接口根修）：设备从哪个网段问，就答哪个网段的可达地址
   const addrs = [bindIp]
-  // 应答：header(QR=1 AA=1) + 原样问题段（仅匹配问题）+ 1 条 A 记录（NAME 用压缩指针
-  // 0xc00c 指向应答包内偏移 12 = 问题起始，问题段虽来自打包查询中段，指针仍指向正确）
+  // 应答：header(QR=1 AA=1) + 匹配问题段【重新编码】+ 1 条 A 记录（NAME 用压缩指针 0xc00c
+  // 指向应答包内偏移 12 = 我们重写的问题段起始）。
+  // ⚠️ 2026-09-16 概率性失败根修：旧版把匹配问题的**原始字节** subarray 复制进应答，而 iOS
+  // mDNSResponder 的打包查询（QD>1）里 floria.local（常不在首位）名字多用**压缩指针**指向包内
+  // 别处（如 _companion-link._tcp.local 的 'local' 标签）——指针复制到新包后指向错位，设备端
+  // 解出的问题名退化成 "floria"（探针实测：QD=1 [floria]），问题段与自己的查询不匹配 → 整个
+  // 应答被丢弃 → 设备重试。设备这次是否把 floria.local 排首位、是否用指针，决定应答是否作数，
+  // 宏观表现就是「floria.local 概率性打不开」。故问题段一律用内联全名重编码，绝不复制原字节。
   const header = Buffer.alloc(12)
+  // ID：源端口 5353 的标准 mDNS 查询 → ID=0（RFC 6762 §18.1）；legacy 查询（随机源端口，
+  // Windows/Node 等解析器）→ 必须回显查询 ID（§6.7），旧版恒写 0 会被这类解析器丢弃
+  header.writeUInt16BE(rinfo.port === MDNS_PORT ? 0 : msg.readUInt16BE(0), 0)
   header.writeUInt16BE(0x8400, 2)
   header.writeUInt16BE(1, 4)
   header.writeUInt16BE(addrs.length, 6)
-  const question = msg.subarray(hitStart, hitEnd)
-  const parts: Buffer[] = [header, question]
-  for (const ip of addrs) {
-    const rec = Buffer.alloc(16)
-    rec.writeUInt16BE(0xc00c, 0)
-    rec.writeUInt16BE(1, 2) // TYPE A
-    rec.writeUInt16BE(1, 4) // CLASS IN
-    rec.writeUInt32BE(MDNS_RECORD_TTL, 6)
-    rec.writeUInt16BE(4, 10) // RDLENGTH
-    const octets = ip.split('.').map(Number)
-    for (let i = 0; i < 4; i++) rec[12 + i] = octets[i] & 0xff
-    parts.push(rec)
-  }
-  const reply = Buffer.concat(parts)
+  const qtail = Buffer.alloc(4)
+  qtail.writeUInt16BE(hitType, 0)
+  qtail.writeUInt16BE(hitClass || 1, 2)
+  const question = Buffer.concat([MDNS_NAME_ENC, qtail])
+  const namePtr = Buffer.from([0xc0, 0x0c])
+  const reply = Buffer.concat([header, question, ...addrs.map((ip) => mdnsAddrRecord(namePtr, ip, 1))])
   // 双发（2026-08-29）：多播应答（组内标准路径）+ 单播回源——iOS 查询（源端口 5353）可达 PC，
   // 但应答走多播组回程时常被 AP 的 IGMP snooping/多播抑制丢弃（实测设备解析不到 floria.local），
   // 单播直达查询者穿该抑制；mDNS 应答幂等，设备收两份无害。legacy 查询（随机源端口）本就单播。
@@ -705,22 +748,29 @@ function mdnsHandleQuery(sock: ReturnType<typeof createSocket>, bindIp: string, 
 // （08-31 无 announce 与 09-01 纯 answer announce 两次热点实测均不解析，其余链路相同）；
 // 带问题段的 legacy unicast response 走 mDNSResponder 常规应答通道（商用 mDNS 网关同款做法）。
 function mdnsAnnouncePacket(bindIp: string): Buffer {
-  const octets = bindIp.split('.').map(Number)
   const question = Buffer.concat([MDNS_NAME_ENC, Buffer.from([0, 1, 0, 1])]) // QTYPE=A QCLASS=IN
-  const rec = Buffer.alloc(16)
-  rec.writeUInt16BE(0xc00c, 0) // NAME → 问题段起始
-  rec.writeUInt16BE(1, 2) // TYPE A
-  // CLASS IN：RFC 6762 §18.11 单播应答中 cache-flush 位必须为 0（0x8001 仅多播合法，
-  // iOS mDNSResponder 严格实现会拒收）——单播 announce 不依赖该位，靠周期重发保新鲜
-  rec.writeUInt16BE(1, 4)
-  rec.writeUInt32BE(MDNS_RECORD_TTL, 6)
-  rec.writeUInt16BE(4, 10) // RDLENGTH
-  for (let i = 0; i < 4; i++) rec[12 + i] = octets[i] & 0xff
   const header = Buffer.alloc(12)
   header.writeUInt16BE(0x8400, 2) // QR=1 AA=1（ID=0：legacy 应答无匹配查询时规范值）
   header.writeUInt16BE(1, 4) // QDCOUNT=1
   header.writeUInt16BE(1, 6) // ANCOUNT=1
-  return Buffer.concat([header, question, rec])
+  // CLASS IN：RFC 6762 §18.11 单播应答中 cache-flush 位必须为 0（0x8001 仅多播合法，
+  // iOS mDNSResponder 严格实现会拒收）——单播 announce 不依赖该位，靠周期重发保新鲜
+  return Buffer.concat([header, question, mdnsAddrRecord(Buffer.from([0xc0, 0x0c]), bindIp, 1)])
+}
+
+// 多播 announce（2026-09-16 概率性失败根修）：单播 announce 本质是 unsolicited unicast
+// response，mDNSResponder 对「没有匹配 outstanding query」的单播包多数直接丢弃——09-01 三轮
+// 单播根修只在设备刚发过查询的 30s 窗口内有效，设备 TTL 一到期仍必须重新查询，而重查询链路
+// （5353 被 msedge/svchost 多进程复用抢包、AP 多播抑制）任一环丢包即解析失败，宏观表现就是
+// 「floria.local 概率性打不开」。多播 announce 是 RFC 6762 §8.3 的标准路径，设备无条件接受
+// 并刷新缓存：60s 周期（< TTL/2）推送后设备侧缓存永不过期，正常网络下不再触发重查询。
+// 报文 QD=0（announce 无问题段，名字只能内联）+ class 0x8001（cache-flush，声明权威数据）。
+function mdnsMulticastAnnouncePacket(bindIp: string): Buffer {
+  const header = Buffer.alloc(12)
+  header.writeUInt16BE(0x8400, 2) // QR=1 AA=1
+  header.writeUInt16BE(0, 4) // QDCOUNT=0
+  header.writeUInt16BE(1, 6) // ANCOUNT=1
+  return Buffer.concat([header, mdnsAddrRecord(MDNS_NAME_ENC, bindIp, 0x8001)])
 }
 
 const ipToU32 = (s: string) =>
@@ -751,13 +801,17 @@ function mdnsSubnetPeers(ip: string, netmask: string): string[] {
 function mdnsAnnounceOne(bindIp: string, log: boolean): void {
   const sock = mdnsSockets.get(bindIp)
   if (!sock) return
+  // ① 多播 announce（标准路径，见 mdnsMulticastAnnouncePacket）：刷新网段内所有设备缓存
+  sock.send(mdnsMulticastAnnouncePacket(bindIp), MDNS_PORT, MDNS_GROUP, () => {})
+  // ② 子网单播枚举（2026-09-01 iPhone 热点实测：该类网络吞多播，多播 announce 到不了设备，
+  // 只能按主机地址逐个单播推；≤512 地址的网段才枚举，大网段交定向推 mdnsPushToReachableClient）
   const netmask = mdnsLanIfs().find((x) => x.address === bindIp)?.netmask
   if (!netmask) return
   const pkt = mdnsAnnouncePacket(bindIp)
   const peers = mdnsSubnetPeers(bindIp, netmask)
   for (const peer of peers) sock.send(pkt, MDNS_PORT, peer, () => {})
   if (log) {
-    console.log(`[gateway] mDNS 单播 announce：floria.local → ${bindIp} → ${peers.length} 个地址（热点吞多播场景免查询可达）`)
+    console.log(`[gateway] mDNS announce：floria.local → ${bindIp}（多播 + 单播 ${peers.length} 地址）`)
   }
 }
 
@@ -934,7 +988,25 @@ function readBackendCfg(previewDir: string): BackendCfg | undefined {
     port: typeof b.port === 'number' ? b.port : 0,
     idleMinutes: typeof b.idleMinutes === 'number' ? b.idleMinutes : GATEWAY_IDLE_MINUTES,
     readyPath: typeof b.readyPath === 'string' && b.readyPath ? b.readyPath : '/api/system_stats', // 项目后端(如 ComfyUI)自身 API,勿随网关前缀迁移
+    previewDir,
   }
+}
+
+// 网关神经元库发现根（2026-09-18 全项目神经元化）：内置双根只覆盖 cwd 根 + 全局根，
+// 看不到其它项目根的 .claude/neturon（神经 tab 只出 3 库的根因）——扩展为
+// 「cwd 根 → 全部项目根 → 全局根」优先序枚举，同 id keep-first（cwd 根真身优先）。
+function gatewayNeuronRoots(): string[] {
+  const roots = [getCwdRoot()]
+  const portable = getPortableRoot()
+  for (const e of readdirSync(portable, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue
+    if (e.name.startsWith('.')) continue
+    if (/^\d{8,14}-/.test(e.name)) continue // 根级临时任务目录
+    const nr = join(portable, e.name, '.claude', 'neturon')
+    if (isDir(nr)) roots.push(nr)
+  }
+  roots.push(getGlobalRoot())
+  return [...new Set(roots)]
 }
 
 function countUserAssistant(text: string): number {
@@ -945,7 +1017,8 @@ function countUserAssistant(text: string): number {
   return n
 }
 
-type SessionMeta = { sidechain: true } | { title: string; messageCount: number; updatedAt: number }
+type SessionCore = { title: string; messageCount: number; updatedAt: number }
+type SessionMeta = { sidechain: true } | (SessionCore & { createdAt: number })
 
 // B2（2026-08-26）大文件兜底（反向扫描 findLastCustomTitle 及其 (size, mtime) 缓存）
 // 2026-08-31 迁入共享权威 sessionStoragePortable.ts（findLastCustomTitleCached），
@@ -953,7 +1026,7 @@ type SessionMeta = { sidechain: true } | { title: string; messageCount: number; 
 // end=start+OVERLAP 的自旋缺陷（无任何 custom-title 记录的文件会死循环）。
 // 标题写入仍只由 sessionStorage.ts 的 saveCustomTitle/saveAgentName 负责，网关不另造标题存储。
 
-async function parseMeta(file: string): Promise<SessionMeta | null> {
+async function parseMeta(file: string): Promise<SessionCore | { sidechain: true } | null> {
   const lite = await readSessionLite(file)
   if (!lite) return null
   const { head, tail, mtime } = lite
@@ -998,14 +1071,21 @@ async function parseMetaCached(file: string): Promise<SessionMeta | null> {
   if (cached && cached.size === st.size && cached.mtimeMs === st.mtimeMs) return cached.meta
   const meta = await parseMeta(file)
   if (meta) {
-    sessionMetaCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, meta })
+    // createdAt（2026-09-18 侧栏创建时间排序）：jsonl 文件创建时刻 = 会话创建时刻。birthtime
+    // 个别文件系统不支持（回 0）→ 落回 mtime（语义退化为「最后活跃」，排序仍稳定）。birthtime
+    // 不可变，随 (size, mtime) 缓存无假命中。
+    const full: SessionMeta = 'sidechain' in meta
+      ? meta
+      : { ...meta, createdAt: st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs }
+    sessionMetaCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, meta: full })
     if (sessionMetaCache.size > 500) {
       // 防无限增长：清掉最旧一半（Map 保持插入序），同 lastCustomTitleCache
       const keys = [...sessionMetaCache.keys()]
       for (const k of keys.slice(0, 250)) sessionMetaCache.delete(k)
     }
+    return full
   }
-  return meta
+  return null
 }
 
 // B 探活收敛（2026-08-27 P2）：与 utils/genericProcessUtils.isProcessRunning 同为 signal-0 探活，
@@ -1083,10 +1163,7 @@ function sweepStaleMaps(now = Date.now()): void {
   for (const [sid, v] of sessionActivity) {
     if (now - v.updatedAt > ACTIVITY_TTL_MS || !isPidAlive(v.pid)) sessionActivity.delete(sid)
   }
-  for (const [sid, v] of sessionModels) {
-    if (now - v.updatedAt > SESSION_MODEL_TTL_MS) sessionModels.delete(sid)
-  }
-  // sessionQueues/sessionTasks 不入时间清扫（09-12 定案，见上方常量区注）：CLI「载荷不变不发」
+  // sessionModels/sessionQueues/sessionTasks 不入时间清扫（09-12/09-16 定案，见上方常量区注）：CLI「载荷不变不发」
   // 契约下时间 TTL 会清仓长不变期的活跃清单 → web 浮窗/排队区消失。生命周期 = detach 清 +
   // 重连 open 补发 + 网关重启对齐，「清单态只属于在线 CLI 进程」由这三者直接持有。
 }
@@ -1127,6 +1204,7 @@ async function listSessions(root: string) {
         title: meta.title,
         messageCount: meta.messageCount,
         updatedAt: meta.updatedAt,
+        createdAt: meta.createdAt,
         state,
         // 2026-09-06 回合中止权威时刻（有才有键）：web 首载恢复 turnEndFlags，防打断后刷新
         // 「正在处理」无限计时复活（closeSeg 二信号之一）。
@@ -1515,19 +1593,30 @@ function listModels(root: string): Record<string, unknown> {
   // 凭据池（2026-08-27 P1 修复）：不再手解 credentials.json，复用官方 loadCredentials()
   // （providers[].models[] = 各供应商实际可用的模型清单）
   const creds = loadCredentials()
-  const poolRows: Array<{ k: string; v: string; src: string; vision?: boolean; provider?: string }> = []
+  const poolRows: Array<{ k: string; v: string; src: string; vision?: boolean; provider?: string; effortLevels?: string[] }> = []
   const poolSet = new Set<string>()
   for (const [name, cfg0] of Object.entries(creds.providers)) {
     const cfg = (cfg0 && typeof cfg0 === 'object' ? cfg0 : {}) as Record<string, unknown>
     const models = Array.isArray(cfg.models) ? (cfg.models as string[]) : []
     const mv =
       cfg.modelVision && typeof cfg.modelVision === 'object' ? (cfg.modelVision as Record<string, unknown>) : {}
+    // 官方思考等级声明（2026-09-18，供应商 effortLevels）随条目下发 → web 推理等级菜单按官方档位动态渲染
+    const effLv = Array.isArray(cfg.effortLevels)
+      ? (cfg.effortLevels as unknown[]).map((s) => String(s).toLowerCase().trim()).filter(Boolean)
+      : undefined
     const label = modelProviderLabel(name)
     for (const m of models) {
       if (poolSet.has(m)) continue
       poolSet.add(m)
       // provider=真实归属供应商标签（2026-08-29 直接切模型自动切供应商：前端据此分组/跨商直选，免启发式前缀判定）
-      poolRows.push({ k: m, v: m, src: `凭据池·${label}`, vision: mv[m] === true, provider: label })
+      poolRows.push({
+        k: m,
+        v: m,
+        src: `凭据池·${label}`,
+        vision: mv[m] === true,
+        provider: label,
+        ...(effLv && effLv.length ? { effortLevels: effLv } : {}),
+      })
     }
   }
   // 已作为凭据池模型展示的 settings/env 条目不再重复（同一模型只出现一次）
@@ -1772,6 +1861,30 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
+  // 神经元可视化（web「神经」tab，只读；数据源与复用层见 neuronViz.ts 头注）：
+  //   GET /gateway/neurons            → 神经元清单（层级 1 选择界面）
+  //   GET /gateway/neurons/graph?id=&res= → 单库三级图数据包（层级 2 Canvas 力导向）
+  if (req.method === 'GET' && url.pathname === '/gateway/neurons') {
+    try {
+      sendJson(res, 200, listNeuronsForGateway(gatewayNeuronRoots()))
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  if (req.method === 'GET' && url.pathname === '/gateway/neurons/graph') {
+    try {
+      const id = (url.searchParams.get('id') || '').trim()
+      if (!id) {
+        sendJson(res, 400, { error: '缺少 id 参数' })
+        return
+      }
+      sendJson(res, 200, buildNeuronGraph(id, gatewayNeuronRoots(), url.searchParams.get('res') || undefined))
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
   // 2026-08-22 模型/思考等级切换（受上方 /gateway/* token 校验保护）：
   //   POST /gateway/model {model?, effortLevel?, sessionId?, defaultModel?}
   //   - model → 每会话切换：校验放宽到凭据池全部供应商（findModelProvider），随
@@ -1781,7 +1894,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   //     activeProvider，导致切一个会话的模型毒害其它在跑会话——模型名/endpoint 错配 400）。
   //   - defaultModel → 全局默认模型（switchModelAuto 写池），只对之后新建的会话生效；
   //     已运行会话按启动快照绑定，不受影响。
-  //   - effortLevel → 写 settings.json effortLevel（全局持久化）+ 广播 {type:'effort'} 实时生效。
+  //   - effortLevel → 写 settings.json effortLevel（全局持久化，过 toPersistableEffort 守卫：
+  //     'max' 非 ant 为 session-scoped 不落盘=删键跟随默认，运行时经广播实时生效）。
   if (req.method === 'POST' && url.pathname === '/gateway/model') {
     try {
       const parsed = await readReportBody(req)
@@ -1823,7 +1937,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         // getClaudeConfigHomeDir()/settings.json（便携模式 = 便携根/.claude，与旧 writeSettingsModel 同路径）。
         // effortLevel 为 null（off/auto/default 清除）→ 传 undefined → mergeWith 删除该键；
         // 写盘失败 → 返回 500 暴露（不再静默），也不广播（避免 CLI 内存与磁盘全局态不一致）。
-        const r = updateSettingsForSource('userSettings', { effortLevel: effortLevel ?? undefined })
+        // 2026-09-18 根修：持久化前过官方边界解析 + toPersistableEffort 守卫。读侧 settings schema
+        // 非 ant 只接受 low/medium/high 且是整文件 safeParse（readSettingsFile 失败→settings:null），
+        // 此前 'max' 原样落盘 → 下次任何进程读 userSettings 整体校验失败作废（model/permissions 全丢）。
+        // 守卫语义与 CLI 持久化同源：'max' 是 session-scoped（非 ant 不落盘）→ 删键 = 重启后跟随模型默认；
+        // 运行时仍按下方广播 'max' 实时生效（claude.ts 对 opus-4-6 发 max、其它模型自动降 high）。
+        const persistable = toPersistableEffort(parseEffortValue(effortLevel))
+        const r = updateSettingsForSource('userSettings', { effortLevel: persistable })
         if (r.error) {
           sendJson(res, 500, { error: `写 settings.json 失败：${r.error.message}` })
           return
@@ -2293,7 +2413,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       res.writeHead(200, {
         'Content-Type': MIME[extname(hit)] || 'application/octet-stream',
         'Content-Length': buf.length,
-        'Cache-Control': 'private, max-age=86400',
+        // 2026-09-16 no-cache 根修（用户定案）：原 max-age=86400 会把首次取到的字节钉在
+        // /image-cache/<sid>/<id> 上 24h——id 撞号覆写后新气泡仍显示旧图（b5bd1265 实证
+        // B 显示成 A）。id 唯一由分配器保证（web-src live.js 单调 maxImgId + CLI 显式 id 透传），
+        // 此处 no-cache 是「URL 字节一变立即反映」的防线，localhost/LAN 重取开销可忽略。
+        'Cache-Control': 'private, no-cache',
       })
       res.end(buf)
     } catch {
@@ -2362,7 +2486,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 2026-08-24 模型 web/CLI 同步：CLI 侧 reportCurrentModel 上报每会话实际模型（内存 Map，TTL 清扫）。
+  // 2026-08-24 模型 web/CLI 同步：CLI 侧 reportCurrentModel 上报每会话实际模型（内存 Map，detach 清扫）。
   // 每会话 override 不写凭据池，web 端 /gateway/session 据此读取校准模型 seat，与 CLI 实际使用一致。
   if (req.method === 'POST' && url.pathname === '/gateway/model-report') {
     try {
@@ -2832,9 +2956,10 @@ async function allocBackendPort(): Promise<number> {
 // 进行中的 spawn（防并发重复拉起）：同一 label 探测期间，后续请求复用同一 Promise
 const backendPending = new Map<string, Promise<BackendProc>>()
 
-function backendLogPath(label: string): string {
-  const safe = label.replace(/[^a-zA-Z0-9_-]/g, '_')
-  return join(getPortableRoot(), '.claude', `backend-${safe}.log`)
+// 后端日志落「该项目自己的」.claude/preview/backend.log（2026-09-19 定案：后端日志属项目产物，
+// 不再散落便携根 .claude/ 根；一个项目一份 preview.json = 一个后端 = 单文件，故直接放 preview/ 根不建 logs/ 子目录）。
+function backendLogPath(cfg: BackendCfg): string {
+  return join(cfg.previewDir, 'backend.log')
 }
 
 // O3：backend 日志轮转 —— 超过上限截断重写，防长期运行无限增长（stdout/stderr 落盘只追加）
@@ -2891,9 +3016,10 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
   const cmd = cfg.cmd.map((a) => (a.includes('{port}') ? a.replaceAll('{port}', String(port)) : a))
   // cmd[0] 若是相对路径（含 / 或 \），node spawn 按进程 cwd 而非选项 cwd 解析 → 手动 resolve 到 cfg.cwd
   if (cmd[0] && !isAbsolute(cmd[0]) && /[\\/]/.test(cmd[0])) cmd[0] = resolve(cfg.cwd, cmd[0])
-  // 子进程 stdout/stderr 落盘到便携根 .claude/backend-<label>.log（stdio ignore 会丢启动报错，难诊断）
-  const logPath = backendLogPath(label)
+  // 子进程 stdout/stderr 落盘到该项目 .claude/preview/backend.log（stdio ignore 会丢启动报错，难诊断）
+  const logPath = backendLogPath(cfg)
   rotateBackendLogIfNeeded(logPath)
+  mkdirSync(join(logPath, '..'), { recursive: true })
   const logFd = openSync(logPath, 'a')
   const child = spawn(cmd[0], cmd.slice(1), {
     cwd: cfg.cwd,
@@ -2931,7 +3057,7 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
       /* 忽略 */
     }
     if (child.pid) killTree(child.pid)
-    throw new Error(`backend ${label}: 端口 ${port} 就绪探测失败（${cfg.readyPath}），详见日志 ${backendLogPath(label)}`)
+    throw new Error(`backend ${label}: 端口 ${port} 就绪探测失败（${cfg.readyPath}），详见日志 ${backendLogPath(cfg)}`)
   }
   backendProcesses.set(label, proc)
   persistBackendRegistry()
@@ -3195,7 +3321,7 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
     // conhost 老式黑窗——用户所见「管理员指令框」置顶抢眼、多窗不合并），配置层无解；原 powershell
     // Start-Process 链依赖 defterm 托管，系统更新随时可能再坏。改为网关直接调 wt.exe，行为不再随
     // defterm 配置漂移。配套：①真实 CLI pid 由 cli-hello 上报补填（wt 自身即退拿不到）；
-    // ②端口落盘 .claude/gateway-port（并入已存在 WT 窗口时新标签继承旧 WT 进程环境，FLOIRA_GATEWAY
+    // ②端口落盘 .claude/gateway/port（并入已存在 WT 窗口时新标签继承旧 WT 进程环境，FLOIRA_GATEWAY
     // 传不到 → CLI env 缺失时读盘发现，见 gatewayToken.ts）。
     // 2026-08-31 根修不变：exe 一律网关自身（协议必然匹配；目录扫描旧案已废，见 webSessionExe 注释）
     const exe = webSessionExe()
@@ -3453,15 +3579,18 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   }
   currentHost = opts?.host || process.env.GATEWAY_HOST || '0.0.0.0'
   currentPort = Number(opts?.port || process.env.GATEWAY_PORT || 8124)
-  currentToken = opts?.token || process.env.SERVER_TOKEN || randomBytes(16).toString('hex')
+  // 2026-09-18 token 竞态根治：读盘-or-创建的稳定密钥。盘上有值即复用——多进程抢起网关时
+  // 各方持有同一秘密，竞态从「毒化源」降级为无害事件（败者转 client 后天然可注册赢家）；
+  // 显式 opts/env 覆盖仍最高；盘上无值（首次启动或 /server off 清盘后）才随机生成。
+  // 旧版每次随机：12:48 事故中两个 CLI 各自拉起 --gateway 子进程，两把不同密钥竞速 bind，
+  // 胜者 token 与败者已写盘的 token 分裂 → 所有 CLI 读盘注册全 401（侧栏无状态/web 误
+  // spawn resume/消息悬空/会话退化折叠，2026-09-18 实证）。
+  currentToken = opts?.token || process.env.SERVER_TOKEN || loadGatewayTokenFromDisk() || randomBytes(16).toString('hex')
   // 共享 token：CLI 侧上报（conversationDisplay.ts /gateway/conversation、/gateway/activity）据此附加校验参数。
-  // 2026-08-17 网关独立化：token 落盘（便携根 .claude/gateway-token），供其它 CLI 进程读取后
-  // 向本网关上报 / 连接 /clients（否则非网关宿主的 CLI 无 token，上报会被 401 拒绝）。
   setGatewayToken(currentToken)
-  saveGatewayTokenToDisk(currentToken)
-  // 2026-09-07 wt 直并配套：端口落盘 .claude/gateway-port——并入已存在 WT 窗口的新标签继承旧 WT
-  // 进程环境，FLOIRA_GATEWAY env 传不到 CLI 子进程，env 缺失时读盘发现（gatewayToken.ts TTL 缓存）。
-  saveGatewayPortToDisk(currentPort)
+  // 落盘移至 listen 成功回调（下方）：不变量「盘上 token/port 恒描述现网关，只有端口持有者可发布」。
+  // 旧序（先写盘后 bind）下 bind 失败者（EADDRINUSE）会把败者 token 覆盖盘上胜者 token——即 12:48
+  // 事故的直接成因。2026-09-07 wt 直并配套的 gateway-port 落盘（env 缺失时 CLI 的发现通道）同批迁移。
   const root = getPortableRoot()
   // 收养上一代网关遗留的存活 web 会话窗口（注册表落盘，重启不杀窗 → 必须收养，否则 resume 幂等失效双开进程）
   adoptWebSessions()
@@ -3700,7 +3829,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             return
           }
           // 2026-09-15 会话间协作：本会话的 agent 发消息给另一个会话（session_send 工具出口）。
-          // 网关只做「按已解析 sid 路由」——会话名 → sid 的解析在发送端 CLI 完成（sessionExposure.ts），
+          // 网关只做「按已解析 sid 路由」——会话名 → sid 的解析在发送端 CLI 完成（sessionAddressing.ts），
           // 网关不引入第二份标题索引；from（来源会话标识）原样透传，由接收端包进消息文本
           // （sessionMessage.ts）。投递帧走 /clients → 接收端 gatewayClient 与本地打字同路径 enqueue。
           // 回执语义 =「网关已接手投递」（在线直投/已暂存/已冷启），非端到端消费确认（离线冷启异步，见 sendSessionMessage）。
@@ -3791,6 +3920,8 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
           if (cliClients.get(sid) === ws) cliClients.delete(sid)
           // 2026-08-30 队列快照：队列态只属于在线 CLI 进程，断开即清（重连后 queue-state 补发对齐）
           sessionQueues.delete(sid)
+          // 2026-09-16 会话真实模型镜像：同队列——模型态只属于在线 CLI 进程（重连 open reportCurrentModel 补报对齐）
+          sessionModels.delete(sid)
           // 2026-09-10 任务清单快照：同队列——清单态只属于在线 CLI 进程（重连由 task-state 补发对齐）
           sessionTasks.delete(sid)
           // 2026-09-08 断连感知根修：detach 不再立即清 activity/beat + 群发 null——CLI /clients
@@ -3847,6 +3978,10 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   })
   server.listen(currentPort, currentHost, () => {
     gatewayListened = true
+    // 端口到手才发布 token/port（2026-09-18 竞态根治，见上方 currentToken 注）：
+    // bind 失败者不再写盘，盘上永远是现网关的秘密，CLI 读盘注册恒可达。
+    saveGatewayTokenToDisk(currentToken)
+    saveGatewayPortToDisk(currentPort)
     console.log(`[gateway] 内置网关监听 http://${currentHost}:${currentPort} (token=${currentToken})`)
     // mDNS 应答器只在全网卡监听时有意义；绑 127.0.0.1（调试）时不起
     if (currentHost === '0.0.0.0') mdnsStart()

@@ -32,8 +32,8 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 
 ## 网关缺失自愈 + 日志落盘
 
-1. **自愈**——`gatewayClient.ts` `probeAndConnect()` 探测网关不在（`/gateway/health` 失败）时，经 `feature('PRIVATE_GATEWAY')` 门控动态 import `commands/server/server.ts` 的 `ensureGatewayAutoStart()` 自动 detached spawn 独立网关（60s 节流；`isGatewayUp` 在→跳过；端口被非网关占用→**静默放弃不强抢**【自动路径禁杀进程】；token 继承盘上 `gateway-token`，无则随机），spawn 后下轮 PROBE_RETRY(10s) 自然接续——网关 crash/空闲回收退出不再需要手动 `/server on`。
-2. **日志**——`spawnGatewayProcess()`（`/server on` 与自动拉起共用）：网关进程 stdout/stderr 落盘便携根 `.claude/gateway.log`（5MB 截断轮转），crash 可取证；手动前台 `exe --gateway` 仍直出终端。
+1. **自愈**——`gatewayClient.ts` `probeAndConnect()` 探测网关不在（`/gateway/health` 失败）时，经 `feature('PRIVATE_GATEWAY')` 门控动态 import `commands/server/server.ts` 的 `ensureGatewayAutoStart()` 自动 detached spawn 独立网关（60s 节流；`isGatewayUp` 在→跳过；端口被非网关占用→**静默放弃不强抢**【自动路径禁杀进程】；token 继承盘上 `.claude/gateway/token`，无则随机），spawn 后下轮 PROBE_RETRY(10s) 自然接续——网关 crash/空闲回收退出不再需要手动 `/server on`。
+2. **日志**——`spawnGatewayProcess()`（`/server on` 与自动拉起共用）：网关进程 stdout/stderr 落盘便携根 `.claude/gateway/gateway.log`（5MB 截断轮转），crash 可取证；手动前台 `exe --gateway` 仍直出终端。
 3. **排查第一现场**：系统 commit 内存临界（固定页面文件 + 多个 cli-dev 进程各 1.5~3.7GB private）时，web 端首屏全量渲染的内存尖峰可触发多进程连锁 crash（Windows 不挑进程，谁撞上分配失败谁死）——查 `gateway.log`；系统层根治=页面文件改自动管理（用户操作）。
 
 ## 神经元内置检索/记忆（NEURON_RAG，默认开）

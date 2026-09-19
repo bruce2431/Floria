@@ -5,7 +5,7 @@
  * 进程（非网关宿主）启动后由本模块：
  *  1. 探测本机网关（GET /gateway/health，地址 = FLOIRA_GATEWAY 或回退 127.0.0.1:8124）；
  *     网关未起则后台定时重试（网关后起也能连上），全程静默不打扰；
- *  2. 读盘 token（网关进程启动时写入便携根 .claude/gateway-token）→ setGatewayToken，
+ *  2. 读盘 token（网关进程启动时写入便携根 .claude/gateway/token）→ setGatewayToken，
  *     让 conversationDisplay 的 HTTP 上报（/gateway/conversation、/gateway/activity）也带 token；
  *  3. 以 WebSocket 客户端连 /clients?token=&session=<getSessionId()> 注册自己的会话；
  *  4. 收到网关转发来的遥测端消息（{type:'send', text}）→ enqueue 注入本进程 REPL
@@ -23,12 +23,11 @@ import {
 } from '../bridge/gatewayPermissionRelay.js'
 import type { BridgePermissionCallbacks, BridgePermissionResponse } from '../bridge/bridgePermissionCallbacks.js'
 import { getMainLoopModel } from './model/model.js'
-import { setSessionProviderOverride } from './credentials/pool.js'
 import { enqueue, getCommandQueueSnapshot, subscribeToCommandQueue } from './messageQueueManager.js'
 import { getGatewayToken, loadGatewayPortFromDisk, loadGatewayTokenFromDisk, setGatewayToken } from './gatewayToken.js'
 import { compressImageBuffer } from './imageResizer.js'
 import { parseSessionMessage, wrapSessionMessage, type SessionSource } from './sessionMessage.js'
-import type { KnownSession } from './sessionExposure.js'
+import type { KnownSession } from './sessionAddressing.js'
 import type { QueuedCommand } from '../types/textInputTypes.js'
 import { feature } from 'bun:bundle'
 
@@ -39,7 +38,7 @@ const RECONNECT_MAX_MS = 60_000
 
 /**
  * 网关 HTTP 基地址：FLOIRA_GATEWAY env 优先；缺失（wt 直并入旧 WT 窗口时 env 不达子进程）
- * 读盘 .claude/gateway-port（网关启动写）；再缺失回退默认 8124。
+ * 读盘 .claude/gateway/port（网关启动写）；再缺失回退默认 8124。
  * 2026-09-15 导出（gatewayBaseUrl）：会话目录查询（fetchSessionDirectory）共用本解析，
  * 不再复制一份地址规则（env → 落盘端口 → 8124 的回退序是 wt spawn 会话能连上网关的关键）。
  */
@@ -359,13 +358,17 @@ function openSocket(token: string): void {
         return
       }
       // 2026-08-22 模型/思考等级控制消息：网关 POST /gateway/model 后按会话路由给在线 CLI，
-      // 走 controlOverrideHandle → REPL 侧 setAppState（与官方 useReplBridge.onSetModel 同语义）。
-      // 2026-09-10 会话级供应商绑定：网关随 model 下发 provider（该模型归属供应商）→
-      // 本进程绑定其 baseUrl/key（进程内，见 credentials/pool.ts）。provider 缺失/null 时清除
-      // 绑定回落启动快照。跨供应商切换从此只影响本会话，不再借道全局凭据池。
+      // 走 controlOverrideHandle → REPL 侧处理器（与官方 useReplBridge.onSetModel 同语义）。
+      // 2026-09-10 会话级供应商绑定：网关随 model 下发 provider（该模型归属供应商），
+      // 跨供应商切换只影响本会话，不借道全局凭据池。
+      // 2026-09-18 切换同拍化：provider 不再立即绑定——随控制消息传给 REPL 侧挂起，
+      // 回合边界（getToolUseContext）与模型名快照成对生效，消除「新端点+旧模型名」错配窗口。
       if (msg.type === 'model') {
-        setSessionProviderOverride(typeof msg.provider === 'string' ? msg.provider : null)
-        invokeControlOverride(msg.type, msg.value)
+        invokeControlOverride(
+          msg.type,
+          msg.value,
+          typeof msg.provider === 'string' ? msg.provider : null,
+        )
         return
       }
       if (msg.type === 'effort') {
@@ -679,7 +682,7 @@ const SESSION_MESSAGE_TIMEOUT_MS = 20_000
  * 会话间协作（2026-09-15）：把一条消息投给另一个会话（session_send 工具的出口）。
  *
  * 网关只做「按已解析 sid 路由」（在线直投 / spawn 在途暂存 / 离线冷启补投，与 web 发送同三形态），
- * 会话名 → sid 的解析在工具侧完成（见 sessionExposure.ts）——网关不引入第二份标题索引。
+ * 会话名 → sid 的解析在工具侧完成（见 sessionAddressing.ts）——网关不引入第二份标题索引。
  * 回执语义 = 「网关已接手投递」而非「目标已消费」：离线目标冷启是异步的，网关无法同步等到
  * 目标进程 ack，故不在协议层伪装成端到端确认。
  */
@@ -721,7 +724,7 @@ export function sendSessionMessage(
  *
  * sid 取转录文件名主干（与网关 /gateway/wsession 的 hash 同源，即消息路由用的那个键）；标题使用
  * 网关已归一的值。网关未起 / 无 token / 形状异常 → 抛错（调用方回报模型，不猜不兜底）。
- * 放在本模块是因为它是一次网关 HTTP 调用（与 health / model-report 同类），而 sessionExposure
+ * 放在本模块是因为它是一次网关 HTTP 调用（与 health / model-report 同类），而 sessionAddressing
  * 保持纯函数模块（不 import 本文件，`feature()` 宏在 bun 直跑下不可用 → 纯模块才可被 probe 导入）。
  */
 export async function fetchSessionDirectory(): Promise<KnownSession[]> {

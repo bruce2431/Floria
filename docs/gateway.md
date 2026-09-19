@@ -13,19 +13,19 @@
 
 ## 2. 认证：token 出 URL + cookie 票证 + 设备配对
 
-**机制**：首链仍带 `?token=<hex>`（CLI `/server on` 打印的 localUrl/lanUrl 就是首链）→ 网关 `handleRequest` 开头 query token 命中即种 `floria_auth` HttpOnly cookie（Path=/、SameSite=Lax、1 年；票证 `randomBytes(24)` 落盘便携根 `.claude/gateway-tickets` JSON 数组，`gatewayToken.ts` 存取，上限 64 个）；此后 `/gateway/*`、`/preview/*` 与 WS 升级校验改「**query token 或 cookie 票证二选一**」——浏览器 URL 不再携带 token（`hideGate()` 清 query）。
+**机制**：首链仍带 `?token=<hex>`（CLI `/server on` 打印的 localUrl/lanUrl 就是首链）→ 网关 `handleRequest` 开头 query token 命中即种 `floria_auth` HttpOnly cookie（Path=/、SameSite=Lax、1 年；票证 `randomBytes(24)` 落盘便携根 `.claude/gateway/tickets` JSON 数组，`gatewayToken.ts` 存取，上限 64 个）；此后 `/gateway/*`、`/preview/*` 与 WS 升级校验改「**query token 或 cookie 票证二选一**」——浏览器 URL 不再携带 token（`hideGate()` 清 query）。
 
-**设备认证配对**：浏览器侧无 token 授权链，授权只走手动配对——①设备未授权 → 前端门显示**设备请求码**（8 位 hex，localStorage `floria-device-code` 持久、同设备恒定）；②PC `/server auth add <请求码>` 手动加入授权名单（票证=码本身，`.claude/gateway-tickets` {id,created} 数组落盘，上限 64）；③设备端门态每 2.5s 轮询 `GET /gateway/activate?code=`（公开端点，防枚举靠码熵；命中名单 → 种 HttpOnly floria_auth cookie 1 年）→ 自动 connect 进入门过渡动画。`/server auth` 列出设备、`auth off <n>` 撤销。**无任何 token 授权通道**：query token 仅剩 CLI 内部 gateway-token（上报/WS/关闭，不种 cookie）；/server on/status 不打印 token。
+**设备认证配对**：浏览器侧无 token 授权链，授权只走手动配对——①设备未授权 → 前端门显示**设备请求码**（8 位 hex，localStorage `floria-device-code` 持久、同设备恒定）；②PC `/server auth add <请求码>` 手动加入授权名单（票证=码本身，`.claude/gateway/tickets` {id,created} 数组落盘，上限 64）；③设备端门态每 2.5s 轮询 `GET /gateway/activate?code=`（公开端点，防枚举靠码熵；命中名单 → 种 HttpOnly floria_auth cookie 1 年）→ 自动 connect 进入门过渡动画。`/server auth` 列出设备、`auth off <n>` 撤销。**无任何 token 授权通道**：query token 仅剩 CLI 内部 gateway-token（上报/WS/关闭，不种 cookie）；/server on/status 不打印 token。
 
 **设备匹配语义**：token 是钥匙、cookie 是每台设备自己记住的钥匙——token 轮换（`/server off` 清盘后再启换新）不影响已授权设备；`/server off` 清盘时同步清票证与 custom token（全设备掉线）。
 
-**gateway-token 稳定密钥**：token 改「读盘-or-创建」——盘上有值即复用（`startLocalGateway` 与 `/server on` spawn 链同序：显式覆盖 > 读盘 > 随机），仅 `/server off` 清盘后才轮换；落盘时机在 **listen 成功回调**，不变量「盘上 token/port 恒描述现网关，只有端口持有者可发布」（否则多进程抢起网关时，bind 失败者会把败者 token 覆盖盘上胜者 token → 全部 CLI `/clients` 注册 401：侧栏无状态 / web 误 spawn resume / 消息悬空 / session-delta 断流会话退化折叠）。CLI 侧 `gatewayClient` 每轮探测重读盘上 token（3s TTL），盘/内存对齐后 ≤10s 自动重连，无需重启进程。
+**gateway/token 稳定密钥**：token 改「读盘-or-创建」——盘上有值即复用（`startLocalGateway` 与 `/server on` spawn 链同序：显式覆盖 > 读盘 > 随机），仅 `/server off` 清盘后才轮换；落盘时机在 **listen 成功回调**，不变量「盘上 token/port 恒描述现网关，只有端口持有者可发布」（否则多进程抢起网关时，bind 失败者会把败者 token 覆盖盘上胜者 token → 全部 CLI `/clients` 注册 401：侧栏无状态 / web 误 spawn resume / 消息悬空 / session-delta 断流会话退化折叠）。CLI 侧 `gatewayClient` 每轮探测重读盘上 token（3s TTL），盘/内存对齐后 ≤10s 自动重连，无需重启进程。
 
 **前端门控**：`needToken()` 判据 =「`GATEWAY && !gateVerified`」（gateVerified 声明提前）；`initGateway` 统一先 `connect()`（cookie 有效 WS 直过 → `hideGate` 直进空态，无效 onclose 回 token 门）；门内输入 token 先 HTTP 预验证（种 cookie）再 connect；`apiUrl` 仍附加 gToken（空串附加无害，网关看 cookie）。
 
 **访问地址（mDNS 自广播 `floria.local`，全设备免配置）**：同 WiFi/热点设备一律 `http://floria.local:<port>/`，换网络/换 IP 免配置免重授权（授权按设备码恒定）；**仅支持 Apple/Windows（`/server` 输出唯一地址不列 IP 直连；Android 浏览器 `.local` 解析差不在支持面）**。本机 hosts `127.0.0.1 floria.local` → 本机走 hosts、远程走 mDNS（floria.com 是公网真实注册域名，勿用作别名）。
 
-**设备自报类型 hint**：iPadOS Safari 桌面模式 UA 与 macOS 全同（无 iPad 字样），网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（`navigator.platform==='MacIntel' && maxTouchPoints>1`，app.js `deviceHint()`），随 activate 轮询与 WS 连接 query `device=` 上报，网关记 `gateway-devices.hint`（`touchGatewayTicket` 第 4 参），`/server auth` 展示 hint 优先于 UA 判定（存量票证 WS 重连即补齐）。
+**设备自报类型 hint**：iPadOS Safari 桌面模式 UA 与 macOS 全同（无 iPad 字样），网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（`navigator.platform==='MacIntel' && maxTouchPoints>1`，app.js `deviceHint()`），随 activate 轮询与 WS 连接 query `device=` 上报，网关记 `.claude/gateway/devices` 的 `hint`（`touchGatewayTicket` 第 4 参），`/server auth` 展示 hint 优先于 UA 判定（存量票证 WS 重连即补齐）。
 
 ## 3. 局网零配置 mDNS 应答器
 
@@ -91,14 +91,14 @@
 
 - `findProjects` 读 `<项目>/.claude/preview/preview.json`，有 `backend` → 项目附 `hasBackend` + `backendCfg`。
 - `GET /gateway/backend?label=`（受 token 保护）：ensureBackend（未起则 spawn）→ `{url, port, pid}`；无 backend → 404。
-- spawn：`{port}` 替换 → cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘 `便携根/.claude/backend-<safeLabel>.log`）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
+- spawn：`{port}` 替换 → cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘 **该项目自己的** `<项目>/.claude/preview/backend.log`，5MB 截断轮转）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
 - **就绪探测用原生 net socket**（`backendReady`）：编译产物 node:http 的 request 对 aiohttp/Python 后端会挂起，net 直连写 HTTP 头读响应状态（200/404 即就绪）。
 - 生命周期：`stopLocalGateway` 遍历 killAllBackends（child.kill + taskkill /F /T /PID 兜底）+ 停回收 timer；空闲回收每 60s（仅 `--gateway` 模式）。
 - 前端三级加载：① `/gateway/backend` 命中 → iframe 直连 + 60s 心跳防误回收；② 静态 preview；③ 默认项目主页兜底。
 
 ### 6.3 后端进程生命周期解耦
 
-**后端进程不随网关关停**：`/server off/restart`、空闲自动退出、网关被硬杀均不 kill 后端——注册表落盘 `.claude/backend-registry.json`（label→{pid,port,startedAt}），网关重启后 `ensureBackend` 按注册表**收养**存活进程（isPidAlive + readyPath 就绪即接管，child=null 走 pid 判活/killTree）；后端仅由空闲回收（idleMinutes，缺省 30min，预览页 60s 心跳保活）与用户手动关闭管理。`/gateway/backend` 响应带 `alreadyRunning`（进程已在册存活）→ 前端不渲染「正在启动」覆盖层，iframe 直挂秒开，仅冷启动显示。**不变量**：网关 stop 一律 killAllBackends 会造成每次重启后端冷启动、网关硬杀来不及 kill 造成后端孤儿占端口（下次 spawn 端口漂移）——两者都由本解耦消除。
+**后端进程不随网关关停**：`/server off/restart`、空闲自动退出、网关被硬杀均不 kill 后端——注册表落盘 `.claude/gateway/backends.json`（label→{pid,port,startedAt}），网关重启后 `ensureBackend` 按注册表**收养**存活进程（isPidAlive + readyPath 就绪即接管，child=null 走 pid 判活/killTree）；后端仅由空闲回收（idleMinutes，缺省 30min，预览页 60s 心跳保活）与用户手动关闭管理。`/gateway/backend` 响应带 `alreadyRunning`（进程已在册存活）→ 前端不渲染「正在启动」覆盖层，iframe 直挂秒开，仅冷启动显示。**不变量**：网关 stop 一律 killAllBackends 会造成每次重启后端冷启动、网关硬杀来不及 kill 造成后端孤儿占端口（下次 spawn 端口漂移）——两者都由本解耦消除。
 
 ### 6.4 安全
 
@@ -109,7 +109,7 @@
 
 web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 headless 管道），与普通 CLI 同路径、同样可被远程审批。**会话落盘按来源定案**：「笔」新建（无 project）→ 全局根 `@WrokSpace/.claude/projects/`（projectScope:'global'）；「项目 +」新建（有 project）→ 该项目根 `.claude/projects/`；不落 Pj16 项目根。落盘位置与 exe 来源无关（cwd 由 `webSessionProjectRoot` 路由）。
 
-**弹窗行为：启动链脱离默认终端委托（defterm），网关直调 `wt.exe -w last nt`**：spawn 不带任何 `-WindowStyle`（实测 `-WindowStyle Minimized`=WT 拒绝托管→回落独立 conhost 老式黑窗；`-WindowStyle Hidden`=进程启动注册但窗口完全不可见；只有无 flag 才并入 WT，代价=并入时新标签激活 WT 窗口可能抢焦点）；不再信任 defterm（25H2 更新弄坏 defterm 激活链且委托键屡遭系统更新重置），四件配套：①`spawnWebSession` 改 `spawn('wt.exe', ['-w','last','nt','-d',cwd,exe,...args])` 直并最近 WT 窗口（无窗自动开新窗），行为不随 defterm 配置漂移；②CLI 入口自检护栏（cli.tsx main 顶部）——交互式 TTY 且无 `WT_SESSION` 且未自举过（`FLORIA_IN_WT`）且非 bun 源码直跑 → 同样 wt 直并后本进程退出（双击 exe 防 conhost 黑窗；wt 不可用留宿主运行），护栏不变量=每交互进程至多自举一次（WT 正常标签自带 `WT_SESSION`，VSCode 等自带宿主终端不接管）；③真实 CLI pid 改由 cli-hello 上报补填（wt 自身即退拿不到 pid：gatewayClient 握手带 process.pid，网关 spawn 在途经 `cliHelloPids` 暂存、注册成功取走填入 webSessions；WebSessionProc.child 字段删除，stopWebSession 只用 p.pid）；④网关启动端口落盘 `.claude/gateway-port`（gatewayToken.ts 三件套 save/load/clear，TTL 3s）——并入已存在 WT 窗口时新标签继承旧 WT 进程环境，env 传不到 CLI 子进程，`baseUrl()` env 缺失时读盘发现再回退 8124。spawn 失败判定：wt exit 非 0 且未注册即 reject（无中转进程可杀），注册超时 20s。**spawn 链两处（spawnWebSession + cli.tsx main 自举块）不得带 `windowsHide: true`**——SW_HIDE 随 STARTUPINFO 被无窗时新开的 WindowsTerminal.exe 继承=首窗创建即隐藏、父进程即退，二次启动命中已存窗才可见（「启动两次」现象）；wt.exe 是 GUI 子系统，spawn 它不会带出控制台黑窗，无窗可防。
+**弹窗行为：启动链脱离默认终端委托（defterm），网关直调 `wt.exe -w last nt`**：spawn 不带任何 `-WindowStyle`（实测 `-WindowStyle Minimized`=WT 拒绝托管→回落独立 conhost 老式黑窗；`-WindowStyle Hidden`=进程启动注册但窗口完全不可见；只有无 flag 才并入 WT，代价=并入时新标签激活 WT 窗口可能抢焦点）；不再信任 defterm（25H2 更新弄坏 defterm 激活链且委托键屡遭系统更新重置），四件配套：①`spawnWebSession` 改 `spawn('wt.exe', ['-w','last','nt','-d',cwd,exe,...args])` 直并最近 WT 窗口（无窗自动开新窗），行为不随 defterm 配置漂移；②CLI 入口自检护栏（cli.tsx main 顶部）——交互式 TTY 且无 `WT_SESSION` 且未自举过（`FLORIA_IN_WT`）且非 bun 源码直跑 → 同样 wt 直并后本进程退出（双击 exe 防 conhost 黑窗；wt 不可用留宿主运行），护栏不变量=每交互进程至多自举一次（WT 正常标签自带 `WT_SESSION`，VSCode 等自带宿主终端不接管）；③真实 CLI pid 改由 cli-hello 上报补填（wt 自身即退拿不到 pid：gatewayClient 握手带 process.pid，网关 spawn 在途经 `cliHelloPids` 暂存、注册成功取走填入 webSessions；WebSessionProc.child 字段删除，stopWebSession 只用 p.pid）；④网关启动端口落盘 `.claude/gateway/port`（gatewayToken.ts 三件套 save/load/clear，TTL 3s）——并入已存在 WT 窗口时新标签继承旧 WT 进程环境，env 传不到 CLI 子进程，`baseUrl()` env 缺失时读盘发现再回退 8124。spawn 失败判定：wt exit 非 0 且未注册即 reject（无中转进程可杀），注册超时 20s。**spawn 链两处（spawnWebSession + cli.tsx main 自举块）不得带 `windowsHide: true`**——SW_HIDE 随 STARTUPINFO 被无窗时新开的 WindowsTerminal.exe 继承=首窗创建即隐藏、父进程即退，二次启动命中已存窗才可见（「启动两次」现象）；wt.exe 是 GUI 子系统，spawn 它不会带出控制台黑窗，无窗可防。
 
 **发送即 resume（会话打开预览/发送才恢复窗口）**：点开 web 会话不再自动 resume（与 CLI 会话一致仅预览；进程停止时列表状态点由常驻红改透明无点——任何会话仅进程在跑时 busy 绿点、否则 null）；会话进程未在线时**发送消息才恢复**——网关 `handleWsMessage 'send'` 对 `cliClients` 未命中且非启动中的会话走 `resumeAndDeliver`（**web 与 CLI 一视同仁**：`sessionProjectRootOf(sessionId)` 按磁盘 `<项目根>/.claude/projects/<id>.jsonl` 定位项目/全局根 → 复用 `spawnWebSession --resume` 按定位项目选 cwd，注册完成后再经 `cliClients` 注入消息；同一会话 resume 在途复用同一 promise 防双 spawn 双写 jsonl；会话文件不在磁盘 → 拒绝「目标会话未在线」）。
 
@@ -121,7 +121,7 @@ web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 h
 
 **防双进程 + web 会话 exe 一律用网关自身**：`webSessionExe` = `process.execPath`（协议必然匹配；目录扫描旧版 exe 会探测旧端点 404 → 永不注册 → wsession 超时）；`spawnWebSession` resume 前查 `cliRegisterAt`（/clients 注册时间戳 Map，CLI_RECENT_REGISTER_MS=10s）：近期有痕迹 = 活进程断连重连中 → 复用 resolve 不 spawn（否则与重连中的原进程形成同会话双进程：网关对重复注册 `prev.close()` → 每秒互踢乒乓、消息路由 50% miss、审批回调每秒清、双写 jsonl，永不自愈）；`resumeAndDeliver` 注入改 400ms×5s 轮询等重连进程回来再注入。取证日志：重复注册顶替落日志、`spawnWebSession` 全程日志（spawn 开始含 exe/cwd / 注册成功含耗时 / 注册超时）、网关日志逐行时间戳（`stampGatewayConsole` 在 startLocalGateway 劫持 console，仅 --gateway 独立进程）。
 
-**网关关停不杀 web 会话窗口 + pid 注册表收养**：**web 会话与普通 CLI 会话同等权重，网关 off/restart/空闲退出/SIGINT 一律不杀存活窗口**（gatewayClient 自动重连新网关；与 backend 生命周期解耦同构；否则 `/server restart` 会把正在执行 restart 的那个会话自己杀掉，restart 断在半路）。代价是重启后内存 `webSessions` 丢失 → resume 幂等失效，故有**运行 pid 注册表落盘** `.claude/gateway-websessions.json`（`[{sessionId,pid,startedAt}]`，变更即写防 kill -9 留脏；`persistWebSessions` 在 set/各 delete 点调用），网关启动 `adoptWebSessions()` 读表收养 isPidAlive 的条目（无 child 仅凭 pid 判活/killTree，同 backend 收养先例）。**与旧 web-sessions.json 区别**：旧表是「web 创建来源标记」（已由磁盘定位取代，勿复辟）；本表是「运行进程 pid 表」（生命周期管理用，与 backend-registry.json 同构）。`stopWebSession`（taskkill 窗口）仅剩显式关闭单会话端点与超时清理使用，网关关停路径不得调用。
+**网关关停不杀 web 会话窗口 + pid 注册表收养**：**web 会话与普通 CLI 会话同等权重，网关 off/restart/空闲退出/SIGINT 一律不杀存活窗口**（gatewayClient 自动重连新网关；与 backend 生命周期解耦同构；否则 `/server restart` 会把正在执行 restart 的那个会话自己杀掉，restart 断在半路）。代价是重启后内存 `webSessions` 丢失 → resume 幂等失效，故有**运行 pid 注册表落盘** `.claude/gateway/websessions.json`（`[{sessionId,pid,startedAt}]`，变更即写防 kill -9 留脏；`persistWebSessions` 在 set/各 delete 点调用），网关启动 `adoptWebSessions()` 读表收养 isPidAlive 的条目（无 child 仅凭 pid 判活/killTree，同 backend 收养先例）。**与旧 web-sessions.json 区别**：旧表是「web 创建来源标记」（已由磁盘定位取代，勿复辟）；本表是「运行进程 pid 表」（生命周期管理用，与 backends.json 同构）。`stopWebSession`（taskkill 窗口）仅剩显式关闭单会话端点与超时清理使用，网关关停路径不得调用。
 
 **SSE 关停显式 end()**：`stopLocalGateway` 里 WS 被显式 `close()` → 页面自动重连成功；但 HTTP `server.close()` **只停止接受新连接、不断开既有连接**，`sseClients.clear()` 只清引用——浏览器 EventSource 收不到 TCP FIN → `onerror` 永不触发 → 前端永不重连 → 僵尸 ES 收不到 updated/session-delta/stream-text，消息区实时链静默死亡。修复 = 关停时对 `sseClients` 逐个显式 `c.res.end()` 再清集合：客户端收到流结束 → onerror → 3s 后 `initLive` 重连新网关 → hello → `refreshSession` 全量对账，旧页面**不刷新自动恢复**（与 WS 侧显式 close → 自动重连完全对称，不加状态源）。
 

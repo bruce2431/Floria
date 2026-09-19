@@ -95,7 +95,7 @@ These are the user-facing or behavior-changing flags that currently bundle clean
 - `TREE_SITTER_BASH_SHADOW` — Enables the tree-sitter bash shadow rollout path.
 - `UNATTENDED_RETRY` — Enables unattended retry behavior in API retry flows.
 - `PRIVATE_GATEWAY`
-  【内置私有化网关，默认开】注册 `/server` 指令（on/off/status 开关内置网关；`--gateway` 独立进程模式——`/server on` detached spawn 自身 exe，`src/gateway/localGateway.ts`（node:http + ws），CLI 退出不影响网关；web 端 WS `send` 带 `sessionId` → 网关按会话跨进程路由 → CLI `gatewayClient.ts` WS 客户端收消息 → `enqueue` 注入对应 REPL（与打字同路径）；token 落盘 `getPortableRoot()/.claude/gateway-token` 跨进程共享；空闲自动回收——cliClients/sockets/sseClients 三集合全空持续 `GATEWAY_IDLE_MINUTES`（默认 10，env 可调）分钟自动关闭；无 AGENT_CWD；会话列表/读取/SSE 基于便携根）。API 清单、安全加固（token 门）、`/gateway/*` 前缀迁移等全链 → [gateway.md](gateway.md)。纯本地指令，不涉 OAuth/GrowthBook/Anthropic API。
+  【内置私有化网关，默认开】注册 `/server` 指令（on/off/status 开关内置网关；`--gateway` 独立进程模式——`/server on` detached spawn 自身 exe，`src/gateway/localGateway.ts`（node:http + ws），CLI 退出不影响网关；web 端 WS `send` 带 `sessionId` → 网关按会话跨进程路由 → CLI `gatewayClient.ts` WS 客户端收消息 → `enqueue` 注入对应 REPL（与打字同路径）；token 落盘 `getPortableRoot()/.claude/gateway/token` 跨进程共享；空闲自动回收——cliClients/sockets/sseClients 三集合全空持续 `GATEWAY_IDLE_MINUTES`（默认 10，env 可调）分钟自动关闭；无 AGENT_CWD；会话列表/读取/SSE 基于便携根）。API 清单、安全加固（token 门）、`/gateway/*` 前缀迁移等全链 → [gateway.md](gateway.md)。纯本地指令，不涉 OAuth/GrowthBook/Anthropic API。
 
 ### 2.3 Bundle-Clean Support Flags
 

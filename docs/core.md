@@ -6,7 +6,7 @@
 
 ## 便携配置根（`envUtils.ts`）
 
-`CLAUDE_CONFIG_DIR` → exe 旁 `.claude/`（带 `.claude-portable` 等标记）→ 逐级向上找 `.claude-portable` → 兜底 `~/.claude`。`.claude/.claude-portable` 必须留在 `@WrokSpace` 根（规则见 [standards.md](standards.md) §3）。
+`CLAUDE_CONFIG_DIR` → 逐级向上找 `.claude/.claude-portable`（**显式标记优先于任何内容指纹**——`settings.json`/`skills`/`commands`/`plugins` 项目级 `.claude` 同样合法，仅凭内容无法与配置根区分）→ exe 旁 `.claude/`（带 `.claude-portable` 等标记；仅在向上无标记时兜底）→ 兜底 `~/.claude`。`.claude/.claude-portable` 必须留在 `@WrokSpace` 根（规则见 [standards.md](standards.md) §3）。复验锚点 `probes/probe-portable-root-order.ts`。
 
 **裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机 `CLAUDE_CONFIG_DIR` 恒设，恒不触发。
 

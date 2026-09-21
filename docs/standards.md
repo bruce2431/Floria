@@ -71,11 +71,11 @@
 **配置根解析**（`src/utils/envUtils.ts` `getClaudeConfigHomeDir`，优先级从高到低）：
 
 1. `CLAUDE_CONFIG_DIR` 环境变量
-2. exe 旁边的 `.claude/`（**须带配置根标记**：`.claude-portable`/`.claude.json`/`settings.json`/`plugins`/`skills`/`commands`/`credentials.json`/`history.jsonl` 任一存在才认；**只有 `projects/` 不算** → 项目本地会话目录不会误判）
-3. 从 exe 目录**逐级向上**找 `.claude/.claude-portable` 标记 → 命中用「该 `.claude` 目录」
+2. 从 exe 目录**逐级向上**找 `.claude/.claude-portable` 标记 → 命中用「该 `.claude` 目录」（**显式标记压过下条的内容指纹**：该标记只由配置根写入，而 `settings.json`/`skills`/`commands`/`plugins` 在项目级 `.claude` 中同样合法，仅凭内容无法区分二者）
+3. exe 旁边的 `.claude/`（**须带配置根标记**：`.claude-portable`/`.claude.json`/`settings.json`/`plugins`/`skills`/`commands`/`credentials.json`/`history.jsonl` 任一存在才认；**只有 `projects/` 不算** → 项目本地会话目录不会误判）——仅在向上无便携标记时兜底
 4. 兜底 `~/.claude`
 
-（解析链与裸机初始化的机制细节 → [core.md](core.md)「便携配置根」。）
+（解析链与裸机初始化的机制细节 → [core.md](core.md)「便携配置根」。复验锚点：`probes/probe-portable-root-order.ts`。）
 
 **硬性约束**：
 - `.claude/.claude-portable` 和 `.claude/` **必须留在 `@WrokSpace` 根目录**。挪进子文件夹后，exe 副本从 `@WrokSpace\<项目>\` 运行向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。

@@ -79,24 +79,29 @@ export const getClaudeConfigHomeDir = memoize(
       return process.env.CLAUDE_CONFIG_DIR.normalize('NFC')
     }
     let exeDir: string | null = null
-    // 2. Portable mode: .claude/ next to the executable
     try {
       const exePath = process.execPath
-      if (exePath) {
-        exeDir = dirname(exePath)
-        const portablePath = join(exeDir, '.claude')
-        if (existsSync(portablePath) && looksLikeConfigHome(portablePath)) {
-          return portablePath.normalize('NFC')
-        }
-      }
+      if (exePath) exeDir = dirname(exePath)
     } catch {
       // process.execPath unavailable, ignore
     }
-    // 3. Portable root marker walk-up: root = parent of `.claude/.claude-portable`;
-    //    the config home is that `.claude` directory itself.
+    // 2. Portable root marker walk-up: root = parent of `.claude/.claude-portable`;
+    //    the config home is that `.claude` directory itself. The marker exists
+    //    precisely to locate the global config home, so it outranks the content
+    //    heuristic below — the latter cannot tell a config home from a project
+    //    `.claude` (both legitimately carry settings.json / skills / commands /
+    //    plugins), whereas the marker is only ever written into a config home.
     if (exeDir) {
       const found = findPortableRoot(exeDir)
       if (found) return join(found, '.claude').normalize('NFC')
+    }
+    // 3. Portable mode: .claude/ next to the executable. Only reached when no
+    //    portable marker exists anywhere up the tree.
+    if (exeDir) {
+      const portablePath = join(exeDir, '.claude')
+      if (existsSync(portablePath) && looksLikeConfigHome(portablePath)) {
+        return portablePath.normalize('NFC')
+      }
     }
     // 4. Default
     return join(homedir(), '.claude').normalize('NFC')

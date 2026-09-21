@@ -15,6 +15,7 @@
  *   F 展示层接线 —— web 投影剥包装 + 来源行；CLI 同源；排队区拆包点
  *   G CLI 接线 + 工具说明 —— 含「撤授权门」源码级钉（防回归）
  *   H 来源行对齐 —— 右对齐（2026-09-15 用户实测定案）
+ *   I 拉起新会话 —— resolveSendMode 真值测（不猜不兜底）+ 工具/网关/说明接线钉（2026-09-20）
  *
  * 用法：bun probe-session-link.ts
  */
@@ -26,7 +27,11 @@ import {
   SESSION_MESSAGE_TAG,
   wrapSessionMessage,
 } from '../src/utils/sessionMessage.ts'
-import { resolveSessionTarget, type KnownSession } from '../src/utils/sessionAddressing.ts'
+import {
+  resolveSendMode,
+  resolveSessionTarget,
+  type KnownSession,
+} from '../src/utils/sessionAddressing.ts'
 
 let pass = 0
 let fail = 0
@@ -182,6 +187,76 @@ check(
 )
 check('H2 web 来源行右对齐（.msg.user .who 靠气泡右侧）', /\.msg\.user \.who \{ align-self: flex-end; \}/.test(styles))
 check('H3 web 无左对齐残留', !/\.msg\.user \.who \{ align-self: flex-start; \}/.test(styles))
+
+// ── I 拉起新会话形态（2026-09-20）──────────────────────────────────────────────
+// 模式判定是纯函数（sessionAddressing.resolveSendMode）：真值测，不靠源码钉。
+// 不变量 = 「不猜不兜底」——不把 to 空当新建、不把缺 project 回落全局根、不在无 new_session 时吞掉 project。
+eq('I1 new_session + project → new', resolveSendMode({ new_session: true, project: 'Pj11' }), {
+  kind: 'new',
+  project: 'Pj11',
+})
+eq('I1 project 两端空白 trim', resolveSendMode({ new_session: true, project: '  Pj11  ' }), {
+  kind: 'new',
+  project: 'Pj11',
+})
+check(
+  'I2 new_session 缺 project 拒绝且点明必填',
+  resolveSendMode({ new_session: true }).kind === 'invalid' &&
+    (resolveSendMode({ new_session: true }) as { error: string }).error.includes('必须指定 project'),
+)
+check(
+  'I3 new_session 与 to 互斥（不静默择一）',
+  resolveSendMode({ new_session: true, to: '甲', project: 'Pj11' }).kind === 'invalid',
+)
+check(
+  'I4 无 new_session 却给 project → 拒绝（不静默忽略）',
+  resolveSendMode({ to: '甲', project: 'Pj11' }).kind === 'invalid',
+)
+check(
+  'I5 无 new_session 且 to 空 → 拒绝（不把空 to 当新建）',
+  resolveSendMode({}).kind === 'invalid' && resolveSendMode({ to: '   ' }).kind === 'invalid',
+)
+eq('I6 既有形态不受影响', resolveSendMode({ to: '甲' }), { kind: 'existing', to: '甲' })
+eq('I6 new_session:false 等同未给', resolveSendMode({ to: '甲', new_session: false }), {
+  kind: 'existing',
+  to: '甲',
+})
+
+// 接线钉（工具/网关文件含 bun:bundle feature 宏，bun 直跑不可 import → 同 G 组手法读源码文本）
+check(
+  'I7 工具 schema 三字段齐全且回执走新链路',
+  sendTool.includes('new_session') &&
+    sendTool.includes('project: z') &&
+    sendTool.includes('createSessionAndSend') &&
+    sendTool.includes('resolveSendMode'),
+)
+check(
+  'I7 工具说明含新建小节与 sid 回执语义（失败=没发出去）',
+  sendPrompt.includes('## 拉起一个新会话') &&
+    sendPrompt.includes('失败就是没发出去') &&
+    sendPrompt.includes('拉起的会话'),
+)
+const uiSrc = readFileSync(fileURLToPath(new URL('../src/tools/SessionSendTool/UI.tsx', import.meta.url)), 'utf8')
+check('I8 工具行区分新建形态', uiSrc.includes('＋ 新会话'))
+check(
+  'I9 CLI 出口发 session-create 帧且超时 > 网关注册超时 20s',
+  gwc.includes("type: 'session-create'") &&
+    /SESSION_CREATE_TIMEOUT_MS = 25_000/.test(gwc) &&
+    gwc.includes('sid: msg.sessionId'),
+)
+const gatewaySrc = readFileSync(fileURLToPath(new URL('../src/gateway/localGateway.ts', import.meta.url)), 'utf8')
+check(
+  'I10 网关先 spawn 再投递（复用既有 spawnWebSession，不另造 spawn 链）',
+  gatewaySrc.includes("if (m.type === 'session-create')") &&
+    gatewaySrc.includes('spawnWebSession(undefined, project, newSid)'),
+)
+check(
+  'I10 新会话命名走 applySessionTitle（落盘+内存成对，rename handler 同一条链）',
+  gatewaySrc.includes("拉起的会话") &&
+    /async function applySessionTitle/.test(gatewaySrc) &&
+    (gatewaySrc.match(/applySessionTitle\(/g) ?? []).length >= 2,
+)
+check('I10 创建失败如实回执（不乐观承诺）', gatewaySrc.includes("'创建会话失败：' + (e?.message ?? String(e))"))
 
 console.log(`\n${pass} 过 / ${fail} 败`)
 if (failures.length) {

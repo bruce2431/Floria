@@ -10,6 +10,11 @@
  *   ② 解析在本进程做（复用网关既有 GET /gateway/sessions），网关只收已解析的 sid 做路由
  *      ——网关不引入第二份会话标题索引。
  *   ③ 投递：gatewayClient.sendSessionMessage → 网关按 sid 三形态路由（在线直投/暂存补投/冷启拉起）。
+ *   ④ 2026-09-20 新增「拉起新会话」形态（new_session + project，project 必填）：判定与 to 路径同源
+ *      （sessionAddressing.resolveSendMode 是 existing/new/invalid 的单一出口），投递走
+ *      gatewayClient.createSessionAndSend —— 网关先 spawn 一个全新会话、**等 /clients 注册完成**
+ *      再投递首条消息，回执携带新 sid（后续可按 sid 寻址）。project label 由本侧查目录前置校验
+ *      （网关对未知 label 会回退全局根，那是 web 建会话链的语义，工具不借那条路猜项目）。
  *
  * **为什么 checkPermissions 与 call 各解析一次**：checkPermissions 是权限门（可能被
  * bypassPermissions 等路径跳过），call 是执行点——跨会话写入是不可撤回的对外动作，
@@ -23,9 +28,15 @@ import { z } from 'zod/v4'
 import { getSessionId } from '../../bootstrap/state.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
 import { errorMessage } from '../../utils/errors.js'
-import { fetchSessionDirectory, sendSessionMessage } from '../../utils/gatewayClient.js'
+import {
+  createSessionAndSend,
+  fetchDirectorySnapshot,
+  fetchSessionDirectory,
+  sendSessionMessage,
+} from '../../utils/gatewayClient.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import {
+  resolveSendMode,
   resolveSessionTarget,
   type ResolvedSessionTarget,
 } from '../../utils/sessionAddressing.js'
@@ -51,9 +62,44 @@ async function resolveAddressing(
   }
 }
 
+/**
+ * 新建会话寻址现场（2026-09-20）：project 必须在目录里真实存在且 scope==='project'——
+ * 网关对未知 label 的既有语义是回退全局根（web 建会话链的行为），工具不能借那条路「猜」出
+ * 一个项目；找不到就带可选列表拒绝（不猜不兜底）。self 与 project 取自**同一份目录快照**，
+ * 两次请求会拿到两份可能漂移的状态。新会话标题由网关侧统一派生（见 localGateway session-create）。
+ */
+async function resolveNewSession(
+  project: string,
+): Promise<{ project: string; self: ResolvedSessionTarget }> {
+  const snap = await fetchDirectorySnapshot()
+  if (!snap.projects.includes(project)) {
+    const shown = snap.projects.slice(0, 12).join('、')
+    const more = snap.projects.length > 12 ? ` 等 ${snap.projects.length} 个` : ''
+    throw new Error(`项目「${project}」不能作为新会话落点（可选：${shown || '目录里没有项目'}${more}）`)
+  }
+  const selfSid = getSessionId()
+  return {
+    project,
+    self: { sid: selfSid, title: snap.sessions.find(s => s.sid === selfSid)?.title ?? '未命名会话' },
+  }
+}
+
 const inputSchema = lazySchema(() =>
   z.strictObject({
-    to: z.string().describe('Target session: its title or sid (gateway session directory).'),
+    to: z
+      .string()
+      .optional()
+      .describe('Target session: its title or sid (gateway session directory). 与 new_session 互斥。'),
+    new_session: z
+      .boolean()
+      .optional()
+      .describe('true = 拉起一个全新会话，并把 text 作为它的首条消息（须同时给 project，且不要给 to）'),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        '新会话落在哪个项目：label 取 /gateway/sessions 的 groups 中 scope=project 的项（仅 new_session: true 时有效，必填）',
+      ),
     text: z
       .string()
       .describe('Message body. Self-contained — the receiving session cannot see your context.'),
@@ -117,8 +163,10 @@ export const SessionSendTool = buildTool({
     return getSessionSendPrompt()
   },
   async validateInput(input) {
-    if (input.to.trim().length === 0) {
-      return { result: false, message: 'to must not be empty', errorCode: 9 }
+    // 形状判定单一出口（resolveSendMode）：existing / new / invalid
+    const mode = resolveSendMode(input)
+    if (mode.kind === 'invalid') {
+      return { result: false, message: mode.error, errorCode: 9 }
     }
     if (input.text.trim().length === 0) {
       return { result: false, message: 'text must not be empty', errorCode: 9 }
@@ -133,30 +181,53 @@ export const SessionSendTool = buildTool({
     return { result: true }
   },
   async checkPermissions(input) {
+    const mode = resolveSendMode(input)
+    if (mode.kind === 'invalid') return deny(mode.error)
     try {
-      await resolveAddressing(input.to)
+      if (mode.kind === 'existing') await resolveAddressing(mode.to)
+      else await resolveNewSession(mode.project)
     } catch (e) {
       return deny(errorMessage(e))
     }
     return { behavior: 'allow', updatedInput: input }
   },
   async call(input) {
-    let target: ResolvedSessionTarget
-    let self: ResolvedSessionTarget
-    try {
-      const a = await resolveAddressing(input.to)
-      target = a.target
-      self = a.self
-    } catch (e) {
-      return { data: { delivered: false, to: input.to, message: `投递失败：${errorMessage(e)}` } }
+    const mode = resolveSendMode(input)
+    if (mode.kind === 'invalid') {
+      return { data: { delivered: false, to: '', message: `投递失败：${mode.error}` } }
     }
-    const r = await sendSessionMessage(target.sid, input.text, self)
-    return {
-      data: {
-        delivered: r.ok,
-        to: target.title,
-        message: r.ok ? `已投递给会话「${target.title}」` : `投递失败：${r.error}`,
-      },
+    try {
+      if (mode.kind === 'existing') {
+        const { target, self } = await resolveAddressing(mode.to)
+        const r = await sendSessionMessage(target.sid, input.text, self)
+        return {
+          data: {
+            delivered: r.ok,
+            to: target.title,
+            message: r.ok ? `已投递给会话「${target.title}」` : `投递失败：${r.error}`,
+          },
+        }
+      }
+      const { project, self } = await resolveNewSession(mode.project)
+      const r = await createSessionAndSend(project, input.text, self)
+      return {
+        data: {
+          // to 对新会话形态 = 新会话 sid（后续寻址凭据）；失败时回落项目 label 便于定位
+          delivered: r.ok,
+          to: r.ok && r.sid ? r.sid : project,
+          message: r.ok
+            ? `已创建会话（项目：${project}）sid=${r.sid} 并投递首条消息`
+            : `投递失败：${r.error}`,
+        },
+      }
+    } catch (e) {
+      return {
+        data: {
+          delivered: false,
+          to: input.to ?? input.project ?? '',
+          message: `投递失败：${errorMessage(e)}`,
+        },
+      }
     }
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {

@@ -2061,14 +2061,13 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         sendJson(res, 404, { error: 'session not found' })
         return
       }
-      await saveCustomTitle(uuid as UUID, title, p)
-      await saveAgentName(uuid as UUID, title, p)
       // 2026-08-25 web 重命名 → CLI 实时同步：目标会话若有 /clients 注册的在线 CLI 进程
       //（web 独立会话窗口 / 终端 CLI），按会话精确路由 rename 事件，CLI 侧更新内存标题缓存
       // + 输入栏徽标（standaloneAgentContext），无需重启即可看到新名字；未命中静默跳过。
       // B2（2026-08-26）route 未命中诊断：补 rename 命中/未命中轨迹到 /gateway/diagnostics，
       // 区分「目标在线已同步缓存」（hit）与「未命中——仅写盘，在线 CLI 缓存未更新，退出可能回退」（miss）。
-      const routed = routeToClient(uuid, { type: 'rename', sessionId: uuid, title })
+      // 2026-09-20 落盘+路由成对逻辑抽为 applySessionTitle（session-create 命名共用同一条链）。
+      const routed = await applySessionTitle(uuid, title, p)
       approvalTrailPush('rename-routed', uuid, undefined, routed ? 'hit' : 'miss')
       scheduleSseFlush(root) // 立即触发列表刷新，让新标题落进前端列表
       sendJson(res, 200, { ok: true, title })
@@ -2627,6 +2626,18 @@ function approvalTrailSnapshot(): unknown[] {
 // 注册完成后再把消息注入 REPL（cliClients 精确路由，与本地打字同路径）。会话文件不在磁盘 → 拒绝。
 // 同一会话 resume 在途（spawn 最长 20s）→ 复用同一 promise，多消息串行投递，杜绝双 spawn 双写 jsonl。
 const resumingSessions = new Map<string, Promise<void>>()
+
+/**
+ * 会话标题落盘 + 在线 CLI 内存同步（2026-09-20 抽自 /gateway/session/rename handler，
+ * 供 session-create 新建会话命名共用）。**成对不可拆**：只落盘不路由 → 在线 CLI 内存仍持旧标题，
+ * 退出时 re-append 覆盖回去（rename handler 原注释即此坑）；只路由不落盘 → 列表刷新后标题丢失。
+ * 返回 routeToClient 是否命中在线 CLI（仅诊断轨迹用来区分 hit/miss）。
+ */
+async function applySessionTitle(uuid: string, title: string, path: string): Promise<boolean> {
+  await saveCustomTitle(uuid as UUID, title, path)
+  await saveAgentName(uuid as UUID, title, path)
+  return routeToClient(uuid, { type: 'rename', sessionId: uuid, title })
+}
 
 /**
  * 投递反馈（2026-09-15 抽取）：三形态路由对发起端的回报口径由调用方决定——web 发送 = status
@@ -3725,6 +3736,8 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             /** 2026-09-15 会话间协作：跨会话消息的收发（发送端已解析好的目标 sid + 来源会话标识） */
             toSessionId?: unknown
             from?: unknown
+            /** 2026-09-20 会话间协作·拉起新会话：新会话落在哪个项目的 label（见 session-create 分支） */
+            project?: unknown
           }
           try {
             m = JSON.parse(data.toString())
@@ -3864,6 +3877,72 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
                 resuming: () => {},
                 done: reply,
               })
+            return
+          }
+          // 2026-09-20 会话间协作·拉起新会话（CLI 侧 session_send 的 new_session 形态）。
+          // 与上一支的分工：本帧让网关先 spawn 一个**全新**会话（无 --resume）并**等 /clients
+          // 注册完成**再投递首条消息——回执带新会话 sid（后续可按 sid 寻址），spawn/注册失败
+          // 如实回执原因。不做「先乐观回 sid、注册超时再静默丢消息」那条链（POST /gateway/wsession
+          // 的预分配语义对 web 有效——前端会话态自明；对工具调用则是撒谎）。
+          // 命名：新会话标题 =「<发起会话标题>拉起的会话」，走 applySessionTitle（落盘 + 在线
+          // CLI 内存同步成对），先于投递执行，且失败不阻断投递（只补诊断轨迹，不吞消息）。
+          // project label 是否真实存在由 CLI 工具侧查目录前置校验；本处不校验也不回退——网关
+          // 对未知 label 的既有语义（webSessionProjectRoot 回退全局根）只属 web 建会话链。
+          if (m.type === 'session-create') {
+            const requestId = typeof m.requestId === 'string' ? m.requestId : ''
+            const project = typeof m.project === 'string' ? m.project.trim() : ''
+            const text = typeof m.text === 'string' ? m.text : ''
+            const f = m.from as { sid?: unknown; title?: unknown } | undefined
+            const from: { sid?: string; title?: string } =
+              f && typeof f === 'object' && typeof f.title === 'string' && f.title
+                ? {
+                    title: f.title.slice(0, 200),
+                    ...(typeof f.sid === 'string' && f.sid ? { sid: f.sid.slice(0, 200) } : {}),
+                  }
+                : {}
+            const reply = (ok: boolean, error?: string, newSid?: string): void => {
+              if (!requestId) return
+              try {
+                ws.send(
+                  JSON.stringify({
+                    type: 'session-message-result',
+                    requestId,
+                    ok,
+                    ...(newSid ? { sessionId: newSid } : {}),
+                    ...(error ? { error } : {}),
+                  }),
+                )
+              } catch {
+                /* 断开忽略 */
+              }
+            }
+            if (!project) reply(false, '缺少 project：新建会话必须指定项目')
+            else if (!text.trim()) reply(false, '消息内容为空')
+            else {
+              const newSid = randomUUID()
+              spawnWebSession(undefined, project, newSid)
+                .then(async () => {
+                  const p = join(webSessionProjectRoot(project), '.claude', 'projects', `${newSid}.jsonl`)
+                  try {
+                    const routed = await applySessionTitle(newSid, `${from.title ?? '未命名会话'}拉起的会话`, p)
+                    approvalTrailPush('session-create-named', newSid, undefined, routed ? 'hit' : 'miss')
+                    scheduleSseFlush(root)
+                  } catch (e) {
+                    // 命名失败不阻断投递：消息必须落地，标题问题留在轨迹里可查（不静默）
+                    console.error(`[gateway] session-create: 命名失败 sid=${newSid}`, e)
+                    approvalTrailPush('session-create-rename-fail', newSid, undefined, (e as Error)?.message)
+                  }
+                  deliverToSession(newSid, { type: 'session-message', text, from }, {
+                    staged: () => {},
+                    resuming: () => {},
+                    done: (ok, error) => reply(ok, error, ok ? newSid : undefined),
+                  })
+                })
+                .catch((e: Error) => {
+                  console.error(`[gateway] session-create: 创建失败 sid=${newSid}`, e)
+                  reply(false, '创建会话失败：' + (e?.message ?? String(e)))
+                })
+            }
             return
           }
           if (m.type === 'session-delta') {

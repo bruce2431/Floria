@@ -420,6 +420,7 @@ function openSocket(token: string): void {
         return
       }
       // 2026-09-15 会话间协作：本会话发出消息的投递回执（tool 调用在等这个）
+      // 2026-09-20 同一回执帧兼作 session-create 的回执：sessionId 字段 = 新拉起的会话 sid
       if (msg.type === 'session-message-result' && msg.requestId) {
         const pending = pendingSessionMessages.get(msg.requestId)
         if (pending) {
@@ -428,7 +429,10 @@ function openSocket(token: string): void {
           pending.resolve(
             msg.ok === false
               ? { ok: false, error: typeof msg.error === 'string' ? msg.error : '投递失败' }
-              : { ok: true },
+              : {
+                  ok: true,
+                  ...(typeof msg.sessionId === 'string' && msg.sessionId ? { sid: msg.sessionId } : {}),
+                },
           )
         }
         return
@@ -672,11 +676,14 @@ export function notifyStreamText(text: string): void {
   }
 }
 
-/** 投递结果：ok=true 表示网关已把消息交给目标会话（在线直投 / 已暂存待投 / 已冷启补投）。 */
-export type SessionMessageResult = { ok: true } | { ok: false; error: string }
+/** 投递结果：ok=true 表示网关已把消息交给目标会话（在线直投 / 已暂存待投 / 已冷启补投）。
+ *  2026-09-20 新建会话：sid = 本次拉起的会话 id（仅 session-create 回执携带，供后续按 sid 寻址）。 */
+export type SessionMessageResult = { ok: true; sid?: string } | { ok: false; error: string }
 
 let sessionMessageSeq = 0
 const SESSION_MESSAGE_TIMEOUT_MS = 20_000
+/** 新建会话超时须 > 网关注册超时（20s），让网关的失败回执先到（否则本端先超时，失败原因丢失）。 */
+const SESSION_CREATE_TIMEOUT_MS = 25_000
 
 /**
  * 会话间协作（2026-09-15）：把一条消息投给另一个会话（session_send 工具的出口）。
@@ -720,6 +727,51 @@ export function sendSessionMessage(
 }
 
 /**
+ * 会话间协作（2026-09-20）：拉起一个**全新**会话并把 text 作为其首条消息投递（session_send 的
+ * new_session 形态出口）。
+ *
+ * 与 sendSessionMessage 的差别只在网关侧链路：本帧让网关先 spawnWebSession(undefined, project)
+ * 并**等 /clients 注册完成**再投递，成功回执才带新会话 sid——「已投递」不是乐观承诺（对比
+ * POST /gateway/wsession 的预分配 sid：那条链在注册超时时会清掉暂存，消息静默丢失而调用方
+ * 已收到成功）。故超时取 25s（> 网关注册超时 20s），失败原因由网关回执带回来。
+ *
+ * project 的合法性（label 是否存在于目录）由工具侧查目录前置校验——网关 webSessionProjectRoot
+ * 对未知 label 的既有语义是回退全局根，属 web 建会话的既有行为，本链路不改它也不依赖它。
+ */
+export function createSessionAndSend(
+  project: string,
+  text: string,
+  from: SessionSource,
+): Promise<SessionMessageResult> {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return Promise.resolve({ ok: false, error: '本地网关未连接：无法拉起新会话' })
+  }
+  const requestId = `sc${Date.now().toString(36)}${(sessionMessageSeq++).toString(36)}`
+  return new Promise<SessionMessageResult>(resolve => {
+    const timer = setTimeout(() => {
+      pendingSessionMessages.delete(requestId)
+      resolve({ ok: false, error: `网关 ${SESSION_CREATE_TIMEOUT_MS}ms 内未回执，新会话创建结果未知` })
+    }, SESSION_CREATE_TIMEOUT_MS)
+    pendingSessionMessages.set(requestId, { resolve, timer })
+    try {
+      ws!.send(
+        JSON.stringify({
+          type: 'session-create',
+          requestId,
+          project,
+          text,
+          from: { sid: from.sid, title: from.title },
+        }),
+      )
+    } catch {
+      clearTimeout(timer)
+      pendingSessionMessages.delete(requestId)
+      resolve({ ok: false, error: '发送失败：网关连接已断开' })
+    }
+  })
+}
+
+/**
  * 会话目录（GET /gateway/sessions）→ 扁平 sid/标题表（2026-09-15）。
  *
  * sid 取转录文件名主干（与网关 /gateway/wsession 的 hash 同源，即消息路由用的那个键）；标题使用
@@ -728,23 +780,46 @@ export function sendSessionMessage(
  * 保持纯函数模块（不 import 本文件，`feature()` 宏在 bun 直跑下不可用 → 纯模块才可被 probe 导入）。
  */
 export async function fetchSessionDirectory(): Promise<KnownSession[]> {
+  return (await fetchDirectorySnapshot()).sessions
+}
+
+/**
+ * 目录快照（2026-09-20）：一次 GET 同时取会话表与**可新建会话的项目 label**。
+ * 新建会话（session-create）要用一次快照同时做两件事——校验 project 合法性（groups 里
+ * scope==='project' 的 label）与取本会话自己的标题（来源标注）——两次请求会拿到两份可能
+ * 不同的状态，故合成一个出口；fetchSessionDirectory 保留为薄包装（既有调用方零改动）。
+ */
+export async function fetchDirectorySnapshot(): Promise<{
+  sessions: KnownSession[]
+  projects: string[]
+}> {
   const token = getGatewayToken()
   const url = `${gatewayBaseUrl()}/gateway/sessions${token ? `?token=${encodeURIComponent(token)}` : ''}`
   const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
   if (!res.ok) throw new Error(`网关会话目录查询失败（HTTP ${res.status}）`)
-  const payload = (await res.json()) as { sessions?: unknown }
+  const payload = (await res.json()) as { sessions?: unknown; groups?: unknown }
   if (!Array.isArray(payload.sessions)) throw new Error('网关会话目录响应格式异常')
-  const out: KnownSession[] = []
+  const sessions: KnownSession[] = []
   for (const s of payload.sessions) {
     const file = (s as { file?: unknown } | null)?.file
     if (typeof file !== 'string' || !file.endsWith('.jsonl')) continue
     const title = (s as { title?: unknown }).title
-    out.push({
+    sessions.push({
       sid: file.slice(0, -'.jsonl'.length),
       title: typeof title === 'string' && title ? title : '未命名会话',
     })
   }
-  return out
+  // groups = 网关 findProjects 结果；只有 scope==='project' 的 label 能作为新会话的项目
+  //（全局根那条 label 是 web「笔」的散装语义，新建会话必须落具体项目——工具侧定案）
+  const projects: string[] = []
+  if (Array.isArray(payload.groups)) {
+    for (const g of payload.groups) {
+      const label = (g as { label?: unknown } | null)?.label
+      const scope = (g as { scope?: unknown } | null)?.scope
+      if (typeof label === 'string' && label && scope === 'project') projects.push(label)
+    }
+  }
+  return { sessions, projects }
 }
 
 let queueSubscriptionAttached = false

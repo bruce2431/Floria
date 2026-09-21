@@ -208,14 +208,16 @@ CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients
                                                                                              → 400ms×5s 轮询 tryInject）
 会话 B 的 CLI ◄── 下行 {type:'session-message', text, from} ──► enqueue(wrapSessionMessage(from, text), mode:'prompt',
                                                                  skipSlashCommands:true)  ← 与本地打字同队列同分叉
-回执：{type:'session-message-result', requestId, ok, error?}
+回执：{type:'session-message-result', requestId, ok, error?, sessionId?}   ← sessionId 仅 session-create 成功时携带
 ```
+
+**`session-create` 上行（2026-09-20，`session_send` 的 `new_session` 形态）**：同一回执帧、另一条投递链——网关先 `spawnWebSession(undefined, project, randomUUID())`（复用 §7 的 web 新建会话链，无 `--resume`，落盘 `<项目根>/.claude/projects/<sid>.jsonl`），**注册完成后**才走 `deliverToSession` 投首条消息，并回执 `sessionId=sid`。要点：① 形状校验只两条（缺 `project` / 空文本 → 回执错误），**label 是否存在于目录由 CLI 侧工具前置校验**——网关对未知 label 的既有语义是回退全局根，本支不校验也不依赖；② 命名 = 「<from.title>拉起的会话」，走 `applySessionTitle`（与 `/gateway/session/rename` 同一条「落盘 + `routeToClient` 内存同步」链，**成对不可拆**），先于投递且失败不阻断投递（只补诊断轨迹）；③ 创建/注册失败如实回执原因，**不做乐观回 sid**（对比 `POST /gateway/wsession` 的预分配语义：那对 web 有效，对工具调用是撒谎）；④ CLI 侧超时 25s > 网关注册超时 20s。
 
 **职责分界（定案）**：
 
 | 侧 | 职责 |
 |---|---|
-| CLI（发送方） | 标题/sid → sid 解析（`utils/sessionAddressing.ts` + `GET /gateway/sessions`），**寻址在转录所在的那一侧完成**；无授权门——目录内任何会话可发 |
+| CLI（发送方） | 标题/sid → sid 解析（`utils/sessionAddressing.ts` + `GET /gateway/sessions`），**寻址在转录所在的那一侧完成**；无授权门——目录内任何会话可发。`new_session` 形态另需校验 `project` 在目录 `groups`（`scope==='project'`）中真实存在 |
 | 网关 | **纯 sid 路由**：形状校验（空 `toSid`/空文本/**自发自收** → 回执错误）、三岔投递、回执。**不做标题匹配、无标题索引** |
 
 **`deliverToSession(sessionId, frame, fb)` 是统一三岔口**（发送方与 web `send` 共用同一投递语义）；`DeliveryFeedback` 三态 `staged`/`resuming`/`done`，只有 `done` 回执——前两态由发送侧 20s 超时兜底（`SESSION_MESSAGE_TIMEOUT_MS`）。

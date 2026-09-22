@@ -294,6 +294,27 @@ export type ContextCollapseSnapshotEntry = {
   lastSpawnTokens: number
 }
 
+/**
+ * Marks the start or end of a session process in the transcript.
+ *
+ * `start` is appended when the session file is materialized (new session) or
+ * adopted (resume); `end` is appended by the exit cleanup handler. The pair
+ * lets a later resume know how long this session has been dormant and whether
+ * the previous process exited cleanly — a missing `end` after a `start` means
+ * the process was killed/crashed (no cleanup ran), which is exactly the signal
+ * a resume needs to warn the model that its context may be stale.
+ *
+ * Not a chain participant and not a model message: it is bookkeeping only
+ * (see isChainParticipant / isTranscriptMessage).
+ */
+export type SessionBoundaryEntry = {
+  type: 'session-boundary'
+  sessionId: UUID
+  event: 'start' | 'end'
+  timestamp: string // ISO 8601
+  reason: string // start: 'new' | 'resume'; end: 'graceful'
+}
+
 export type Entry =
   | TranscriptMessage
   | SummaryMessage
@@ -315,6 +336,7 @@ export type Entry =
   | ContentReplacementEntry
   | ContextCollapseCommitEntry
   | ContextCollapseSnapshotEntry
+  | SessionBoundaryEntry
 
 export function sortLogs(logs: LogOption[]): LogOption[] {
   return logs.sort((a, b) => {

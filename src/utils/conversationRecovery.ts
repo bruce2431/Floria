@@ -35,6 +35,7 @@ import {
   normalizeMessages,
 } from './messages.js'
 import { copyPlanForResume } from './plans.js'
+import { buildSessionContinuityNote } from './sessionBoundary.js'
 import { processSessionStartHooks } from './sessionStart.js'
 import {
   buildConversationChain,
@@ -45,6 +46,7 @@ import {
   loadFullLog,
   loadMessageLogs,
   loadTranscriptFile,
+  readLastSessionBoundary,
   removeExtraFields,
 } from './sessionStorage.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
@@ -553,6 +555,11 @@ export async function loadConversationForResume(
       checkResumeConsistency(messages)
     }
 
+    // Capture the source transcript's last activity time before deserialization
+    // rewrites the array — the continuity note needs the pre-resume value.
+    const lastActivityTs = (messages!.at(-1) as SerializedMessage | undefined)
+      ?.timestamp
+
     // Restore skill state from invoked_skills attachments before deserialization.
     // This ensures skills survive multiple compaction cycles after resume.
     restoreSkillStateFromMessages(messages!)
@@ -566,6 +573,22 @@ export async function loadConversationForResume(
 
     // Append hook messages to the conversation
     messages.push(...hookMessages)
+
+    // Inject a session-continuity note so a freshly resumed process knows how
+    // long the session was dormant and whether the previous run ended cleanly.
+    // Placed at the HEAD (not the tail) so detectTurnInterruption cannot read
+    // it as the last user message and mistake the resume for a live turn.
+    const boundaryFile = sourceJsonlFile ?? log?.fullPath
+    const continuityNote = buildSessionContinuityNote({
+      lastActivityTs,
+      prevBoundary: boundaryFile ? readLastSessionBoundary(boundaryFile) : null,
+    })
+    if (continuityNote) {
+      const [noteMessage] = normalizeMessages([
+        createUserMessage({ content: continuityNote, isMeta: true }),
+      ])
+      if (noteMessage) messages.unshift(noteMessage)
+    }
 
     return {
       messages,

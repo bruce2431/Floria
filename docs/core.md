@@ -157,3 +157,22 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 `useToolSearch` 由 `await isToolSearchEnabled(...)` 得出（含上表探测结果），故模型在线上根本看不到 ToolSearchTool、也无从调用；`toolExecution.ts` 那句「先用 ToolSearchTool 装载」的提示只在有延迟工具时才可能触发。系统提示里也不含工具搜索文案（`ToolSearchTool/prompt.ts` 只在工具本体进 `filteredTools` 时才随 schema 上线）。**因此不需要给 `isEnabled()` 补模型感知**——那是与线上过滤重复的第二道守卫。
 
 **验证**：`probes/probe-toolref-autodetect.ts` **16 过 / 0 败**（A 静态名单与非池模型 / B 真端点判定 glm-4.7·glm-4.5-air 拒、glm-5.3-flash 429 fail-open / C 同步入口读同一缓存 / D 幂等 / E 组合门含 haiku 短路与「无可延迟工具零耗时」）。纯 CLI 层，无 web 改动不 bump sw。
+
+## 会话边界标记与 resume 时间跨度注入（`utils/sessionBoundary.ts`）
+
+会话 jsonl 记录消息但**不带进程起止痕迹**，且模型收到的 API 消息里时间戳一律被剥掉（`userMessageToMessageParam`/`assistantMessageToMessageParam` 只发 `{role,content}`）——一个休眠数天的会话 resume 后，模型读旧转录如同仍是当下，会按已过时的前提「惊慌失措」地办事。修法=写盘留痕 + resume 时注入模型可见提示，两件事缺一不可（元数据条目**不会**成为模型消息）。
+
+| 件 | 职责 |
+|---|---|
+| `types/logs.ts` `SessionBoundaryEntry` | 新条目类型 `{type:'session-boundary', sessionId, event:'start'\|'end', timestamp, reason}`，并入 `Entry` 联合；**不参与 parentUuid 链、不是模型消息**（`loadTranscriptFile` 的 else-if 链静默忽略未知类型），不影响 `--resume` 列表的 firstPrompt/messageCount |
+| `utils/sessionBoundary.ts` | 纯逻辑（无 I/O，可探针直跑）：`formatGap` / `parseLastSessionBoundaryFromTail` / `buildSessionBoundaryEntry` / `buildSessionContinuityNote` |
+| `utils/sessionStorage.ts` | 写：`Project.recordSessionBoundary(event,reason)` 走 `appendEntryToFile`（与本就被清理路径调用的 `reAppendSessionMetadata` 同机制）——`materializeSessionFile()` 写 `start/new`、`adoptResumedSessionFile()` 写 `start/resume`、`getProject()` 的 `registerCleanup` 回调（`gracefulShutdown`→`runCleanupFunctions` 触发，覆盖 SIGINT/SIGTERM/SIGHUP/自然退出）写 `end/graceful`；读：导出 `readLastSessionBoundary(filePath)` 取 64KB 尾部 `findLast` 行首 `{"type":"session-boundary"` 行 |
+| `utils/conversationRecovery.ts` | `loadConversationForResume()`（**全部** resume 入口——交互 CLI / print·SDK / web 独立会话——的汇合点）在反序列化后取源 messages 末条 `timestamp` 作 `lastActivityTs`，`buildSessionContinuityNote` 产 `<session-continuity>` 提示，`createUserMessage({isMeta:true})` 后 **`unshift` 到头部**注入 |
+
+**不变量**：
+- **判异常终止靠「无 end」**：崩溃/被杀/断电时 `registerCleanup` 根本不跑 ⇒ 尾部只有 `start` 无 `end` 即天然判据，无需额外簿记；`end` 恒为退出前最后写入 ⇒ 必落在 tail 窗口内，正常/异常判定可靠。`start` 可能被长会话挤出窗口 ⇒ 降级为「无记录」，不影响判据（间隔主要靠末条消息 timestamp 算）。
+- **注入必在头部而非尾部**：`detectTurnInterruption` 遇末条 `isMeta` 直接返回 `none`，若注入尾部会掩盖真实中断检测。
+- **措辞随间隔自适应、总是注入**（`lastActivityTs` 拿不到时不注入——宁缺毋滥）：分钟级「间隔短，上文仍可能有效」/ 小时级「可能已变，先核实」/ 天级「勿假设旧上下文仍成立，先核实现场」。上次无 `end` 记录时显式声明异常终止。
+- **UI 隐藏**：`isMeta:true` 走既有「Continue from where you left off.」同机制，前端不渲染，无需 web 改动、不 bump sw。
+
+**验证**：`probes/probe-session-boundary.ts` **19 过 / 0 败**（tail 解析含空/无边界/start-only/start+end/消息体内嵌同名字面量不误配/尾部混杂；`formatGap` 秒·分·时·天级；note 的 null 短路与四级措辞 + graceful/NOT-recorded/unknown 三分支）。纯 CLI 层。

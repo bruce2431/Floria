@@ -59,6 +59,7 @@ import {
   type LogOption,
   type PersistedWorktreeSession,
   type SerializedMessage,
+  type SessionBoundaryEntry,
   sortLogs,
   type TranscriptMessage,
 } from '../types/logs.js'
@@ -88,6 +89,10 @@ import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
 import { extractTag, isCompactBoundaryMessage } from './messages.js'
+import {
+  buildSessionBoundaryEntry,
+  parseLastSessionBoundaryFromTail,
+} from './sessionBoundary.js'
 import {
   extractJsonStringField,
   extractLastJsonStringField,
@@ -466,6 +471,10 @@ function getProject(): Project {
         // shows the auto-generated firstPrompt instead.
         await project?.flush()
         try {
+          // Record the end boundary before the metadata re-append so a later
+          // resume can tell this process exited cleanly. A kill/crash/reboot
+          // skips this handler entirely — the absent `end` is the signal.
+          project?.recordSessionBoundary('end', 'graceful')
           project?.reAppendSessionMetadata()
         } catch {
           // Best-effort — don't let metadata re-append crash the cleanup
@@ -981,6 +990,21 @@ class Project {
   }
 
   /**
+   * Append a start/end boundary to the session file. Sync via appendEntryToFile
+   * so it works from the exit cleanup path (same mechanism as
+   * reAppendSessionMetadata). No-op before the file is materialized.
+   */
+  recordSessionBoundary(event: 'start' | 'end', reason: string): void {
+    if (this.sessionFile === null) return
+    const sessionId = getSessionId() as UUID
+    if (!sessionId) return
+    appendEntryToFile(
+      this.sessionFile,
+      buildSessionBoundaryEntry(sessionId, event, reason),
+    )
+  }
+
+  /**
    * Create the session file, write cached startup metadata, and flush
    * buffered entries. Called on the first user/assistant message.
    */
@@ -990,6 +1014,8 @@ class Project {
     // and create a metadata-only file despite --no-session-persistence.
     if (this.shouldSkipPersistence()) return
     this.ensureCurrentSessionFile()
+    // Record the start boundary first so it precedes any message in the file.
+    this.recordSessionBoundary('start', 'new')
     // mode/agentSetting are cache-only pre-materialization; write them now.
     this.reAppendSessionMetadata()
     if (this.pendingEntries.length > 0) {
@@ -1541,6 +1567,9 @@ export async function resetSessionFilePointer() {
 export function adoptResumedSessionFile(): void {
   const project = getProject()
   project.sessionFile = getTranscriptPath()
+  // Record the start boundary for this resume, so a later resume can measure
+  // the dormancy gap from it (and from the last message's timestamp).
+  project.recordSessionBoundary('start', 'resume')
   project.reAppendSessionMetadata(true)
 }
 
@@ -2630,6 +2659,22 @@ function readFileTailSync(fullPath: string): string {
   }
 }
 /* eslint-enable custom-rules/no-sync-fs */
+
+/**
+ * Read the most recent session-boundary entry from a transcript's tail.
+ *
+ * Used on resume to learn when the previous process last ran and whether it
+ * exited cleanly. The `end` boundary is the last thing the exit cleanup
+ * writes, so it is reliably inside the tail window even for huge sessions;
+ * a `start` with no following `end` means the process was killed/crashed.
+ * Returns null when the file has no boundary (older transcripts) or on any
+ * read error.
+ */
+export function readLastSessionBoundary(
+  filePath: string,
+): SessionBoundaryEntry | null {
+  return parseLastSessionBoundaryFromTail(readFileTailSync(filePath))
+}
 
 export async function saveCustomTitle(
   sessionId: UUID,

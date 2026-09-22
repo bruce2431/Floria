@@ -1,9 +1,12 @@
 import { feature } from 'bun:bundle';
+import pkg from '../../package.json';
 
-// Define MACRO global for development (normally injected by bun build --define)
+// Define MACRO global for development (normally injected by bun build --define).
+// VERSION 只在未注入时兜底（`bun run dev` 直跑源码），故取 package.json 作唯一真源——
+// 构建产物走 build.ts 注入的 MACRO.VERSION（= `<base>+<build metadata>`，见 scripts/build.ts getDevVersion）。
 if (typeof MACRO === 'undefined') {
   (globalThis as any).MACRO = {
-    VERSION: '2.1.87-dev',
+    VERSION: pkg.version,
     BUILD_TIME: new Date().toISOString(),
     PACKAGE_URL: 'claude-code-source-snapshot',
     FEEDBACK_CHANNEL: 'github',

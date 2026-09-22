@@ -61,4 +61,4 @@
 ## 版本控制（git）
 
 - 本目录即仓库根，远程 `bruce2431/Floria`；`node_modules/`、`.codegraph/`、`dist/`、`temp/`、`*.exe`、`.env*` 由 `.gitignore` 排除。
-- **GitHub Release 发布**：版本号 = exe 内嵌的 dev 版本串（构建自动生成，格式 `2.1.<x>-dev.<日期>.t<UTC时分秒>.sha<HEAD 8 位>`）；流程 = commit+push → 同名 tag → Release（notes 按神经元 LOG 条目主题分组）→ 附对应 exe 为 asset。
+- **GitHub Release 发布**：tag 与版本串格式 = `v<X.Y.Z>+<YYYYMMDD>.t<UTC时分秒>.sha<HEAD 8 位>`。构建元数据必须挂 `+` 不挂 `-`——`-` 是 SemVer 的 pre-release 段（语义「该版本的预发布」，优先级还低于该版本本身），会把已发布正式版标成自相矛盾的预发布；`+` 是 build metadata，不参与优先级比较。`X.Y.Z` 取 `package.json` 的 `version`，dev 构建版本串 = `<version>+<构建元数据>`（`scripts/build.ts` `getDevVersion`）。流程 = commit+push → 建同名 tag → Release（notes 按神经元 LOG 条目主题分组）→ 附对应 exe 为 asset。

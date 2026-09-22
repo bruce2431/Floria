@@ -61,12 +61,17 @@ function runCommand(cmd: string[]): string | null {
   return new TextDecoder().decode(proc.stdout).trim() || null
 }
 
+// dev 版本串 = <base>+<构建元数据>。构建元数据必须挂在 `+` 而非 `-`：
+// `-` 在 SemVer 里引出 pre-release 段（语义「某版本的预发布版」，且优先级低于该版本本身），
+// 把已发布产物标成比 base 更早的预发布属于自相矛盾；`+` 引出 build metadata，
+// 不参与优先级比较，语义正是「同版本、不同构建」——dev 与正式版的区分另由产物名
+// 的 `cli-dev-` 前缀承载（见下方 outfile 推导）。
 function getDevVersion(baseVersion: string): string {
   const timestamp = new Date().toISOString()
   const date = timestamp.slice(0, 10).replaceAll('-', '')
   const time = timestamp.slice(11, 19).replaceAll(':', '')
   const sha = runCommand(['git', 'rev-parse', '--short=8', 'HEAD']) ?? 'unknown'
-  return `${baseVersion}-dev.${date}.t${time}.sha${sha}`
+  return `${baseVersion}+${date}.t${time}.sha${sha}`
 }
 
 function getVersionChangelog(): string {

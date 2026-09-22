@@ -1234,8 +1234,10 @@ export function REPL({
     registerLeaderToolUseConfirmQueue(setToolUseConfirmQueue);
     return () => unregisterLeaderToolUseConfirmQueue();
   }, [setToolUseConfirmQueue]);
+  // 层次归位（2026-09-22，B 案）：state = 渲染投影（经 cap），ref = 全量源（与父源语义一致，
+  // 模型上下文/工具上下文/后台会话分叉都读它）。此前 ref 也存 cap 产物 → 长会话上下文被静默截断。
   const [messages, rawSetMessages] = useState<MessageType[]>(() => capRenderedMessages(initialMessages ?? []));
-  const messagesRef = useRef(messages);
+  const messagesRef = useRef<MessageType[]>(initialMessages ?? []);
   // Stores the willowMode variant that was shown (or false if no hint shown).
   // Captured at hint_shown time so hint_converted telemetry reports the same
   // variant — the GrowthBook value shouldn't change mid-session, but reading
@@ -1251,46 +1253,43 @@ export function REPL({
   // that queue functional updaters then synchronously read the ref
   // (e.g. handleSpeculationAccept → onQuery) see stale data.
   const setMessages = useCallback((action: React.SetStateAction<MessageType[]>) => {
-    const prev = messagesRef.current;
     const next = typeof action === 'function' ? action(messagesRef.current) : action;
-    // P1 cap 后物理长度不再单调增长（追加→砍头→长度不变），「长度=逻辑进度」
-    // 判定一律用逻辑长度（物理长度+占位已归档数），保证 baseline/pending 语义
-    // 与未 cap 时一致（否则发送回显永不消失 = 用户消息渲染两条）。
-    const prevLogical = logicalRenderedLength(prev);
-    const nextLogical = logicalRenderedLength(next);
-    if (nextLogical < userInputBaselineRef.current) {
+    // 长度 = 逻辑进度（ref 恒为全量源、物理长度单调增长，直接用 .length）：baseline/pending
+    // 是数据层语义，与渲染投影的裁剪无关（投影上的读数经 logicalRenderedLength 与这里逐值相等）。
+    const prevLength = messagesRef.current.length;
+    const nextLength = next.length;
+    if (nextLength < userInputBaselineRef.current) {
       // Shrank (compact/rewind/clear) — clamp so placeholderText's length
       // check can't go stale.
       userInputBaselineRef.current = 0;
-    } else if (nextLogical > prevLogical && userMessagePendingRef.current) {
+    } else if (nextLength > prevLength && userMessagePendingRef.current) {
       // Grew while the submitted user message hasn't landed yet. If the
       // added messages don't include it (bridge status, hook results,
       // scheduled tasks landing async during processUserInputBase), bump
       // baseline so the placeholder stays visible. Once the user message
       // lands, stop tracking — later additions (assistant stream) should
       // not re-show the placeholder.
-      const delta = nextLogical - prevLogical;
-      // cap 砍头保尾：常规追加恒在尾部；全量替换场景（resume/compact）新增
-      // 可能在头部——先试尾部窗口，不含人发消息再试头部窗口。
+      const delta = nextLength - prevLength;
+      // 常规追加恒在尾部；全量替换场景（resume/compact）新增可能在头部——
+      // 先试尾部窗口，不含人发消息再试头部窗口。
       const tail = next.slice(-Math.min(delta, next.length));
       const added = tail.some(isHumanTurn) ? tail : next.slice(0, Math.min(delta, next.length));
       if (added.some(isHumanTurn)) {
         userMessagePendingRef.current = false;
       } else {
-        userInputBaselineRef.current = nextLogical;
+        userInputBaselineRef.current = nextLength;
       }
     }
-    // P1 渲染历史上限：占位归档早期消息后再落 ref/state（cap 在 baseline 判定之后，
-    // 保证 delta/增长判定用未截断数组）。
-    const capped = capRenderedMessages(next);
-    messagesRef.current = capped;
-    rawSetMessages(capped);
+    // 层次归位（唯一写入口）：数据层收全量，只有渲染投影过 cap。
+    messagesRef.current = next;
+    rawSetMessages(capRenderedMessages(next));
   }, []);
   // Capture the baseline message count alongside the placeholder text so
   // the render can hide it once displayedMessages grows past the baseline.
+  // 存全量源坐标；4750 行在投影上比较时经 logicalRenderedLength 换算回同一坐标。
   const setUserInputOnProcessing = useCallback((input: string | undefined) => {
     if (input !== undefined) {
-      userInputBaselineRef.current = logicalRenderedLength(messagesRef.current);
+      userInputBaselineRef.current = messagesRef.current.length;
       userMessagePendingRef.current = true;
     } else {
       userMessagePendingRef.current = false;
@@ -1661,9 +1660,8 @@ export function REPL({
   const pickNewSpinnerTip = useCallback(() => {
     if (tipPickedThisTurnRef.current) return;
     tipPickedThisTurnRef.current = true;
-    // P1 cap 砍头会使物理索引失位（数组内容整体左移，slice(idx) 恒空），
-    // 改用「上次处理到的最后一条消息」定位起点；引用被 cap 砍掉则全量重扫
-    // （bashTools 是 Set，幂等）。
+    // 起点用「上次处理到的最后一条消息」的引用定位（数组被整体替换——compact/resume——
+    // 时 findIndex 失配 → 全量重扫，bashTools 是 Set，幂等）。
     const list = messagesRef.current;
     const last = bashToolsLastMsgRef.current;
     const startIdx = last ? list.findIndex(m => m === last) + 1 : 0;
@@ -4765,6 +4763,8 @@ export function REPL({
   // while deferredMessages lags behind messages. Suppressed when viewing an
   // agent — displayedMessages is a different array there, and onAgentSubmit
   // doesn't use the placeholder anyway.
+  // 坐标：baseline 存全量源条数（setMessages/setUserInputOnProcessing），displayedMessages
+  // 是 cap 后的渲染投影 → 用 logicalRenderedLength 换算回全量坐标再比（两者逐值相等）。
   const placeholderText = userInputOnProcessing && !viewedAgentTask && logicalRenderedLength(displayedMessages) <= userInputBaselineRef.current ? userInputOnProcessing : undefined;
   const toolPermissionOverlay = focusedInputDialog === 'tool-permission' ? <PermissionRequest key={toolUseConfirmQueue[0]?.toolUseID} onDone={() => setToolUseConfirmQueue(([_, ...tail]) => tail)} onReject={handleQueuedCommandOnCancel} toolUseConfirm={toolUseConfirmQueue[0]!} toolUseContext={getToolUseContext(messages, messages, abortController ?? createAbortController(), mainLoopModel)} verbose={verbose} workerBadge={toolUseConfirmQueue[0]?.workerBadge} setStickyFooter={isFullscreenEnvEnabled() ? setPermissionStickyFooter : undefined} /> : null;
 

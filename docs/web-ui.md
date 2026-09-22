@@ -160,9 +160,9 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 10. 内存优化链
 
-**P1 渲染历史上限（REPL.tsx）**：`capRenderedMessages` 把 React messages state 收敛为尾部 200 条（`MAX_RENDER_MESSAGES`），更早消息替换为单条归档占位（计数从占位文案自身解析=幂等）；cap 在 setMessages wrapper baseline 判定之后落 ref/state；初始 useState 同样 cap。**语义变化：transcript 虚拟滚动回放同样只见窗口**（完整历史权威在 jsonl）；数据层不经 cap。
+**P1 渲染历史上限（REPL.tsx + utils/renderCap.ts，自建机制——父源无此层）**：`capRenderedMessages` 只作用于**渲染出口**——`setMessages` 把全量数组落 `messagesRef`（数据层＝模型/工具上下文，与父源同语义），`rawSetMessages` 收到的才是 cap 产物（React messages state 收敛为尾部 200 条（`MAX_RENDER_MESSAGES`）+ 单条归档占位，计数从占位文案自身解析=幂等）；初始 useState 同样 cap。**长度不变量：`logicalRenderedLength(投影)` ＝ 未 cap 原始条数**（占位元素自身不计数）⇒ baseline/pending 判定在全量源（`.length`）与投影上逐值相等，删除「cap 后长度非单调」的一切补偿。**语义变化：transcript 虚拟滚动回放只见窗口**（完整历史权威在 jsonl）。探针 `probes/probe-render-cap-layering.ts`（长度不变量 + cap 幂等）。
 
-**P2 增量上报（conversationDisplay.ts + localGateway.ts）**：CLI 侧 `displayCacheBySession`（键 `${sessionId}:${mode}`，存已上报投影序列 + lastModel 末态 + 失步标）做「水位对齐 + 尾部窗口投影」——对齐键为稳定键 `sid`，`filterConversationForDisplay` 新增可选 `initialLastModel/lastModelOut`，每轮发 `{sessionId, messages, base}`；网关 `/gateway/conversation` 按 base 聚合为全量，响应带 `cached` 长度，CLI 校验不符（网关重启/sweep 失步）置 needFullSync 下轮全量直传对账。P1×P2 联合：单轮构建/序列化/传输峰值恒定（≤200 条投影）。已知名义缺口：CLI 进程重启后 cache 空且窗口首条对不上网关缓存时走窗口全量替换（web 前缀短暂缺失，jsonl 权威在盘）。
+**P2 增量上报（conversationDisplay.ts + localGateway.ts）**：CLI 侧 `displayCacheBySession`（键 `${sessionId}:${mode}`，存已上报投影的**尾部窗口** `sent`（≤ `SENT_WINDOW`=400）+ 绝对起点 `sentOffset` + lastModel 末态 + 失步标；上报 `base` 恒为绝对坐标，网关侧语义与缓存视窗化前一致）做「水位对齐 + 尾部窗口投影」——对齐键为稳定键 `sid`，`filterConversationForDisplay` 新增可选 `initialLastModel/lastModelOut`，每轮发 `{sessionId, messages, base}`；网关 `/gateway/conversation` 按 base 聚合为全量，响应带 `cached` 长度，CLI 校验不符（网关重启/sweep 失步）置 needFullSync 下轮全量直传对账。P1×P2 联合：单轮构建/序列化/传输峰值恒定（≤200 条投影）。已知名义缺口：CLI 进程重启后 cache 空且窗口首条对不上网关缓存时走窗口全量替换（web 前缀短暂缺失，jsonl 权威在盘）。
 
 **P3 web 注入图压缩前移（gatewayClient.ts）**：`compressPastedContentsFromImages`（WS send 分支）对 >2MB 原图先 `compressImageBuffer` 再入 pastedContents；CLI 本地粘贴链的执行时 resize 原样保留。
 

@@ -656,12 +656,42 @@ export async function sendConversationToServer(
 /**
  * 已上报展示投影缓存（P2 增量上报的 CLI 侧基线，2026-08-31）：
  * 键 = `${sessionId}:${mode}`（transcript/prompt 两种投影独立维护）。sent = 已成功上报的
- * 完整投影序列（增量对齐基线）；lastModel = 上次扫描终点模型（窗口投影续算「已切换模型」
- * 提示的跨扫描状态）；needFullSync = 网关失步，下轮全量直传对账。只存轻量展示投影
- * （过滤后的 blocks），与网关 conversationDisplays 同源同量级，进程退出即清。
+ * 投影**尾部窗口**（增量对齐基线，有界：见 setCacheSent）；lastModel = 上次扫描终点模型
+ * （窗口投影续算「已切换模型」提示的跨扫描状态）；needFullSync = 网关失步，下轮直传对账。
+ * 只存轻量展示投影（过滤后的 blocks），与网关 conversationDisplays 同源同量级，进程退出即清。
  */
-type DisplayCacheEntry = { sent: DisplayMessage[]; lastModel?: string; needFullSync?: boolean }
+type DisplayCacheEntry = {
+  /** 已上报投影的**尾部窗口**（≤ SENT_WINDOW 条），恒定等于全量投影的 slice(sentOffset)。 */
+  sent: DisplayMessage[]
+  /** sent[0] 在全量投影中的绝对下标（被丢弃的头部条数）。base 上报仍是绝对坐标。 */
+  sentOffset: number
+  lastModel?: string
+  needFullSync?: boolean
+}
 const displayCacheBySession = new Map<string, DisplayCacheEntry>()
+
+/** cache.sent 保留的投影尾部条数（2026-09-22 有界化）：缓存只需承载「对齐 + 尾部窗口」，
+ *  全量投影在网关/jsonl 侧各有权威，CLI 进程没有理由整份驻留。取值须 > P1 渲染窗口
+ *  （renderCap.ts MAX_RENDER_MESSAGES=200）——sent 覆盖范围恒 ⊇ 投影窗口时，display[0]
+ *  才稳定能在 sent 内定位；否则每轮退化为窗口全量替换，P2 的峰值有界性丢失。 */
+const SENT_WINDOW = 400
+
+/** 缓存窗口只读诊断（锚点：probes/probe-render-cap-layering.ts）——sent 条数 + 绝对起点。 */
+export function displayCacheStats(sessionId: string, mode: DisplayMode): { sent: number; sentOffset: number } | null {
+  const c = displayCacheBySession.get(`${sessionId}:${mode}`)
+  return c ? { sent: c.sent.length, sentOffset: c.sentOffset } : null
+}
+
+/** 唯一写入口：整份投影进、尾部窗口 + 绝对偏移落（sentOffset = 绝对起点）。 */
+function setCacheSent(cache: DisplayCacheEntry, sent: DisplayMessage[], offset: number): void {
+  if (sent.length > SENT_WINDOW) {
+    cache.sentOffset = offset + sent.length - SENT_WINDOW
+    cache.sent = sent.slice(sent.length - SENT_WINDOW)
+  } else {
+    cache.sentOffset = offset
+    cache.sent = sent
+  }
+}
 
 /**
  * delta 序号账本（2026-09-10 二轮根修，进程生命周期，**独立于展示缓存条目**）：
@@ -704,9 +734,12 @@ export async function exportConversationToServer(
   // 不推进基线，等下一次非空投影（同一轮内 state 回补）按正常对齐语义续上。
   if (cache && display.length === 0) return display
 
-  // 失步后的强制全量对账：sent 已在失步轮本地合并（含前缀），直传恢复网关完整
+  // 失步后的强制对账：sent 已在失步轮本地合并（含前缀），带**绝对** sentOffset 直传恢复网关完整
+  // （不能省 base 直传：视窗化的 sent 无 base 会退化成「网关缓存被尾部窗口整体替换」）。网关缓存
+  // 比 sentOffset 短（被 sweep/重启，前缀无法复现）时 cached 校验不符 → 失步标保留，由
+  // /gateway/session 磁盘权威链恢复。
   if (cache?.needFullSync && cache.sent.length > 0) {
-    if (await sendConversationToServer(sessionId, cache.sent)) cache.needFullSync = false
+    if (await sendConversationToServer(sessionId, cache.sent, cache.sentOffset)) cache.needFullSync = false
     return display
   }
 
@@ -716,19 +749,23 @@ export async function exportConversationToServer(
     // 尾部窗口、跨轮滑动会让同一条记录的 uuid 时裸时派生 → 对齐恒失配 → 每轮退化为「窗口全量
     // 替换」，网关缓存被 200 条窗口覆盖（P2 名义缺口常态化）。sid 位置无关（见下稳定键赋值段），
     // 跨轮/跨端恒一致。
-    const base = cache.sent.findIndex(m => m.sid && m.sid === display[0]!.sid)
-    if (base >= 0) {
-      // 窗口覆盖不变量（与 buildDisplayDelta 同款）：display 未覆盖到 sent 末尾 = state 塌缩
-      // 瞬态，禁止 mergedSent = display（base===0 时会直接把基线截断），本轮不推进基线。
-      if (base + display.length < cache.sent.length) return display
-      const mergedSent = base === 0 ? display : [...cache.sent.slice(0, base), ...display]
+    const idx = cache.sent.findIndex(m => m.sid && m.sid === display[0]!.sid)
+    if (idx >= 0) {
+      // 上报 base = 绝对下标（缓存窗口起点 + 窗口内偏移），网关侧坐标与 sent 视窗化前一致。
+      const base = cache.sentOffset + idx
+      // 窗口覆盖不变量（与 buildDisplayDelta 同款；两侧同减 sentOffset 后即旧式比较）：
+      // display 未覆盖到 sent 末尾 = state 塌缩瞬态，禁止 merged = display（idx===0 时会直接把
+      // 基线截断），本轮不推进基线。
+      if (idx + display.length < cache.sent.length) return display
+      // 合并基线（窗口坐标；merged[0] 恒 = sent[0] ⇒ 偏移沿用 sentOffset）
+      const mergedSent = idx === 0 ? display : [...cache.sent.slice(0, idx), ...display]
       if (await sendConversationToServer(sessionId, display, base)) {
-        cache.sent = mergedSent
+        setCacheSent(cache, mergedSent, cache.sentOffset)
         cache.lastModel = lastModel
       } else {
         // 发送异常（网关不在）或网关失步（cached 校验不符）：本地先合并基线并置失步标，
-        // 下轮全量直传对账（网关重启/sweep 场景都能恢复完整）。
-        cache.sent = mergedSent
+        // 下轮直传对账（网关重启/sweep 场景都能恢复完整）。
+        setCacheSent(cache, mergedSent, cache.sentOffset)
         cache.lastModel = lastModel
         cache.needFullSync = true
       }
@@ -738,7 +775,9 @@ export async function exportConversationToServer(
 
   // 常规全量路径：首报 / 对齐未命中（CLI 重启后 cache 空、窗口滑出基线记忆）
   await sendConversationToServer(sessionId, display)
-  displayCacheBySession.set(cacheKey, { sent: display, lastModel })
+  const entry: DisplayCacheEntry = { sent: [], sentOffset: 0, lastModel }
+  setCacheSent(entry, display, 0)
+  displayCacheBySession.set(cacheKey, entry)
   return display
 }
 
@@ -798,7 +837,8 @@ export function buildDisplayDelta(
     k++
   }
   if (k - base0 >= display.length) return null // 与 sent 完全一致且无新增
-  // 窗口覆盖不变量：新投影必须到达 sent 末尾（base0 + display.length >= sent.length）才可发
+  // 窗口覆盖不变量：新投影必须到达 sent 末尾（base0 + display.length >= sent.length；两侧同为
+  // 缓存窗口坐标、sentOffset 相消，与旧式绝对比较等价）才可发
   // delta。不满足 = CLI React state 处于塌缩/重建瞬态（实证：非全屏 REACTIVE_COMPACT 边界
   // setMessages(() => [boundary]) 把 state 收缩为单条，随后逐条回补，每个中间 commit 都会
   // 触发本函数）——此时发出的小基线 delta 会把 web 已提交历史截断成残段（2026-09-09 录屏
@@ -817,7 +857,8 @@ export function buildDisplayDelta(
   deltaSeqBySession.set(cacheKey, seq)
   const delta = { seq, anchorSid, messages: display.slice(k - base0) }
   cache.lastModel = lastModelOut.lastModel
-  cache.sent = [...cache.sent.slice(0, k), ...display.slice(k - base0)]
+  // 基线窗口坐标更新（merged[0] = sent[0] ⇒ 偏移不变）
+  setCacheSent(cache, [...cache.sent.slice(0, k), ...display.slice(k - base0)], cache.sentOffset)
   return delta
 }
 

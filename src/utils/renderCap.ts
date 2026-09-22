@@ -1,7 +1,15 @@
 // ---- P1 渲染历史上限（2026-08-31，20260828145952-内存增长根因与代码层修改建议.md）----
-// UI 渲染投影（React messages state）只保留尾部窗口，更早的消息替换为单条归档占位。
-// 磁盘 jsonl 不动（会话持久化权威在盘）；尾部窗口恒完整。计数从占位文案自身解析，
+// **自建机制**（父源没有，fork 独有）：UI 渲染投影只保留尾部窗口，更早的消息替换为单条
+// 归档占位。磁盘 jsonl 不动（会话持久化权威在盘）；尾部窗口恒完整。计数从占位文案自身解析，
 // 天然幂等，/clear、resume 换会话后自动从零重计。
+//
+// 2026-09-22 层次归位（B 案）：cap 只作用于**渲染出口**——messagesRef（数据层/模型上下文）
+// 恒为全量、与父源语义一致；唯一写入口 rawSetMessages 收到的是本模块输出。此前把 ref 也
+// 写 cap 产物，长会话的模型上下文被静默截断到 200 条。
+//
+// 长度不变量（精确，非近似）：**logicalRenderedLength(投影) === 未 cap 时该数组的原始条数**，
+// 故一切「数组长度=逻辑进度」判定（baseline/pending）在全量源与投影上读数一致，且全量源
+// 无占位时就是 .length。占位元素自身不计入逻辑长度（它不对应任何真实记录）。
 //
 // 2026-09-09 自 REPL.tsx 迁出为共享模块：占位是渲染投影专属标记，除 REPL 的 cap 外，
 // useLogMessages（转录落盘边界必须剥离投影——占位混入转录会以 parentUuid=null 成链根
@@ -45,8 +53,12 @@ export function renderArchivedCount<T extends PlaceholderCandidate>(list: readon
   return placeholderCount(head);
 }
 
+/** 逻辑长度 = 未 cap 时该数组的原始条数（占位元素自身不计数、归档条数计回）。
+ *  全量源（无占位）返回值即 .length；渲染投影返回值与全量源**逐值相等**——baseline 存于
+ *  全量源坐标、比较发生在投影上，两侧同一把尺子。 */
 export function logicalRenderedLength<T extends PlaceholderCandidate>(list: readonly T[]): number {
-  return list.length + renderArchivedCount(list);
+  const archived = renderArchivedCount(list);
+  return archived > 0 ? list.length - 1 + archived : list.length;
 }
 
 export function capRenderedMessages<T extends PlaceholderCandidate & { uuid?: unknown }>(list: readonly T[]): T[] {
@@ -66,7 +78,9 @@ export function capRenderedMessages<T extends PlaceholderCandidate & { uuid?: un
   }
   const body = (found ? list.filter(m => !isRenderArchivePlaceholder(m)) : list) as T[];
   const excess = body.length - MAX_RENDER_MESSAGES;
-  if (excess <= 0 && !found) return body;
+  // 无归档可记即原引用返回（无占位、或残留占位计数为 0 的坏输入）：不产出「…早期 0 条」空占位，
+  // 逻辑长度不变量（投影 - 1 + 归档 = 原始条数）才恒成立。
+  if (excess <= 0 && archived === 0) return body;
   if (excess > 0) archived += excess;
   const placeholder = createSystemMessage(`${ARCHIVE_PLACEHOLDER_PREFIX}${archived} 条消息已归档 — 完整历史在会话 jsonl（/transcript 可查）`, 'info');
   return [placeholder as unknown as T, ...body.slice(Math.max(0, excess))];

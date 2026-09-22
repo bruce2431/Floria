@@ -48,7 +48,7 @@ const none: Check = { blocked: false, streak: 0, kind: 'identical' }
 
 // ---------- A. 状态机行为（真实模块） ----------
 console.log('A. toolLoopBreaker 状态机行为')
-ok('阈值常量 ①=5 ②=4 ③=40', TOOL_LOOP_BREAKER_LIMIT === 5 && TOOL_FAMILY_BATCH_LIMIT === 4 && TOOL_FAMILY_FLOOD_LIMIT === 40)
+ok('阈值常量 ①=5 ②=10 ③=40', TOOL_LOOP_BREAKER_LIMIT === 5 && TOOL_FAMILY_BATCH_LIMIT === 10 && TOOL_FAMILY_FLOOD_LIMIT === 40)
 
 // 维度①：同名同参
 {
@@ -111,17 +111,27 @@ ok('阈值常量 ①=5 ②=4 ③=40', TOOL_LOOP_BREAKER_LIMIT === 5 && TOOL_FAMI
   ok('超大计划单批 30 个：不熔断', !r.blocked, `kind=${r.kind} streak=${r.streak}`)
 }
 {
-  // 跨 4 个纯簿记批（每批 1-2 个 TaskUpdate，参数各不同）→ 第 4 批熔断
+  // 跨 10 个纯簿记批（每批 1-2 个 TaskUpdate，参数各不同）→ 第 10 批熔断
   const s = createToolLoopBreakerState()
   let r: Check = none
-  for (let b = 0; b < 3; b++) {
+  for (let b = 0; b < 9; b++) {
     toolLoopBreakerBeginBatch(s)
     r = toolLoopBreakerCheck(s, 'TaskUpdate', { taskId: String(b), status: 'completed' })
   }
-  ok('连续 3 个纯簿记批：不熔断', !r.blocked && s.familyBatchStreak === 3, `streak=${s.familyBatchStreak}`)
+  ok('连续 9 个纯簿记批：不熔断', !r.blocked && s.familyBatchStreak === 9, `streak=${s.familyBatchStreak}`)
   toolLoopBreakerBeginBatch(s)
-  r = toolLoopBreakerCheck(s, 'TaskUpdate', { taskId: '9', status: 'completed' })
-  ok('第 4 个纯簿记批：熔断（familyBatch streak=4）', r.blocked && r.kind === 'familyBatch' && r.streak === 4, `kind=${r.kind} streak=${r.streak}`)
+  r = toolLoopBreakerCheck(s, 'TaskUpdate', { taskId: '99', status: 'completed' })
+  ok('第 10 个纯簿记批：熔断（familyBatch streak=10）', r.blocked && r.kind === 'familyBatch' && r.streak === 10, `kind=${r.kind} streak=${r.streak}`)
+  // 正常开工跨度（建 3 个任务 + 起 1 个，逐块各成一批 = 4 轮）不再撞线
+  const w = createToolLoopBreakerState()
+  let wr: Check = none
+  for (let i = 0; i < 3; i++) {
+    toolLoopBreakerBeginBatch(w)
+    wr = toolLoopBreakerCheck(w, 'TaskCreate', { subject: `t${i}`, description: `d${i}` })
+  }
+  toolLoopBreakerBeginBatch(w)
+  wr = toolLoopBreakerCheck(w, 'TaskUpdate', { taskId: '1', status: 'in_progress' })
+  ok('开工建单+起步 4 轮：不熔断（旧阈值 4 的误伤现场）', !wr.blocked && w.familyBatchStreak === 4, `streak=${w.familyBatchStreak}`)
 }
 {
   // 实质工具打断连击：3 纯批 → Bash → 再纯批 → 不熔断

@@ -81,7 +81,7 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 
 - **判据三维（任一触发即熔断）**：
   - ① 同名同参（tool 名 + `JSON.stringify(input)` 全等）**连续**调用达 `TOOL_LOOP_BREAKER_LIMIT`（=5）次。任何不同调用即重置（正常重试参数几乎总变，逐字重发连续 5 次不存在）。
-  - ② **含簿记批连击**：连续 `TOOL_FAMILY_BATCH_LIMIT`（=4）轮每轮至少 1 个**簿记家族**调用（TaskCreate/TaskUpdate/TaskGet/TaskList/TodoWrite），任何实质工具出现即清零。病理 = 跨轮持续簿记不干活。**单批大批量突发不算多轮**——一次建 10-30 个任务是合法正常流。
+  - ② **含簿记批连击**：连续 `TOOL_FAMILY_BATCH_LIMIT`（=10）轮每轮至少 1 个**簿记家族**调用（TaskCreate/TaskUpdate/TaskGet/TaskList/TodoWrite），任何实质工具出现即清零。病理 = 跨轮持续簿记不干活。**单批大批量突发不算多轮**——一次建 10-30 个任务是合法正常流；逐块各成一批时「建单+起步」的正常开工跨度须留余量，故阈值高于清单长度阶。
   - ③ **单轮簿记洪水**：单批内簿记调用达 `TOOL_FAMILY_FLOOD_LIMIT`（=40）次即熔断（第 40 个即拦）。
   - 纯状态机在 `utils/toolLoopBreaker.ts`（零依赖、探针直测）；批边界由调用方每批 `toolLoopBreakerBeginBatch` 划定，家族计数对任何非家族调用清零，与①的签名计数相互独立（①刻意跨批累计）。
 - **落点**：`queryLoop` 跨迭代状态声明在 `while (true)` 之前；**每批 tool_use 执行前**（`runTools` 前）逐块喂入扫描。`streamingToolExecutor` 为 statsig 门控本构建恒关，不为死配置加分支。

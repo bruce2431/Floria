@@ -5,7 +5,7 @@ import { ERROR_MESSAGE_USER_ABORT } from 'src/services/compact/compact.js';
 import { isRateLimitErrorMessage } from 'src/services/rateLimitMessages.js';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { Box, NoSelect, Text } from '../../ink.js';
-import { API_ERROR_MESSAGE_PREFIX, API_TIMEOUT_ERROR_MESSAGE, CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE, CUSTOM_OFF_SWITCH_MESSAGE, INVALID_API_KEY_ERROR_MESSAGE, INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL, ORG_DISABLED_ERROR_MESSAGE_ENV_KEY, PROMPT_TOO_LONG_ERROR_MESSAGE, RATE_LIMIT_FALLBACK_NOTICE_PREFIX, startsWithApiErrorPrefix } from '../../services/api/errors.js';
+import { API_ERROR_MESSAGE_PREFIX, API_TIMEOUT_ERROR_MESSAGE, CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE, CUSTOM_OFF_SWITCH_MESSAGE, INSUFFICIENT_BALANCE_ERROR_MESSAGE, INVALID_API_KEY_ERROR_MESSAGE, INVALID_API_KEY_ERROR_MESSAGE_EXTERNAL, ORG_DISABLED_ERROR_MESSAGE_ENV_KEY, PROMPT_TOO_LONG_ERROR_MESSAGE, RATE_LIMIT_FALLBACK_NOTICE_PREFIX, startsWithApiErrorPrefix } from '../../services/api/errors.js';
 import { isEmptyMessageText, NO_RESPONSE_REQUESTED } from '../../utils/messages.js';
 import { getUpgradeMessage } from '../../utils/model/contextWindowUpgradeCheck.js';
 import { getDefaultSonnetModel, renderModelName } from '../../utils/model/model.js';
@@ -117,6 +117,12 @@ export function AssistantTextMessage(t0) {
           t2 = $[5];
         }
         return t2;
+      }
+    // 402 余额不足（errors.ts INSUFFICIENT_BALANCE_ERROR_MESSAGE）：不再透出原始
+    // JSON，直接红字提示充值
+    case INSUFFICIENT_BALANCE_ERROR_MESSAGE:
+      {
+        return <MessageResponse height={1}><Text color="error">{INSUFFICIENT_BALANCE_ERROR_MESSAGE}</Text></MessageResponse>;
       }
     case INVALID_API_KEY_ERROR_MESSAGE:
       {

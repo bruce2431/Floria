@@ -146,6 +146,20 @@ export function isMediaSizeErrorMessage(msg: AssistantMessage): boolean {
   )
 }
 export const CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE = 'Credit balance is too low'
+/**
+ * 402 Payment Required —— 第三方 OpenAI 兼容端点（DeepSeek / GLM 等）余额不足时
+ * 的唯一返回形态，正文固定为 "Insufficient Balance"。此常量是渲染键：CLI 端
+ * AssistantTextMessage 按精确文案匹配渲红字，web 端同文本直接显示。
+ */
+export const INSUFFICIENT_BALANCE_ERROR_MESSAGE = '余额不足请充值'
+const INSUFFICIENT_BALANCE_MARKER = 'insufficient balance'
+/** 是否为余额不足错误（判据 = 端点返回的 "Insufficient Balance" 文本，大小写不敏感）。 */
+export function isInsufficientBalanceError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.toLowerCase().includes(INSUFFICIENT_BALANCE_MARKER)
+  )
+}
 // Anthropic OAuth 登录线路已移除（2026-09-18）：文案不再指向 /login，
 // 凭据池无可用钥匙走下方 CREDENTIAL_POOL_NO_KEY_MESSAGE 专用文案。
 export const INVALID_API_KEY_ERROR_MESSAGE = 'Not logged in · No usable credentials'
@@ -740,6 +754,15 @@ export function getAssistantMessageFromError(
     })
   }
 
+  // 402 余额不足（第三方端点 "Insufficient Balance"）：HTTP 语义上 402 即「需付费」，
+  // 本链路里唯一来源是余额不足，故不再透出原始 JSON 包裹，直接渲染充值提示。
+  if (isInsufficientBalanceError(error)) {
+    return createAssistantAPIErrorMessage({
+      content: INSUFFICIENT_BALANCE_ERROR_MESSAGE,
+      error: 'billing_error',
+    })
+  }
+
   if (
     error instanceof Error &&
     error.message.includes('Your credit balance is too low')
@@ -1046,6 +1069,10 @@ export function classifyAPIError(error: unknown): string {
       .includes(CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE.toLowerCase())
   ) {
     return 'credit_balance_low'
+  }
+
+  if (isInsufficientBalanceError(error)) {
+    return 'insufficient_balance'
   }
 
   // Authentication errors

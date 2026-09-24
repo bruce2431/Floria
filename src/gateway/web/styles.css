@@ -1474,8 +1474,12 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
 /* 全高特例（预览 iframe / 神经元图）：内容自己管滚动，卡体撑满；判据是卡内的结构，不是槽上的类 */
 .view-card:has(.preview-shell) > .view-scroll,
 .view-card:has(.neu-graph) > .view-scroll { padding: 0; scrollbar-gutter: auto; overflow: hidden; display: flex; flex-direction: column; }
+/* margin:0 与 max-width:none 是同一条「撤掉 920px 居中帽」的两个半条，必须成对出现：
+   .view-scroll 在本块成了 column flex 容器，flex item 在交叉轴（水平）带 auto margin 时不参与
+   stretch，宽度改取 fit-content —— 内容又是 width:100% 的 iframe，percentage 在不定宽父里回落
+   成 iframe 默认宽 300px ⇒ 预览缩成居中窄条。不变量：特例卡内 .view-body 的宽度恒由卡宽决定。 */
 .view-card:has(.preview-shell) > .view-scroll > .view-body,
-.view-card:has(.neu-graph) > .view-scroll > .view-body { max-width: none; flex: 1; min-height: 0; }
+.view-card:has(.neu-graph) > .view-scroll > .view-body { max-width: none; margin: 0; flex: 1; min-height: 0; }
 .mgr-pane { width: 100%; }
 .mgr-top { display: flex; align-items: center; justify-content: space-between; min-height: 40px; margin-bottom: 28px; }
 .mgr-kind { display: inline-flex; background: var(--active); border-radius: 10px; padding: 3px; gap: 2px; }

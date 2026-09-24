@@ -23,7 +23,7 @@
 import { createServer, request as httpRequest, type Server } from 'node:http'
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, type FSWatcher } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { join, resolve, extname, basename, sep, isAbsolute } from 'node:path'
+import { join, resolve, extname, basename, sep, isAbsolute, delimiter } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { UUID } from 'crypto'
 import { networkInterfaces } from 'node:os'
@@ -3031,6 +3031,15 @@ async function ensureBackend(label: string, cfg: BackendCfg): Promise<BackendPro
   }
 }
 
+// 预览后端运行时解析（2026-09-24 便携化定案）：backend 的 cmd[0] 多是裸名（"python"/"node"），
+// 按系统 PATH 解析会命中机器级安装或 Microsoft Store 0 字节存根（Pj15/Pj18 事故根因），且换机即失效。
+// 前置工作区内置便携 runtime <portableRoot>/.claude/runtime/{python,python/Scripts,node} 即让内置 runtime
+// 赢，工作区整体拷走即可用；目录不存在时 PATH 条目被系统静默忽略，行为同既往。
+function backendRuntimeDirs(): string[] {
+  const base = join(getPortableRoot(), '.claude', 'runtime')
+  return [join(base, 'python'), join(base, 'python', 'Scripts'), join(base, 'node')]
+}
+
 async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendProc> {
   const port = cfg.port > 0 ? cfg.port : await allocBackendPort()
   if (!port) throw new Error(`backend ${label}: 无可用端口（${BACKEND_PORT_BASE}-${BACKEND_PORT_MAX} 均被占用）`)
@@ -3044,10 +3053,21 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
   const logFd = openSync(logPath, 'a')
   const child = spawn(cmd[0], cmd.slice(1), {
     cwd: cfg.cwd,
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      PATH: [...backendRuntimeDirs(), process.env.PATH ?? ''].filter(Boolean).join(delimiter),
+    },
     stdio: ['ignore', logFd, logFd],
     shell: false,
     windowsHide: true, // 2026-08-20 黑框根因修复：python.exe 是 console 子系统，不设 windowsHide 每次 spawn 会弹出黑色命令行窗口（用户「黑框=单独弹出的指令框，类似 cmd」）
+  })
+  // spawn 失败（解释器缺失 ENOENT 等）异步 emit 'error'，无监听即成未捕获异常打死整个网关进程
+  // （2026-09-24 Pj13 事故：cmd[0]="node" 本机不存在 → 点开预览即 floria.local 全断）。
+  // 记为 spawnError，由就绪探测循环退出后统一抛给调用方（路由回 400，网关存活）。
+  let spawnError: Error | null = null
+  child.on('error', (e) => {
+    spawnError = e
   })
   const proc: BackendProc = { pid: child.pid ?? 0, port, cfg, startedAt: Date.now(), lastActive: Date.now(), child }
   child.on('exit', () => {
@@ -3064,7 +3084,7 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
   // 就绪探测：最多 ~24s（冷启动慢的后端如 ComfyUI torch 初始化实测 ~22s）
   let ready = false
   for (let i = 0; i < 120; i++) {
-    if (gatewayStopping || child.exitCode !== null) break
+    if (gatewayStopping || child.exitCode !== null || spawnError) break
     if (await backendReady(port, cfg.readyPath)) {
       ready = true
       break
@@ -3078,6 +3098,15 @@ async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendPr
       /* 忽略 */
     }
     if (child.pid) killTree(child.pid)
+    if (spawnError) {
+      // spawn 根本没起来（无 'exit'，exit 处理器不会跑）→ 此处收日志 fd 防泄漏
+      try {
+        closeSync(logFd)
+      } catch {
+        /* 忽略 */
+      }
+      throw new Error(`backend ${label}: 启动失败 ${spawnError.message}（cmd: ${cmd.join(' ')}）`)
+    }
     throw new Error(`backend ${label}: 端口 ${port} 就绪探测失败（${cfg.readyPath}），详见日志 ${backendLogPath(cfg)}`)
   }
   backendProcesses.set(label, proc)

@@ -94,6 +94,8 @@
 - `findProjects` 读 `<项目>/.claude/preview/preview.json`，有 `backend` → 项目附 `hasBackend` + `backendCfg`。
 - `GET /gateway/backend?label=`（受 token 保护）：ensureBackend（未起则 spawn）→ `{url, port, pid}`；无 backend → 404。
 - spawn：`{port}` 替换 → cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘**该项目自己的** `<项目>/.claude/preview/backend.log`，5MB 截断轮转）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
+- **解释器解析 = 工作区内置便携 runtime**（`backendRuntimeDirs()`）：spawn 把 `<portableRoot>/.claude/runtime/{python,python/Scripts,node}` 前置进子进程 `PATH`，故 `cmd[0]` 裸名（`python`/`node`）命中的是内置 runtime 而非机器级安装或系统 PATH（目录不存在时该 PATH 条目被系统静默忽略）——工作区整体拷走即可用。**不变量：preview 后端不依赖机器 PATH 状态。**
+- spawn 失败（缺解释器 ENOENT 等）经 `child.on('error')` 记入 `spawnError` → 就绪探测循环即时退出 → 抛给路由回 500 JSON（网关不退出）。**不变量：单个后端配置失败不得终止网关进程。**
 - **就绪探测用原生 net socket**（`backendReady`）：编译产物 node:http 的 request 对 aiohttp/Python 后端会挂起，net 直连写 HTTP 头读响应状态（200/404 即就绪）。
 - 生命周期：`stopLocalGateway` 遍历 killAllBackends（child.kill + taskkill /F /T /PID 兜底）+ 停回收 timer；空闲回收每 60s（仅 `--gateway` 模式）。
 - 前端三级加载：① `/gateway/backend` 命中 → iframe 直连 + 60s 心跳防误回收；② 静态 preview；③ 默认项目主页兜底。

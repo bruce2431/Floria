@@ -12,8 +12,11 @@
  *      不该命名」交给命名模型判断（prompt 保留 name=null 拒绝语义）；只尊重
  *      community.min_group_size（单节点不成群）。
  *   2. 密钥不进 config.yaml（NSCs 旧 config 的 api_key 已被抹成 x，示范了密钥入库
- *      的下场）：config 只声明 llm.provider/model/temperature，凭据单源 = 全局根
- *      credentials.json providers.<provider>（与 WebSearch 同一惯例）。
+ *      的下场）：config 只声明 llm.provider/model/temperature/thinking，凭据单源 =
+ *      全局根 credentials.json providers.<provider>（与 WebSearch 同一惯例）。
+ *      llm.thinking 原样透传进请求体（Anthropic 协议字段），用于压低思考预算：
+ *      {type: enabled, budget_tokens: N} 越小思考越少，{type: disabled} 可直关闭
+ *      （deepseek-flash 经 /anthropic 端点实测两者都吃，且与 temperature 并存不报错）。
  */
 
 import { copyFileSync, existsSync } from 'node:fs'
@@ -137,6 +140,8 @@ function resolveLlm(neuronPath: string): { system: string; call: LlmCall } {
   const providerName = String(cfgRequired(cfg, 'llm.provider', ctx))
   const model = String(cfgRequired(cfg, 'llm.model', ctx))
   const temperature = Number(cfgGet(cfg, 'llm.temperature', 0.3))
+  // 可选：低思考档。缺失则不传该字段（保持端点默认行为）
+  const thinking = cfgGet(cfg, 'llm.thinking')
 
   const creds = loadCredentials()
   const provider = creds.providers[providerName]
@@ -163,6 +168,7 @@ function resolveLlm(neuronPath: string): { system: string; call: LlmCall } {
           model,
           max_tokens: LLM_MAX_TOKENS,
           temperature,
+          ...(thinking && typeof thinking === 'object' ? { thinking } : {}),
           system,
           messages: [{ role: 'user', content: user }],
         }),

@@ -56,7 +56,7 @@
 
 - 会话目录：`getProjectDir()`（`sessionStoragePortable.ts`）＝ `<项目>/.claude/projects`（**平铺**）。跨项目会话列表（`/resume`、stats、cleanup、insights 等）用**逐级向上扫描**：`getProjectSessionDirsUpToHome(cwd)` / `getSessionProjectsParentsUpToHome(cwd)` 从 CWD 逐级收集 `<dir>/.claude/projects` 直至配置根，再加配置根本身的 projects 目录 → 从任何子目录启动都能看到该项目全部会话。全工作区已无任何 `<sanitized>` 旧桶，全部平铺。
 - 自动记忆：`getAutoMemPath()`（`memdir/paths.ts`），优先级 = `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` → settings.json `autoMemoryDirectory`（policy/local/user，排除 projectSettings）→ 默认 `<项目>/.claude/projects/memory/`（镜像会话目录 `getProjectDir()`，随项目移动）。`getMemoryBaseDir()` 仍锚定全局配置根，仅服务**用户级 agent-memory**（`<配置根>/agent-memory/`）与旧路径检测；自动记忆不再落全局根。
-- **启动位置决定记忆**：记忆按「启动时 CWD 的项目根」解析，写入该项目 `.claude/projects/memory/`——从 `@WrokSpace` 启动读写工作区记忆，从 `@WrokSpace/PjN-…` 启动读写该项目记忆。统一从 `@WrokSpace/cli-dev.exe` 启动。从同一项目不同子目录启动，会话/记忆共用同一平铺目录。
+- **启动位置决定记忆**：记忆按「启动时 CWD 的项目根」解析，写入该项目 `.claude/projects/memory/`——从 `@WrokSpace` 启动读写工作区记忆，从 `@WrokSpace/PjN-…` 启动读写该项目记忆。exe 为项目根时间戳产物、禁固定名（→ CLAUDE.md「常用命令」），从工作区根或项目根启动均可。从同一项目不同子目录启动，会话/记忆共用同一平铺目录。
 - **归档**：要归档某项目时，直接 zip 整个项目文件夹（含 `.claude/projects/`）即带走会话**和自动记忆**（两者同目录），无需单独导出。
 
 ### 2.2 docs 文档库编写规范（2026-09-19 定案）
@@ -192,7 +192,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 - 命中后用 `neuron_source` 取完整 `mem.content` 确认真实上下文，按 `core_file[].path` 复用脚本，不重复造轮子。
 - 同一话题有失败（pattern=try）和成功（pattern=succeed）两条时，认准成功那条。
 - 查询用自然语句（做了什么/怎么做的），不要关键词堆砌（BGE 对自然语句友好）。
-- LOG 条目写库入口（Pj16 现状）→ CLAUDE.md「文件维护规范」：UTF-8 脚本文件 `bun:sqlite` 直写 mem 层，禁 `bun -e` 内联中文；写后 `probe-neuron-index.ts` 只读核验（可自主跑），`rebuild-neuron-index.ts` 全量重编码（重资源长跑）启动前必须先征得用户同意。
+- LOG 条目写库入口（Pj16 现状）→ CLAUDE.md「文件维护规范」：新 LOG 条目经内置 `remember` 工具写各自 mem 层（`neuron=<PjN>`，写法 → [core.md](core.md)「神经元内置检索/记忆」）；写后 `probe-neuron-index.ts` 只读核验（可自主跑），`rebuild-neuron-index.ts` 全量重编码（重资源长跑）启动前必须先征得用户同意。
 
 ## 8. Changelog 标准
 
@@ -232,7 +232,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 ## 11. 常见坑速查
 
 - **`.claude/.claude-portable` / `.claude/` 挪走** → exe 副本向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。
-- **exe 副本放进带配置根标记的项目 `.claude/`**（含 `.claude.json`/`settings.json`/`plugins`/`skills` 等）→ 配置根判定第 2 步静默切到项目本地，插件/记忆/凭证全失效。**只有 `projects/` 的目录不算配置根**。Pj16 现状：`Pj16-CodeAgent构建/.claude/` 自带 `settings.json` 标记位本就命中，但本机 `CLAUDE_CONFIG_DIR` 已设 **HKCU 用户级**恒指 `@WrokSpace/.claude`（envUtils.ts 第 1 步 env 永远赢）→ 邻接判定永不生效，项目级 skill（archify）/`preview/` 可安全存放；仅无该 env 的拷 exe 部署场景按本条处理。
+- **exe 副本放进带配置根标记的项目 `.claude/`**（含 `.claude.json`/`settings.json`/`plugins`/`skills` 等）→ 配置根判定第 2 步静默切到项目本地，插件/记忆/凭证全失效。**只有 `projects/` 的目录不算配置根**。Pj16 现状：`Pj16-CodeAgent构建/.claude/` 自带 `settings.json` 标记位本就命中，但配置根解析第 2 步（上溯 `.claude/.claude-portable`）先命中工作区根 `@WrokSpace/.claude/` → 邻接判定（第 3 步）不生效，项目级 skill（archify）/`preview/` 可安全存放；仅把 exe 拷到无该标记处部署时按本条处理。
 - **会话/自动记忆项目级、平铺**（不按启动目录分桶）：会话写入 `<项目>/.claude/projects/*.jsonl`，自动记忆写入 `<项目>/.claude/projects/memory/`，均随项目打包归档不丢失。跨项目会话列表用逐级向上扫描。
 - **项目级 `.claude/` 启动不自动建** → 只在首次写项目设置（`/permissions`、`/config`、MCP 审批、插件装项目 scope）才惰性创建；要手动放 `CLAUDE.md` 或空 `settings.json`。
 - **settings.json hooks 用 CWD 相对路径**（`.claude/...`）→ 在子目录会话里 hook 脚本静默跳过，只在 `@WrokSpace` 根目录跑才命中。

@@ -10,7 +10,7 @@
 
 **信任判据同源**：`computeTrustDialogAccepted()` / `isPathTrusted()`（均 `config.ts`）把便携根标记当**唯一显式信任锚**——`isUnderPortableRoot(cwd)` 命中即已信任，压过 `projects[<绝对路径>].hasTrustDialogAccepted` 记录（标记优先于路径推断，与上行解析链同序）。理由：TrustDialog yes 分支同时写标记（`maybeInitPortableRoot`）与路径记录，唯有标记能在盘符 / 挂载点 / 机器变化后存活 ⇒ 换盘符、换机器不触发重新信任。复验锚点 `probes/probe-portable-trust.ts`。
 
-**裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机 `CLAUDE_CONFIG_DIR` 恒设，恒不触发。
+**裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机配置根由工作区根 `.claude-portable` 标记（walk-up 第 2 步）决定，本步不触发。
 
 ## 会话/记忆项目级平铺
 
@@ -59,7 +59,7 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 
 **blocks 标准（声明源 = 各库 `config.yaml`）**：`blocks.max_chars`（Pj16 = **300 字** ≈180 token，落 BGE 位置上限 512 的安全余量）+ 库个性约定 `prompts.add_memory`（读取方 `remember.ts:52`）——块数 ≥ 2、一块一件事；单块 ≤ max_chars；**block[0] = 检索锚**（查询形自然语句 + 关键标识：功能名/文件路径/参数名/报错原文）；按 `；。` 主切、`【标签】` 并入首块；**块内不嵌时间戳**（时间已蕴含在 memory_id）；禁纯工具名块。**写入侧强制**：`memwriter.ts` `splitBlock(block, maxChars)`（就近取窗口后半段的句末标点 `。；！？` 或换行，找不到才硬切）与 `blockMaxChars(cfg)`（读 `blocks.max_chars`，缺省 300），`buildEntry` 对 `blocks` 与 `[input.content]` **两条路径都切**。**动因**：encode 对超长输入**静默丢尾**（transformers.js feature-extraction 默认按 tokenizer 512 token 截断），超长块尾部对检索零贡献；且 BGE 路径是**逐块 encode + 逐维 max-pool**（每块一票），块长/块数直接决定向量形态。**已知副作用**：max-pool 使池化向量范数随块数增长 ⇒ 同一 query 对同一条目 cos 近似 ∝ 1/√块数，**块数本身即 cos 惩罚**——判 cos 高低先看块数；kw 项（读全文）兜住实际检索效果。precog 标注语义：检索某组件历史→修改相同东西=true、不同东西但改相同文件相同部分=revelant。source 是来源标签（对照真身库 'QQ'/'微信'）。
 
-**LOG 更新口（现行做法）**：新 LOG 条目 = UTF-8 脚本文件 `bun:sqlite` 同构直写 `l2.mem/mem.db`（**禁 `bun -e` 内联中文**——Windows 下 mojibake；脚本自带断言，blocks 超限 exit(1) 不落盘；`memory_id=PJ16_MEM_{ts}`、`source='MEM'`、blocks 按上述标准）。**直写绕过写入器 ⇒ mem.db 与 `embeddings.npy` 行数漂移**（INSERT 只追加，缺失行恒在尾部）。漂移由**下一次经 memwriter 的写入自动消化**（`computeEmbeddings` 增量补齐，O(K) 毫秒级）——不必人工重编码；漂移窗口内该库 recall 按行数不一致报错。两件维护入口：**`scripts/rebuild-neuron-index.ts`**（走 `memwriter.rebuildEmbeddings(forceFull=true)` 按 `readMemories` 行序全量重编码，覆写 npy + index_config，幂等可重跑，指定库路径为可选参数；**降为建库/换模型/行序破坏时的人工入口，启动前必须先征得用户同意**）+ **`probes/probe-neuron-index.ts`**（A 行数三处一致 / B 每行 L2 归一 / C 真检索可用，9 过 0 败，秒级只读可自主跑）。**全项目神经元化**：`scripts/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库并迁入各自历史 LOG，写法通用。使用标准 → [standards.md](standards.md) §7。
+**LOG 更新口（现行做法）**：新 LOG 条目经内置 **`remember` 工具**写 `l2.mem/mem.db`（`neuron=PJ16`；`content` 保留 [用户]/[Agent] 对话格式、`blocks` 按上述标准、`source` 写实来源；`memory_id=PJ16_MEM_{ts}`）。**写 mem = 更新 LOG，同一件事**，只追加原则不变——纠错走 `action=update` supersede 旧条目（不删除）。编码恒增量（只算 npy 尚缺的尾部行），全量重编码不在写入路径上。两件维护入口：**`scripts/rebuild-neuron-index.ts`**（走 `memwriter.rebuildEmbeddings(forceFull=true)` 按 `readMemories` 行序全量重编码，覆写 npy + index_config，幂等可重跑，指定库路径为可选参数；**降为建库/换模型/行序破坏时的人工入口，启动前必须先征得用户同意**）+ **`probes/probe-neuron-index.ts`**（A 行数三处一致 / B 每行 L2 归一 / C 真检索可用，9 过 0 败，秒级只读可自主跑）。**全项目神经元化**：`scripts/init-neuron-project.ts` 为各在盘项目建 Neuron-PjN 三层库并迁入各自历史 LOG，写法通用。使用标准 → [standards.md](standards.md) §7。
 
 ## WebSearch 本地多后端检索
 

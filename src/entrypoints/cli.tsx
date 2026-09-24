@@ -38,6 +38,58 @@ if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
   }
 }
 
+/** 自举等待 WT 窗口落地的上限：无实例冷启动（AppX 激活 + 建窗）最坏几秒；超时即放弃等待、让本进程退场，不无限挂着黑窗。 */
+const WT_WINDOW_WAIT_MS = 20000
+
+/** 探测「屏幕上此刻是否存在可见的 Windows Terminal 窗口」；null = 探测不可用。 */
+type TerminalWindowProbe = () => boolean
+
+/**
+ * 构造可见 WT 窗口探针：user32 的 FindWindowW(CASCADIA_HOSTING_WINDOW_CLASS) + IsWindowVisible。
+ * WT 的每个窗口都是一枚该类名的顶层窗口，隐藏窗（未显示/托盘）不计入——判据要的是「用户能看到」。
+ * 探测不可用（ffi/动态库异常）时返回 null，由调用方按「无实例」处理（见自举块的说明）。
+ */
+async function makeTerminalWindowProbe(): Promise<TerminalWindowProbe | null> {
+  try {
+    const { dlopen, FFIType, ptr } = await import('bun:ffi')
+    const user32 = dlopen('user32.dll', {
+      FindWindowW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+      IsWindowVisible: { args: [FFIType.ptr], returns: FFIType.bool },
+    })
+    const windowClass = Buffer.from('CASCADIA_HOSTING_WINDOW_CLASS\0', 'utf16le')
+    return () => {
+      const hwnd = user32.symbols.FindWindowW(ptr(windowClass), null)
+      return Boolean(hwnd && user32.symbols.IsWindowVisible(hwnd))
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 自举交接后，等到「用户真能看到 Windows Terminal 窗口」再让黑窗退场。
+ *
+ * 不变量：本进程退出时，屏幕上已有一个可见的 WT 窗口（或已等满 WT_WINDOW_WAIT_MS）。
+ * 判据不用 wt.exe 的 'spawn' 事件——它只代表中转进程被创建，WindowsTerminal 侧建窗
+ * 要 1.5s+（无实例冷启动更久）。父进程若在那时就退，conhost 黑窗先消失、窗口后出现，
+ * 中间的无反馈空窗期正是「双击一次只闪黑窗、再双击才弹窗」的成因（2026-09-22 实测：
+ * 'spawn' 在 68ms，窗口 1471ms 才可见）。已有 WT 窗口时首次轮询即命中（该窗口本就可见，
+ * 不产生空窗期），不增延迟。
+ */
+async function waitForTerminalWindow(
+  probe: TerminalWindowProbe | null,
+): Promise<void> {
+  if (!probe) return
+  // 提示只用 ASCII：自举阶段 stdout 还没做任何编码设置，中文在 conhost 下有乱码风险。
+  // biome-ignore lint/suspicious/noConsole:: intentional console output
+  console.log('Starting Windows Terminal...')
+  const deadline = Date.now() + WT_WINDOW_WAIT_MS
+  while (Date.now() < deadline) {
+    if (probe()) return
+    await new Promise((resolveTick) => setTimeout(resolveTick, 100))
+  }
+}
+
 /**
  * Bootstrap entrypoint - checks for special flags before loading the full CLI.
  * All imports are dynamic to minimize module evaluation for fast paths.
@@ -49,7 +101,8 @@ async function main(): Promise<void> {
   // 2026-09-07 conhost 宿主自举并入 WT（defterm 解耦收官，根治 web/双击弹「管理员指令框」黑窗）：
   // 系统默认终端委托在 25H2 更新后激活链损坏且委托配置屡遭系统更新重置（08-29/09-02/09-07 三次
   // 实证），CLI 交互会话不再信任宿主——交互式 TTY 且不在 WT 内（无 WT_SESSION）且未自举过
-  // （FLORIA_IN_WT）且非 bun 源码直跑 → 经 wt.exe -w last nt 并入最近 WT 窗口后本进程退出；
+  // （FLORIA_IN_WT）且非 bun 源码直跑 → 经 wt.exe 交接给 Windows Terminal 后本进程退出
+  // （已有可见 WT 窗口则并入其新标签，否则常规新建一窗，见下方 spawn 处说明）；
   // wt 不可用/启动失败则留在当前宿主继续运行。护栏不变量：每个交互进程至多自举一次
   // （FLORIA_IN_WT 由自举注入；WT 正常标签自带 WT_SESSION；VSCode 等自带宿主的终端不接管）。
   if (
@@ -61,10 +114,18 @@ async function main(): Promise<void> {
     !/(^|[\\/])bun(\.exe)?$/i.test(process.execPath)
   ) {
     const { spawn: spawnProc } = await import('node:child_process');
+    const probeTerminal = await makeTerminalWindowProbe();
+    // 有可见 WT 窗口 → -w last nt 并入该窗口成新标签；一个都没有 → 不带 -w（WT 常规启动，
+    // 只建一枚窗口）。不能一律 -w last：WindowsTerminal 未运行时 -w last 先开一枚默认窗口、
+    // 再为命令行开一枚，冷启动双窗即由此而来（2026-09-22 监视器实证：同一 pid 下先后出现
+    // Terminal 与 cli-dev 两窗）。探测不可用按「无实例」走：两种误判中「多开一枚窗口」可容忍，
+    // 「冷启动双窗」正是此处要根除的症状。
     const child = spawnProc(
       'wt.exe',
-      ['-w', 'last', 'nt', '-d', process.cwd(), process.execPath, ...args],
-      // 不设 windowsHide：SW_HIDE 会随 STARTUPINFO 被 -w last 无窗时新开的 WindowsTerminal
+      probeTerminal?.()
+        ? ['-w', 'last', 'nt', '-d', process.cwd(), process.execPath, ...args]
+        : ['nt', '-d', process.cwd(), process.execPath, ...args],
+      // 不设 windowsHide：SW_HIDE 会随 STARTUPINFO 被 wt 新开的 WindowsTerminal
       // 继承 = 首窗创建即隐藏、二次启动才可见（2026-09-09 双启动根因）。wt.exe 是 GUI 子系统，
       // spawn 它不会带出控制台窗口，无需此 flag。
       { env: { ...process.env, FLORIA_IN_WT: '1' }, stdio: 'ignore' },
@@ -73,7 +134,12 @@ async function main(): Promise<void> {
       child.once('spawn', () => resolveHandoff(true));
       child.once('error', () => resolveHandoff(false));
     });
-    if (handedOff) return;
+    if (handedOff) {
+      // 2026-09-22 交接后等窗口落地再退（根因见 waitForTerminalWindow 注释）：
+      // 原实现在 'spawn' 即退，黑窗先消失、窗口 1.5s+ 后才出现，空窗期被误判成「没启动」。
+      await waitForTerminalWindow(probeTerminal);
+      return;
+    }
     // biome-ignore lint/suspicious/noConsole:: intentional console output
     console.error('[cli] wt.exe 不可用，留在当前终端宿主运行');
   }

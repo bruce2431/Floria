@@ -7,14 +7,16 @@ import { setChar } from '../core/char.js'
 import { needToken } from '../core/gateway.js'
 import { refreshSession, renderSessionBody, stopLiveFoldTimer, bindLiveFoldTimer } from '../core/live.js'
 import { hashOf, findSession, loadSessions, fetchMessages, applySessionModel } from '../core/sessions.js'
-import { chatArea, messagesEl, inputWrap, state, loadMgrView, live, toast } from '../core/state.js'
+import { chatArea, sessionCard, messagesEl, inputWrap, state, loadMgrView, live, toast } from '../core/state.js'
 import { renderTransient, claimStartTs, syncTurnLive, takeover, clearTakeover, sendSubscribe, renderTaskDock } from '../inputbar/approval.js'
 import { renderProjSeat, closeProjPop } from '../inputbar/commands.js'
 import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
+import { clearRailExt } from '../sidebar/rail-ext.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
+import { showView } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
   // /preview/* 静态页路径）；hash 路由保留为旧链接/旧缓存页兜底（parseRoute 先 pathname 后 hash）。
@@ -43,7 +45,8 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
     // 任何导航（route 被调用）→ 退出管理视图；管理视图只由 mgr-tab 点击直接 renderMgr 进入，不走 route
     state.mgr = null
     state.preview = null
-    if (r.name !== 'preview') state.previewMounted = null // 离开预览：清已挂载标记，下次进入重挂
+    // 离开预览：清已挂载标记（下次进入重挂）+ 清预览页注册的侧栏快捷按钮（注册集属于那份文档）
+    if (r.name !== 'preview') { state.previewMounted = null; clearRailExt() }
     // 离开项目预览时回收 backend 保活心跳（2026-08-27 返回按钮移除后，退出预览全靠导航）
     if (window.__backendHeartbeat) {
       clearInterval(window.__backendHeartbeat)
@@ -97,10 +100,12 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
   }
 
   // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（top=台面 76.75%−26px），
-  // 会话态移回 #chat-area 沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
+  // 会话态移回会话卡沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
+  // 2026-09-23 卡化：两处基准都在会话卡内（.g-stage 是卡的后代；docked 目标是卡本身），
+  // 输入栏随会话卡生灭——不再有「挂槽位」的旧路径。
   const emptyStageEl = () => document.querySelector('#empty-hint .g-stage')
   function mountInput(where) {
-    const target = where === 'stage' ? emptyStageEl() : chatArea
+    const target = where === 'stage' ? emptyStageEl() : sessionCard
     if (target && inputWrap.parentNode !== target) target.appendChild(inputWrap)
   }
   // 输入栏 stage↔chat 迁移的 FLIP 补间（2026-08-30 丝滑空态→会话）：换父后 top/width 是
@@ -188,7 +193,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
-    chatArea.classList.remove('mgr-on')
+    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }
 
@@ -218,8 +223,8 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
     clearTakeover() // 切换会话：清掉残留的提问/审批 takeover（输入栏恢复）
     closeProjPop() // 切换会话：项目选择器弹层一并收起（初始界面专属件）
     renderProjSeat() // 会话态：工作文件夹标识按当前会话项目重渲（锁定只读）
-    chatArea.classList.remove('mgr-on')
-    flipInput(false) // 输入栏移回 #chat-area 沉底（FLIP 像素级补间）
+    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    flipInput(false) // 输入栏移回会话卡沉底（FLIP 像素级补间）
     const s = findSession(hash)
     state.currentHash = hash
     sendSubscribe() // 2026-08-30 pending 重放：切会话即订阅 → 网关回放该会话未决审批/提问（补弹交互卡）

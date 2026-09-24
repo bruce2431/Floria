@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>floria</title>
-  <meta name="theme-color" content="#ffffff" />
+  <meta name="theme-color" content="#ececf1" /><!-- = 底板色（--plane），与页面底色同源 -->
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=342" />
+  <link rel="stylesheet" href="/styles.css?v=346" />
 </head>
 <body>
 <div id="app">
@@ -25,6 +25,9 @@
         <button id="rail-new" class="rail-ico" title="新建对话（回到首页）"></button>
         <button id="rail-search" class="rail-ico" title="搜索会话"></button>
         <button id="rail-bubble" class="rail-ico" title="最近会话"></button>
+        <!-- 预览页注册的快捷按钮（2026-09-23）：iframe 内页面经 postMessage 注册，宿主渲染于此；
+             display:contents 不产生盒，子按钮与上面四个内置图标同列同 gap（见 sidebar/rail-ext.js） -->
+        <div id="rail-ext"></div>
       </div>
       <div id="rail-bottom">
         <div id="rail-avatar" title="只读查看 · 本地工作区">
@@ -44,25 +47,9 @@
             <button id="panel-collapse" class="act-btn" title="折叠侧栏"></button>
           </div>
         </div>
-        <!-- 管理入口 tabs：插件（含技能预览）+ 项目（样式同 .mtab 但高度/字体放大） -->
-        <div class="mgr-tabs" id="mgr-tabs">
-          <button class="mgr-tab on" data-mgr="plugins" title="插件 / 技能预览">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M10.2 3.5H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 3.5h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M10.2 13.7H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 13.7h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/></svg>
-            <span>插件</span>
-          </button>
-          <button class="mgr-tab" data-mgr="projects" title="项目管理">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>
-            <span>项目</span>
-          </button>
-          <button class="mgr-tab" data-mgr="models" title="模型配置">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></svg>
-            <span>模型</span>
-          </button>
-          <button class="mgr-tab" data-mgr="neurons" title="神经元视图（mem→认知→社群节点图）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/><path d="M12 4.5v13.5M12 18v1.5"/></svg>
-            <span>神经</span>
-          </button>
-        </div>
+        <!-- 管理入口 tabs（插件 / 项目 / 模型 / 神经）：定义单一真源 = web-src/views/registry.js，
+             启动时 renderMgrTabs() 按表生成（本处不再有死按钮与内联 SVG；图标取 core/icons.js 的 I 表） -->
+        <div class="mgr-tabs" id="mgr-tabs"></div>
         <div id="recent">
           <div id="recent-head">
             <div id="recent-left">
@@ -136,87 +123,92 @@
          仅已开始的对话（#chat-area.in-session）+ 侧栏折叠（#sidebar 无 .open）+ 宽屏时显示，
          首页新对话不显示；pointer-events:none 不挡交互。
          2026-08-15 临时隐藏中：styles.css #char display:none（代码保留空跑），删除该行即恢复 -->
-    <img id="char" src="/char/1.jpg" alt="AI 形象" draggable="false" />
-    <div id="chat-scroll"><div id="messages"></div></div>
-    <!-- 空态（token 门验证后）：与 SubPj3 阶段3 一致——居中正方形趴栏图铺满；
-         输入栏（#input-wrap）在 stage 内真相对定位（SubPj3 同款：top=台面 76.75% − 半高 26px），
-         任意窗口大小都贴图走不偏移；app.js 按界面在 stage（空态）↔ chat-area（会话 docked）间移动挂载 -->
-    <div id="empty-hint">
-      <div class="g-stage">
-        <div class="g-media">
-          <img class="g-ph empty-ico" src="/gate/state-newchat.webp?v=2" alt="Floria" />
-        </div>
-        <div id="input-wrap">
-          <!-- 输入栏（2026-08-21 dsh InputBar 完全移植：照抄 deepseek-harness InputBar.module.css .card 布局——
-               textarea(#input) 顶部 + 底部 .row 工具行[左 .tools = .add(+命令) + .modes（只读无权限数据→空） +
-               右 .trailing = .trigger 模型·推理座 + .primary 发送]。
-               2026-08-21 用户纠正：完全移植源码，不再自作主张加 upload/think/mic 胶囊） -->
-          <div id="input-bar">
-            <!-- 附件胶囊（2026-08-28 图片 / 2026-09-12 文件）：待发送附件行；入口在 + 浮窗「上传」组 -->
-            <div id="img-pills" hidden></div>
-            <div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-ph="输入消息，Enter 发送"></div>
-            <div class="row">
-              <div class="tools">
-                <input id="img-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
-                <!-- 文件上传（2026-09-12）：+ 浮窗「上传文件」行触发；POST /gateway/upload 落盘 exe 目录 uploads/ -->
-                <input id="file-upload" type="file" multiple hidden />
-                <button id="cmd-btn" class="add" title="命令" aria-label="命令" aria-haspopup="listbox"></button>
-                <!-- 项目选择器（2026-09-02）：空态=右侧切换目标项目（=侧栏项目「+」同链路 state.newProject，
-                     首条消息按它落项目）；会话态=工作文件夹标识保留显示但锁定只读（.locked 白底无箭头，
-                     #chat-area.in-session 门控；管理/预览态挂载点不在 chat-area 自动隐藏） -->
-                <div id="proj-root" class="proj-root">
-                  <button id="proj-seat" class="proj-seat" title="目标项目" aria-label="目标项目" aria-haspopup="menu">
-                    <span class="projIco"></span><span class="projLabel">全局</span><span class="chevron"></span>
-                  </button>
-                  <div id="proj-pop" hidden></div>
-                </div>
-                <div class="modes"></div>
-              </div>
-              <div class="trailing">
-                <!-- 模型·推理座（dsh ModelSelect .root：.trigger chip + .menu 定位上下文） -->
-                <div id="model-root" class="model-root">
-                  <button id="model-seat" class="trigger" title="模型与推理等级" aria-label="模型与推理等级" aria-haspopup="menu">
-                    <span class="triggerLabel"></span>
-                    <span class="triggerEffort"></span>
-                    <span class="chevron"></span>
-                  </button>
-                  <!-- 模型·推理等级弹窗（dsh ModelSelect .menu）：root→Model/Effort 两级 drill -->
-                  <div id="model-pop" hidden></div>
-                </div>
-                <!-- 上下文占用（dsh ContextMeter）：发送钮左边的环形小圆，展示上下文已用百分比，
-                     点击展开 breakdown 面板。数据来自 /api/session 的 context 字段（网关提取）。
-                     无数据（无 usage / 无模型窗口）时 hidden。 -->
-                <div id="ctx-meter" class="ctx-meter" hidden>
-                  <button id="ctx-btn" class="ctx-trigger" type="button" title="上下文已用" aria-label="上下文已用" aria-haspopup="dialog" aria-expanded="false"></button>
-                  <div id="ctx-panel" class="ctx-panel" role="dialog" aria-label="上下文已用" hidden></div>
-                </div>
-                <button id="send-btn" class="primary" title="只读查看 · 无法发送" aria-label="发送"></button>
-              </div>
-            </div>
-            <!-- composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁入 #input-bar 子元素位，用户定案：
-                 审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
-                 隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
-            <div id="composer-takeover" hidden></div>
-            <!-- 底栏任务浮窗（2026-09-10；几何 09-11 二轮定案）：CLI TodoV2 清单（源码 useTasksV2 单源出口
-                 → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位（bottom:100%）：
-                 收敛态露出 12px 把手条（#task-lip，白表面+1px 0.10 描边，与输入栏/面板同族材质），
-                 点击上展 .td-panel（宽=输入栏宽−48px 居中、
-                 底边与输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px,var(--bar-room,460px)) 内部滚动），
-                 再点头部向下收敛。
-                 无清单整窗 hidden；审批/提问接管卡在场 → .blocked 收敛且禁点（.bar-takeover 规则本就 display:none 让位）。 -->
-            <div id="task-dock" hidden>
-              <button id="task-lip" class="td-lip" type="button" aria-expanded="false" aria-controls="task-panel" title="展开任务清单"></button>
-              <div id="task-panel" class="td-panel" role="region" aria-label="任务清单"></div>
-            </div>
+    <!-- 会话卡（视图注册表 tab:false 一条，视图卡化 2026-09-23）：#char / #chat-scroll / #empty-hint
+         承载模块级 const 引用的单例 DOM（messagesEl / inputWrap / charEl），不能随卡销毁重建
+         → 常驻此处，离开会话视图只切 hidden。槽里同一时刻恰好一张卡：管理/预览卡由注册表按需创建。 -->
+    <section id="session-card" class="view-card session">
+      <img id="char" src="/char/1.jpg" alt="AI 形象" draggable="false" />
+      <div id="chat-scroll"><div id="messages"></div></div>
+      <!-- 空态（token 门验证后）：与 SubPj3 阶段3 一致——居中正方形趴栏图铺满；
+           输入栏（#input-wrap）在 stage 内真相对定位（SubPj3 同款：top=台面 76.75% − 半高 26px），
+           任意窗口大小都贴图走不偏移；app.js 按界面在 stage（空态）↔ 会话卡（会话 docked）间移动挂载 -->
+      <div id="empty-hint">
+        <div class="g-stage">
+          <div class="g-media">
+            <img class="g-ph empty-ico" src="/gate/state-newchat.webp?v=2" alt="Floria" />
           </div>
-          <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]） -->
-          <div id="cmd-pop" hidden></div>
-          <!-- @ 提及浮窗：输入 @ 时在输入栏上方弹出（插件/技能 + 近48h 会话），宽度=输入栏 -->
-          <!-- 文件变更胶囊已移除（2026-08-26 任务 C）：实时变更改在处理折叠内内联展示，不再悬浮输入栏上方 -->
-          <div id="mention-pop" hidden></div>
+          <div id="input-wrap">
+            <!-- 输入栏（2026-08-21 dsh InputBar 完全移植：照抄 deepseek-harness InputBar.module.css .card 布局——
+                 textarea(#input) 顶部 + 底部 .row 工具行[左 .tools = .add(+命令) + .modes（只读无权限数据→空） +
+                 右 .trailing = .trigger 模型·推理座 + .primary 发送]。
+                 2026-08-21 用户纠正：完全移植源码，不再自作主张加 upload/think/mic 胶囊） -->
+            <div id="input-bar">
+              <!-- 附件胶囊（2026-08-28 图片 / 2026-09-12 文件）：待发送附件行；入口在 + 浮窗「上传」组 -->
+              <div id="img-pills" hidden></div>
+              <div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-ph="输入消息，Enter 发送"></div>
+              <div class="row">
+                <div class="tools">
+                  <input id="img-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+                  <!-- 文件上传（2026-09-12）：+ 浮窗「上传文件」行触发；POST /gateway/upload 落盘 exe 目录 uploads/ -->
+                  <input id="file-upload" type="file" multiple hidden />
+                  <button id="cmd-btn" class="add" title="命令" aria-label="命令" aria-haspopup="listbox"></button>
+                  <!-- 项目选择器（2026-09-02）：空态=右侧切换目标项目（=侧栏项目「+」同链路 state.newProject，
+                       首条消息按它落项目）；会话态=工作文件夹标识保留显示但锁定只读（.locked 白底无箭头，
+                       #chat-area.in-session 门控；管理/预览态挂载点不在会话卡内自动隐藏） -->
+                  <div id="proj-root" class="proj-root">
+                    <button id="proj-seat" class="proj-seat" title="目标项目" aria-label="目标项目" aria-haspopup="menu">
+                      <span class="projIco"></span><span class="projLabel">全局</span><span class="chevron"></span>
+                    </button>
+                    <div id="proj-pop" hidden></div>
+                  </div>
+                  <div class="modes"></div>
+                </div>
+                <div class="trailing">
+                  <!-- 模型·推理座（dsh ModelSelect .root：.trigger chip + .menu 定位上下文） -->
+                  <div id="model-root" class="model-root">
+                    <button id="model-seat" class="trigger" title="模型与推理等级" aria-label="模型与推理等级" aria-haspopup="menu">
+                      <span class="triggerLabel"></span>
+                      <span class="triggerEffort"></span>
+                      <span class="chevron"></span>
+                    </button>
+                    <!-- 模型·推理等级弹窗（dsh ModelSelect .menu）：root→Model/Effort 两级 drill -->
+                    <div id="model-pop" hidden></div>
+                  </div>
+                  <!-- 上下文占用（dsh ContextMeter）：发送钮左边的环形小圆，展示上下文已用百分比，
+                       点击展开 breakdown 面板。数据来自 /api/session 的 context 字段（网关提取）。
+                       无数据（无 usage / 无模型窗口）时 hidden。 -->
+                  <div id="ctx-meter" class="ctx-meter" hidden>
+                    <button id="ctx-btn" class="ctx-trigger" type="button" title="上下文已用" aria-label="上下文已用" aria-haspopup="dialog" aria-expanded="false"></button>
+                    <div id="ctx-panel" class="ctx-panel" role="dialog" aria-label="上下文已用" hidden></div>
+                  </div>
+                  <button id="send-btn" class="primary" title="只读查看 · 无法发送" aria-label="发送"></button>
+                </div>
+              </div>
+              <!-- composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁入 #input-bar 子元素位，用户定案：
+                   审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
+                   隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
+              <div id="composer-takeover" hidden></div>
+              <!-- 底栏任务浮窗（2026-09-10；几何 09-11 二轮定案）：CLI TodoV2 清单（源码 useTasksV2 单源出口
+                   → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位（bottom:100%）：
+                   收敛态露出 12px 把手条（#task-lip，白表面+1px 0.10 描边，与输入栏/面板同族材质），
+                   点击上展 .td-panel（宽=输入栏宽−48px 居中、
+                   底边与输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px,var(--bar-room,460px)) 内部滚动），
+                   再点头部向下收敛。
+                   无清单整窗 hidden；审批/提问接管卡在场 → .blocked 收敛且禁点（.bar-takeover 规则本就 display:none 让位）。 -->
+              <div id="task-dock" hidden>
+                <button id="task-lip" class="td-lip" type="button" aria-expanded="false" aria-controls="task-panel" title="展开任务清单"></button>
+                <div id="task-panel" class="td-panel" role="region" aria-label="任务清单"></div>
+              </div>
+            </div>
+            <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]） -->
+            <div id="cmd-pop" hidden></div>
+            <!-- @ 提及浮窗：输入 @ 时在输入栏上方弹出（插件/技能 + 近48h 会话），宽度=输入栏 -->
+            <!-- 文件变更胶囊已移除（2026-08-26 任务 C）：实时变更改在处理折叠内内联展示，不再悬浮输入栏上方 -->
+            <div id="mention-pop" hidden></div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   </main>
 
   <!-- 搜索覆盖层 -->
@@ -258,6 +250,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=361"></script>
+<script src="/app.js?v=365"></script>
 </body>
 </html>

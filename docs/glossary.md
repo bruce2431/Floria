@@ -29,9 +29,18 @@
 
 | 规范名 | 实体 | 说明 | 旧称 |
 |---|---|---|---|
-| 侧栏 | `#sidebar` | = 折叠轨 + 展开面板；展开态右缘可拖拽调宽（`#panel-resizer` 把手，仅展开态 ≥721px 显示，范围 [232, min(560, 视口−120)] 写 `:root --panel-w`，**不记忆**——折叠即清内联值回默认 280px） | 侧栏 |
-| 折叠轨 | `#rail` | 折叠态 64px 窄条；其图标组统称 **rail 图标族**（logo/新建/搜索/最近会话/头像） | |
-| 展开面板 | `#panel` | 展开态 280px：品牌行 + 管理 tabs + 最近列表 | |
+| 底板 | `--plane`（`#ececf1`） | 容器底色，`body` 与 `#app` 同色 ⇒ 整窗读作一块底板（`#app` 的 22px 外框圆弧融进底板不再显形）；**侧栏与视图卡之间的缝隙露出它当分隔**。卡化读法见 web-ui §41 | 底子/画布 |
+| 无形槽 | `#chat-area` | 承载视图卡的无形状容器：通高、无圆角/无背景/无边距，只作定位与卡的 flex 容器；`#gate-screen`（token 门浮层）与 `#menu-btn`（移动端抽屉把手）留槽级，与「当前哪张卡」无关。**同一时刻槽里恰好一张卡** | 主区/内容区 |
+| 视图卡 | `.view-card` | 浮在底板上的圆角卡（`border-radius: var(--radius)` + 边距 2px + `background: var(--chat-bg)` + `position: relative`）：会话流/管理视图/项目预览各一张；**不画线、不加阴影**，分隔只靠与底板的底色差。`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形 | 内容卡 |
+| 会话卡 | `#session-card`（`.view-card.session`） | 会话视图那张卡，常驻 `index.html`——承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM，**离开只切 `hidden` 不销毁** | |
+| 管理卡 | `.view-card.mgr` | 插件/项目/模型/神经四个管理视图的卡，按需创建、离开即 `.remove()`（神经元图 rAF 以 `canvas.isConnected` 自毁） | |
+| 预览卡 | `.view-card[data-view=preview]` | 项目预览那张卡（非注册表条目，走 `showPreviewCard()`）；同样按需创建、离开即 `.remove()` | |
+| 卡内滚动层 | `.view-scroll` / `.view-body` | 管理卡的滚动层与内容列（`24px 20px 8px` 内边距 + 920px 内容宽），镜像会话卡 `#chat-scroll` 的几何；全高视图（预览/神经元图）由 `.view-card:has(...)` 改 padding/overflow | |
+| 视图注册表 | `views/registry.js` `VIEWS` | 视图定义单一真源（`{id,title,tip,icon,tab,render\|card}`）：侧栏 tab 生成 / `#mgr/<id>` 路由 / 卡体渲染三处查同一张表；**整卡切换唯一入口 `showView(id)`**，会话卡以 `tab:false` 入表走同一路径（web-ui §41） | tab 定义 |
+| 侧栏 | `#sidebar` | = 折叠轨 + 展开面板。**是 `#app` 的真实 flex 子元素**（桌面 ≥721px 亦然）：折叠 64 ↔ 展开 280 **只由自身宽度驱动**，主区 `#chat-area` 靠 flex 跟随收放（无 `padding-left` 避让，门期收宽至 0）。**背景透明 = 底板本身**（无自身形状）；手机 ≤720px 为覆盖式抽屉（脱离 flex 流，显式给底板色，否则透出 `#scrim` 发黑）。展开态右缘可拖拽调宽（`#panel-resizer` 把手，仅展开态 ≥721px 显示，范围 [232, min(560, 视口−120)] 写 `:root --panel-w`，**不记忆**——折叠即清内联值回默认 280px） | 侧栏 |
+| 折叠轨 | `#rail` | 折叠态 64px 窄条（底色同底板）；其图标组统称 **rail 图标族**（logo/新建/搜索/最近会话/头像 + 注册轨按钮） | |
+| 注册轨按钮 | `#rail-ext .rail-ico` | **预览页**经 `postMessage` 往折叠轨注册的快捷按钮（容器 `#rail-ext` 为 `display:contents`，不产生盒 ⇒ 与内置图标同列同 gap）；点击回跳预览页。注册集属于当前那份预览文档，换文档即清（web-ui §39） | 预览注册按钮 |
+| 展开面板 | `#panel` | 展开态 280px：品牌行 + 管理 tabs + 最近列表；底色同底板、**不画右缘分隔线**（侧栏是通高平面，分隔由底板色从卡缝露出承担，web-ui §41） | |
 | 最近列表 | `#recent`/`#recent-body` | 会话容器（「最近」头 + 整理会话 + 模式 tabs） | |
 | 整理会话弹层 | `#organize-pop` | 「一个列表 / 按项目展开」切换浮层 | |
 | 模式 tabs | `#mode-tabs` | 项目/聊天两种列表排列 | |

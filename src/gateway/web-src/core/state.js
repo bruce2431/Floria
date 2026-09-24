@@ -5,6 +5,7 @@ import { setConn } from './gateway.js'
 import { ctx } from '../inputbar/ctx-meter.js'
   // ---------- 元素 ----------
   const chatArea = $('chat-area')
+  const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
   const messagesEl = $('messages')
   const inputWrap = $('input-wrap')
   const inputEl = $('input')
@@ -98,6 +99,7 @@ export {
   sInput,
   saveMgrView,
   sendBtn,
+  sessionCard,
   sidebar,
   state,
   timer,

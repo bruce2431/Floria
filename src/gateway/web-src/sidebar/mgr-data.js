@@ -4,7 +4,7 @@ import { hideGate } from '../core/auth.js'
 import { needToken, apiUrl } from '../core/gateway.js'
 import { loadModelCur, saveModelCur, MODEL_CUR, renderModelSeat } from '../inputbar/model-select.js'
 import { state } from '../core/state.js'
-import { renderMgrGrid, renderMgrModels } from './mgr.js'
+import { renderMgrGrid, renderMgrModelList } from './mgr.js'
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
   // 首次进入管理视图 fetch，刷新按钮 force 重新拉取；失败显示错误 + 重试（不回落假数据）。
@@ -39,7 +39,7 @@ import { renderMgrGrid, renderMgrModels } from './mgr.js'
     if (needToken()) return null // token 门锁定态：不发起数据请求
     MODELS_LOADING = true
     MODELS_ERR = ''
-    renderMgrModels()
+    renderMgrModelList()
     try {
       const res = await fetch(apiUrl('/gateway/models'))
       const data = await res.json()
@@ -67,7 +67,7 @@ import { renderMgrGrid, renderMgrModels } from './mgr.js'
       if (!MODELS) MODELS_ERR = e.message || String(e)
     } finally {
       MODELS_LOADING = false
-      renderMgrModels()
+      renderMgrModelList()
       renderModelSeat() // 2026-08-25 模型数据落地后刷新输入栏模型 seat（含 hideGate 补拉场景）
     }
     return MODELS

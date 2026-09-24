@@ -20,9 +20,13 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'chat/route.js', ranges: [[899, 1205]], first: ['  // ---------- 路由 ----------'] },
   { file: 'chat/messages.js', ranges: [[1206, 1947], [4349, 4418]], first: ['  // ---------- 消息渲染 ----------', '  let pendingUserMsgs = []'] },
   { file: 'sidebar/recent.js', ranges: [[1948, 2438]], first: ['  // ---------- 侧栏 ----------'] },
-  { file: 'sidebar/mgr.js', ranges: [[2439, 2893]], first: ['  function renderMgr() {'] },
+  { file: 'sidebar/rail-ext.js', ranges: [[2438, 2438]], first: ['  // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------'] },
+  { file: 'sidebar/mgr.js', ranges: [[2439, 2893]], first: ['  // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。'] },
   { file: 'sidebar/neurons.js', ranges: [[2893, 2893]], first: ['  // ---------- 神经元视图（web「神经」tab）----------'] },
   { file: 'sidebar/bubble-search.js', ranges: [[2894, 2932]], first: ['  // ---------- 气泡弹层 ----------'] },
+  // 视图注册表（2026-09-23 视图卡化）：区间号取 2932 只作执行序排序 —— 排在 tab 生成所需的
+  // core/icons.js(I) 与 core/state.js(esc/#chat-area/session-card) 之后、__app__ 事件绑定之前。
+  { file: 'views/registry.js', ranges: [[2932, 2932]], first: [''] },
   { file: '__app__', ranges: [[2933, 3011], [5379, 5398]], first: ['  // ---------- 事件绑定 ----------', '  // ---------- 启动 ----------'] },
   { file: 'inputbar/ctx-meter.js', ranges: [[3012, 3303]], first: ['  // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------'] },
   { file: 'core/gateway.js', ranges: [[3304, 3420], [4154, 4161], [4969, 5047], [5352, 5378]], first: ['  // ---------- 网关模式（SubPj2 私有化网关）----------', '  function setConn(on, label) {', '  function connect() {', '  function initGateway() {'] },

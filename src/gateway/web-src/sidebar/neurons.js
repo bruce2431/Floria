@@ -2,17 +2,14 @@
 // （mem→cog→社群；2026-09-16 新增，数据源 = 网关 /gateway/neurons[/graph]，见 src/gateway/neuronViz.ts）
 
 import { apiUrl, needToken } from '../core/gateway.js'
+import { I } from '../core/icons.js'
+import { esc, isMobile, saveMgrView, state } from '../core/state.js'
+import { viewBody } from '../views/registry.js'
 import { mgrColor, MGR_PALETTE } from './mgr-data.js'
 import { setPanel } from './recent.js'
-import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toast } from '../core/state.js'
   // ---------- 神经元视图（web「神经」tab）----------
-
-  // 脑图标（层级1 卡片 + index.html tab 同款内联 svg）
-  const NEU_ICON =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/>' +
-    '<path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/>' +
-    '<path d="M12 4.5v13.5M12 18v1.5"/></svg>'
+  // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
+  // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
 
   // ---------- 数据源：神经元清单（层级1） ----------
   let NEU = null
@@ -57,30 +54,29 @@ import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toa
       NEU_GRAPH_ERR = e.message || String(e)
     } finally {
       NEU_GRAPH_LOADING = false
-      if (state.mgrView.neuronSel) renderMgrNeurons() // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态
+      // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态。回程守卫 = 神经元卡仍在槽里才对它渲染
+      // （旧实现无条件 renderMgrNeurons()，图数据慢过用户切 tab 时会把别的视图洗掉）。
+      const b = viewBody('neurons')
+      if (b && state.mgrView.neuronSel) renderMgrNeurons(b)
     }
     return NEU_GRAPH
   }
 
-  /** 神经元视图统一分发（mgr.js renderMgr 的 neurons 分支入口）：有选中 = 图视图，无 = 选择界面 */
-  function renderMgrNeurons() {
-    if (state.mgrView.neuronSel) renderNeuGraphView()
-    else renderNeuPicker()
+  /** 神经元视图统一分发（注册表 neurons 条的 render）：有选中 = 图视图，无 = 选择界面 */
+  function renderMgrNeurons(body) {
+    if (state.mgrView.neuronSel) renderNeuGraphView(body)
+    else renderNeuPicker(body)
   }
 
   // ---------- 层级1：神经元选择界面 ----------
-  function renderNeuPicker() {
-    messagesEl.innerHTML =
+  function renderNeuPicker(body) {
+    body.innerHTML =
       '<div class="mgr-pane">' +
-      '<div class="mgr-top"></div>' +
       '<div class="mgr-head"><h2 class="mgr-title">神经元</h2>' +
       '<div class="mgr-sub">记忆神经元库 · mem→认知→社群三级节点图（数据源 .claude/neturon/neurons）</div></div>' +
       '<div class="mgr-grid" id="neu-grid"></div>' +
       '<div class="mgr-foot">数据源：网关 /gateway/neurons 实时扫描</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     renderNeuGrid()
     loadNeuronsData(false)
   }
@@ -117,7 +113,7 @@ import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toa
   function neuCardHtml(n) {
     return (
       `<div class="mgr-card neu-card" data-id="${esc(n.id)}" title="进入 ${esc(n.name || n.id)} 节点图">` +
-      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${NEU_ICON}</div>` +
+      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${I.brain}</div>` +
       '<div class="mgr-meta">' +
       `<div class="mgr-name">${esc(n.name || n.id)}<span class="inst-badge">${esc(n.id)}</span></div>` +
       `<div class="mgr-desc">${esc(n.description || '（无触发说明）')}</div>` +
@@ -130,10 +126,10 @@ import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toa
   }
 
   // ---------- 层级2：节点图视图 ----------
-  function renderNeuGraphView() {
+  function renderNeuGraphView(body) {
     const sel = state.mgrView.neuronSel
     const meta = (NEU || []).find((n) => n.id === sel)
-    messagesEl.innerHTML =
+    body.innerHTML =
       '<div class="mgr-pane neu-pane">' +
       '<div class="neu-head">' +
       '<button class="neu-back" id="neu-back" title="返回神经元选择">‹ 神经元</button>' +
@@ -144,9 +140,6 @@ import { chatArea, esc, inputWrap, isMobile, messagesEl, saveMgrView, state, toa
       '<div class="neu-graph" id="neu-graph"><canvas id="neu-canvas"></canvas><div class="neu-pop" id="neu-pop" hidden></div></div>' +
       '<div class="mgr-foot">滚轮缩放 · 空白处拖拽平移 · 节点可拖拽 · 悬停/点击弹浮窗 · 数据源 /gateway/neurons/graph</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     const back = $('neu-back')
     if (back)
       back.addEventListener('click', () => {

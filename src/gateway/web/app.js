@@ -19,10 +19,14 @@
     toggle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="5" width="6.5" height="14" rx="2"/><rect x="14" y="5" width="6.5" height="14" rx="2"/></svg>',
     collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6 15.5 12 9.5 18"/></svg>',
     folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
+    // 插件（2026-09-23 视图卡化：从 index.html 的 tab 内联 SVG 迁入，注册表按 icon:'plug' 引用）
+    plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M10.2 3.5H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 3.5h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M10.2 13.7H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 13.7h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/></svg>',
     msg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5V19H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>',
     chip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></svg>',
+    // 神经（2026-09-23 视图卡化：原 neurons.js 的 NEU_ICON 常量迁入，注册表按 icon:'brain' 引用）
+    brain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/><path d="M12 4.5v13.5M12 18v1.5"/></svg>',
     // DeepSeek 鲸鱼 logo（deepseek-harness packages/client/ui-primitives/src/FishLogo.tsx，figma I39:24057 精确提取，fill=currentColor 随父级）
     whale: '<svg class="whale" viewBox="0 0 23.16 17.04" fill="none" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z" fill="currentColor"/></svg>',
     // ---- dsh 输入栏图标（2026-08-21 完全移植：deepseek-harness ui-primitives/icons 精确 path，fill=currentColor）----
@@ -76,7 +80,7 @@
     if (needToken()) return null // token 门锁定态：不发起数据请求
     MODELS_LOADING = true
     MODELS_ERR = ''
-    renderMgrModels()
+    renderMgrModelList()
     try {
       const res = await fetch(apiUrl('/gateway/models'))
       const data = await res.json()
@@ -104,7 +108,7 @@
       if (!MODELS) MODELS_ERR = e.message || String(e)
     } finally {
       MODELS_LOADING = false
-      renderMgrModels()
+      renderMgrModelList()
       renderModelSeat() // 2026-08-25 模型数据落地后刷新输入栏模型 seat（含 hideGate 补拉场景）
     }
     return MODELS
@@ -118,6 +122,7 @@
 
   // ---------- 元素 ----------
   const chatArea = $('chat-area')
+  const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
   const messagesEl = $('messages')
   const inputWrap = $('input-wrap')
   const inputEl = $('input')
@@ -1216,7 +1221,8 @@ function setSessionCwd(v) { sessionCwd = v }
     // 任何导航（route 被调用）→ 退出管理视图；管理视图只由 mgr-tab 点击直接 renderMgr 进入，不走 route
     state.mgr = null
     state.preview = null
-    if (r.name !== 'preview') state.previewMounted = null // 离开预览：清已挂载标记，下次进入重挂
+    // 离开预览：清已挂载标记（下次进入重挂）+ 清预览页注册的侧栏快捷按钮（注册集属于那份文档）
+    if (r.name !== 'preview') { state.previewMounted = null; clearRailExt() }
     // 离开项目预览时回收 backend 保活心跳（2026-08-27 返回按钮移除后，退出预览全靠导航）
     if (window.__backendHeartbeat) {
       clearInterval(window.__backendHeartbeat)
@@ -1270,10 +1276,12 @@ function setSessionCwd(v) { sessionCwd = v }
   }
 
   // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（top=台面 76.75%−26px），
-  // 会话态移回 #chat-area 沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
+  // 会话态移回会话卡沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
+  // 2026-09-23 卡化：两处基准都在会话卡内（.g-stage 是卡的后代；docked 目标是卡本身），
+  // 输入栏随会话卡生灭——不再有「挂槽位」的旧路径。
   const emptyStageEl = () => document.querySelector('#empty-hint .g-stage')
   function mountInput(where) {
-    const target = where === 'stage' ? emptyStageEl() : chatArea
+    const target = where === 'stage' ? emptyStageEl() : sessionCard
     if (target && inputWrap.parentNode !== target) target.appendChild(inputWrap)
   }
   // 输入栏 stage↔chat 迁移的 FLIP 补间（2026-08-30 丝滑空态→会话）：换父后 top/width 是
@@ -1361,7 +1369,7 @@ function setSessionCwd(v) { sessionCwd = v }
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
-    chatArea.classList.remove('mgr-on')
+    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }
 
@@ -1391,8 +1399,8 @@ function setSessionCwd(v) { sessionCwd = v }
     clearTakeover() // 切换会话：清掉残留的提问/审批 takeover（输入栏恢复）
     closeProjPop() // 切换会话：项目选择器弹层一并收起（初始界面专属件）
     renderProjSeat() // 会话态：工作文件夹标识按当前会话项目重渲（锁定只读）
-    chatArea.classList.remove('mgr-on')
-    flipInput(false) // 输入栏移回 #chat-area 沉底（FLIP 像素级补间）
+    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    flipInput(false) // 输入栏移回会话卡沉底（FLIP 像素级补间）
     const s = findSession(hash)
     state.currentHash = hash
     sendSubscribe() // 2026-08-30 pending 重放：切会话即订阅 → 网关回放该会话未决审批/提问（补弹交互卡）
@@ -2422,8 +2430,8 @@ function setLastNavHash(v) { lastNavHash = v }
 
   // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
   // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联
-  // --panel-w——#sidebar/#panel 宽、主区避让 padding、输入栏 half-padding 补偿全消费同一变量，
-  // 天然联动；不持久化，setPanel(false) 清内联值。拖拽中 body.sb-resizing 关宽度过渡即时跟手。
+  // --panel-w——#sidebar 与 .panel-inner 的宽消费同一变量，主区靠 flex 跟随；不持久化，
+  // setPanel(false) 清内联值。拖拽中 body.sb-resizing 关宽度过渡即时跟手。
   {
     const rz = $('panel-resizer')
     const clampW = (x) => Math.max(232, Math.min(560, window.innerWidth - 120, x))
@@ -2897,6 +2905,53 @@ function setLastNavHash(v) { lastNavHash = v }
   // 插件与技能预览都从「插件」入口进入，顶部插件/技能切换；数据源 = 网关 /gateway/plugins 实时扫描。
   // 重渲保留滚动位置（切换 kind/cat 时内容高度变化，避免 scrollTop 被重置成可见跳动）。
 function setFirstSendHash(v) { firstSendHash = v }
+  // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
+  // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
+  // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道，同 default-preview
+  // 的 floria-open-session 先例；宿主侧此前无对应监听，本模块补上）。
+  // 契约：预览页 → 宿主 parent.postMessage({ type:'floria-rail-register', items:[{id,icon,title}] }, '*')
+  //       icon = I 图标表的键（不让预览页自送 SVG——视觉沿用侧栏现成图标，SPEC §6.4「不新增视觉」）
+  //       title = 悬浮提示；id 由预览页自定义，点击时原样回传。
+  //       宿主 → 预览页 frame.contentWindow.postMessage({ type:'floria-rail-action', id }, '*')
+  // 呈现：折叠态 = 复现成 .rail-ico（28px 圆角 8，hover --hover），挂进 #rail-mid；#rail-ext 用
+  //       display:contents 不产生盒，子元素与内置四个图标同列同 gap 居中（零新增视觉）。
+  // 不变量：注册集属于**当前加载的那份预览文档**——文档换（iframe 换 src / 重建 / 离开预览），
+  //        注册集即失效并清空；凭 e.source 精确匹配当前 .preview-frame 才采纳，别处窗口伪报不进来。
+  let railExtItems = []
+  function clearRailExt() {
+    railExtItems = []
+    const box = $('rail-ext')
+    if (box) box.innerHTML = ''
+  }
+  function renderRailExt() {
+    const box = $('rail-ext')
+    if (!box) return
+    box.innerHTML = railExtItems
+      .map((it) => `<button class="rail-ico" data-rail-id="${esc(it.id)}" title="${esc(it.title)}">${I[it.icon]}</button>`)
+      .join('')
+    box.querySelectorAll('.rail-ico').forEach((b) =>
+      b.addEventListener('click', () => {
+        const f = document.querySelector('.preview-frame')
+        if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'floria-rail-action', id: b.dataset.railId }, '*')
+      }),
+    )
+  }
+  function bindRailExtBridge() {
+    addEventListener('message', (e) => {
+      const d = e.data
+      if (!d || d.type !== 'floria-rail-register') return
+      const f = document.querySelector('.preview-frame')
+      if (!f || f.contentWindow !== e.source) return
+      // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
+      railExtItems = (Array.isArray(d.items) ? d.items : [])
+        .filter((it) => it && typeof it.id === 'string' && it.id && Object.prototype.hasOwnProperty.call(I, it.icon))
+        .map((it) => ({ id: it.id, icon: it.icon, title: typeof it.title === 'string' ? it.title : '' }))
+      renderRailExt()
+    })
+  }
+  bindRailExtBridge()
+
+  // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。
   function renderMgr() {
     closeMentionPop()
     stopLiveFoldTimer()
@@ -2906,63 +2961,50 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
     // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
     // 清槽，会话 A 的 session-delta 到达时按残留 curUuid 命中守卫 → renderSessionBody 整页重建
-    // #messages 把管理视图（如神经元图）洗成会话消息流；#chat-area.mgr-on 仍在位（CSS 隐藏
-    // #input-wrap）=「跳到 chat、有宽度没底栏」。清槽清单与不变量见 route.js clearSessionSlots。
+    // #messages 把管理视图（如神经元图）洗成会话消息流。清槽清单与不变量见 route.js clearSessionSlots。
     clearSessionSlots()
-    const scrollEl = document.querySelector('#chat-scroll')
-    const prevTop = scrollEl ? scrollEl.scrollTop : 0
-    // 「项目」入口：仿照插件布设，每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
-    if (state.mgr === 'projects') {
-      // 顶部结构与插件视图完全同构（mgr-top mgr-kind + mgr-cats 占位），避免切换跳动；无刷新/设置按钮
-      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
-      messagesEl.innerHTML =
-        '<div class="mgr-pane">' +
-        // 空 mgr-top 占位：与插件视图「插件/技能」切换行等高（.mgr-top min-height），避免切换时标题跳动
-        '<div class="mgr-top"></div>' +
-        '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
-        '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
-        `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
-        `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
-        '<div class="mgr-list" id="mgr-list"></div>' +
-        '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
-        '</div>'
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      renderMgrProj()
-      const pq = $('mgr-pq')
-      if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
-      return
-    }
-    // 「模型」入口：仿照项目布设，展示便携根 settings.json 的模型配置（只读）
-    if (state.mgr === 'models') {
-      // 顶部结构与插件视图完全同构（空 mgr-top 占位等高防跳）
-      messagesEl.innerHTML =
-        '<div class="mgr-pane">' +
-        '<div class="mgr-top"></div>' +
-        '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
-        '<div class="mgr-model-list" id="mgr-model-list"></div>' +
-        '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
-        '</div>'
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      renderMgrModels()
-      loadModelsData(false)
-      return
-    }
-    // 「神经」入口：层级1 神经元选择卡片，层级2 三级节点图（neurons.js，数据源 /gateway/neurons[/graph]）
-    if (state.mgr === 'neurons') {
-      renderMgrNeurons()
-      return
-    }
+    // 切卡：同 id 卡复用（卡体整换、滚动层不动 ⇒ 滚动位置天然保持），异 id 卡新建并 .remove() 旧卡
+    showView(state.mgr)
+  }
+
+  // 「项目」视图：每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
+  function renderMgrProjects(body) {
+    const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
+      '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
+      `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
+      `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
+      '<div class="mgr-list" id="mgr-list"></div>' +
+      '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
+      '</div>'
+    renderMgrProj()
+    const pq = $('mgr-pq')
+    if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
+  }
+
+  // 「模型」视图：便携根 settings.json 的模型配置（只读；数据源 = 网关 /gateway/models）
+  function renderMgrModels(body) {
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
+      '<div class="mgr-model-list" id="mgr-model-list"></div>' +
+      '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
+      '</div>'
+    renderMgrModelList()
+    loadModelsData(false)
+  }
+
+  // 「插件/技能」视图（id='plugins' 的默认形态，即侧栏第一 tab）
+  function renderMgrPlugins(body) {
     const v = state.mgrView
     const kindName = v.kind === 'skills' ? '技能' : '插件'
     const sub =
       v.kind === 'skills'
         ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
         : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
-    messagesEl.innerHTML =
+    body.innerHTML =
       '<div class="mgr-pane">' +
       '<div class="mgr-top">' +
       '<div class="mgr-kind">' +
@@ -2979,19 +3021,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       '<div class="mgr-grid" id="mgr-grid"></div>' +
       '<div class="mgr-foot">数据源：网关 /gateway/plugins 实时扫描</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     renderMgrGrid()
     loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉
-    // 恢复滚动位置（scroll-behavior:smooth 会让赋值动画，临时切 auto 立即归位）
-    if (scrollEl) {
-      const old = scrollEl.style.scrollBehavior
-      scrollEl.style.scrollBehavior = 'auto'
-      scrollEl.scrollTop = prevTop
-      scrollEl.style.scrollBehavior = old
-    }
-    const pane = messagesEl.querySelector('.mgr-pane')
+    const pane = body.querySelector('.mgr-pane')
     pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
       b.addEventListener('click', () => {
         v.kind = b.dataset.kind
@@ -3123,7 +3155,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (vl.includes('doubao')) return '字节豆包'
     return '自定义 / 其他'
   }
-  function renderMgrModels() {
+  // 模型列表的卡体渲染（写进 .mgr-model-list；2026-09-23 卡化改名：renderMgrModels 一名已归「模型视图」）
+  function renderMgrModelList() {
     const list = $('mgr-model-list')
     if (!list) return
     if (MODELS_LOADING) {
@@ -3205,7 +3238,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const ok = await apiSetModel({ defaultModel: id })
     if (ok) {
       if (MODELS) MODELS.activeModel = id
-      renderMgrModels()
+      renderMgrModelList()
       toast(`默认模型已设为 ${id}`)
     } else {
       toast('设置失败 · 模型不在凭据池或网关未连接')
@@ -3226,7 +3259,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 用户切屏频繁 → WS 重连频繁 → 重挂频繁）。改两级重入：同 label 且 iframe 在场（data-label 锚定）=
     // 软重入——不重写 shell、不清槽，三级链照跑但 mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航
     // 扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；异 label 或 iframe 不在场 = 硬挂载。
-    const curFrame = messagesEl.querySelector('.preview-frame')
+    // 2026-09-23 视图卡化：预览不再是「把 shell 塞进 #messages」，而是自己的整张卡（.view-card，
+    // data-view='preview'，见 views/registry.js showPreviewCard）。卡体一律经 viewBody('preview') 取——
+    // 预览卡不在槽里则返回 null（异步回程不写别人家的卡）；槽里的会话卡已随之 hidden，旧版
+    // inputWrap/chatArea 三条 mgr-on 压制规则的前提消失。
+    showPreviewCard()
+    const body = viewBody('preview')
+    if (!body) return
+    const curFrame = body.querySelector('.preview-frame')
     const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
     if (!soft) {
       state.currentHash = ''
@@ -3236,22 +3276,22 @@ function setFirstSendHash(v) { firstSendHash = v }
       // 见 route.js clearSessionSlots；2026-09-19 收敛为共享出口，管理视图同款）。
       clearSessionSlots()
       state.preview = label
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      messagesEl.innerHTML =
+      body.innerHTML =
         '<div class="preview-shell">' +
         '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
         '</div>'
     }
+    // 预览 iframe 挂在 .preview-body 里（该层由上面的 shell 建立，软重入时原样保留）
     const mount = (src, name, already) => {
-      const body = document.querySelector('.preview-body')
+      const vbody = viewBody('preview') // 预览卡仍在槽里才挂（三级链是异步的，回程时视图可能已被换走）
+      const body = vbody && vbody.querySelector('.preview-body')
       if (!body) return
       // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
       // 一律不走下方整区重建
       const cur = body.querySelector('.preview-frame')
       if (cur) {
-        if (cur.getAttribute('src') !== src) cur.setAttribute('src', src)
+        // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
+        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
         state.previewMounted = src.includes('/default-preview/') ? null : label
         return
       }
@@ -3263,6 +3303,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       //    还需数秒，缓冲 8s 自动淡出（不再永远卡转圈），点击仍可提前关闭（focus iframe 移交内部焦点）。
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
+      clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
       body.innerHTML =
         `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already
@@ -3383,13 +3424,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // ---------- 神经元视图（web「神经」tab）----------
-
-  // 脑图标（层级1 卡片 + index.html tab 同款内联 svg）
-  const NEU_ICON =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/>' +
-    '<path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/>' +
-    '<path d="M12 4.5v13.5M12 18v1.5"/></svg>'
+  // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
+  // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
 
   // ---------- 数据源：神经元清单（层级1） ----------
   let NEU = null
@@ -3434,30 +3470,29 @@ function setFirstSendHash(v) { firstSendHash = v }
       NEU_GRAPH_ERR = e.message || String(e)
     } finally {
       NEU_GRAPH_LOADING = false
-      if (state.mgrView.neuronSel) renderMgrNeurons() // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态
+      // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态。回程守卫 = 神经元卡仍在槽里才对它渲染
+      // （旧实现无条件 renderMgrNeurons()，图数据慢过用户切 tab 时会把别的视图洗掉）。
+      const b = viewBody('neurons')
+      if (b && state.mgrView.neuronSel) renderMgrNeurons(b)
     }
     return NEU_GRAPH
   }
 
-  /** 神经元视图统一分发（mgr.js renderMgr 的 neurons 分支入口）：有选中 = 图视图，无 = 选择界面 */
-  function renderMgrNeurons() {
-    if (state.mgrView.neuronSel) renderNeuGraphView()
-    else renderNeuPicker()
+  /** 神经元视图统一分发（注册表 neurons 条的 render）：有选中 = 图视图，无 = 选择界面 */
+  function renderMgrNeurons(body) {
+    if (state.mgrView.neuronSel) renderNeuGraphView(body)
+    else renderNeuPicker(body)
   }
 
   // ---------- 层级1：神经元选择界面 ----------
-  function renderNeuPicker() {
-    messagesEl.innerHTML =
+  function renderNeuPicker(body) {
+    body.innerHTML =
       '<div class="mgr-pane">' +
-      '<div class="mgr-top"></div>' +
       '<div class="mgr-head"><h2 class="mgr-title">神经元</h2>' +
       '<div class="mgr-sub">记忆神经元库 · mem→认知→社群三级节点图（数据源 .claude/neturon/neurons）</div></div>' +
       '<div class="mgr-grid" id="neu-grid"></div>' +
       '<div class="mgr-foot">数据源：网关 /gateway/neurons 实时扫描</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     renderNeuGrid()
     loadNeuronsData(false)
   }
@@ -3494,7 +3529,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function neuCardHtml(n) {
     return (
       `<div class="mgr-card neu-card" data-id="${esc(n.id)}" title="进入 ${esc(n.name || n.id)} 节点图">` +
-      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${NEU_ICON}</div>` +
+      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${I.brain}</div>` +
       '<div class="mgr-meta">' +
       `<div class="mgr-name">${esc(n.name || n.id)}<span class="inst-badge">${esc(n.id)}</span></div>` +
       `<div class="mgr-desc">${esc(n.description || '（无触发说明）')}</div>` +
@@ -3507,10 +3542,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // ---------- 层级2：节点图视图 ----------
-  function renderNeuGraphView() {
+  function renderNeuGraphView(body) {
     const sel = state.mgrView.neuronSel
     const meta = (NEU || []).find((n) => n.id === sel)
-    messagesEl.innerHTML =
+    body.innerHTML =
       '<div class="mgr-pane neu-pane">' +
       '<div class="neu-head">' +
       '<button class="neu-back" id="neu-back" title="返回神经元选择">‹ 神经元</button>' +
@@ -3521,9 +3556,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       '<div class="neu-graph" id="neu-graph"><canvas id="neu-canvas"></canvas><div class="neu-pop" id="neu-pop" hidden></div></div>' +
       '<div class="mgr-foot">滚轮缩放 · 空白处拖拽平移 · 节点可拖拽 · 悬停/点击弹浮窗 · 数据源 /gateway/neurons/graph</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     const back = $('neu-back')
     if (back)
       back.addEventListener('click', () => {
@@ -4035,6 +4067,74 @@ function setFirstSendHash(v) { firstSendHash = v }
       }),
     )
   }
+
+
+  // ---------- 视图注册表 ----------
+  const VIEWS = [
+    // 会话卡常驻 index.html（承载 #messages/#input-wrap/#char 等模块级 const 引用的单例 DOM，
+    // 不能销毁重建）→ card() 直接返回既存元素
+    { id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false, card: () => sessionCard },
+    { id: 'plugins', title: '插件', tip: '插件 / 技能预览', icon: 'plug', tab: true, render: renderMgrPlugins },
+    { id: 'projects', title: '项目', tip: '项目管理', icon: 'folder', tab: true, render: renderMgrProjects },
+    { id: 'models', title: '模型', tip: '模型配置', icon: 'chip', tab: true, render: renderMgrModels },
+    { id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true, render: renderMgrNeurons },
+  ]
+  const viewOf = (id) => VIEWS.find((v) => v.id === id)
+
+  // 侧栏 tab 生成（启动时一次）。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
+  // app.js 点击绑定读 dataset.mgr、route.js syncMgrTabs 按 state.mgr 切 .on。
+  function renderMgrTabs() {
+    const box = $('mgr-tabs')
+    if (!box) return
+    box.innerHTML = VIEWS.filter((v) => v.tab)
+      .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
+      .join('')
+  }
+
+  // ---------- 槽位（#chat-area = 无形槽）：同一时刻恰好一张卡 ----------
+  // 管理/预览卡按需创建、离开即 .remove()——神经元图的 rAF 以 canvas.isConnected 自毁，
+  // display:none 不释放；会话卡改 hidden（其 DOM 是单例，见上）。
+  let curCardEl = null
+  function makeCard(id) {
+    const el = document.createElement('section')
+    el.className = 'view-card mgr'
+    el.dataset.view = id
+    el.innerHTML = '<div class="view-scroll"><div class="view-body"></div></div>'
+    return el
+  }
+  function showCard(el) {
+    if (el === curCardEl) return el
+    if (curCardEl && curCardEl !== sessionCard) curCardEl.remove()
+    curCardEl = el
+    sessionCard.hidden = el !== sessionCard
+    if (el !== sessionCard) chatArea.appendChild(el)
+    return el
+  }
+  // 同 id 的卡在场则复用：卡体整换但 .view-scroll 不动 ⇒ 滚动位置天然保持
+  // （旧版进管理视图手写 scrollTop 存取块因此退场）
+  function reuseOrMake(id) {
+    if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
+    return makeCard(id)
+  }
+  // 切卡唯一入口：查表 → 换卡 → 渲染。未知 id 返回 null（不回落任何视图）
+  function showView(id) {
+    const v = viewOf(id)
+    if (!v) return null
+    const el = showCard(v.card ? v.card() : reuseOrMake(v.id))
+    if (v.render) v.render(el.querySelector('.view-body'))
+    return el
+  }
+  // 预览卡：非注册表条目（项目预览走 iframe 通道，与内部视图注册表不合并，见 SPEC-视图卡化 §7）
+  function showPreviewCard() {
+    return showCard(reuseOrMake('preview'))
+  }
+  // 异步回程渲染守卫：本视图的卡仍在槽里才交出卡体（否则返回 null，调用方不渲染）
+  function viewBody(id) {
+    if (!curCardEl || curCardEl.dataset.view !== id) return null
+    return curCardEl.querySelector('.view-body')
+  }
+
+  renderMgrTabs()
 
   // ---------- 事件绑定 ----------
   // rail

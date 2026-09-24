@@ -1,4 +1,6 @@
-// 管理三界面渲染（插件/项目/模型）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
+// 管理视图渲染（插件/项目/模型）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
+// 2026-09-23 视图卡化：本文件只负责「把某个视图的内容写进交给它的卡体」——卡由 views/registry.js
+// 的槽位管理，分发改成查表（showView(state.mgr)），四段 if 链与空 .mgr-top 占位一并退场。
 
 import { route, navigate, clearSessionSlots } from '../chat/route.js'
 import { stageRelease } from '../chat/stage.js'
@@ -7,13 +9,16 @@ import { gToken, needToken } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { stopLiveFoldTimer } from '../core/live.js'
 import { hashOf, sessCmp, sorted } from '../core/sessions.js'
-import { chatArea, messagesEl, inputWrap, bodyEl, overlay, state, saveMgrView, ALL, esc, toast, isMobile } from '../core/state.js'
+import { bodyEl, overlay, state, saveMgrView, ALL, esc, toast, isMobile } from '../core/state.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { apiSetModel } from '../inputbar/model-select.js'
 import { gwSend } from '../inputbar/send.js'
+import { showPreviewCard, showView, viewBody } from '../views/registry.js'
 import { MGR, MGR_LOADING, MGR_ERR, loadMgrData, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, mgrColor } from './mgr-data.js'
 import { renderMgrNeurons } from './neurons.js'
+import { clearRailExt } from './rail-ext.js'
 import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
+  // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。
   function renderMgr() {
     closeMentionPop()
     stopLiveFoldTimer()
@@ -23,63 +28,50 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     // 2026-09-19 神经 tab 被实时流洗成 chat 根治：管理视图（插件/项目/模型/神经）是「离开会话视图」
     // 的入口之一，必须与 renderHome/openProjectPreview 同款清全局槽——旧实现只清 currentHash 不
     // 清槽，会话 A 的 session-delta 到达时按残留 curUuid 命中守卫 → renderSessionBody 整页重建
-    // #messages 把管理视图（如神经元图）洗成会话消息流；#chat-area.mgr-on 仍在位（CSS 隐藏
-    // #input-wrap）=「跳到 chat、有宽度没底栏」。清槽清单与不变量见 route.js clearSessionSlots。
+    // #messages 把管理视图（如神经元图）洗成会话消息流。清槽清单与不变量见 route.js clearSessionSlots。
     clearSessionSlots()
-    const scrollEl = document.querySelector('#chat-scroll')
-    const prevTop = scrollEl ? scrollEl.scrollTop : 0
-    // 「项目」入口：仿照插件布设，每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
-    if (state.mgr === 'projects') {
-      // 顶部结构与插件视图完全同构（mgr-top mgr-kind + mgr-cats 占位），避免切换跳动；无刷新/设置按钮
-      const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
-      messagesEl.innerHTML =
-        '<div class="mgr-pane">' +
-        // 空 mgr-top 占位：与插件视图「插件/技能」切换行等高（.mgr-top min-height），避免切换时标题跳动
-        '<div class="mgr-top"></div>' +
-        '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
-        '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
-        `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
-        `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
-        '<div class="mgr-list" id="mgr-list"></div>' +
-        '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
-        '</div>'
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      renderMgrProj()
-      const pq = $('mgr-pq')
-      if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
-      return
-    }
-    // 「模型」入口：仿照项目布设，展示便携根 settings.json 的模型配置（只读）
-    if (state.mgr === 'models') {
-      // 顶部结构与插件视图完全同构（空 mgr-top 占位等高防跳）
-      messagesEl.innerHTML =
-        '<div class="mgr-pane">' +
-        '<div class="mgr-top"></div>' +
-        '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
-        '<div class="mgr-model-list" id="mgr-model-list"></div>' +
-        '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
-        '</div>'
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      renderMgrModels()
-      loadModelsData(false)
-      return
-    }
-    // 「神经」入口：层级1 神经元选择卡片，层级2 三级节点图（neurons.js，数据源 /gateway/neurons[/graph]）
-    if (state.mgr === 'neurons') {
-      renderMgrNeurons()
-      return
-    }
+    // 切卡：同 id 卡复用（卡体整换、滚动层不动 ⇒ 滚动位置天然保持），异 id 卡新建并 .remove() 旧卡
+    showView(state.mgr)
+  }
+
+  // 「项目」视图：每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
+  function renderMgrProjects(body) {
+    const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
+      '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
+      `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
+      `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
+      '<div class="mgr-list" id="mgr-list"></div>' +
+      '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
+      '</div>'
+    renderMgrProj()
+    const pq = $('mgr-pq')
+    if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
+  }
+
+  // 「模型」视图：便携根 settings.json 的模型配置（只读；数据源 = 网关 /gateway/models）
+  function renderMgrModels(body) {
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
+      '<div class="mgr-model-list" id="mgr-model-list"></div>' +
+      '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
+      '</div>'
+    renderMgrModelList()
+    loadModelsData(false)
+  }
+
+  // 「插件/技能」视图（id='plugins' 的默认形态，即侧栏第一 tab）
+  function renderMgrPlugins(body) {
     const v = state.mgrView
     const kindName = v.kind === 'skills' ? '技能' : '插件'
     const sub =
       v.kind === 'skills'
         ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
         : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
-    messagesEl.innerHTML =
+    body.innerHTML =
       '<div class="mgr-pane">' +
       '<div class="mgr-top">' +
       '<div class="mgr-kind">' +
@@ -96,19 +88,9 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       '<div class="mgr-grid" id="mgr-grid"></div>' +
       '<div class="mgr-foot">数据源：网关 /gateway/plugins 实时扫描</div>' +
       '</div>'
-    inputWrap.classList.remove('docked')
-    chatArea.classList.remove('in-session')
-    chatArea.classList.add('mgr-on')
     renderMgrGrid()
     loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉
-    // 恢复滚动位置（scroll-behavior:smooth 会让赋值动画，临时切 auto 立即归位）
-    if (scrollEl) {
-      const old = scrollEl.style.scrollBehavior
-      scrollEl.style.scrollBehavior = 'auto'
-      scrollEl.scrollTop = prevTop
-      scrollEl.style.scrollBehavior = old
-    }
-    const pane = messagesEl.querySelector('.mgr-pane')
+    const pane = body.querySelector('.mgr-pane')
     pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
       b.addEventListener('click', () => {
         v.kind = b.dataset.kind
@@ -240,7 +222,8 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     if (vl.includes('doubao')) return '字节豆包'
     return '自定义 / 其他'
   }
-  function renderMgrModels() {
+  // 模型列表的卡体渲染（写进 .mgr-model-list；2026-09-23 卡化改名：renderMgrModels 一名已归「模型视图」）
+  function renderMgrModelList() {
     const list = $('mgr-model-list')
     if (!list) return
     if (MODELS_LOADING) {
@@ -322,7 +305,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     const ok = await apiSetModel({ defaultModel: id })
     if (ok) {
       if (MODELS) MODELS.activeModel = id
-      renderMgrModels()
+      renderMgrModelList()
       toast(`默认模型已设为 ${id}`)
     } else {
       toast('设置失败 · 模型不在凭据池或网关未连接')
@@ -343,7 +326,14 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
     // 用户切屏频繁 → WS 重连频繁 → 重挂频繁）。改两级重入：同 label 且 iframe 在场（data-label 锚定）=
     // 软重入——不重写 shell、不清槽，三级链照跑但 mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航
     // 扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；异 label 或 iframe 不在场 = 硬挂载。
-    const curFrame = messagesEl.querySelector('.preview-frame')
+    // 2026-09-23 视图卡化：预览不再是「把 shell 塞进 #messages」，而是自己的整张卡（.view-card，
+    // data-view='preview'，见 views/registry.js showPreviewCard）。卡体一律经 viewBody('preview') 取——
+    // 预览卡不在槽里则返回 null（异步回程不写别人家的卡）；槽里的会话卡已随之 hidden，旧版
+    // inputWrap/chatArea 三条 mgr-on 压制规则的前提消失。
+    showPreviewCard()
+    const body = viewBody('preview')
+    if (!body) return
+    const curFrame = body.querySelector('.preview-frame')
     const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
     if (!soft) {
       state.currentHash = ''
@@ -353,22 +343,22 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       // 见 route.js clearSessionSlots；2026-09-19 收敛为共享出口，管理视图同款）。
       clearSessionSlots()
       state.preview = label
-      inputWrap.classList.remove('docked')
-      chatArea.classList.remove('in-session')
-      chatArea.classList.add('mgr-on')
-      messagesEl.innerHTML =
+      body.innerHTML =
         '<div class="preview-shell">' +
         '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
         '</div>'
     }
+    // 预览 iframe 挂在 .preview-body 里（该层由上面的 shell 建立，软重入时原样保留）
     const mount = (src, name, already) => {
-      const body = document.querySelector('.preview-body')
+      const vbody = viewBody('preview') // 预览卡仍在槽里才挂（三级链是异步的，回程时视图可能已被换走）
+      const body = vbody && vbody.querySelector('.preview-body')
       if (!body) return
       // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
       // 一律不走下方整区重建
       const cur = body.querySelector('.preview-frame')
       if (cur) {
-        if (cur.getAttribute('src') !== src) cur.setAttribute('src', src)
+        // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
+        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
         state.previewMounted = src.includes('/default-preview/') ? null : label
         return
       }
@@ -380,6 +370,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       //    还需数秒，缓冲 8s 自动淡出（不再永远卡转圈），点击仍可提前关闭（focus iframe 移交内部焦点）。
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
+      clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
       body.innerHTML =
         `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already
@@ -509,8 +500,11 @@ export {
   renderList,
   renderMgr,
   renderMgrGrid,
+  renderMgrModelList,
   renderMgrModels,
+  renderMgrPlugins,
   renderMgrProj,
+  renderMgrProjects,
   renderProject,
   setDefaultModel,
 }

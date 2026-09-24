@@ -54,10 +54,12 @@ const homeBody = body(routeJs, 'function renderHome()')
 ok('A2 renderHome 调 clearSessionSlots', homeBody.includes('clearSessionSlots()'))
 const mgrBody = body(mgrJs, 'function renderMgr()')
 ok('A3 renderMgr 调 clearSessionSlots', mgrBody.includes('clearSessionSlots()'))
+// 2026-09-23 视图卡化：槽上的 mgr-on 类退役，切视图统一走 views/registry.js 的 showView(id)——
+// 不变量形态不变（进入非会话视图前先卸会话态），只是「切换动作」换成整卡替换。
 ok(
-  'A3 renderMgr 清槽早于 mgr-on（视图切换前先卸会话态）',
-  lineOf(mgrBody, 'clearSessionSlots()') >= 0 && lineOf(mgrBody, 'clearSessionSlots()') < lineOf(mgrBody, "classList.add('mgr-on')"),
-  '顺序错：清槽必须早于加 mgr-on',
+  'A3 renderMgr 清槽早于切卡 showView（视图切换前先卸会话态）',
+  lineOf(mgrBody, 'clearSessionSlots()') >= 0 && lineOf(mgrBody, 'clearSessionSlots()') < lineOf(mgrBody, 'showView(state.mgr)'),
+  '顺序错：清槽必须早于 showView(state.mgr)',
 )
 const prevBody = body(mgrJs, 'function openProjectPreview(')
 const hardBranch = prevBody.slice(prevBody.indexOf('if (!soft) {'))

@@ -76,6 +76,7 @@
 4. 兜底 `~/.claude`
 
 （解析链与裸机初始化的机制细节 → [core.md](core.md)「便携配置根」。复验锚点：`probes/probe-portable-root-order.ts`。）
+- **信任判据亦以标记为准**：目录位于便携根（`.claude-portable` 所在）之下即视为已信任（`isUnderPortableRoot`），压过全局配置里的绝对路径记录 ⇒ **换盘符 / 换机器不触发重新信任**。复验锚点 `probes/probe-portable-trust.ts`。
 
 **硬性约束**：
 - `.claude/.claude-portable` 和 `.claude/` **必须留在 `@WrokSpace` 根目录**。挪进子文件夹后，exe 副本从 `@WrokSpace\<项目>\` 运行向上找不到标记 → 配置掉回 `~/.claude`，插件/记忆/凭证全失效。

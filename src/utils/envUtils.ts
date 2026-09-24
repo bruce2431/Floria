@@ -127,6 +127,23 @@ export function getPortableRoot(): string {
   return root ?? homedir()
 }
 
+/**
+ * Whether `startDir` lives under a portable root — i.e. walking up from it
+ * finds a `.claude/.claude-portable` marker.
+ *
+ * The marker IS the trust record: accepting a folder in the trust dialog calls
+ * maybeInitPortableRoot, which designates that folder as the global root and
+ * seeds the marker there. Keying trust off this on-disk marker (rather than an
+ * absolute-path entry in the global config) keeps it valid when the drive
+ * letter, mount point or machine changes — the same reason the config home
+ * itself resolves from the marker. Callers pass the directory being trusted
+ * (session cwd, or a target path). Unlike `getPortableRoot()`, this reports
+ * existence and never falls back to the home directory.
+ */
+export function isUnderPortableRoot(startDir: string): boolean {
+  return findPortableRoot(startDir) !== null
+}
+
 export function getTeamsDir(): string {
   return join(getClaudeConfigHomeDir(), 'teams')
 }

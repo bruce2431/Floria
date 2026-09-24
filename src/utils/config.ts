@@ -17,7 +17,11 @@ import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getGlobalClaudeFile } from './env.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import {
+  getClaudeConfigHomeDir,
+  isEnvTruthy,
+  isUnderPortableRoot,
+} from './envUtils.js'
 import { ConfigParseError, getErrnoCode } from './errors.js'
 import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
 import { getFsImplementation } from './fsOperations.js'
@@ -733,6 +737,15 @@ function computeTrustDialogAccepted(): boolean {
     return true
   }
 
+  // Portable root marker outranks the absolute-path records below. Accepting a
+  // folder writes the marker (maybeInitPortableRoot) AND an absolute-path entry;
+  // only the marker survives a drive-letter / mount / machine change, so trust
+  // must be readable from it. Same precedence as the config-home resolution in
+  // getClaudeConfigHomeDir: explicit marker > path inference.
+  if (isUnderPortableRoot(getCwd())) {
+    return true
+  }
+
   const config = getGlobalConfig()
 
   // Always check where trust would be saved (git root or original cwd)
@@ -773,6 +786,8 @@ function computeTrustDialogAccepted(): boolean {
  * /assistant installing into a user-typed path).
  */
 export function isPathTrusted(dir: string): boolean {
+  // Same marker-over-path precedence as computeTrustDialogAccepted.
+  if (isUnderPortableRoot(resolve(dir))) return true
   const config = getGlobalConfig()
   let currentPath = normalizePathForConfigKey(resolve(dir))
   while (true) {

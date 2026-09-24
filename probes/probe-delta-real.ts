@@ -37,6 +37,7 @@ process.env.FLOIRA_GATEWAY = `http://127.0.0.1:${PORT}`
 
 const { filterConversationForDisplay, buildDisplayDelta, exportConversationToServer } = await import('../src/utils/conversationDisplay.ts')
 const { capRenderedMessages, MAX_RENDER_MESSAGES } = await import('../src/utils/renderCap.ts')
+type SliceAnchorRef = { current: { uuid: string; idx: number } | null }
 
 const SID = 'probe-real'
 const MODE = 'prompt-tail-think' as const
@@ -124,6 +125,9 @@ let firstNullStep = -1
 
 const start = Math.max(0, records.length - tail)
 let nullStreak = 0
+// 窗口边界锚点：与 REPL 的 renderCapAnchorRef 同构（跨轮存活 —— 窗口只在超过 cap+step
+// 时前进一次，追加不动顶行；2026-09-24 跳顶根修）。
+const anchorRef: SliceAnchorRef = { current: null }
 for (let i = start; i <= records.length; i += step) {
   // ---- 压缩塌缩注入（--collapse=N）：REACTIVE_COMPACT 边界 setMessages(() => [boundary]) 的同构事件 ----
   // state 收缩为单条 compact_boundary（投影层 line 338 跳过 system/非 local_command）→ 投影为空 →
@@ -139,7 +143,7 @@ for (let i = start; i <= records.length; i += step) {
       timestamp: 1000 + i * 10,
       content: 'compact_boundary',
     }
-    const cstate = capRenderedMessages([boundary]) as never
+    const cstate = capRenderedMessages([boundary], anchorRef) as never
     emit(
       buildDisplayDelta(cstate, SID, MODE) as unknown as { seq: number; anchorSid: string; messages: DisplayMessage[] } | null,
       i,
@@ -148,7 +152,7 @@ for (let i = start; i <= records.length; i += step) {
     console.log(`i=${i} ★注入压缩塌缩：state=1 条 boundary → 投影=空 → 全量重建缓存（seq 回落；水位 gwSeq=${gwSeq} 不动）`)
   }
   for (let rep = 0; rep < dup; rep++) {
-    const state = capRenderedMessages(records.slice(0, i)) as unknown as { type?: string }[]
+    const state = capRenderedMessages(records.slice(0, i), anchorRef) as unknown as { type?: string }[]
     // 与 REPL 同序：delta 即发（同步）→ 全量 POST（600ms 防抖处，此处直接调用）
     const d = buildDisplayDelta(state as never, SID, MODE) as unknown as { seq: number; anchorSid: string; messages: DisplayMessage[] } | null
     emit(d, i)

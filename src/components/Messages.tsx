@@ -32,6 +32,7 @@ import { buildMessageLookups, createAssistantMessage, deriveUUID, getMessagesAft
 import { computeLastThinkingBlockId } from '../utils/conversationDisplay.js';
 import { plural } from '../utils/stringUtils.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
+import { computeSliceStart, type SliceAnchor } from '../utils/renderCap.js';
 import { Divider } from './design-system/Divider.js';
 import type { UnseenDivider } from './FullscreenLayout.js';
 import { LogoV2 } from './LogoV2/LogoV2.js';
@@ -257,7 +258,7 @@ type Props = {
     rowOffset: number;
     currentIdx: number;
   } | null) => void;
-  /** Bypass MAX_MESSAGES_WITHOUT_VIRTUALIZATION. For one-shot headless renders
+  /** Bypass the non-virtualized render cap (renderCap.ts MAX_RENDER_MESSAGES). For one-shot headless renders
    *  (e.g. /export via renderToString) where the memory concern doesn't apply
    *  and the "already in scrollback" justification doesn't hold. */
   disableRenderCap?: boolean;
@@ -289,56 +290,9 @@ const MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE = 30;
 // memory concern doesn't apply to renderToString.
 //
 // The slice boundary is tracked as a UUID anchor, not a count-derived
-// index. Count-based slicing (slice(-200)) drops one message from the
-// front on every append, shifting scrollback content and forcing a full
-// terminal reset per turn (CC-941). Quantizing to 50-message steps
-// (CC-1154) helped but still shifted on compaction and collapse regrouping
-// since those change collapsed.length without adding messages. The UUID
-// anchor only advances when rendered count genuinely exceeds CAP+STEP —
-// immune to length churn from grouping/compaction (CC-1174).
-//
-// The anchor stores BOTH uuid and index. Some uuids are unstable between
-// renders: collapseHookSummaries derives the merged uuid from the first
-// summary in a group, but reorderMessagesInUI reshuffles hook adjacency
-// as tool results stream in, changing which summary is first. When the
-// uuid vanishes, falling back to the stored index (clamped) keeps the
-// slice roughly where it was instead of resetting to 0 — which would
-// jump from ~200 rendered messages to the full history, orphaning
-// in-progress badge snapshots in scrollback.
-const MAX_MESSAGES_WITHOUT_VIRTUALIZATION = 200;
-const MESSAGE_CAP_STEP = 50;
-export type SliceAnchor = {
-  uuid: string;
-  idx: number;
-} | null;
-
-/** Exported for testing. Mutates anchorRef when the window needs to advance. */
-export function computeSliceStart(collapsed: ReadonlyArray<{
-  uuid: string;
-}>, anchorRef: {
-  current: SliceAnchor;
-}, cap = MAX_MESSAGES_WITHOUT_VIRTUALIZATION, step = MESSAGE_CAP_STEP): number {
-  const anchor = anchorRef.current;
-  const anchorIdx = anchor ? collapsed.findIndex(m => m.uuid === anchor.uuid) : -1;
-  // Anchor found → use it. Anchor lost → fall back to stored index
-  // (clamped) so collapse-regrouping uuid churn doesn't reset to 0.
-  let start = anchorIdx >= 0 ? anchorIdx : anchor ? Math.min(anchor.idx, Math.max(0, collapsed.length - cap)) : 0;
-  if (collapsed.length - start > cap + step) {
-    start = collapsed.length - cap;
-  }
-  // Refresh anchor from whatever lives at the current start — heals a
-  // stale uuid after fallback and captures a new one after advancement.
-  const msgAtStart = collapsed[start];
-  if (msgAtStart && (anchor?.uuid !== msgAtStart.uuid || anchor.idx !== start)) {
-    anchorRef.current = {
-      uuid: msgAtStart.uuid,
-      idx: start
-    };
-  } else if (!msgAtStart && anchor) {
-    anchorRef.current = null;
-  }
-  return start;
-}
+// index — 理由（CC-941 计数滑动 / CC-1154 步长量化 / CC-1174 UUID 锚点）
+// 见 utils/renderCap.ts 顶部「窗口边界改 UUID 锚点 + 步长量化」节。
+// 该函数与 REPL 层投影 cap 共用同一实现，勿在此处另写一份。
 const MessagesImpl = ({
   messages,
   tools,
@@ -449,8 +403,8 @@ const MessagesImpl = ({
 
   // Anchor for the first rendered message in the non-virtualized cap slice.
   // Monotonic advance only — mutation during render is idempotent (safe
-  // under StrictMode double-render). See MAX_MESSAGES_WITHOUT_VIRTUALIZATION
-  // comment above for why this replaced count-based slicing.
+  // under StrictMode double-render). See computeSliceStart in utils/renderCap.ts
+  // for why this replaced count-based slicing (and the shared REPL-layer cap).
   const sliceAnchorRef = useRef<SliceAnchor>(null);
 
   // Expensive message transforms — filter, reorder, group, collapse, lookups.

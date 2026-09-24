@@ -8,6 +8,8 @@
 
 `CLAUDE_CONFIG_DIR` → 逐级向上找 `.claude/.claude-portable`（**显式标记优先于任何内容指纹**——`settings.json`/`skills`/`commands`/`plugins` 项目级 `.claude` 同样合法，仅凭内容无法与配置根区分）→ exe 旁 `.claude/`（带 `.claude-portable` 等标记；仅在向上无标记时兜底）→ 兜底 `~/.claude`。`.claude/.claude-portable` 必须留在 `@WrokSpace` 根（规则见 [standards.md](standards.md) §3）。复验锚点 `probes/probe-portable-root-order.ts`。
 
+**信任判据同源**：`computeTrustDialogAccepted()` / `isPathTrusted()`（均 `config.ts`）把便携根标记当**唯一显式信任锚**——`isUnderPortableRoot(cwd)` 命中即已信任，压过 `projects[<绝对路径>].hasTrustDialogAccepted` 记录（标记优先于路径推断，与上行解析链同序）。理由：TrustDialog yes 分支同时写标记（`maybeInitPortableRoot`）与路径记录，唯有标记能在盘符 / 挂载点 / 机器变化后存活 ⇒ 换盘符、换机器不触发重新信任。复验锚点 `probes/probe-portable-trust.ts`。
+
 **裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机 `CLAUDE_CONFIG_DIR` 恒设，恒不触发。
 
 ## 会话/记忆项目级平铺
@@ -35,6 +37,7 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 1. **自愈**——`gatewayClient.ts` `probeAndConnect()` 探测网关不在（`/gateway/health` 失败）时，经 `feature('PRIVATE_GATEWAY')` 门控动态 import `commands/server/server.ts` 的 `ensureGatewayAutoStart()` 自动 detached spawn 独立网关（60s 节流；`isGatewayUp` 在→跳过；端口被非网关占用→**静默放弃不强抢**（自动路径禁杀进程）；token 继承盘上 `.claude/gateway/token`，无则随机），spawn 后下轮 PROBE_RETRY(10s) 自然接续——网关 crash/空闲回收退出不再需手动 `/server on`。
 2. **日志**——`spawnGatewayProcess()`（`/server on` 与自动拉起共用）：网关进程 stdout/stderr 落盘便携根 `.claude/gateway/gateway.log`（5MB 截断轮转）；手动前台 `exe --gateway` 直出终端。
 3. **排查第一现场**：系统 commit 内存临界时 web 首屏全量渲染的内存尖峰可触发多进程连锁 crash（Windows 不挑进程，谁撞分配失败谁死）——查 `gateway.log`；系统层根治=页面文件改自动管理（用户操作）。
+4. **CLI 级缓存/日志**——`cachePaths.ts` `CACHE_PATHS` 四基路径（`baseLogs`/`errors`/`messages`/`mcpLogs`）一律锚定 `<配置根>/cache/<cwd-slug>/`，不走 `env-paths`（Windows 下会解析到宿主 `%LOCALAPPDATA%\claude-cli-nodejs\Cache`）：便携版插到任何机器都不在宿主盘留痕，基路径随盘符 / 挂载点走。目录名 slug 由本件自带 `sanitizePath`（djb2Hash）生成——**不用** `sessionStoragePortable.ts` 的 Bun.hash 版，升级后目录名保持稳定、旧缓存不孤儿化。复验锚点 `probes/probe-cache-paths.ts`。
 
 ## 神经元内置检索/记忆（NEURON_RAG，默认开）
 
@@ -176,3 +179,7 @@ web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息�
 - **UI 隐藏**：`isMeta:true` 走既有「Continue from where you left off.」同机制，前端不渲染，无需 web 改动、不 bump sw。
 
 **验证**：`probes/probe-session-boundary.ts` **19 过 / 0 败**（tail 解析含空/无边界/start-only/start+end/消息体内嵌同名字面量不误配/尾部混杂；`formatGap` 秒·分·时·天级；note 的 null 短路与四级措辞 + graceful/NOT-recorded/unknown 三分支）。纯 CLI 层。
+
+## 非全屏渲染与 scrollback 不变量（`utils/renderCap.ts` + `ink/log-update.ts`）
+
+构建期 `USER_TYPE` 常量折叠为 `'external'` ⇒ `isFullscreenEnvEnabled()` 恒 false ⇒ 消息列表是**普通动态 Ink 内容**、靠终端原生 scrollback（非 alt-screen）。此模式下已滚出视口的行（`y < viewportY`）物理不可改写，Ink 检测到这些行变化时**只能 `fullReset`**（`\x1b[2J\x1b[3J\x1b[H`＝清屏 + **清 scrollback** + 光标归零，`FlickerReason='offscreen'`）——终端因此把视口拉回顶部。**不变量：进入渲染投影的顶部内容在追加时不得变化**；违反即每条追加触发一次全屏重置（用户表现为「滚动浏览历史时概率性跳到最顶部」）。渲染历史上限（[web-ui.md](web-ui.md) §10 P1）的窗口边界因此必须用锚点 + 步长量化，而非按条数滑动。复验锚点 `probes/probe-render-cap-flicker.ts`（`render({onFrame})` 收 `FrameEvent.flickers`：纯追加 0 次、顶部滑动每帧命中、计数滑动 260 帧 60 次 → 锚点量化 1 次）。

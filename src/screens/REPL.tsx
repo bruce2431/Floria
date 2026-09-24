@@ -294,7 +294,7 @@ import { useMessageActions, MessageActionsKeybindings, MessageActionsBar, type M
 import { setClipboard } from '../ink/termio/osc.js';
 import type { ScrollBoxHandle } from '../ink/components/ScrollBox.js';
 import { createAttachmentMessage, getQueuedCommandAttachments } from '../utils/attachments.js';
-import { capRenderedMessages, logicalRenderedLength } from '../utils/renderCap.js';
+import { capRenderedMessages, logicalRenderedLength, type SliceAnchor } from '../utils/renderCap.js';
 
 // Stable empty array for hooks that accept MCPServerConnection[] — avoids
 // creating a new [] literal on every render in remote mode, which would
@@ -1236,7 +1236,11 @@ export function REPL({
   }, [setToolUseConfirmQueue]);
   // 层次归位（2026-09-22，B 案）：state = 渲染投影（经 cap），ref = 全量源（与父源语义一致，
   // 模型上下文/工具上下文/后台会话分叉都读它）。此前 ref 也存 cap 产物 → 长会话上下文被静默截断。
-  const [messages, rawSetMessages] = useState<MessageType[]>(() => capRenderedMessages(initialMessages ?? []));
+  // 窗口边界锚点（跳顶根修 2026-09-24）：必须跨调用存活 —— 锚点是一次前进、追加不动的
+  // 唯一依据；若每次重算（count-based）则每追加一条窗口就前移一条，顶部行逐帧变化，
+  // 非全屏下只能 fullReset（清 scrollback）⇒「概率性跳到最顶部」。声明须先于其消费的 useState。
+  const renderCapAnchorRef = useRef<SliceAnchor>(null);
+  const [messages, rawSetMessages] = useState<MessageType[]>(() => capRenderedMessages(initialMessages ?? [], renderCapAnchorRef));
   const messagesRef = useRef<MessageType[]>(initialMessages ?? []);
   // Stores the willowMode variant that was shown (or false if no hint shown).
   // Captured at hint_shown time so hint_converted telemetry reports the same
@@ -1282,7 +1286,7 @@ export function REPL({
     }
     // 层次归位（唯一写入口）：数据层收全量，只有渲染投影过 cap。
     messagesRef.current = next;
-    rawSetMessages(capRenderedMessages(next));
+    rawSetMessages(capRenderedMessages(next, renderCapAnchorRef));
   }, []);
   // Capture the baseline message count alongside the placeholder text so
   // the render can hide it once displayedMessages grows past the baseline.

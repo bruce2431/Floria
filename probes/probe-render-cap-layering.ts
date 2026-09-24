@@ -2,7 +2,7 @@
  * probe-render-cap-layering.ts —— 2026-09-22 P1 层次归位（B 案）+ P2 缓存有界化 的复验探针
  *
  * 三条不变量：
- *  A. renderCap：**logicalRenderedLength(投影) === 未 cap 时原始条数**（精确），投影 ≤ 201 条、
+ *  A. renderCap：**logicalRenderedLength(投影) === 未 cap 时原始条数**（精确），投影 ≤ cap + step 条、
  *     至多一条占位且恒在下标 0、cap 幂等。这条保证「baseline 存于全量源坐标、比较发生在投影上」
  *     两侧同尺（发送回显 placeholder 的显隐判据）。
  *  B. P2 增量链：投影窗口滑动时上报 base 恒为**绝对**坐标（= cache.sentOffset + 窗口内偏移），
@@ -14,7 +14,7 @@
  * base 越界 → 全量替换；响应 cached = merged.length）。不触真网关、不写盘、不起会话。
  */
 import { filterConversationForDisplay, exportConversationToServer, buildDisplayDelta, displayCacheStats } from '../src/utils/conversationDisplay.ts'
-import { capRenderedMessages, logicalRenderedLength, isRenderArchivePlaceholder, MAX_RENDER_MESSAGES } from '../src/utils/renderCap.ts'
+import { capRenderedMessages, logicalRenderedLength, isRenderArchivePlaceholder, MAX_RENDER_MESSAGES, RENDER_CAP_STEP, type SliceAnchorRef } from '../src/utils/renderCap.ts'
 
 let failures = 0
 const ok = (cond: boolean, label: string, extra = ''): void => {
@@ -43,15 +43,17 @@ const source = (n: number): Record<string, unknown>[] => {
 console.log('=== A. renderCap 长度不变量（逻辑长度 = 未 cap 原始条数）===')
 for (const n of [0, 1, 199, 200, 201, 202, 400, 1000]) {
   const list = source(n)
-  const capped = capRenderedMessages(list)
+  const anchorRef: SliceAnchorRef = { current: null }
+  const capped = capRenderedMessages(list, anchorRef)
   const logical = logicalRenderedLength(capped)
   const placeholders = capped.filter(m => isRenderArchivePlaceholder(m as never)).length
   const headIsPlaceholder = isRenderArchivePlaceholder(capped[0] as never)
   const atMost = placeholders === 0 || (placeholders === 1 && headIsPlaceholder)
-  ok(logical === n && capped.length <= MAX_RENDER_MESSAGES + 1 && atMost,
+  // 上界 = cap + step（窗口只在超过 cap+step 时前进到恰好 cap 条；未进档期间可驻留 cap+step 条）
+  ok(logical === n && capped.length <= MAX_RENDER_MESSAGES + RENDER_CAP_STEP && atMost,
     `n=${n}: 投影=${capped.length} 逻辑=${logical} 占位=${placeholders}`)
   // 幂等：再 cap 一次结构不变
-  const again = capRenderedMessages(capped)
+  const again = capRenderedMessages(capped, anchorRef)
   ok(again.length === capped.length && logicalRenderedLength(again) === n, `n=${n}: cap 幂等`)
 }
 ok(logicalRenderedLength(source(300) as never) === 300, '全量源（无占位）逻辑长度 = .length')
@@ -92,11 +94,13 @@ let deltaCount = 0
 
 const full: Record<string, unknown>[] = []
 const rec = (i: number): Record<string, unknown> => (i % 2 === 0 ? userRec(i / 2) : asstRec((i - 1) / 2))
+// 锚点跨轮存活 = REPL 的 renderCapAnchorRef（本轮 900 次调用模拟同一会话的 900 次 setMessages）
+const anchorRef: SliceAnchorRef = { current: null }
 
 for (let t = 0; t < TURNS; t++) {
   full.push(rec(t))
   // REPL：state = cap(全量源)；导出链消费 state（P1×P2 契约不变）
-  const projection = capRenderedMessages(full) as never[]
+  const projection = capRenderedMessages(full, anchorRef) as never[]
   await exportConversationToServer(projection, SID, MODE)
   buildDisplayDelta(projection, SID, MODE)
 
@@ -124,7 +128,7 @@ ok(rebuiltSids.length === expectedSids.length && rebuiltSids.every((s, i) => s =
   '桩网关按 base 聚合的重建序列 = 全量源直算投影（逐条 sid 相等）',
   `重建=${rebuilt.length} 期望=${expectedFinal.length}`)
 ok(baseViolations === 0, '绝对 base 自洽（base+载荷 = 投影总长；sent+sentOffset = 投影总长）', `违例轮次=${baseViolations}`)
-ok(payloadMax <= MAX_RENDER_MESSAGES + 1, '单轮上报载荷 ≤ 渲染窗口+1（P2 峰值有界）', `最大=${payloadMax}`)
+ok(payloadMax <= MAX_RENDER_MESSAGES + RENDER_CAP_STEP + 1, '单轮上报载荷 ≤ 渲染窗口+step+1（P2 峰值有界）', `最大=${payloadMax}`)
 const stats = displayCacheStats(SID, MODE)!
 ok(stats.sent <= 400 && stats.sentOffset > 0,
   '显示缓存已视窗化（sent ≤ SENT_WINDOW 且 sentOffset 递增）', `sent=${stats.sent} sentOffset=${stats.sentOffset}`)

@@ -13,47 +13,32 @@ import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './core/gateway.
 import { I } from './core/icons.js'
 import { initLive } from './core/live.js'
 import { loadSessions } from './core/sessions.js'
-import { inputEl, bubblePop, overlay, sInput, state, saveMgrView, isMobile } from './core/state.js'
+import { inputEl, overlay, sInput, sidebar, state, saveMgrView, isMobile } from './core/state.js'
 import { initViewport } from './core/viewport.js'
 import { gwSend } from './inputbar/send.js'
-import { renderBubble, openSearch, renderSearch } from './sidebar/bubble-search.js'
+import { openSearch, renderSearch } from './sidebar/bubble-search.js'
 import { renderProject } from './sidebar/mgr.js'
 import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
 
   // ---------- 事件绑定 ----------
-  // rail
-  $('rail-logo').innerHTML = I.logo
-  $('rail-logo').addEventListener('click', () => setPanel(true))
-  $('rail-toggle').innerHTML = I.toggle
-  $('rail-toggle').addEventListener('click', () => setPanel(true))
+  // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
+  //  · #menu-btn 汉堡（左上角，全视口共用一枚）：点击 = 打开并钉住（钉住后鼠标移出侧栏不自动收）
+  //  · 左缘唤出（桌面，预览式打开、不钉住）：判据 = 「指针到达窗口左缘」，两种观测合一——
+  //    ①窗口内取样到 clientX ≤ EDGE_PX；②指针直接从左缘离开窗口（document mouseout：relatedTarget
+  //    为 null 且 clientX ≤ 0）。快速左移常在同一个取样间隔内直接冲出窗口，靠细条 mouseenter 会被整段
+  //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
+  const EDGE_PX = 8
+  const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
+  $('menu-btn').addEventListener('click', () => setPanel(true, { pin: true }))
+  document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
+  document.addEventListener('mouseout', (e) => {
+    if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)
+  })
+  $('scrim').addEventListener('click', () => setPanel(false))
   $('panel-collapse').innerHTML = I.collapse
   $('panel-collapse').addEventListener('click', () => setPanel(false))
   $('panel-search').innerHTML = I.mag
   $('panel-search').addEventListener('click', openSearch)
-  $('rail-new').innerHTML = I.pen
-  $('rail-new').addEventListener('click', () => { state.newProject = null; navigate('#/'); if (isMobile()) setPanel(false) })
-  $('rail-search').innerHTML = I.mag
-  $('rail-search').addEventListener('click', openSearch)
-
-  // 移动端：汉堡按钮打开抽屉、遮罩关闭抽屉
-  $('menu-btn').addEventListener('click', () => setPanel(true))
-  $('scrim').addEventListener('click', () => setPanel(false))
-  $('rail-bubble').innerHTML = I.bubble
-  $('rail-bubble').addEventListener('click', () => {
-    const willShow = !bubblePop.classList.contains('show')
-    if (willShow) {
-      renderBubble()
-      // 先以不可见方式测量，把弹窗锚定到气泡按钮右侧并垂直居中，避免闪现/错位
-      bubblePop.style.visibility = 'hidden'
-      bubblePop.classList.add('show')
-      const r = $('rail-bubble').getBoundingClientRect()
-      bubblePop.style.left = Math.round(r.right + 8) + 'px'
-      bubblePop.style.top = Math.round(r.top + r.height / 2 - bubblePop.offsetHeight / 2) + 'px'
-      bubblePop.style.visibility = 'visible'
-    } else {
-      bubblePop.classList.remove('show')
-    }
-  })
   $('recent-write').innerHTML = I.pen
   $('recent-write').addEventListener('click', () => { state.newProject = null; navigate('#/'); if (isMobile()) setPanel(false) })
   // 2026-08-24 定案：开启新会话只用「笔」图标（recent-write → 回首页空态），
@@ -69,15 +54,17 @@ import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
     }),
   )
 
-  // 管理入口 tab（插件，含技能预览）：点击 → 主区切换管理视图（侧栏会话列表不变）；再点已选中 tab → 退出管理
-  document.querySelectorAll('.mgr-tab').forEach((b) =>
-    b.addEventListener('click', () => {
-      const k = b.dataset.mgr
-      // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
-      if (state.mgr === k) navigate('#/')
-      else { saveMgrView(); navigate('#mgr/' + k) }
-    }),
-  )
+  // 管理入口 tab（插件，含技能预览）：点击 → 主区切换管理视图（侧栏会话列表不变）；再点已选中 tab → 退出管理。
+  // 委托绑在容器上（非逐钮）：卡片化二期起 renderMgrTabs 会在运行期重渲（外部卡注册/清空），
+  // 逐钮绑定会被 innerHTML 一并抹掉。
+  $('mgr-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('.mgr-tab')
+    if (!b) return
+    const k = b.dataset.mgr
+    // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
+    if (state.mgr === k) navigate('#/')
+    else { saveMgrView(); navigate('#mgr/' + k) }
+  })
 
   // 整理会话弹层
   document.querySelectorAll('.org-opt').forEach((b) =>

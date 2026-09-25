@@ -9,32 +9,14 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=347" />
+  <link rel="stylesheet" href="/styles.css?v=350" />
 </head>
 <body>
 <div id="app">
 
-  <!-- 左侧侧栏：rail（折叠态 64px 极简）+ panel（展开态 280px） -->
+  <!-- 左侧侧栏（2026-09-25 折叠态改定案）：折叠态宽度归 0（主区满宽），唤出入口 = 内容卡左上角汉堡
+       #menu-btn（点击 = 打开并钉住）+ 窗口左缘唤出（app.js document 级监听，悬停预览式、移出即收）；展开态 = panel（280px） -->
   <div id="sidebar">
-    <nav id="rail">
-      <div id="rail-top">
-        <button id="rail-logo" class="rail-ico" title="floria · 展开侧栏"></button>
-      </div>
-      <div id="rail-mid">
-        <button id="rail-toggle" class="rail-ico" title="展开侧栏"></button>
-        <button id="rail-new" class="rail-ico" title="新建对话（回到首页）"></button>
-        <button id="rail-search" class="rail-ico" title="搜索会话"></button>
-        <button id="rail-bubble" class="rail-ico" title="最近会话"></button>
-        <!-- 预览页注册的快捷按钮（2026-09-23）：iframe 内页面经 postMessage 注册，宿主渲染于此；
-             display:contents 不产生盒，子按钮与上面四个内置图标同列同 gap（见 sidebar/rail-ext.js） -->
-        <div id="rail-ext"></div>
-      </div>
-      <div id="rail-bottom">
-        <div id="rail-avatar" title="只读查看 · 本地工作区">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.7-8 6v2h16v-2c0-3.3-3.6-6-8-6z"/></svg>
-        </div>
-      </div>
-    </nav>
     <aside id="panel">
       <div class="panel-inner">
         <div class="panel-header">
@@ -116,6 +98,8 @@
         </div>
       </div>
     </div>
+    <!-- 左缘唤出由 app.js 的 document 级监听承担（mousemove clientX ≤ 8 / mouseout 从左缘出窗口），
+         无对应元素——细条 hit-test 会被快速移动整段跳过 -->
     <button id="menu-btn" title="打开侧栏" aria-label="打开侧栏">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
@@ -245,11 +229,11 @@
   </div>
 </div>
 
-<!-- 聊天气泡弹层（最近会话，贴在 rail 附近） -->
+<!-- 聊天气泡弹层（最近会话；原开启入口 rail-bubble 已随折叠带撤除，现无开启点——待定夺） -->
 <div id="bubble-pop" class="popup"></div>
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=366"></script>
+<script src="/app.js?v=370"></script>
 </body>
 </html>

@@ -105,7 +105,7 @@ import { setPanel } from '../sidebar/recent.js'
     }
     if (!e.target.closest('#mention-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
-    if (!bubblePop.contains(e.target) && !e.target.closest('#rail-bubble')) bubblePop.classList.remove('show')
+    if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
   })
   // 风险确认门：Escape 关闭（dsh Modal 的 Escape onClose 监听；输入栏 keydown 不覆盖遮罩态）
   document.addEventListener('keydown', (e) => {

@@ -17,7 +17,7 @@
 
 ## 2. 会话创建与首条消息链
 
-**新建流程 = 笔与项目「+」一致，先到初始化界面（空态），发送首条消息才真正建会话**：笔（rail-new/recent-write）清 `state.newProject` 回全局首页；项目文件夹行「+」仅设 `state.newProject=label` + `navigate('#/')`。**seat 三态**：空态=白底 chip 可点弹层选项目、label 显示项目全称（max-width 240px）；会话态（`#chat-area.in-session` 门控）=工作文件夹标识保留显示（按 projectScope/projectLabel 渲染、全局会话显示「全局」）但 `.locked` 锁定只读；管理/预览态挂载点不在 chat-area 自动隐藏。`gwSend` 空态分支带 project 调 `newWebSession(project)`（创建失败恢复 newProject）→ 建会话后才弹 CLI 窗口。
+**新建流程 = 笔与项目「+」一致，先到初始化界面（空态），发送首条消息才真正建会话**：笔（`#recent-write`）清 `state.newProject` 回全局首页；项目文件夹行「+」仅设 `state.newProject=label` + `navigate('#/')`。**seat 三态**：空态=白底 chip 可点弹层选项目、label 显示项目全称（max-width 240px）；会话态（`#chat-area.in-session` 门控）=工作文件夹标识保留显示（按 projectScope/projectLabel 渲染、全局会话显示「全局」）但 `.locked` 锁定只读；管理/预览态挂载点不在 chat-area 自动隐藏。`gwSend` 空态分支带 project 调 `newWebSession(project)`（创建失败恢复 newProject）→ 建会话后才弹 CLI 窗口。
 
 **首条消息立即上屏**：renderSession 首屏 fetch 常抢在 CLI 写入首条 user 消息前返回空，此时乐观上屏（用户气泡 + 正在处理折叠），真实数据经 SSE 整页替换。**丝滑建会**：乐观渲染前移到发送瞬间（不等 wsession 返回）+ `flipInput(false)` 沉底，失败回滚空态；`flipInput(toStage)` 为 FLIP 补间（变更前测旧矩形 → 统一施加类/父容器变更 → transform 从旧位滑到新位），renderHome/renderSession 换向均走它。
 
@@ -152,7 +152,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **限流降级提示居中灰 + resume 哨兵全端剔除**：①统一限流降级不再发 `NO_RESPONSE_REQUESTED` 静默占位——改 `rateLimitFallbackNotice(model)` 生成「模型用量已达上限 · 已切换备用模型（model）」，仍记入会话历史；CLI 端 AssistantTextMessage 前缀匹配居中灰渲染（置于 switch **之前**——动态文本不进精确 case），web 端经投影前缀命中转 `pushSystemHint`；②resume 补位哨兵（`conversationRecovery` 追加的 `NO_RESPONSE_REQUESTED` assistant 占位，数据层保留）权威投影层 assistant 分支按精确文本整条剔除（CLI 原有 return null，web 侧曾漏出被渲染成回复气泡），历史回放与实时增量同治。
 
-**审批栏正文按工具语义渲染**：`prettyToolInput(toolName,input,desc)`（`inputbar/approval.js`）：Edit/MultiEdit（`input.edits[]`）=文件名 + **红/绿两段文本 diff**（`.appr-diff`）；其余工具=**中文字段标签 + 值**列表（`FIELD_LABELS` + `TOOL_FIELD_ORDER`，未列字段追加在后）；命令/正文类字段（`command`/`content`/`new_source`/`prompt`）恒落 mono 代码块（`.appr-pre`），多行/超 140 字符值自动升级成块；`boolean true`→「是」，`false`/`null`/空串不渲染；与卡头 `a.description` 逐字重复的字段不再渲染。纯 web 展示层：进料仍是 CLI `sendRequest` 原样透传的 `a.input`。探针 `probes/probe-approval-pretty.ts`（含转义/XSS 断言）。
+**审批栏正文按工具语义渲染**：`prettyToolInput(toolName,input,desc)`（`inputbar/approval.js`）：Edit/MultiEdit（`input.edits[]`）=文件名 + **红/绿两段文本 diff**（`.appr-diff`）；其余工具=**中文字段标签 + 值**列表（`FIELD_LABELS` + `TOOL_FIELD_ORDER`，未列字段追加在后）；命令/正文类字段（`command`/`content`/`new_source`/`prompt`）恒落 mono 代码块（`.appr-pre`），多行/超 140 字符值自动升级成块；`boolean true`→「是」，`false`/`null`/空串不渲染；与卡头 `a.description` 逐字重复的字段不再渲染。**ExitPlanMode**：`input.plan`（模型写的计划正文）走 `mdHtml` 渲染（`.appr-md` 作用域，样式注入于 `core/gateway.js` 的 `gatewayCss()`——审批卡不在 `.msg .body`/`.done-think`/`.tr-body` 内，故 md 块级标签在此重复挂样式），其余字段（`allowedPrompts`）仍按通用字段列表渲染；与 CLI 弹窗 `<Markdown>` 同源语义。纯 web 展示层：进料仍是 CLI `sendRequest` 原样透传的 `a.input`。探针 `probes/probe-approval-pretty.ts`（含转义/XSS 断言 + ExitPlanMode 分支接线断言，mdHtml 注入记录型 stub）。
 
 **审批栏入场动效**：`.appr-in`（`@keyframes apprInUp`：`opacity 0→1` + `translateY(10px→0)`，220ms ease-out）与高度长出（320ms）**同帧起播**；卡面本体在 `.bar-takeover` 态不退场 ⇒ 内容淡入不露首帧空洞；10px 位移落在卡片底部内边距内 ⇒ 按钮行不被裁角；**只在「普通输入栏 → 卡片」那一次播放**（`showTakeover` 的 `firstShow` 门）。
 
@@ -181,7 +181,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **模块布局**：
 - `app.js` 入口=import 群 + 事件绑定 + 启动序列
 - `core/`：icons（SVG 图标）、state（元素引用/共享可变态/toast/媒体工具）、char（角色形象）、markdown、sessions（会话映射）、live（SSE 会话事件）、gateway（WS 连接/审批中继）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）
-- `sidebar/`：mgr-data、recent(最近会话/拖宽)、mgr（插件/项目/模型三界面 mgr-tabs）、bubble-search、neurons（神经 tab）、rail-ext（预览页注册的折叠轨快捷按钮，见 §39）
+- `sidebar/`：mgr-data、recent(最近会话/拖宽)、mgr（插件/项目/模型三界面 mgr-tabs）、bubble-search、neurons（神经 tab）、rail-ext（预览页注册的快捷按钮，见 §39）
 - `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、send（gwSend/syncGwSend）
 - `chat/`：route（路由渲染）、messages（消息渲染）、stage（钉顶占位/stage 机制）
 - `views/`：registry（**视图注册表 + 槽位整卡切换**——tab 的 id/标题/图标/渲染函数单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处查同一张表，见 §41）
@@ -408,19 +408,24 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **落盘与鉴图解耦**：`storeImages`（`utils/imageStore.ts`）在 `supportsVision` 判定之前无条件执行，故非识图模型下图片同样落在 image-cache、按 `pastedContents` id 命名——这是双来源能共用同一 URL 的前提。
 - **占位符剥除条件**（`userBodyHtml`）：有 imageId 块时按 id 精确剥（原行为）；无 image 块时全剥 `[Image #N]`——否则占位会以裸文本与渲染出的图重影。
 
-## 38. 侧栏折叠 = 预留空间的拉伸（宽度即唯一状态源）
+## 38. 侧栏折叠 = 宽度归 0 的拉伸（宽度即唯一状态源）
 
-- **不变量**：**折叠/展开只有一份状态源**——`#sidebar` 的宽度。`#sidebar` 是 `#app` 的真实 flex 子元素（桌面 ≥721px 亦然，不再走 `position:absolute` 覆盖层），`#sidebar.open` 把宽度 64→280，`#chat-area`（`flex:1`）随之被挤窄/放宽。**主区不做任何避让**：`padding-left` 补偿一族已整体删除，`#chat-area` 上残留的 `padding-left` 过渡一并摘除——「宽度 + padding 两份」收敛成一份。
-- **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中，不存在「画面锚视口、相对可见区偏右 rail-w/2」的偏差；空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
-- **token 门**：`body.token-gate #sidebar { width: 0; overflow: hidden }`——侧栏在 flex 流内，`transform` 位移**不释放宽度**，必须收宽才不挤主区；门解除后随 `#sidebar` 的 width 过渡 0→64 拉伸，与门图淡出、趴栏淡入同一时序。
-- **桌面 rail/panel 分工**：`#rail` 绝对定位覆盖层（不占 flex 空间）+ 0.15s 交叉淡出；`#panel` 常态 `flex:1 1 auto` 占满 `#sidebar`（宽度由 sidebar 动画驱动，内容靠定宽 `.panel-inner` 逐帧揭示），折叠态靠 `opacity/visibility` 隐藏。手机（≤720px）仍是覆盖式抽屉，不受影响。
-- **无分隔线**：`#panel` 不画 `border-right`（侧栏是通高平面、无自身形状；分隔交由底板色从卡缝露出承担，见 §41）。拖拽调宽详见 §21（`:root` 内联 `--panel-w` 同时被 `#sidebar` 与 `.panel-inner` 消费）。
+- **不变量**：**折叠/展开只有一份状态源**——`#sidebar` 的宽度。`#sidebar` 是 `#app` 的真实 flex 子元素（桌面 ≥721px 亦然），`#sidebar.open` 把宽度 0→280，`#chat-area`（`flex:1`）随之被挤窄/放宽。**主区不做任何避让**：`padding-left` 补偿一族已整体删除——「宽度 + padding 两份」收敛成一份。
+- **折叠态无自带外观**（2026-09-25 定案）：原 64px 折叠图标带 `#rail`（logo / 展开 / 新建 / 搜索 / 最近会话气泡 / 头像）连同其桌面覆盖层与交叉淡出过渡一并撤除，折叠 = 宽度 0、主区满宽。**唤出入口只有两个**：
+  - `#menu-btn` 汉堡（内容卡左上角 `top/left:10px`，全视口共用一枚，即手机端原有抽屉把手）：点击 = `setPanel(true,{pin:true})` 打开并**钉住**；`#sidebar.open ~ #chat-area #menu-btn` 展开态隐藏，收回入口在面板头部（`.floria-logo` / `#panel-collapse`，均 `setPanel(false)`）。
+  - **左缘唤出**（`web-src/app.js` 的 `document` 级监听，无对应元素）：判据 = 「指针到达窗口左缘」的两种观测合一——①`mousemove` 取样到 `clientX ≤ 8`；②`mouseout` 且 `relatedTarget === null && clientX ≤ 0`（指针**直接从左缘离开窗口**）。守卫 `edgeArmed()`：`!state.panelOpen && !isMobile() && !body.token-gate`。**为何不用细条元素**：快速左移常在同一个取样间隔内直接冲出窗口，8px 细条的 `mouseenter` 会被整段跳过（用户实测「向左后再向右一点点才唤出」）。唤出为**不钉住**的预览式，移出侧栏即自动收（`sidebar/recent.js` 的 `#sidebar` `mouseleave` → 未钉住则 `setPanel(false)`）。
+- **钉住单一状态源 = `recent.js` 模块内 `panelPinned`**：`setPanel(open, opt)` 里 `panelPinned = !!open && !!opt.pin`（收起一律清），`mouseleave` 只读它裁决收不收。全项目仅 `#menu-btn` 的 click 传 `{pin:true}`。
+- **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中；空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
+- **token 门**：`body.token-gate #sidebar { width: 0; overflow: hidden }`——侧栏在 flex 流内，`transform` 位移**不释放宽度**，必须收宽才不挤主区；门解除后随 `#sidebar` 的 width 过渡 0→280 拉伸，与门图淡出、趴栏淡入同一时序。
+- **panel 无独立定位规则**：`#panel` 宽 0 ↔ `var(--panel-w)` 随 `#sidebar.open` 同步过渡，内容靠定宽 `.panel-inner` 逐帧揭示；手机（≤720px）改覆盖式抽屉（`transform: translateX(-100%)`，不受影响）。
+- **折叠态内容避让**：窄桌面 / 平板竖屏（721–899px，#messages 760px 居中后左侧留白不足）给非全出血卡的滚动层留 `padding-top:60px`（全出血卡本就 `padding:0`，汉堡浮在其上）。
+- **无分隔线**：`#panel` 不画 `border-right`（侧栏是通高平面、无自身形状；分隔交由底板色从卡缝露出承担，见 §41）。拖拽调宽详见 §21（`:root` 内联 `--panel-w` 同时被 `#sidebar` 与 `.panel-inner` 消费；`#panel-resizer` 由 `#sidebar.open` 门控）。
 
-## 39. 预览页往折叠轨注册快捷按钮（iframe ↔ 宿主 postMessage）
+## 39. 预览页注册快捷按钮（iframe ↔ 宿主 postMessage）
 
-- **契约（预览页 → 宿主）**：`parent.postMessage({ type:'floria-rail-register', items:[{ id, icon, title }] }, '*')`。`icon` 必须是 `core/icons.js` `I` 图标表的键（**预览页不自送 SVG**——视觉沿用折叠轨现成图标）；`title` = 悬浮提示；`id` 由预览页自定义。
+- **契约（预览页 → 宿主）**：`parent.postMessage({ type:'floria-rail-register', items:[{ id, icon, title }] }, '*')`。`icon` 必须是 `core/icons.js` `I` 图标表的键（**预览页不自送 SVG**）；`title` = 悬浮提示；`id` 由预览页自定义。
 - **回跳（宿主 → 预览页）**：点击注册来的按钮 → `frame.contentWindow.postMessage({ type:'floria-rail-action', id }, '*')`，`id` 原样回传。
-- **呈现**：按钮即 `.rail-ico`（复用折叠轨图标样式，28px / radius 8 / hover `--hover`），渲染进 `#rail-mid` 内的 `#rail-ext`——后者 `display: contents` 不产生盒，子按钮直接成为 `#rail-mid` 的 flex 参与者，与内置四个图标**同列同 gap**（零新增视觉）。仅折叠态可见（随 `#rail` 的显示门控）。
+- **现状（2026-09-25）**：**注册链与按钮样式保留、挂载点暂缺**——原 `#rail-mid > #rail-ext`（`display:contents`，与内置四图标同列同 gap）随折叠带撤除，`renderRailExt()` 取不到盒即空转，落地位置待定。`.rail-ico` 样式（28px / radius 8 / hover `--hover`）与 `I` 键约定原样保留，接回只需给一个挂载点。
 - **不变量**：**注册集属于「当前加载的那份预览文档」**。①采纳侧：`e.source` 必须等于当前 `.preview-frame` 的 `contentWindow`（别处窗口/图表 iframe 伪报不进来）；②失效侧：iframe 换 src、硬挂载重建、离开预览路由，三处都走 `clearRailExt()`（`chat/route.js` 的 `route()` 非 preview 分支 + `sidebar/mgr.js` 的 `mount()` 两条分支）。
 - **边界校验**（外部输入）：`id` 必须为非空字符串、`icon` 必须是 `I` 的自有键（`Object.prototype.hasOwnProperty`，`constructor` 之类原型键不收），不合格项丢弃。
 - **实现**：`sidebar/rail-ext.js`（模块内顶层 `bindRailExtBridge()` 自注册监听，与 §22 图表高度上报同走 `window` message）。
@@ -432,14 +437,35 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 ## 41. 内容卡化：无形槽 + 每视图一张 `.view-card`（缝里露底板当分隔）
 
 - **底板 = `--plane`（`#ececf1`）**：`body` 与 `#app` 同色 ⇒ 整窗读作**一块底板**，`#app` 的 22px 外框圆弧融进底板不再显形（Prism 的读法：只有内容卡有形状）。`index.html` 的 `theme-color` 同步取该值。
-- **侧栏 = 底板本身**：`#sidebar` / `#rail` / `#panel` 背景一律透明，图标与面板内容直接落在底板上（原 `#sidebar` 白底是「一条白柱子」读法的来源）。**例外**：手机（≤720px）抽屉是盖在卡**之上**的浮层，透明会透出 `#scrim`（z25）而发黑 ⇒ 该 media 内显式给 `background: var(--plane)`。
-- **槽 = `#chat-area`（无形状）**：通高、无圆角/无背景/无边距，只作定位与「卡」的 flex 容器；`#gate-screen`（token 门全屏浮层）与 `#menu-btn`（移动端抽屉把手）留槽级，与「当前哪张卡」无关。
-- **卡 = `.view-card`**：`border-radius: var(--radius)` + `margin: 2px`（缝宽用户实测 1~2px 定案）+ `background: var(--chat-bg)` + `position: relative`，四周缝隙露出底板——**与侧栏之间那条缝就是分隔**（替代已删的 `#panel` 右缘 `border-right`，见 §38）。卡不画线、不加阴影，分隔只靠底色差（`--plane` ↔ `--chat-bg`）。**不变量：槽里同一时刻恰好一张卡**——`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形，`#empty-hint`/`#input-wrap.docked`/`#char` 这些绝对定位后代几何逐像素不变；`position: relative` 是它们百分比基准的包含块，不可省。
+- **侧栏 = 底板本身**：`#sidebar` / `#panel` 背景一律透明，图标与面板内容直接落在底板上（原 `#sidebar` 白底是「一条白柱子」读法的来源）。**例外**：手机（≤720px）抽屉是盖在卡**之上**的浮层，透明会透出 `#scrim`（z25）而发黑 ⇒ 该 media 内显式给 `background: var(--plane)`。
+- **槽 = `#chat-area`（无形状）**：通高、无圆角/无背景/无边距，只作定位与「卡」的 flex 容器；`#gate-screen`（token 门全屏浮层）与 `#menu-btn`（侧栏唤出汉堡）留槽级，与「当前哪张卡」无关。
+- **卡 = `.view-card`**：`border-radius: var(--radius)` + `margin: 2px`（缝宽用户实测 1~2px 定案）+ `background: var(--chat-bg)` + `position: relative`，四周缝隙露出底板——**与侧栏之间那条缝就是分隔**（替代已删的 `#panel` 右缘 `border-right`，见 §38）。卡不画线、不加阴影，分隔只靠底色差（`--plane` ↔ `--chat-bg`）。**`overflow: hidden` = 卡矩形（含圆角）是内容的硬边界**——卡的形状由自身背景圆角给出，任何**不透明填充物**（预览卡/外部卡的白底 iframe、神经元画布）都必须被它裁掉；否则方角盖住四角、卡与槽缘之间的底板缝断在角上，与「内容透明」的会话卡读法不一致。**不变量：槽里同一时刻恰好一张卡**——`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形，`#empty-hint`/`#input-wrap.docked`/`#char` 这些绝对定位后代几何逐像素不变；`position: relative` 是它们百分比基准的包含块，不可省。
 - **整卡切换（`views/registry.js`）**：视图定义单一真源 = `VIEWS` 表（`{id,title,tip,icon,tab,render|card}`），消费三处——侧栏 tab 生成（`renderMgrTabs()` 启动时注入 `#mgr-tabs`，`index.html` 不再有死按钮/内联 SVG）、`#mgr/<id>` 路由（`parseRoute` 的 `r.mgr` 即 id）、卡体渲染。**切卡唯一入口 `showView(id)`**：查表 → 换卡 → 渲染，未知 id 返回 null（不回落任何视图）。会话卡以 `tab:false` 入表（侧栏条目构成不动）走同一条路径，无默认内容旁路。
 - **卡的生灭**：会话卡常驻 `index.html`（`#session-card`，承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM）→ 离开只切 `hidden`（`.view-card[hidden]{display:none}` 必需，否则被 `display:flex` 压过）；管理卡/预览卡按需创建、离开即 `.remove()`（神经元图的 rAF 以 `canvas.isConnected` 自毁，`display:none` 不释放）。同 id 卡在场即复用 ⇒ 卡体整换而滚动层不动，**滚动位置天然保持**（管理视图手写 `scrollTop` 存取块退役）。
-- **卡内滚动层**：`.view-scroll`（padding `24px 20px 8px`）+ `.view-body`（`max-width: 920px` 居中）= 镜像 `.mgr-on` 时代 `#chat-scroll` + `#messages{max-width:920px}` 的几何；会话卡仍用 `#chat-scroll`（stage 链读它的 `scrollTop`/`scrollHeight`）。全高视图（项目预览 / 神经元图）的判据从槽上的 `.mgr-on:has(...)` 改为卡内结构：`.view-card:has(.preview-shell|.neu-graph) > .view-scroll`（`padding:0` + `overflow:hidden` + 纵向 flex）。**该状态下 `.view-body` 的 `max-width` 与 `margin` 必须一并撤销**（二者是同一个「920px 居中帽」的两个半条）——`.view-scroll` 此时是纵向 flex 容器，交叉轴上的 auto margin 会让 flex item 退出 stretch、宽度塌成 `fit-content`（内容为 `width:100%` 的 iframe 时回落到默认 300px）。**不变量：全高卡内 `.view-body` 的宽度恒由卡宽决定。**
+- **卡内滚动层**：`.view-scroll`（padding `24px 20px 8px`）+ `.view-body`（`max-width: 920px` 居中）= 镜像 `.mgr-on` 时代 `#chat-scroll` + `#messages{max-width:920px}` 的几何；会话卡仍用 `#chat-scroll`（stage 链读它的 `scrollTop`/`scrollHeight`）。全高视图（项目预览 / 神经元图）的判据从槽上的 `.mgr-on:has(...)` 改为卡内结构：`.view-card:has(.preview-shell|.ext-shell|.neu-graph) > .view-scroll`（`padding:0` + `overflow:hidden` + 纵向 flex）。**该状态下 `.view-body` 的 `max-width` 与 `margin` 必须一并撤销**（二者是同一个「920px 居中帽」的两个半条）——`.view-scroll` 此时是纵向 flex 容器，交叉轴上的 auto margin 会让 flex item 退出 stretch、宽度塌成 `fit-content`（内容为 `width:100%` 的 iframe 时回落到默认 300px）。**不变量：全高卡内 `.view-body` 的宽度恒由卡宽决定。**
 - **异步回程守卫**：回程渲染一律经 `viewBody(id)`——本视图的卡仍在槽里才交出卡体，否则返回 null（旧实现 `loadNeuronGraph` 的 `finally` 无条件重渲，图数据慢过用户切 tab 时会把别的视图洗掉）。
 - **覆盖层随卡收口**：`#gate-screen`（`inset:0` + `background:#fff`）须自带 `border-radius: var(--radius)`——槽已无圆角可 `inherit`（否则方角盖住卡的圆弧）；`#empty-hint` 无底色不需处理。
 - **变量退场**：`--panel-bg` 随侧栏透明化删除（原仅 `#panel` 一处消费）。
-- **消费点零改动（验收锚）**：`web-src/app.js` 的 `.mgr-tab` 点击绑定读 `dataset.mgr`、`chat/route.js` 的 `syncMgrTabs()` 按 `state.mgr` 切 `.on`——注册表是既有形态的收口，两处均未触碰。
+- **消费点**：`web-src/app.js` 的 `.mgr-tab` 点击**委托绑在 `#mgr-tabs` 容器上**（读 `e.target.closest('.mgr-tab').dataset.mgr`）、`chat/route.js` 的 `syncMgrTabs()` 按 `state.mgr` 切 `.on`。委托形态是 §42 的前提：`renderMgrTabs()` 自二期起会在运行期重渲（外部卡注册/清空），逐钮绑定会被 `innerHTML` 一并抹掉。
 
+
+## 42. 卡片化二期：web 内部调用外部 `.claude/preview/` 卡片（一卡一 iframe）
+
+- **定位**：一期（§41）之后外部 preview 只能整页占一张「预览卡」；二期让 preview **按能力申报卡片**，宿主**只按声明摆位、不解释卡片内容**。三条既有设计前提不可动：①`.claude/preview/` 是项目自持的**自包含**静态页（自带相对 css/js），网关只做静态托管；②`preview.json` 是项目向宿主申报「自己界面能力」的声明文件（`backend` 段是第一种能力，`cards` 是并列的第二种，**不是新机制**）；③`/preview/<label>/*` 的路由边界就是隔离边界（SPEC-视图卡化 §7）。
+- **渲染 = 一卡一 iframe**：每张卡一个 `iframe`，`src = /preview/<label>/<path>`（同源）。外部内容始终跑在自己的文档里 ⇒ preview 保持自包含，与宿主 CSS/JS **零互相污染**；`#片段`原样带上，由卡页自我定位（宿主不推断）。**同源 fetch-HTML 注入被否决**：`innerHTML` 不执行 script，等于要自造脚本/CSS 加载器并把 §7 边界推倒重来。
+- **声明一：`preview.json` 的 `cards` 段**（静态清单，与 `backend` 并列同一份申报表）
+  ```json
+  { "cards": [ { "id": "books", "title": "书稿列表", "icon": "folder",
+                 "path": "cards/books.html", "host": "view", "tab": true } ] }
+  ```
+  `id` 必填 `/^[a-zA-Z0-9_-]{1,32}$/` 且项目内唯一；`title` 必填非空；`path` 必填、**preview 目录内相对路径**（可带 `#片段`）；`icon` 可选，须是 `core/icons.js` `I` 表自有键，缺省 `plug`；`host` 必填 = **渲染位置由 preview 自己要求**，本版只定义 `"view"`（主区一张独立视图卡）；`tab` 缺省 true（上侧栏 tab）。整个 `cards` 缺失 = 空集（正常，非错误）。
+- **声明二：页面 postMessage 实时注册**（沿用 §39 的桥范式）：`parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')`，字段与校验同上，**同 id 覆盖静态清单项**（页面最了解自己有什么卡）。用途 = 无 `preview.json` 的纯静态 preview、或卡片集随页面状态变化。
+- **端点**：`GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`；label 未命中 / 无 preview → 404，有 preview 无卡片 → 空数组。卡片资源**不需要新路由**——`/preview/<label>/<path>` 已托管 preview 目录内任意文件（含 `resolve` + `startsWith` 越界防护与鉴权）。解析侧见 gateway.md §6.5。
+- **表与命名空间**：运行时表 `EXT` 与第一方 `VIEWS` **分开存**（`views/registry.js`），只在 `viewOf` / `renderMgrTabs` 两个查询点合流；外部卡 id 为 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车），tip 带项目 label。`#mgr-tabs` 的点击因此必须是容器**委托**（见 §41 末条）。
+- **不变量**
+  1. **外部卡集恒属于「最近一次挂载的那份 preview 文档所属项目」**——异 label 硬挂载 / iframe 换 src / 文档重挂即清（清点 = `sidebar/mgr.js` 的 `syncExtCards(label)`，与 `clearRailExt()` 同点）；**离开预览路由不清**，否则用户点外部卡 tab 的瞬间卡就没了。
+  2. **只为「当前帧」作证**——`floria-cards-register` 与 `floria-rail-register` 共用同一道门：`e.source === 当前 .preview-frame.contentWindow`；label 取帧上锚定的 `dataset.label`，**不由消息自称**。
+  3. **外部永不进第一方注册表**——外部卡**没有 `render` 代码**，其 `render` 由宿主生成（`views/ext-card.js` 的 `mountExtCard` 写 iframe 壳）⇒ 外部代码不获得在宿主 DOM 执行的能力。
+  4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
+- **样式**：`.ext-shell`（`relative` + 纵向 flex + `height:100%`）> `.ext-frame`（`flex:1; width:100%; border:0`）。与 `.preview-shell`/`.preview-frame` **同构但不复用类名**——宿主侧所有「当前预览帧」的查询（rail-ext 的 `.preview-frame`、`openProjectPreview` 三级链）都按 `.preview-frame` 定位，外部卡若同用会顶替真预览帧。全高卡特例判据须并入 `.ext-shell`（与 `:has(.preview-shell|.neu-graph)` 同一块，见 §41 卡内滚动层）。
+- **探针锚点**：`probes/probe-web-ext-cards.ts`（结构 + 行为真值表；网关侧解析从 `localGateway.ts` 提取、经 `Bun.Transpiler` 剥类型后直接跑，不另起网关）。

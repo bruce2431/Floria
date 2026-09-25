@@ -1,6 +1,6 @@
 /* floria — 会话查看器前端（ChatGPT 风格黑白主题）
    配色：黑白灰 + 唯一彩色 = 发送按钮蓝
-   布局：主聊天区 + 左侧可折叠侧栏（折叠 rail 64px / 展开 panel 280px） */
+   布局：主聊天区 + 左侧可折叠侧栏（折叠 0px 宽、唤出入口=左上角汉堡 + 左缘热区 / 展开 panel 280px） */
 :root {
   --bg: #ffffff;
   --chat-bg: #ffffff;
@@ -18,7 +18,6 @@
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
   --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.08);
   --radius: 14px;
-  --rail-w: 64px;
   --panel-w: 280px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -84,7 +83,11 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* 视图卡。position:relative ⇒ 卡是绝对定位后代的包含块（#empty-hint inset:0 / #input-wrap.docked
    的 100% 与 #char），而卡矩形＝卡化前的 #chat-area 矩形 ⇒ 这些覆盖层的几何逐像素不变。
    [hidden] 显式声明：会话卡常驻 DOM（承载模块级单例引用），退场靠 hidden 而非销毁。 */
-.view-card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); }
+/* overflow:hidden = 卡矩形（含圆角）是内容的硬边界（不变量）。卡的形状由自身背景的圆角给出，任何
+   不透明填充物都必须被它裁掉——否则方角内容（预览 iframe 的白底、神经元画布）盖住四角，卡与槽缘
+   之间的底板缝断在角上，与透明的会话卡读法不一致。2026-09-25 根修：v3.2.2「全高卡 .view-body 宽度」
+   让 iframe 真正填满卡体后，此前的方角覆盖才显形。 */
+.view-card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
 .view-card[hidden] { display: none; }
 /* 管理/预览卡的滚动层与内容列：几何镜像会话卡的 #chat-scroll（24/20/8 内边距）+ .mgr-on 时代的
    920px 内容宽（会话卡的 #messages 保持 760px，两者各自独立） */
@@ -121,7 +124,7 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    仅「已开始的对话（#chat-area.in-session，排除首页空态）+ 侧栏折叠（#sidebar 无 .open）
    + 宽屏（≥1280px，左侧确有空缺）」时显示；首页新对话 / 侧栏展开 / 窄屏（无空缺）隐藏。
    pointer-events:none 不挡滚动与点击。
-   宽受限于左侧空缺：max-width = (视口宽 − rail64 − 消息区760)/2 − 间距，不压到消息区。 */
+   宽受限于左侧空缺：max-width = (视口宽 − 消息区760)/2 − 间距，不压到消息区。 */
 #char {
   position: absolute; left: 20px; top: 50%; transform: translateY(-50%);
   border-radius: 16px; object-fit: contain;
@@ -1332,38 +1335,22 @@ body.token-gate #input-wrap { display: none; }
 /* 阶段3：趴栏（欢迎胶囊已按用户要求移除 2026-08-18） */
 
 /* ================= 左侧侧栏 ================= */
-/* 折叠态 = ChatGPT 风格极简 rail（64px 底板无缝，顶部 logo / 中部图标垂直居中 / 底部头像）；
-   展开态 = 280px panel（桌面 rail 交叉淡出，见下方 media）。
+/* 折叠态 = 宽度 0（2026-09-25 定案：撤掉 64px 折叠图标带 rail，唤出入口改为内容卡左上角汉堡
+   #menu-btn + 窗口左缘唤出，见「汉堡按钮」节与 app.js 的 document 级监听）；展开态 = 280px panel。
    侧栏是 #app 的真实 flex 子元素（桌面 ≥721px 亦然）：宽度即唯一状态源，折叠/展开靠 width 过渡
-   把主区内容卡挤窄/挤宽——主区不再用 padding-left 补偿避让，趴栏/门图在内容卡内自然居中。
+   把主区内容卡挤窄/挤宽——主区不做 padding-left 补偿避让，趴栏/门图在内容卡内自然居中。
    手机（≤720px）仍是覆盖式抽屉（见文件末 media），那时侧栏脱离 flex 流。
-   z-index:10 保证 rail 图标盖在主区之上。
-   2026-09-23 卡化：侧栏 = 底板本身（background 透明 ⇒ 透出 #app 底板色），图标/面板内容直接落在
+   2026-09-23 卡化：侧栏 = 底板本身（background 透明 ⇒ 透出 #app 底板色），面板内容直接落在
    底板上——这才消掉「一条白柱子」的读法（Prism 06：圆弧属于内容卡，侧栏没有自身形状）。 */
 #sidebar {
   display: flex; height: 100%; position: relative; z-index: 10;
-  width: var(--rail-w); background: transparent;
+  width: 0; background: transparent;
   transition: width 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.3s ease, visibility 0.3s;
 }
 #sidebar.open { width: var(--panel-w); }
 
-/* 桌面（≥721px）无额外定位规则：侧栏沿用上面的 flex 子元素形态。
-   2026-09-23 撤销 2026-08-30 的覆盖层方案（absolute + 那族 padding-left 避让补偿）：侧栏宽度
-   挤占主区后，趴栏/门图/会话/管理视图全在 #chat-area 内（position:absolute; inset:0 + flex 居中），
-   随卡片收窄自动重居中——不再需要八条 padding-left 补偿，状态源从「宽度 + padding 两份」收敛成一份。
-   代价（原覆盖层正是为回避它而设）：token 门完成、侧栏 0→64 拉伸时画面随之左移 rail-w/2——与
-   门图淡出、趴栏淡入同一时序，两者同为「内容卡内居中」，画面不跳变。 */
-#rail {
-  flex: 0 0 var(--rail-w); background: transparent; /* 底板本身，见 #sidebar 注释 */
-  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-  padding: 18px 0; position: relative;
-}
-#rail-top { display: flex; justify-content: center; }
-#rail-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
-/* 预览页注册的侧栏快捷按钮容器（2026-09-23）：display:contents 不产生盒，注册来的 .rail-ico
-   直接成为 #rail-mid 的 flex 参与者，与内置图标同列同 gap——零新增视觉（SPEC §6.4） */
-#rail-ext { display: contents; }
-#rail-bottom { display: flex; justify-content: center; }
+/* 预览页注册的侧栏快捷按钮样式（2026-09-23 SPEC §6.4，契约见 sidebar/rail-ext.js）。
+   挂载点 #rail-ext 随折叠带在 2026-09-25 撤除，注册链与样式保留待命——落地位置定了接回即可。 */
 .rail-ico {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   color: var(--text); border-radius: 8px; transition: background 0.15s;
@@ -1371,11 +1358,6 @@ body.token-gate #input-wrap { display: none; }
 .rail-ico:hover { background: var(--hover); }
 .rail-ico svg { width: 20px; height: 20px; }
 .rail-ico img.logo-mark { width: 24px; height: 24px; border-radius: 6px; }
-#rail-avatar {
-  width: 32px; height: 32px; border-radius: 50%; background: #22c55e; color: #fff;
-  display: flex; align-items: center; justify-content: center;
-}
-#rail-avatar svg { width: 17px; height: 17px; }
 
 #panel {
   width: 0; overflow: hidden; background: transparent; /* 同为底板，见 #sidebar 注释 */
@@ -1385,32 +1367,6 @@ body.token-gate #input-wrap { display: none; }
 #sidebar.open #panel { width: var(--panel-w); }
 .panel-inner { width: var(--panel-w); flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-/* 桌面丝滑展开/折叠（2026-08-30）：sidebar 宽度 64↔280 平滑过渡，主区内容卡随 flex 同步收放；
-   rail 改左侧绝对定位覆盖层 + 0.15s 快速交叉淡出（替换原 display:none 瞬隐）；panel 常态 flex:1
-   占满 sidebar（宽度由 sidebar 动画驱动、内容靠定宽 inner 逐帧揭示）。手机抽屉（≤720px）不受影响。 */
-@media (min-width: 721px) {
-  #rail {
-    position: absolute; top: 0; left: 0; bottom: 0; width: var(--rail-w); z-index: 2;
-    transition: opacity 0.15s ease, visibility 0.15s;
-  }
-  /* 折叠时 rail 延迟淡入（2026-09-02 修「折叠途中 rail 与收缩中的 panel 短暂同现」）：
-     0.13s 延迟 + 0.15s 淡入 = 0.28s，与 sidebar 宽度动画同步结束；
-     过渡取目标态（:not(.open)）的 transition 值，展开侧仍走无延迟立即淡出。 */
-  #sidebar:not(.open) #rail { transition: opacity 0.15s ease 0.13s, visibility 0.15s 0.13s; }
-  #sidebar.open #rail { display: flex; opacity: 0; visibility: hidden; pointer-events: none; }
-  #panel {
-    width: auto; flex: 1 1 auto; min-width: 0;
-    transition: opacity 0.1s ease, visibility 0.1s;
-  }
-  #sidebar.open #panel { width: auto; }
-  /* 折叠二轮根修（2026-09-02「还是有一点」）：rail 延迟淡入只挡了前半程，panel 本体全程可见仍与
-     rail 淡入段重叠。现 panel 折叠时 0.1s 快速淡出+visibility 隐藏（rail 0.13s 才淡入 → 时间轴零
-     交集）。展开侧 panel 0.1s 淡入、visibility 立即恢复，rail 仍无延迟立即淡出。
-     2026-09-23：原先靠 #sidebar 白底遮住淡出段，现侧栏即底板（透明）——淡出中露出的是底板本身，
-     不是主区，无需再遮。 */
-  #sidebar:not(.open) #panel { opacity: 0; visibility: hidden; }
-}
-
 /* ---------- 拖拽调宽把手（2026-09-12）：仅桌面展开态（#sidebar.open + ≥721px）可见 ----------
    贴 #sidebar 右缘 8px 热区，hover 显 3px 竖线；手指交互 = grab/grabbing 光标。
    拖动由 JS 改 :root 内联 --panel-w（#sidebar / .panel-inner 宽消费同一变量，主区靠 flex 跟随）；
@@ -1418,7 +1374,8 @@ body.token-gate #input-wrap { display: none; }
    不持久化——setPanel(false) 移除内联值，每次折叠→再展开回默认 280px。手机抽屉（≤720px）恒无。 */
 #panel-resizer { display: none; }
 @media (min-width: 721px) {
-  #panel-resizer {
+  /* 仅展开态出现（折叠态 #sidebar 宽 0，把手会半挂在屏外成死区） */
+  #sidebar.open #panel-resizer {
     display: block; position: absolute; top: 0; bottom: 0; right: -4px; width: 8px;
     z-index: 5; cursor: grab; touch-action: none;
   }
@@ -1473,12 +1430,14 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
    与 920px 宽帽、:has() 满高特例一并退役——它们的前提是「一张卡装五个视图、只有内容在换」。 */
 /* 全高特例（预览 iframe / 神经元图）：内容自己管滚动，卡体撑满；判据是卡内的结构，不是槽上的类 */
 .view-card:has(.preview-shell) > .view-scroll,
+.view-card:has(.ext-shell) > .view-scroll,
 .view-card:has(.neu-graph) > .view-scroll { padding: 0; scrollbar-gutter: auto; overflow: hidden; display: flex; flex-direction: column; }
 /* margin:0 与 max-width:none 是同一条「撤掉 920px 居中帽」的两个半条，必须成对出现：
    .view-scroll 在本块成了 column flex 容器，flex item 在交叉轴（水平）带 auto margin 时不参与
    stretch，宽度改取 fit-content —— 内容又是 width:100% 的 iframe，percentage 在不定宽父里回落
    成 iframe 默认宽 300px ⇒ 预览缩成居中窄条。不变量：特例卡内 .view-body 的宽度恒由卡宽决定。 */
 .view-card:has(.preview-shell) > .view-scroll > .view-body,
+.view-card:has(.ext-shell) > .view-scroll > .view-body,
 .view-card:has(.neu-graph) > .view-scroll > .view-body { max-width: none; margin: 0; flex: 1; min-height: 0; }
 .mgr-pane { width: 100%; }
 .mgr-top { display: flex; align-items: center; justify-content: space-between; min-height: 40px; margin-bottom: 28px; }
@@ -1545,6 +1504,11 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 /* .preview-shell relative 承载绝对定位（overlay 等依赖此定位上下文） */
 .preview-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .preview-frame { flex: 1; width: 100%; border: none; border-radius: 0; background: #fff; } /* 2026-08-27 去 1px 边框+圆角：完全填满 */
+/* 外部卡（卡片化二期）：一卡一 iframe，卡体 = /preview/<label>/<path>（同源文档，自包含自带 css/js）。
+   与 .preview-shell 同构但**不复用类名**——宿主侧所有「当前预览帧」的查询（rail-ext 的
+   .preview-frame、mgr 的三级链）都按 .preview-frame 定位，外部卡若同用会顶替真预览帧。 */
+.ext-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ext-frame { flex: 1; width: 100%; border: none; background: #fff; }
 /* 预览加载/兜底（2026-08-15）：先 fetch 探测入口，命中挂 iframe；失败显示占位 + 返回按钮 */
 .preview-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .preview-loading { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 13px; }
@@ -1687,13 +1651,40 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 
 /* ================= 响应式适配 =================
    断点：
-   ≥1024px  电脑（各种尺寸）— rail 64px / panel 280px，超宽屏限宽居中
+   ≥1024px  电脑（各种尺寸）— panel 280px（折叠态宽 0 + 左上角汉堡），超宽屏限宽居中
    721–1023 平板（iPad 竖屏等）— 卡片留边略收、panel 240px
-   ≤720px   手机 — 全屏无缝，侧栏变全屏抽屉（汉堡按钮打开），rail 隐藏 */
+   ≤720px   手机 — 全屏无缝，侧栏变全屏抽屉（汉堡按钮打开） */
 
-/* 汉堡按钮 / 抽屉遮罩默认隐藏（仅手机显示） */
-#menu-btn { display: none; }
+/* 抽屉遮罩默认隐藏（仅手机显示） */
 #scrim { display: none; }
+
+/* ---------- 汉堡按钮 #menu-btn：折叠态唤出侧栏（所有视口共用同一枚）----------
+   侧栏折叠时浮在内容卡左上角；点击 = 打开并钉住（钉住态下鼠标移出侧栏不自动收，见
+   sidebar/recent.js 的 mouseleave 判定）。展开态隐藏——收回入口在面板头部（.floria-logo /
+   #panel-collapse）。即手机端原有的抽屉把手，2026-09-25 起桌面折叠态同款复用。 */
+#menu-btn {
+  position: absolute; top: 10px; left: 10px; z-index: 15;
+  width: 40px; height: 40px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text); background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+#menu-btn svg { width: 20px; height: 20px; }
+#menu-btn:hover { background: var(--hover); }
+/* #sidebar 与 #chat-area 同为 #app 子元素 → 兄弟选择器直取「侧栏展开」这一状态 */
+#sidebar.open ~ #chat-area #menu-btn { display: none; }
+
+/* 左缘唤出无对应元素（2026-09-25）：判据「指针到达窗口左缘」由 app.js 的 document 级监听承担
+   （mousemove clientX ≤ 8 / mouseout 从左缘出窗口），守卫（折叠态 / 非手机 / 非 token 门）与之同处。
+   原 #edge-hot 细条靠 hit-test，快速移动会在同一取样间隔内直接冲出窗口而整段跳过——已撤。 */
+
+/* 折叠态汉堡浮在内容卡左上角，内容列会顶到它：窄桌面 / 平板竖屏（721–899px，#messages 760px
+   居中后左侧留白不足）给非全出血卡的滚动层留顶距。宽屏留白已足够；全出血卡（预览 iframe /
+   外部卡 / 神经元画布）本就 padding:0，汉堡浮在其上，不参与此规则。 */
+@media (min-width: 721px) and (max-width: 899px) {
+  #sidebar:not(.open) ~ #chat-area #session-card > #chat-scroll { padding-top: 60px; }
+  #sidebar:not(.open) ~ #chat-area .view-card:not(:has(.preview-shell)):not(:has(.ext-shell)):not(:has(.neu-graph)) > .view-scroll { padding-top: 60px; }
+}
 
 /* 平板 / 小屏笔记本（iPad 竖屏 ~768–1023px） */
 @media (max-width: 1023px) {
@@ -1701,8 +1692,6 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   #app { border-radius: 18px; }
   #messages { max-width: 640px; }
   :root { --panel-w: 240px; }
-  #rail { padding: 14px 0; }
-  #rail-mid { gap: 18px; }
 }
 
 /* 手机（≤720px）：全屏无缝 + 侧栏抽屉 */
@@ -1710,7 +1699,7 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   body { padding: 0; }
   #app { border-radius: 0; box-shadow: none; position: relative; }
 
-  /* 侧栏 = 从左侧滑入的全屏抽屉（rail 隐藏，仅 panel）。
+  /* 侧栏 = 从左侧滑入的全屏抽屉（宽度由上面的规则给到 100%，此处只接管定位与滑入）。
      抽屉必须不透明（2026-09-23）：桌面侧栏是透明底板，但手机端它是盖在卡**之上**的浮层，
      透明会透出下面的 #scrim 遮罩（z25）→ 抽屉发黑。此处显式给底板色。 */
   #sidebar {
@@ -1721,25 +1710,13 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
     box-shadow: 8px 0 28px rgba(0, 0, 0, 0.16);
   }
   #sidebar.open { transform: none; box-shadow: none; }
-  #sidebar #rail { display: none; }
   #panel, #sidebar.open #panel, .panel-inner { width: 100%; }
 
   /* 抽屉遮罩：侧栏滑入时盖住主区，点空白关闭 */
   #scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.28); z-index: 25; display: none; }
   #sidebar.open + #scrim { display: block; }
 
-  /* 汉堡按钮：左上角悬浮，打开抽屉 */
-  #menu-btn {
-    position: absolute; top: 10px; left: 10px; z-index: 15;
-    width: 40px; height: 40px; border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--text); background: rgba(255, 255, 255, 0.9);
-    border: 1px solid var(--border); box-shadow: var(--shadow-sm);
-  }
-  #menu-btn svg { width: 20px; height: 20px; }
-  #menu-btn:hover { background: var(--hover); }
-
-  /* 主区留白收窄，首条消息避开汉堡按钮 */
+  /* 主区留白收窄，首条消息避开汉堡按钮（汉堡本体样式见上方「汉堡按钮」节，全视口共用） */
   #chat-scroll { padding: 16px 12px 8px; }
   #chat-area.in-session #chat-scroll { padding-top: 60px; padding-bottom: 140px; } /* 2026-08-21 dsh 高胶囊：docked bar 高度增加，同步留足底边距 */
   #messages { max-width: 100%; }

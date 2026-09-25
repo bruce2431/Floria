@@ -132,6 +132,17 @@ interface BackendCfg {
   // 落该目录下的 backend.log（2026-09-19 定案「一个文件就直接放」，不建 logs/ 子目录）。
   previewDir: string
 }
+// preview.json 的 cards 声明（2026-09-25 卡片化二期）：与 backend 并列的同一份「项目向宿主申报
+// 界面能力」清单。宿主只按声明摆位、不解释卡片内容——卡源仍是项目自己的 .claude/preview/ 静态页，
+// 走既有 /preview/<label>/* 托管（自包含与隔离边界见 docs/gateway.md §4/§6）。
+interface PreviewCard {
+  id: string
+  title: string
+  icon: string // core/icons.js I 表键（前端校验），缺省 plug
+  path: string // preview 目录内相对路径，可带 #片段（同页自我定位）
+  host: 'view' // 渲染位置，由 preview 声明；本版只定义 view（主区独立视图卡）
+  tab: boolean // host=view 时是否上侧栏 tab，缺省 true
+}
 interface BackendProc {
   pid: number
   port: number
@@ -974,13 +985,69 @@ function findProjects(root: string): ProjectInfo[] {
   return groups
 }
 
+// 读 <previewDir>/preview.json 原始对象（backend 与 cards 共用一份解析）。文件缺失 / 坏 JSON /
+// 顶层非对象 → null。不变量：坏文件不得抛出（findProjects 每次请求都跑，抛=整个网关 500）。
+function readPreviewJson(previewDir: string): Record<string, unknown> | null {
+  const pj = join(previewDir, 'preview.json')
+  if (!existsSync(pj)) return null
+  try {
+    const raw = JSON.parse(readFileSync(pj, 'utf-8')) as unknown
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
+// 卡片资源路径必须是 preview 目录内的相对文件路径：拒绝绝对路径 / 反斜杠 / query / 空段 /
+// `.` `..` 段（含 %2e 编码后的形态——先 decode 再判）；允许尾随 #片段（不参与路径解析）。
+function isPreviewRelPath(p: string): boolean {
+  if (!p || p.startsWith('/') || p.includes('\\') || p.includes('?')) return false
+  const i = p.indexOf('#')
+  const file = i >= 0 ? p.slice(0, i) : p
+  let rel: string
+  try {
+    rel = decodeURIComponent(file)
+  } catch {
+    return false // 非法 % 序列
+  }
+  if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes('?')) return false
+  return rel.split('/').every((s) => s && s !== '.' && s !== '..')
+}
+
+// 读 <previewDir>/preview.json 的 cards 声明。不合格条目整条丢弃（不猜不兜底，与前端 rail-ext
+// 边界校验同范式）：id 非法 / 重名、title 空、path 越界、host 非 view。整个 cards 缺失 = 空集。
+function readPreviewCards(previewDir: string): PreviewCard[] {
+  const list = readPreviewJson(previewDir)?.cards
+  if (!Array.isArray(list)) return []
+  const out: PreviewCard[] = []
+  const seen = new Set<string>()
+  for (const it of list) {
+    if (!it || typeof it !== 'object' || Array.isArray(it)) continue
+    const c = it as Record<string, unknown>
+    const id = typeof c.id === 'string' ? c.id.trim() : ''
+    const title = typeof c.title === 'string' ? c.title.trim() : ''
+    const path = typeof c.path === 'string' ? c.path.trim() : ''
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(id) || !title || seen.has(id)) continue
+    if (c.host !== 'view') continue // 本版只定义 view
+    if (!isPreviewRelPath(path)) continue
+    seen.add(id)
+    out.push({
+      id,
+      title,
+      icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+      path,
+      host: 'view',
+      tab: c.tab !== false,
+    })
+  }
+  return out
+}
+
 // 读 <previewDir>/preview.json 的 backend 声明；不存在或结构非法 → undefined
 function readBackendCfg(previewDir: string): BackendCfg | undefined {
-  const pj = join(previewDir, 'preview.json')
-  if (!existsSync(pj)) return undefined
-  const raw = JSON.parse(readFileSync(pj, 'utf-8')) as {
+  const raw = readPreviewJson(previewDir) as {
     backend?: { name?: unknown; cmd?: unknown; cwd?: string; port?: number; idleMinutes?: number; readyPath?: string }
-  }
+  } | null
   const b = raw?.backend
   if (!b || !Array.isArray(b.cmd) || !b.cmd.length) return undefined
   return {
@@ -2148,6 +2215,23 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         sessions: pSessions,
         lastActive: pSessions.length ? (pSessions[0].updatedAt as number) : 0,
       })
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 外部卡片清单：/gateway/preview-cards?label=<项目> → { label, cards:[…] }
+  // （卡片化二期）preview.json 的 cards 声明；无 preview 项目 / label 未命中 → 404，无卡片 → 空数组。
+  if (req.method === 'GET' && url.pathname === '/gateway/preview-cards') {
+    const cLabel = url.searchParams.get('label') || ''
+    const cProj = findProjects(root).find((g) => g.scope === 'project' && g.label === cLabel)
+    if (!cProj || !cProj.hasPreview) {
+      sendJson(res, 404, { error: 'project not found' })
+      return
+    }
+    try {
+      const cDir = resolve(cProj.dir, '..', 'preview') // cProj.dir = <root>/<label>/.claude/projects
+      sendJson(res, 200, { label: cLabel, cards: readPreviewCards(cDir) })
     } catch (e) {
       sendError(res, e)
     }

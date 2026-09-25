@@ -13,7 +13,7 @@ import { bodyEl, overlay, state, saveMgrView, ALL, esc, toast, isMobile } from '
 import { closeMentionPop } from '../inputbar/mention.js'
 import { apiSetModel } from '../inputbar/model-select.js'
 import { gwSend } from '../inputbar/send.js'
-import { showPreviewCard, showView, viewBody } from '../views/registry.js'
+import { clearExtCards, registerExtCards, showPreviewCard, showView, viewBody } from '../views/registry.js'
 import { MGR, MGR_LOADING, MGR_ERR, loadMgrData, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, mgrColor } from './mgr-data.js'
 import { renderMgrNeurons } from './neurons.js'
 import { clearRailExt } from './rail-ext.js'
@@ -311,6 +311,20 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       toast('设置失败 · 模型不在凭据池或网关未连接')
     }
   }
+  // 外部卡片清单同步（卡片化二期）：清单属于「当前 .preview-frame 所指项目」——与 clearRailExt 同点
+  // 调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过 preview.json，registerExtCards 再校
+  // 一遍（postMessage 那条不过网关，两条外部输入共用 ext-card.js 的同一份过滤器）。
+  // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
+  let extCardsSeq = 0
+  function syncExtCards(label) {
+    const seq = ++extCardsSeq
+    clearExtCards()
+    fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then((d) => { if (seq === extCardsSeq) registerExtCards(label, d && d.cards, true) })
+      .catch(() => {}) // 清单拿不到 = 该项目无外部卡（不猜不兜底）
+  }
+
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。
   // 预览页加载三级策略（2026-08-19 Web 容器）：
   //  ① preview.json 声明 backend → 网关 /gateway/backend 懒加载 spawn 后端进程，iframe 直连 http://127.0.0.1:<port>/
@@ -358,7 +372,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       const cur = body.querySelector('.preview-frame')
       if (cur) {
         // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
-        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
+        if (cur.getAttribute('src') !== src) { clearRailExt(); syncExtCards(label); cur.setAttribute('src', src) }
         state.previewMounted = src.includes('/default-preview/') ? null : label
         return
       }
@@ -371,6 +385,7 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
+      syncExtCards(label) // 同上：清上一份文档的侧栏快捷按钮 + 上一份预览页申报的外部卡，重取本项目清单
       body.innerHTML =
         `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already

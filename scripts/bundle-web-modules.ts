@@ -26,6 +26,8 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'sidebar/bubble-search.js', ranges: [[2894, 2932]], first: ['  // ---------- 气泡弹层 ----------'] },
   // 视图注册表（2026-09-23 视图卡化）：区间号取 2932 只作执行序排序 —— 排在 tab 生成所需的
   // core/icons.js(I) 与 core/state.js(esc/#chat-area/session-card) 之后、__app__ 事件绑定之前。
+  // 外部卡（卡片化二期）：定义件须排在 registry.js 之前（同区间号 → 稳定排序按本表顺序）
+  { file: 'views/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
   { file: 'views/registry.js', ranges: [[2932, 2932]], first: [''] },
   { file: '__app__', ranges: [[2933, 3011], [5379, 5398]], first: ['  // ---------- 事件绑定 ----------', '  // ---------- 启动 ----------'] },
   { file: 'inputbar/ctx-meter.js', ranges: [[3012, 3303]], first: ['  // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------'] },

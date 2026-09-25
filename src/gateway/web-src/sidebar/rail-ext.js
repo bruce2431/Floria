@@ -2,6 +2,7 @@
 
 import { I } from '../core/icons.js'
 import { esc } from '../core/state.js'
+import { registerExtCards } from '../views/registry.js'
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
   // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
   // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道，同 default-preview
@@ -36,9 +37,16 @@ import { esc } from '../core/state.js'
   function bindRailExtBridge() {
     addEventListener('message', (e) => {
       const d = e.data
-      if (!d || d.type !== 'floria-rail-register') return
+      if (!d) return
+      // 两类申报共用「当前预览帧作证」这一道门（e.source 必须就是 .preview-frame 的 contentWindow）
+      const rail = d.type === 'floria-rail-register'
+      const cards = d.type === 'floria-cards-register'
+      if (!rail && !cards) return
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
+      // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
+      // views/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       railExtItems = (Array.isArray(d.items) ? d.items : [])
         .filter((it) => it && typeof it.id === 'string' && it.id && Object.prototype.hasOwnProperty.call(I, it.icon))

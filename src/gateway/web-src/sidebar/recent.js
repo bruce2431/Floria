@@ -62,7 +62,7 @@ import { renderList, renderProject } from './mgr.js'
     return m ? m[0] : label || ''
   }
 
-  function itemHtml(s, showProj) {
+  function itemHtml(s, showProj, opts) {
     const on = hashOf(s) === state.currentHash
     // 会话状态点：busy=绿（正在运行）· waiting=橘（等待用户）· idle=红（运行暂停/已完成）· 无=透明（CLI 未打开）
     const dotCls = s.state === 'busy' ? ' st-busy' : s.state === 'waiting' ? ' st-ask' : s.state === 'idle' ? ' st-wait' : ''
@@ -71,7 +71,9 @@ import { renderList, renderProject } from './mgr.js'
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
     // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/关闭）
-    const more = '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
+    // 行菜单挂靠 #recent-body 的浮起/内嵌机制（toggleRowMenu 按 bodyEl 定位），宿主不提供该机制时
+    // 传 opts.more=false 关掉，避免渲染出点不动的死控件（work 模式侧栏的聊天列表即此例）。
+    const more = opts && opts.more === false ? '' : '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
       <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}${more}</button>`
   }

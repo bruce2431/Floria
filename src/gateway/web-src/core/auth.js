@@ -12,6 +12,7 @@ import { syncGwSend } from '../inputbar/send.js'
 import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
 import { loadNeuronsData } from '../sidebar/neurons.js'
 import { renderRecent } from '../sidebar/recent.js'
+import { ensureWork } from '../sidebar/work.js'
   function deviceHint() {
     return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? 'iPad' : ''
   }
@@ -146,6 +147,9 @@ import { renderRecent } from '../sidebar/recent.js'
         }
       }
       renderRecent()
+      // work 模式数据补拉：boot 的 initWork→ensureWork 撞上 needToken()（token 未就绪）早退，
+      // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr/models/neurons 同点补拉。
+      if (state.sbMode === 'work') ensureWork()
     })
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新

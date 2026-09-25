@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=350" />
+  <link rel="stylesheet" href="/styles.css?v=355" />
 </head>
 <body>
 <div id="app">
@@ -20,15 +20,20 @@
     <aside id="panel">
       <div class="panel-inner">
         <div class="panel-header">
-          <button class="floria-logo" title="折叠侧栏">
-            <img class="brand-ico" src="/icon.ico" alt="Floria" />
-            <span>Floria</span><span id="floria-conn"></span>
-          </button>
+          <!-- 侧栏模式切换（2026-09-25）：floria·chat = 现有侧栏（管理 tabs + 最近列表）；
+               floria·work = Prism 式工作区（项目切换 / 文件·聊天 tab / 文件树 / 工作区卡），
+               主区随之变两栏（编辑区 + 助手）。原 .floria-logo 品牌按钮由本 tab 取代；
+               折叠入口仍是右侧 #panel-collapse（全视口可见），连接状态移到「最近」行。 -->
+          <div class="mode-switch" id="mode-switch">
+            <button class="ms-btn on" data-sbmode="chat">floria·chat</button>
+            <button class="ms-btn" data-sbmode="work">floria·work</button>
+          </div>
           <div class="panel-actions">
             <button id="panel-search" class="act-btn" title="搜索会话"></button>
             <button id="panel-collapse" class="act-btn" title="折叠侧栏"></button>
           </div>
         </div>
+        <div id="chat-panel">
         <!-- 管理入口 tabs（插件 / 项目 / 模型 / 神经）：定义单一真源 = web-src/views/registry.js，
              启动时 renderMgrTabs() 按表生成（本处不再有死按钮与内联 SVG；图标取 core/icons.js 的 I 表） -->
         <div class="mgr-tabs" id="mgr-tabs"></div>
@@ -36,6 +41,8 @@
           <div id="recent-head">
             <div id="recent-left">
               <span id="recent-label">最近</span>
+              <!-- 连接状态（原在 Floria 品牌名后，2026-09-25 随模式 tab 顶替品牌行迁来；setConn 链不变） -->
+              <span id="floria-conn"></span>
             </div>
             <div id="recent-right">
               <button id="recent-more" class="rh-btn" title="整理会话">…</button>
@@ -54,6 +61,41 @@
             <button class="mtab" data-pt="chats">聊天</button>
           </div>
           <div id="recent-body"></div>
+        </div>
+        </div><!-- /#chat-panel -->
+
+        <!-- work 模式侧栏（2026-09-25，参考 Prism）：骨架在此，内容由 web-src/sidebar/work.js 渲染。
+             项目切换下拉 = state.projects（/gateway/sessions 的 groups）；文件树 = /gateway/project 的
+             files；点文件 → 主区 #work-editor 只读打开（/gateway/file）。 -->
+        <div id="work-panel" hidden>
+          <div class="wk-head">
+            <button id="wk-proj-seat" class="wk-proj" title="切换项目" aria-haspopup="menu">
+              <span class="wk-proj-ico"></span><span class="wk-proj-label">选择项目</span><span class="chevron"></span>
+            </button>
+            <button id="wk-refresh" class="act-btn" title="刷新项目与文件树"></button>
+            <div id="wk-proj-pop" class="popup" hidden></div>
+          </div>
+          <div class="wk-tabs">
+            <button class="wk-tab on" data-wktab="files">文件</button>
+            <button class="wk-tab" data-wktab="chat">聊天</button>
+            <div class="wk-tools">
+              <button id="wk-find" class="wk-ico" title="过滤文件"></button>
+              <button id="wk-view" class="wk-ico" title="视图开关" aria-haspopup="dialog"></button>
+            </div>
+            <div id="wk-view-pop" class="popup" hidden>
+              <div class="wkv-title">视图</div>
+              <button class="wkv-row on" data-wkpane="editor"><span>编辑区</span><span class="wkv-sw"></span></button>
+              <button class="wkv-row on" data-wkpane="assist"><span>助手</span><span class="wkv-sw"></span></button>
+            </div>
+          </div>
+          <div class="wk-find-row" id="wk-find-row" hidden>
+            <input id="wk-find-input" type="text" placeholder="过滤文件…" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="wk-body" id="wk-body"></div>
+          <div class="wk-foot" id="wk-foot">
+            <span class="wk-foot-ico"></span>
+            <span class="wk-foot-text" id="wk-foot-text">Floria</span>
+          </div>
         </div>
       </div>
     </aside>
@@ -107,6 +149,17 @@
          仅已开始的对话（#chat-area.in-session）+ 侧栏折叠（#sidebar 无 .open）+ 宽屏时显示，
          首页新对话不显示；pointer-events:none 不挡交互。
          2026-08-15 临时隐藏中：styles.css #char display:none（代码保留空跑），删除该行即恢复 -->
+    <!-- 工作区编辑区（2026-09-25 work 模式）：只读查看项目内文件，与 #session-card 并排组成两栏
+         （#chat-area.work → flex-direction:row）。刻意不用 .view-card 类——它是 work 模式的常驻栏，
+         若带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。 -->
+    <section id="work-editor">
+      <div class="wk-ed-head">
+        <button id="wk-ed-back" class="wk-ico" title="返回助手"></button>
+        <span id="wk-ed-path" class="wk-ed-path"></span>
+      </div>
+      <div class="wk-ed-body" id="wk-ed-body"></div>
+    </section>
+
     <!-- 会话卡（视图注册表 tab:false 一条，视图卡化 2026-09-23）：#char / #chat-scroll / #empty-hint
          承载模块级 const 引用的单例 DOM（messagesEl / inputWrap / charEl），不能随卡销毁重建
          → 常驻此处，离开会话视图只切 hidden。槽里同一时刻恰好一张卡：管理/预览卡由注册表按需创建。 -->
@@ -234,6 +287,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=370"></script>
+<script src="/app.js?v=377"></script>
 </body>
 </html>

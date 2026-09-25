@@ -39,10 +39,15 @@
 | 预览卡 | `.view-card[data-view=preview]` | 项目预览那张卡（非注册表条目，走 `showPreviewCard()`）；同样按需创建、离开即 `.remove()` | |
 | 卡内滚动层 | `.view-scroll` / `.view-body` | 管理卡的滚动层与内容列（`24px 20px 8px` 内边距 + 920px 内容宽），镜像会话卡 `#chat-scroll` 的几何；全高视图（预览/神经元图）由 `.view-card:has(...)` 改 padding/overflow | |
 | 视图注册表 | `views/registry.js` `VIEWS` | 视图定义单一真源（`{id,title,tip,icon,tab,render\|card}`）：侧栏 tab 生成 / `#mgr/<id>` 路由 / 卡体渲染三处查同一张表；**整卡切换唯一入口 `showView(id)`**，会话卡以 `tab:false` 入表走同一路径（web-ui §41） | tab 定义 |
-| 侧栏 | `#sidebar` | = 折叠态（宽度 0，无自带外观）+ 展开面板。**是 `#app` 的真实 flex 子元素**（桌面 ≥721px 亦然）：折叠 0 ↔ 展开 280 **只由自身宽度驱动**，主区 `#chat-area` 靠 flex 跟随收放（无 `padding-left` 避让，门期收宽至 0）。**背景透明 = 底板本身**（无自身形状）；手机 ≤720px 为覆盖式抽屉（脱离 flex 流，显式给底板色，否则透出 `#scrim` 发黑）。展开态右缘可拖拽调宽（`#panel-resizer` 把手，仅展开态 ≥721px 显示，范围 [232, min(560, 视口−120)] 写 `:root --panel-w`，**不记忆**——折叠即清内联值回默认 280px）。唤出入口 `#menu-btn`（钉住）/ `#edge-hot`（悬停预览，离开即收），见 web-ui §38 | 侧栏 |
+| 侧栏 | `#sidebar` | = 折叠态（宽度 0，无自带外观）+ 展开面板。**是 `#app` 的真实 flex 子元素**（桌面 ≥721px 亦然）：折叠 0 ↔ 展开 280 **只由自身宽度驱动**，主区 `#chat-area` 靠 flex 跟随收放（无 `padding-left` 避让，门期收宽至 0）。**背景透明 = 底板本身**（无自身形状）；手机 ≤720px 为覆盖式抽屉（脱离 flex 流，宽 `min(300px, 84vw)`，显式给底板色，否则透出 `#scrim` 发黑）。展开态右缘可拖拽调宽（`#panel-resizer` 把手，仅展开态 ≥721px 显示，范围 [232, min(560, 视口−120)] 写 `:root --panel-w`，**不记忆**——折叠即清内联值回默认 280px）。唤出入口 = `#menu-btn`（钉住）/ 窗口左缘唤出（`document` 级监听，无对应元素，悬停预览、离开即收），见 web-ui §38 | 侧栏 |
 | 注册快捷按钮 | `.rail-ico` | **预览页**经 `postMessage` 注册的快捷按钮（点击回跳预览页）；注册集属于当前那份预览文档，换文档即清（web-ui §39）。**挂载点暂缺（2026-09-25）**——原容器 `#rail-ext` 随 64px 折叠带撤除，样式与注册链保留、落地位置待定 | 预览注册按钮 / 注册轨按钮 |
-| 展开面板 | `#panel` | 展开态 280px：品牌行 + 管理 tabs + 最近列表；底色同底板、**不画右缘分隔线**（侧栏是通高平面，分隔由底板色从卡缝露出承担，web-ui §41） | |
-| 最近列表 | `#recent`/`#recent-body` | 会话容器（「最近」头 + 整理会话 + 模式 tabs） | |
+| 展开面板 | `#panel` | 展开态 280px：模式行 + 两个面板（chat / work，同一时刻恰一个非 hidden）；底色同底板、**不画右缘分隔线**（侧栏是通高平面，分隔由底板色从卡缝露出承担，web-ui §41） | |
+| 模式切换 tab | `.mode-switch` > `.ms-btn` | 侧栏模式分段控件（`floria·chat` / `floria·work`），占原位品牌行；两钮恒 `font-weight:600`（颜色区分选中，防 CJK 字宽跳动）。原 `.floria-logo` 品牌按钮退役，折叠入口仍是右侧 `#panel-collapse`。见 web-ui §43 | 品牌行/logo 行 |
+| chat 面板 | `#chat-panel` | 现行侧栏（管理 tabs + 最近列表）；`sbMode=chat` 时在场 | |
+| work 面板 | `#work-panel` | Prism 式工作区侧栏：项目切换（`#wk-proj-seat` + `#wk-proj-pop`）/ 文件·聊天 tab / 文件树（`#wk-body`）/ 视图开关浮层（`#wk-view-pop`）/ 工作区卡（`#wk-foot`）；`sbMode=work` 时在场。见 web-ui §43 | 项目态侧栏 |
+| 工作区编辑区 | `#work-editor` | work 模式主区左栏（只读查看项目内文件），与 `#session-card` 并排组成两栏；**刻意不用 `.view-card` 类**（常驻栏，不参与「槽里恰好一张卡」语义）。手机 ≤720px 不成立两栏，改为 `.wk-file-open` 覆盖层（头部 `#wk-ed-back` 返回） | 编辑器/预览栏 |
+| 两栏开关浮层 | `#wk-view-pop` | work 模式「编辑区 / 助手」两个开关（`.wkv-row`）；不变量 = 至少保留一栏（全关会强制回助手栏并 toast） | 视图浮层 |
+| 最近列表 | `#recent`/`#recent-body` | 会话容器（「最近」头 + 整理会话 + 模式 tabs）；连接状态点 `#floria-conn` 随模式行改址落在此头左侧 | |
 | 整理会话弹层 | `#organize-pop` | 「一个列表 / 按项目展开」切换浮层 | |
 | 模式 tabs | `#mode-tabs` | 项目/聊天两种列表排列 | |
 | 项目文件夹分组 | `.folder` | 按项目分组的折叠头（含行内「+」新建） | |

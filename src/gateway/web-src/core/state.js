@@ -28,21 +28,49 @@ import { ctx } from '../inputbar/ctx-meter.js'
   // currentHash 无会话态 = ''（与 recent.js firstSendHash 同一表示，禁止再引入 null）：乐观项
   // pendingUserMsgs.hash 的「未归属」判定（p.hash === ''）依赖此约定——两套空值表示会让首页
   // 发送的乐观气泡在 navigate 进会话时被 renderSession 的归属守卫判为异类而丢弃（消息先闪现后消失）。
-  const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' } }
+  const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
+    // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
+    // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
+    // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关。
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
   // 实现「刷新保持当前界面」（会话/管理/预览三态均可恢复，不再回退初始界面）。
   const UI_KEY = 'floria-ui-v1'
-  function saveMgrView() {
-    try { localStorage.setItem(UI_KEY, JSON.stringify({ mgrView: state.mgrView })) } catch { /* 存储不可用忽略 */ }
+  // 写入 = read-modify-write 打补丁：mgrView 与 work 两族状态共用同一 key，
+  // 直接 setItem(整份) 会让后写者抹掉先写者（两族各自保存时都会发生）。
+  function patchUI(patch) {
+    try {
+      const raw = localStorage.getItem(UI_KEY)
+      const cur = raw ? JSON.parse(raw) : {}
+      localStorage.setItem(UI_KEY, JSON.stringify({ ...cur, ...patch }))
+    } catch { /* 存储不可用忽略 */ }
   }
+  function saveMgrView() { patchUI({ mgrView: state.mgrView }) }
   function loadMgrView() {
     try {
       const raw = localStorage.getItem(UI_KEY)
       if (!raw) return
       const d = JSON.parse(raw)
       if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
+    } catch { /* 忽略 */ }
+  }
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
+  function saveWork() {
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist })
+  }
+  function loadWork() {
+    try {
+      const raw = localStorage.getItem(UI_KEY)
+      if (!raw) return
+      const d = JSON.parse(raw)
+      if (!d) return
+      if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
+      if (typeof d.workProj === 'string') state.workProj = d.workProj
+      if (typeof d.workFile === 'string') state.workFile = d.workFile
+      if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
+      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
     } catch { /* 忽略 */ }
   }
   let ALL = []
@@ -92,12 +120,14 @@ export {
   isTouch,
   live,
   loadMgrView,
+  loadWork,
   messagesEl,
   modeTabsEl,
   overlay,
   recentLabel,
   sInput,
   saveMgrView,
+  saveWork,
   sendBtn,
   sessionCard,
   sidebar,

@@ -19,6 +19,7 @@ import { gwSend } from './inputbar/send.js'
 import { openSearch, renderSearch } from './sidebar/bubble-search.js'
 import { renderProject } from './sidebar/mgr.js'
 import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
+import { initWork, setSbMode } from './sidebar/work.js'
 
   // ---------- 事件绑定 ----------
   // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
@@ -39,6 +40,12 @@ import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
   $('panel-collapse').addEventListener('click', () => setPanel(false))
   $('panel-search').innerHTML = I.mag
   $('panel-search').addEventListener('click', openSearch)
+  // 侧栏模式切换（2026-09-25）：floria·chat ⇄ floria·work。委托在容器上——两个 .ms-btn 常驻不重渲，
+  // 但委托写法与其它侧栏控件一致，且 setSbMode 已内部落地全部渲染（applySbMode）。
+  $('mode-switch').addEventListener('click', (e) => {
+    const b = e.target.closest('.ms-btn')
+    if (b && b.dataset.sbmode !== state.sbMode) setSbMode(b.dataset.sbmode)
+  })
   $('recent-write').innerHTML = I.pen
   $('recent-write').addEventListener('click', () => { state.newProject = null; navigate('#/'); if (isMobile()) setPanel(false) })
   // 2026-08-24 定案：开启新会话只用「笔」图标（recent-write → 回首页空态），
@@ -99,6 +106,9 @@ import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
     // 重置回首页（2026-08-28「进入/刷新一律默认初始界面」旧定案作废）。刷新瞬间列表未就绪由
     // renderSession 占位「加载中」，WS 验证通过 → hideGate 的 loadSessions().then 恢复链落地重渲。
     renderRecent()
+    // work 模式启动恢复（2026-09-25）：恢复持久化模式/项目/文件 → 绑事件 → 落地；须在 route() 之前，
+    // route 进入 mgr/preview 时会把模式强制切回 chat（视图卡与 work 两栏互斥，见 chat/route.js）。
+    initWork()
     route()
     if (GATEWAY) initGateway()
     else { inputEl.contentEditable = 'false'; inputEl.dataset.ph = '只读查看 · 无法发送' } // 只读查看器：输入不可编辑

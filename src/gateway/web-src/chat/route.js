@@ -16,6 +16,7 @@ import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
 import { clearRailExt } from '../sidebar/rail-ext.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
+import { setSbMode } from '../sidebar/work.js'
 import { showView } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
@@ -42,6 +43,10 @@ import { showView } from '../views/registry.js'
   function route() {
     closeMentionPop()
     const r = parseRoute()
+    // work 模式与视图卡（管理/预览）互斥（2026-09-25）：work 主区两栏只在会话卡在场时成立，
+    // 进入 mgr/preview 一律强制回 chat 模式（顶部 tab 高亮、#work-panel 显隐、主区 .work 由
+    // applySbMode 一并落地）。反向（work 里点开管理 tab）由 mgr-tabs 点击走 navigate → 命中此处。
+    if ((r.name === 'mgr' || r.name === 'preview') && state.sbMode === 'work') setSbMode('chat')
     // 任何导航（route 被调用）→ 退出管理视图；管理视图只由 mgr-tab 点击直接 renderMgr 进入，不走 route
     state.mgr = null
     state.preview = null

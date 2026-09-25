@@ -628,27 +628,29 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .ask-fold summary::-webkit-details-marker { display: none; }
 .ask-fold .ask-body { margin: 2px 0 2px 0; }
 
-/* ── Markdown 渲染（对话文本，作用于 .body 内的 mdHtml 输出） ── */
-.msg .body .p { margin: 0; }
-.msg .body p { margin: 3px 0; }
-.msg .body h1, .msg .body h2, .msg .body h3, .msg .body h4 { margin: 14px 0 4px; font-weight: 700; color: var(--text); line-height: 1.4; }
-.msg .body h1 { font-size: 17px; }
-.msg .body h2 { font-size: 16px; }
-.msg .body h3 { font-size: 15px; }
-.msg .body h4 { font-size: 14px; }
-.msg .body ul, .msg .body ol { margin: 4px 0; padding-left: 20px; }
-.msg .body li { margin: 2px 0; }
-.msg .body blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding: 2px 10px; color: var(--text-2); }
-.msg .body hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
-.msg .body a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.msg .body a:hover { color: var(--text-2); }
+/* ── Markdown 渲染（对话文本，作用于 .body 内的 mdHtml 输出；2026-09-25 起 .wk-ed-md 同款——
+   work 主区编辑区渲染 .md 文件时用同一份 mdHtml 输出，两处必须同一套排版） ── */
+.msg .body .p, .wk-ed-md .p { margin: 0; }
+.msg .body p, .wk-ed-md p { margin: 3px 0; }
+.msg .body h1, .msg .body h2, .msg .body h3, .msg .body h4,
+.wk-ed-md h1, .wk-ed-md h2, .wk-ed-md h3, .wk-ed-md h4 { margin: 14px 0 4px; font-weight: 700; color: var(--text); line-height: 1.4; }
+.msg .body h1, .wk-ed-md h1 { font-size: 17px; }
+.msg .body h2, .wk-ed-md h2 { font-size: 16px; }
+.msg .body h3, .wk-ed-md h3 { font-size: 15px; }
+.msg .body h4, .wk-ed-md h4 { font-size: 14px; }
+.msg .body ul, .msg .body ol, .wk-ed-md ul, .wk-ed-md ol { margin: 4px 0; padding-left: 20px; }
+.msg .body li, .wk-ed-md li { margin: 2px 0; }
+.msg .body blockquote, .wk-ed-md blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding: 2px 10px; color: var(--text-2); }
+.msg .body hr, .wk-ed-md hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.msg .body a, .wk-ed-md a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.msg .body a:hover, .wk-ed-md a:hover { color: var(--text-2); }
 /* 2026-08-31：旁白（.done-think）/思考正文（.tr-body）也走 mdHtml，inline code/围栏代码块样式一并对齐
    （此前只挂 .msg .body，旁白里 `feedConfigs.tsx` 等只有 UA 默认等宽、无灰底） */
-.msg .body code, .done-think code, .tr-body code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-.msg .body .code-block, .done-think .code-block, .tr-body .code-block { position: relative; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #f7f8fa; }
-.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
-.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code { background: transparent; padding: 0; font-size: inherit; }
-.msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+.msg .body code, .done-think code, .tr-body code, .wk-ed-md code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+.msg .body .code-block, .done-think .code-block, .tr-body .code-block, .wk-ed-md .code-block { position: relative; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #f7f8fa; }
+.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre, .wk-ed-md .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
+.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code, .wk-ed-md .code-block code { background: transparent; padding: 0; font-size: inherit; }
+.msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang, .wk-ed-md .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
 /* 2026-09-12：嵌入式图表（```chart 双段围栏）——web 渲染 %%html 段进 sandbox iframe（opaque origin，
    高度由 iframe 内 BOOT postMessage 上报、messages.js 按 e.source 设高；上限 60vh 超出内部滚动），
    「源码」按钮切原文（.as-src）。%%ascii 段仅供 CLI，web 弃用。普通 ```html 围栏不受影响 */
@@ -663,10 +665,10 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .chart-embed.as-src .chart-raw { display: block; }
 /* 2026-09-04：md-table 作用域同步扩展到 .done-think/.tr-body（08-31 code 对齐漏了表格，
    旁白/思考正文里的表格此前以裸 table 渲染=无边框无内距，视觉等同未渲染） */
-.msg .body .md-table, .done-think .md-table, .tr-body .md-table { margin: 6px 0; overflow-x: auto; }
-.msg .body .md-table table, .done-think .md-table table, .tr-body .md-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
-.msg .body .md-table th, .msg .body .md-table td, .done-think .md-table th, .done-think .md-table td, .tr-body .md-table th, .tr-body .md-table td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: normal; word-break: break-word; }
-.msg .body .md-table th, .done-think .md-table th, .tr-body .md-table th { background: var(--rail-bg); font-weight: 600; }
+.msg .body .md-table, .done-think .md-table, .tr-body .md-table, .wk-ed-md .md-table { margin: 6px 0; overflow-x: auto; }
+.msg .body .md-table table, .done-think .md-table table, .tr-body .md-table table, .wk-ed-md .md-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.msg .body .md-table th, .msg .body .md-table td, .done-think .md-table th, .done-think .md-table td, .tr-body .md-table th, .tr-body .md-table td, .wk-ed-md .md-table th, .wk-ed-md .md-table td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: normal; word-break: break-word; }
+.msg .body .md-table th, .done-think .md-table th, .tr-body .md-table th, .wk-ed-md .md-table th { background: var(--rail-bg); font-weight: 600; }
 
 .msg-system { text-align: center; color: var(--text-3); font-size: 12px; padding: 2px 24px 10px; }
 
@@ -792,9 +794,16 @@ body.kb-open #input-wrap { transition: none; }
 /* 2026-08-21 高度对齐 dsh：docked composer 折叠到内容高度（单行 28px = 4px 顶垫 + 24px 行高），
    hero 空态保留 52px 两行地板（dsh InputBar .hero .mirror min-h 52 仅 hero 生效） */
 #input-wrap.docked #input { min-height: 28px; }
-/* 底部工具行（dsh .row）：textarea 与工具行 gap 12px；左 .tools / 右 .trailing */
+/* 底部工具行（dsh .row）：textarea 与工具行 gap 12px；左 .tools / 右 .trailing。
+   flex-wrap: nowrap（2026-09-25 根修）：工具行与右侧发送组恒为一行。此前 wrap 让「分行」先于
+   「收缩」发生——分行判据是未收缩的 hypothetical main size（basis），min-width:0 那套收缩链
+   （row→tools→proj-root→proj-seat→projLabel）对它完全无效：手机窄屏下 .trailing 整组被挤到
+   第二行右对齐，而项目名 chip 反倒保持全宽、不触发省略号。dsh 用 wrap 的前提是它的 .tools 里
+   装的是可换行的胶囊组，本处 .tools 只承载 + / 项目 chip / 空 .modes，换行没有任何合法场景。
+   不变量：.row 恒为一行；放不下时由 .tools → #proj-root → #proj-seat → .projLabel 逐级收缩，
+   项目名出省略号，.trailing 始终贴着行尾。 */
 #input-bar .row {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
   gap: 12px; padding: 2px 8px 6px; min-width: 0;
 }
 #input-bar .tools,
@@ -1699,10 +1708,14 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   body { padding: 0; }
   #app { border-radius: 0; box-shadow: none; position: relative; }
 
-  /* 侧栏 = 从左侧滑入的全屏抽屉（宽度由上面的规则给到 100%，此处只接管定位与滑入）。
+  /* 侧栏 = 从左侧滑入的抽屉（宽度 = 84vw 帽 300px）。选择器必须带 `.open`：桌面那条
+     `#sidebar.open { width: var(--panel-w) }` 特指度 (1,1,0) 高于本条 (1,0,0)，展开态会被它
+     按 240px（≤1023px 档的 --panel-w）窄化，本条宽度整条形同废弃（2026-09-25 手机实测：
+     抽屉只有 240px，头部「已连接」被挤断行）。折叠态（无 .open）不设宽就跑 translateX(-100%)，
+     宽度只在展开时有意义，故两态同值。
      抽屉必须不透明（2026-09-23）：桌面侧栏是透明底板，但手机端它是盖在卡**之上**的浮层，
      透明会透出下面的 #scrim 遮罩（z25）→ 抽屉发黑。此处显式给底板色。 */
-  #sidebar {
+  #sidebar, #sidebar.open {
     position: absolute; top: 0; left: 0; bottom: 0; height: 100%;
     width: min(300px, 84vw); z-index: 30; background: var(--plane);
     transform: translateX(-100%);
@@ -1962,4 +1975,131 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 @media (max-width: 720px) {
   .neu-legend { display: none; }
   .neu-pane { padding: 14px 14px 10px; }
+}
+
+/* ============ 侧栏 chat / work 双模式（2026-09-25，参考 Prism） ============
+   状态源 = core/state.js 的 sbMode/projects/workProj/workFile/wkEditor/wkAssist；
+   落地 = sidebar/work.js 的 applySbMode()（切 #chat-panel / #work-panel 的 hidden + 主区 .work）。
+   本段只给样式，不含任何状态判断分支——「哪一栏可见」全由类与 hidden 表达。 */
+
+/* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命） */
+.mode-switch { display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
+/* 两钮恒 font-weight:600（颜色区分选中）：400↔600 切换会让 CJK 字宽微变、分段控件宽度跳动 */
+.ms-btn { padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-2); white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.ms-btn:hover { color: var(--text); }
+.ms-btn.on { background: var(--bg); color: var(--text); box-shadow: var(--shadow-sm); }
+
+/* 两个面板同占 .panel-inner 的剩余高度（各自内部滚动）；[hidden] 显式声明——面板带 display:flex，
+   作者样式优先级高于 UA 的 [hidden]{display:none}，不写这条则 hidden 属性失效 */
+#chat-panel, #work-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#chat-panel[hidden], #work-panel[hidden] { display: none; }
+
+/* work 模式隐藏顶栏「搜索会话」入口：work 侧栏自带 🔍（过滤当前 tab），同为放大镜同屏即重复观感。
+   类由 applySbMode() 落在 #panel 上；chat 模式自动复原。 */
+#panel.work #panel-search { display: none; }
+
+/* ---------- work 侧栏 ---------- */
+.wk-head { display: flex; align-items: center; gap: 2px; padding: 10px 8px 6px 12px; position: relative; }
+.wk-proj { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 7px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--text); text-align: left; transition: background 0.15s; }
+.wk-proj:hover { background: var(--hover); }
+.wk-proj-ico { display: flex; flex: none; color: var(--text-2); }
+.wk-proj-ico svg { width: 16px; height: 16px; display: block; }
+.wk-proj-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-proj .chevron { flex: none; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--text-3); transition: transform 0.15s; }
+#wk-proj-seat.empty .wk-proj-label { color: var(--text-3); font-weight: 500; }
+
+#wk-proj-pop { top: calc(100% - 2px); left: 10px; right: 10px; padding: 4px; max-height: 60vh; overflow-y: auto; }
+#wk-proj-pop[hidden], #wk-view-pop[hidden] { display: none; }
+.wkp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
+.wkp-row:hover { background: var(--hover); }
+.wkp-row.on { background: var(--active); font-weight: 600; }
+.wkp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wkp-tag { flex: none; font-size: 10px; color: var(--text-3); }
+
+.wk-tabs { display: flex; align-items: center; gap: 4px; padding: 0 8px 4px 12px; position: relative; }
+.wk-tab { padding: 4px 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); transition: background 0.15s, color 0.15s; }
+.wk-tab:hover { background: var(--hover); color: var(--text); }
+.wk-tab.on { background: var(--active); color: var(--text); font-weight: 600; }
+.wk-tools { display: flex; align-items: center; gap: 1px; margin-left: auto; }
+.wk-ico { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--text-2); transition: background 0.15s, color 0.15s; }
+.wk-ico:hover { background: var(--hover); color: var(--text); }
+.wk-ico svg { width: 16px; height: 16px; display: block; }
+
+/* 视图开关浮层 */
+#wk-view-pop { right: 6px; top: calc(100% - 4px); width: 186px; padding: 8px; }
+.wkv-title { font-size: 12px; color: var(--text-3); padding: 2px 6px 6px; }
+.wkv-row { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
+.wkv-row:hover { background: var(--hover); }
+.wkv-sw { flex: none; width: 30px; height: 17px; border-radius: 999px; background: var(--border); position: relative; transition: background 0.15s; }
+.wkv-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); transition: transform 0.15s; }
+.wkv-row.on .wkv-sw { background: var(--blue); }
+.wkv-row.on .wkv-sw::after { transform: translateX(13px); }
+
+.wk-find-row { padding: 0 12px 6px; }
+.wk-find-row[hidden] { display: none; }
+.wk-find-row input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; color: var(--text); background: var(--bg); outline: none; }
+.wk-find-row input:focus { border-color: var(--blue); }
+
+.wk-body { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
+.wk-body::-webkit-scrollbar { width: 8px; }
+.wk-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+/* 空态/加载态文案用 --text-2：--text-3(#c4c4c9) 在白底浮层上肉眼等同空白，
+   2026-09-25「下拉纯空白」实报的次因——失败必须看得见 */
+.wk-empty { padding: 18px 12px; font-size: 12.5px; color: var(--text-2); text-align: center; }
+.wk-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; border-radius: 7px; font-size: 12.5px; color: var(--text); text-align: left; }
+.wk-row:hover { background: var(--hover); }
+.wk-row.file.on { background: var(--active); font-weight: 600; }
+.wk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-chev, .wk-chec { flex: none; width: 14px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-3); }
+.wk-chev svg { width: 12px; height: 12px; display: block; }
+.wk-fic { flex: none; display: inline-flex; color: var(--text-2); }
+.wk-fic svg { width: 15px; height: 15px; display: block; }
+.wk-row.dir .wk-name { font-weight: 600; }
+.wk-row.dir svg { color: var(--text-2); }
+
+.wk-newchat-wrap { padding: 10px 4px; }
+.wk-newchat { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 10px; border-radius: 10px; font-size: 13.5px; font-weight: 600; color: var(--text); background: var(--active); transition: background 0.15s; }
+.wk-newchat:hover { background: var(--border); }
+.wk-newchat svg { width: 14px; height: 14px; display: block; }
+
+/* 聊天 tab 的会话列表：条目复用全局 .sess-item（recent.js itemHtml），此处只管纵向排布 */
+.wk-chats { display: flex; flex-direction: column; gap: 1px; padding: 0 2px; }
+
+.wk-foot { display: flex; align-items: center; gap: 8px; margin: 4px 10px 10px; padding: 9px 12px; border-radius: 11px; background: var(--bg); border: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.wk-foot:hover { background: var(--hover); }
+.wk-foot-ico { display: flex; flex: none; }
+.wk-foot-ico img, .wk-foot-ico svg { width: 18px; height: 18px; border-radius: 4px; display: block; }
+.wk-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
+
+/* ============ work 主区两栏（编辑区 + 助手） ============
+   #work-editor 刻意不用 .view-card：它是 work 模式常驻栏，带该类会落入 registry 的
+   「槽里同一时刻恰好一张卡」语义。几何复制 .view-card（margin 2px / --radius / --chat-bg）。 */
+#work-editor { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
+#chat-area.work { flex-direction: row; }
+#chat-area.work > #work-editor { display: flex; flex: 1 1 50%; min-width: 0; }
+#chat-area.work > #session-card { flex: 1 1 50%; min-width: 0; }
+#chat-area.work.hide-editor > #work-editor { display: none; }
+#chat-area.work.hide-assist > #session-card { display: none; }
+
+.wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
+.wk-ed-back { display: none; }
+.wk-ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
+.wk-ed-body { flex: 1; min-height: 0; overflow: auto; }
+.wk-ed-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.wk-ed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.wk-code { margin: 0; padding: 16px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre; }
+.wk-ed-md { padding: 16px 20px; }
+.wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
+.wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }
+
+/* 手机端（≤720px）：两栏不成立——常态只显示助手，点文件时编辑区以覆盖层全屏打开（返回键收起） */
+@media (max-width: 720px) {
+  #chat-area.work { flex-direction: column; }
+  #chat-area.work > #work-editor { display: none; }
+  #chat-area.work > #session-card { flex: 1; }
+  #chat-area.work.wk-file-open > #work-editor {
+    display: flex; position: absolute; inset: 2px; z-index: 20; margin: 0; border-radius: var(--radius);
+  }
+  .wk-ed-back { display: inline-flex; }
 }

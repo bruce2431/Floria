@@ -418,6 +418,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中；空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
 - **token 门**：`body.token-gate #sidebar { width: 0; overflow: hidden }`——侧栏在 flex 流内，`transform` 位移**不释放宽度**，必须收宽才不挤主区；门解除后随 `#sidebar` 的 width 过渡 0→280 拉伸，与门图淡出、趴栏淡入同一时序。
 - **panel 无独立定位规则**：`#panel` 宽 0 ↔ `var(--panel-w)` 随 `#sidebar.open` 同步过渡，内容靠定宽 `.panel-inner` 逐帧揭示；手机（≤720px）改覆盖式抽屉（`transform: translateX(-100%)`，不受影响）。
+- **手机抽屉宽度 = `min(300px, 84vw)`，且选择器必须写成 `#sidebar, #sidebar.open`**：桌面那条 `#sidebar.open { width: var(--panel-w) }` 特指度 (1,1,0) 高于手机档的 `#sidebar` (1,0,0)，展开态会被按 `--panel-w`（≤1023px 档 240px）窄化——宽度声明整条形同废弃（2026-09-25 手机实测：抽屉 240px、头部「已连接」断行）。**不变量：手机档抽屉宽度只由该 media 内一条声明给值。**
 - **折叠态内容避让**：窄桌面 / 平板竖屏（721–899px，#messages 760px 居中后左侧留白不足）给非全出血卡的滚动层留 `padding-top:60px`（全出血卡本就 `padding:0`，汉堡浮在其上）。
 - **无分隔线**：`#panel` 不画 `border-right`（侧栏是通高平面、无自身形状；分隔交由底板色从卡缝露出承担，见 §41）。拖拽调宽详见 §21（`:root` 内联 `--panel-w` 同时被 `#sidebar` 与 `.panel-inner` 消费；`#panel-resizer` 由 `#sidebar.open` 门控）。
 
@@ -432,7 +433,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 40. 未定/已推迟：项目控制台与项目态侧栏
 
-以下为**已讨论未实现**，勿当成现状：主区「项目控制台」（项目级会话/卡片/神经元/skill/settings/CLAUDE.md 聚合）、**项目态侧栏 scoped**（标题 `Floria · PjN`、`最近` 只列该项目会话、会话行不显示项目标识、四管理 tab 在项目态隐藏）、预览注册按钮**展开后的形态**。方案全文与参考图见 `20260923192542-prism参考图/SPEC.md`。
+主区「项目控制台」（项目级会话/卡片/神经元/skill/settings/CLAUDE.md 聚合）**仍未实现**，勿当成现状。**项目态侧栏已落地但换了形态**——不再是原方案的 `Floria · PjN` scoped 最近列表，而是 §43 的 work 模式（项目切换 + 文件树 + 主区两栏）。预览注册按钮**展开后的形态**仍推迟。方案全文与参考图见 `20260923192542-prism参考图/SPEC.md`。
 
 ## 41. 内容卡化：无形槽 + 每视图一张 `.view-card`（缝里露底板当分隔）
 
@@ -469,3 +470,24 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
   4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
 - **样式**：`.ext-shell`（`relative` + 纵向 flex + `height:100%`）> `.ext-frame`（`flex:1; width:100%; border:0`）。与 `.preview-shell`/`.preview-frame` **同构但不复用类名**——宿主侧所有「当前预览帧」的查询（rail-ext 的 `.preview-frame`、`openProjectPreview` 三级链）都按 `.preview-frame` 定位，外部卡若同用会顶替真预览帧。全高卡特例判据须并入 `.ext-shell`（与 `:has(.preview-shell|.neu-graph)` 同一块，见 §41 卡内滚动层）。
 - **探针锚点**：`probes/probe-web-ext-cards.ts`（结构 + 行为真值表；网关侧解析从 `localGateway.ts` 提取、经 `Bun.Transpiler` 剥类型后直接跑，不另起网关）。
+
+## 43. 侧栏 chat / work 双模式（Prism 式工作区）
+
+- **模式与状态源**：`state.sbMode`（`'chat'` / `'work'`），持久化在 `UI_KEY='floria-ui-v1'`（`sbMode` + `workProj`/`workFile`/`wkEditor`/`wkAssist`，`core/state.js` 的 `saveWork`/`loadWork`）。**模式不落 hash 路由**——`/session/`、`/manage/`、`/project/` 三条真路径已占满，模式只走 localStorage。`UI_KEY` 由 `mgrView` 与 work 两族状态共用，写入一律经 `patchUI()` 的 read-modify-write 打补丁（整份 `setItem` 会让后写者抹掉先写者）。
+- **落地唯一入口 = `sidebar/work.js` 的 `applySbMode()`**：`#chat-panel` / `#work-panel` 切 `hidden`、`.ms-btn` 切 `.on`、`#chat-area` 切 `.work`，启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。启动序 = `initWork()`（`loadWork()` → `mountWork()` → `applySbMode()`，**绑定必须先于 applySbMode 的渲染**，否则 work 面板首渲的行没有容器级委托）。
+- **主区两栏**：`#chat-area.work` → `flex-direction: row`；`#work-editor` 与 `#session-card` 各 `flex: 1 1 50%`。显隐由 `#chat-area.work.hide-editor` / `.hide-assist` 门控。**不变量：编辑区与助手至少一栏可见**（`applyPanes()` 在两者皆关时强制回助手栏并 toast）。
+- **模式互斥**：work 模式只在会话卡在场时成立——`chat/route.js` 的 `route()` 在 `r.name` 为 `mgr`/`preview` 且当前为 work 时调 `setSbMode('chat')`（顶 tab 高亮、面板显隐、`.work` 由 `applySbMode` 一并落地）。反向无特殊处理（work 侧栏本就不含管理/预览入口）。
+- **数据源（零后端改动）**：项目列表 = `/gateway/sessions` 的 `groups`（`core/sessions.js` `loadSessions` 顺带存进 `state.projects`，含无会话项目）；文件树 = `GET /gateway/project?label=` 的 `files`（节点 `{name,type:'dir'|'file',children?}`）；单文件 = `GET /gateway/file?label=&path=`（原始字节，已有路径穿越防护 + 4 MB 上限 + MIME 头）。
+- **work 数据的「门后补拉」**：`ensureWork()`（`sidebar/work.js`）是 work 数据补齐的唯一路径，三处调用——`applySbMode()` 进入 work、启动 `initWork()`→`applySbMode()`、以及 `core/auth.js` `hideGate()` 的 `loadSessions().then` 链内（`state.sbMode==='work'` 时）。**为什么必须挂在 hideGate**：`loadProjectTree()` 与 `renderEditor()`→`readFile()` 都依赖 token，boot 时 `needToken()` 仍为真（`loadProjectTree` 直接早退、`readFile` 拿 401 且不重试），刷新后从 localStorage 恢复的 `workProj`/`workFile` 就停在「无文件树 + 编辑区读取失败」——手点 ⟳ 才好的现象即此。补拉点与 mgr/models/neurons 数据的门后补拉同点（不新开窗口、不加定时重试）。
+- **项目列表渲染单一路径（不变量）**：`renderWorkChrome()` = 项目名 + 底部卡计数 + 下拉内容（末尾调 `renderWorkProjects()`）的**同一次**渲染，四处调用点共用；下拉内容不得只在下拉打开那一刻从 `state.projects` 快照单独渲一次。**下拉绝不由「在途/空列表」渲染**：`#wk-proj-seat` 点击先 `await ensureProjectList()`（已有列表即返回，空则拉一次——`loadSessions` 在启动早期会因 `needToken()` 早退）再 `pop.hidden = false`。空态文案（`.wk-empty`）取 `--text-2`，`--text-3` 在白底浮层上肉眼等同空白（失败必须看得见）。
+- **模块顶层名字全局唯一（构建不变量）**：`scripts/bundle-web-modules.ts` 把各模块体**原样拼进同一个 IIFE**（只剥 `import` 行），故全部模块的顶层 `function`/`const` 共享一个作用域——**同名即静默覆盖**（按 MODULES 序后出现者胜），先声明者的调用点会跑到另一个实现上且无任何报错。新增模块的顶层名一律带模块前缀。探针锚点：`probes/probe-web-module-scope.ts`（模块间同名 / 与 prelude 注入名 `$` 冲突 / 产物 `app.js` 顶层声明去重，三闸）。
+- **编辑区渲染分流**（`readFile()`）：图片扩展名 → `<img src=fileUrl>`；`content-type` 判文本（含 `.md` 兜底）→ `.md` 走 `core/markdown.js` 的 `mdHtml`（排版作用域 `.wk-ed-md`，与 `.msg .body` 同一套规则，见 styles.css Markdown 段）否则 `<pre class="wk-code">` 转义原文；413/403/二进制 → 居中提示不静默空白。**`edSeq` 序号守卫**：快速连点文件时丢弃迟到的旧响应。
+- **文件树**：整块 `innerHTML` 重渲 ⇒ 点击事件**委托在 `#wk-body` 容器上**（逐行绑定会被下次重渲抹掉）；过滤词命中自身或任一子孙即保留目录（`wkNodeHit`，否则目录被滤掉、里面的命中项也没了）。
+- **与预览页注册按钮的关系**：work 侧栏不含 `#rail-ext` 挂载点（折叠带已于 2026-09-25 撤除，见 §38/§39）；work 模式不改变该链路的状态。
+- **样式**：模式 tab / `#work-panel` / 文件树 / `#work-editor` 两栏 / 手机覆盖层集中在 `styles.css` 末段「侧栏 chat / work 双模式」块；`#work-panel[hidden]`、`#chat-panel[hidden]` 须显式声明（面板带 `display:flex`，作者样式优先级高于 UA 的 `[hidden]{display:none}`）。手机 ≤720px 两栏不成立：常态只显示助手，点文件给 `#chat-area` 加 `.wk-file-open` → `#work-editor` 变 `position:absolute; inset:2px` 覆盖层，`#wk-ed-back`（仅手机露出）清除该态。
+- **聊天 tab 列表**：列出 `state.workProj` 的会话（`ALL` 取 `projectScope==='project' && projectLabel===state.workProj`，`sessCmp` 排序），条目**复用 `recent.js` 的 `itemHtml(s, false, { more: false })`**——与侧栏「项目展开」同一份行渲染，零复刻。`more:false` 是必需的：行菜单（`toggleRowMenu`）挂靠 `#recent-body` 的浮起/内嵌机制，work 侧栏不提供该机制，留着就是点不动的死控件。点击委托在 `#wk-body`（整块 `innerHTML` 重渲，逐行绑定会被抹掉），语义同 `bindSessClicks`（已在该会话内不重复 navigate；移动端收面板）。
+- **过滤词按 tab 各判各的**：`wkFilter` 单一状态源，文件 tab 走 `wkNodeHit`（文件名/路径，命中自身或任一子孙即保留该目录），聊天 tab 按会话标题子串。**切 tab 清词**——两 tab 判据不同，留旧词会渲染出假空态。
+- **图标 SVG 无自带尺寸**：`core/icons.js` 的 `I.*` 全是裸 `<svg viewBox>`（不带 width/height），**每个使用点必须落在有 `svg{width;height}` 规则的 slot 里**；裸插会取替换元素默认 300×150（巨型图标撑爆行高）。文件树目录行与文件行同用 `.wk-fic` slot。
+- **新聊天**：work 模式「聊天」tab 的按钮（在会话列表上方）→ `state.newProject = state.workProj` + `navigate('#/')`，复用 `recent.js` 的 `state.newProject` 首条消息落项目契约。**不切回 chat 模式**：`#/` 空态由 `renderHome()` 渲进会话卡（非视图卡），work 两栏布局照样成立；模式互斥只对 mgr/preview 两张视图卡生效。
+- **侧栏控件不复设（work 模式）**：顶栏 `#panel-search`（搜索会话）在 work 模式隐藏（`#panel.work #panel-search`，类由 `applySbMode()` 落在 `#panel` 上）——work 自带 🔍（`#wk-find` 过滤当前 tab），两个放大镜同屏即「重复」观感。刷新/重载只有 `#wk-refresh`（`.wk-head` 内，= `refreshWork()`：`loadSessions()` + 当前项目文件树）一个入口，`.wk-tools` 不再有第二个 ⟳（`.wk-tools` = 🔍 + ⚙）。
+- **构建登记**：`scripts/bundle-web-modules.ts` MODULES 表内 `sidebar/work.js` 区间号 2932（只作执行序排序，排在 `views/registry.js` 之后、`__app__` 之前）。

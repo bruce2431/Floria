@@ -29,6 +29,9 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   // 外部卡（卡片化二期）：定义件须排在 registry.js 之前（同区间号 → 稳定排序按本表顺序）
   { file: 'views/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
   { file: 'views/registry.js', ranges: [[2932, 2932]], first: [''] },
+  // work 模式侧栏（2026-09-25）：区间号同为 2932 只作执行序排序 —— 依赖 views/registry.js 的
+  // showCard（work 主区两栏与视图卡互斥）与 core/state.js 的 state/chatArea/#work-* 元素，故排其后。
+  { file: 'sidebar/work.js', ranges: [[2932, 2932]], first: ['  // ---------- work 模式侧栏（Prism 式） ----------'] },
   { file: '__app__', ranges: [[2933, 3011], [5379, 5398]], first: ['  // ---------- 事件绑定 ----------', '  // ---------- 启动 ----------'] },
   { file: 'inputbar/ctx-meter.js', ranges: [[3012, 3303]], first: ['  // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------'] },
   { file: 'core/gateway.js', ranges: [[3304, 3420], [4154, 4161], [4969, 5047], [5352, 5378]], first: ['  // ---------- 网关模式（SubPj2 私有化网关）----------', '  function setConn(on, label) {', '  function connect() {', '  function initGateway() {'] },

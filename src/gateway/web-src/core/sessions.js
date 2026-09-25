@@ -50,6 +50,10 @@ import { saveModelCur, MODEL_CUR, modelUserPicked, setModelUserPicked, renderMod
       const data = await res.json()
       if (!Array.isArray(data.sessions)) throw new Error(data.error || 'bad response')
       setAll(withSynthetic(data.sessions))
+      // work 模式项目列表（2026-09-25）：/gateway/sessions 随 sessions 一并返回 groups（含「无会话的
+      // 项目」），此前被丢弃。work 侧栏的项目切换必须用它——按 sessions 自行分组的做法只覆盖有会话者。
+      state.projects = Array.isArray(data.groups) ? data.groups : []
+      state.workspace = typeof data.workspace === 'string' ? data.workspace : ''
       applyTurnEndAt(ALL)
       live.listSig = listSigOf(data.sessions)
     } catch (e) {

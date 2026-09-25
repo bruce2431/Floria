@@ -56,6 +56,26 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-file{margin-bottom:2px;color:var(--text);font-family:var(--mono);font-size:13px;line-height:20px;word-break:break-all;overflow-wrap:anywhere}
       .appr-meta{margin-bottom:2px;color:var(--text-3);font-size:12px;line-height:18px}
       .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:#f7f8fa;color:#0f1115;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+      /* ExitPlanMode 计划正文的 Markdown 作用域（approval.js prettyToolInput → mdHtml）：
+         审批卡不在 .msg/.done-think 内，故 mdHtml 产出的块级标签在此重新给样式，语义对齐 styles.css 同名规则。 */
+      .appr-md{color:var(--text);font-size:13px;line-height:20px;word-break:break-word}
+      .appr-md p{margin:4px 0}
+      .appr-md h1,.appr-md h2,.appr-md h3,.appr-md h4{margin:12px 0 4px;font-weight:700;color:var(--text);line-height:1.4}
+      .appr-md h1{font-size:16px}.appr-md h2{font-size:15px}.appr-md h3{font-size:14px}.appr-md h4{font-size:13px}
+      .appr-md ul,.appr-md ol{margin:4px 0;padding-left:20px}
+      .appr-md li{margin:2px 0}
+      .appr-md blockquote{border-left:3px solid var(--border);margin:4px 0;padding:2px 10px;color:var(--text-2)}
+      .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
+      .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+      .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
+      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#f7f8fa}
+      .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
+      .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
+      .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
+      .appr-md .md-table{margin:6px 0;overflow-x:auto}
+      .appr-md .md-table table{border-collapse:collapse;font-size:12.5px;width:100%}
+      .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}
+      .appr-md .md-table th{background:var(--rail-bg);font-weight:600}
       .appr-diff{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
       .appr-diff-h{padding:5px 10px;background:#f7f8fa;color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
       .appr-diff-b{margin:0;padding:8px 10px;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}

@@ -456,6 +456,14 @@ import { firstSendHash } from '../sidebar/recent.js'
       const head = str(o.file_path) ? `<div class="appr-file">${esc(str(o.file_path))}</div>` : ''
       return head + o.edits.map((e, i) => diffBlock(`第 ${i + 1} 处修改`, str(e.old_string), str(e.new_string), '')).join('')
     }
+    // ExitPlanMode：输入里的 plan 是模型写的 Markdown 计划正文，走 mdHtml 渲染（.appr-md 作用域样式），
+    // 与 CLI 弹窗 <Markdown> 同源语义；其余字段（allowedPrompts 等）仍按通用字段列表渲染。
+    if (toolName === 'ExitPlanMode') {
+      const plan = str(o.plan)
+      const rest = Object.keys(o).filter((k) => k !== 'plan' && present(k))
+      const restHtml = rest.length ? `<div class="appr-kvs">${rest.map((k) => fieldRow(k, o[k], desc)).join('')}</div>` : ''
+      return (plan.trim() ? `<div class="appr-md">${mdHtml(plan)}</div>` : '') + restHtml
+    }
     const order = TOOL_FIELD_ORDER[toolName] || []
     const keys = order.filter(present).concat(Object.keys(o).filter((k) => !order.includes(k) && present(k)))
     if (!keys.length) return ''

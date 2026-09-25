@@ -20,7 +20,15 @@ const body = src.slice(i, j)
 // 与 web-src/core/state.js:51 同款 esc（探针注入）
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
-const prettyToolInput = new Function('esc', `${body}\nreturn prettyToolInput`)(esc) as (
+// mdHtml 在真实运行期来自 core/markdown.js（依赖 MENTION_* 等 DOM 侧模块，不宜整段切片）；
+// 探针注入记录型 stub——只验证 ExitPlanMode 分支「把 plan 交给 mdHtml 并包进 .appr-md」的接线，
+// 不重复测 markdown 解析本身（那是 core/markdown.js 的职责）。
+const mdCalls: string[] = []
+const mdHtmlStub = (s: unknown) => {
+  mdCalls.push(String(s ?? ''))
+  return `<p>${esc(s)}</p>`
+}
+const prettyToolInput = new Function('esc', 'mdHtml', `${body}\nreturn prettyToolInput`)(esc, mdHtmlStub) as (
   tool: string, input: unknown, desc?: string,
 ) => string
 
@@ -70,7 +78,17 @@ ok('未知工具: false/null/空串不渲染', !unknown.includes('off') && !unkn
 ok('未知工具: 嵌套对象 JSON 内联', unknown.includes('{&quot;a&quot;:1}'))
 ok('未知工具: 仍非原始 JSON 倾倒（无 appr-command 时代的外层花括号）', !unknown.trim().startsWith('{'))
 
-// ---- ⑤ 空输入不炸 ----
+// ---- ⑤ ExitPlanMode：计划正文走 Markdown，不再落 appr-pre 纯文本 ----
+const plan = prettyToolInput('ExitPlanMode', {
+  plan: '# 计划\n\n- 第一步\n- 第二步\n\n```ts\nconst a = 1\n```',
+  allowedPrompts: [{ tool: 'Bash', prompt: 'run tests' }],
+})
+ok('ExitPlanMode: plan 交给 mdHtml', mdCalls.some((s) => s.includes('# 计划') && s.includes('第一步')))
+ok('ExitPlanMode: 包 .appr-md 且不落 appr-pre', plan.includes('appr-md') && !plan.includes('appr-pre'))
+ok('ExitPlanMode: 与卡头说明不重复/其余字段照渲', plan.includes('appr-kvs') && plan.includes('allowedPrompts'))
+ok('ExitPlanMode: 无 plan 不渲空 md 容器', prettyToolInput('ExitPlanMode', {}) === '' && !prettyToolInput('ExitPlanMode', { plan: '   ' }).includes('appr-md'))
+
+// ---- ⑥ 空输入不炸 ----
 ok('空输入返回空串', prettyToolInput('Bash', {}) === '' && prettyToolInput('Edit', null) !== undefined)
 
 console.log('渲染样例（Edit 切片前 6 行）:')

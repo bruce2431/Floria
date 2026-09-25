@@ -2418,15 +2418,22 @@ function setLastNavHash(v) { lastNavHash = v }
   }
 
   // ---------- 侧栏 ----------
-  function setPanel(open) {
+  // 开合唯一入口。opt.pin 只在打开时有意义：钉住 = 鼠标移出侧栏不自动收（汉堡/抽屉把手点击），
+  // 不钉 = 预览式（#edge-hot 悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
+  let panelPinned = false
+  function setPanel(open, opt) {
+    panelPinned = !!open && !!(opt && opt.pin)
     state.panelOpen = open
     sidebar.classList.toggle('open', open)
     // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
     if (!open) document.documentElement.style.removeProperty('--panel-w')
-    // 展开/折叠侧栏时关闭 rail 相关的弹层
+    // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
   }
+  // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
+  // 侧栏折叠时宽度 0，本事件不会触发。
+  sidebar.addEventListener('mouseleave', () => { if (!panelPinned) setPanel(false) })
 
   // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
   // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联
@@ -2939,9 +2946,16 @@ function setFirstSendHash(v) { firstSendHash = v }
   function bindRailExtBridge() {
     addEventListener('message', (e) => {
       const d = e.data
-      if (!d || d.type !== 'floria-rail-register') return
+      if (!d) return
+      // 两类申报共用「当前预览帧作证」这一道门（e.source 必须就是 .preview-frame 的 contentWindow）
+      const rail = d.type === 'floria-rail-register'
+      const cards = d.type === 'floria-cards-register'
+      if (!rail && !cards) return
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
+      // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
+      // views/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       railExtItems = (Array.isArray(d.items) ? d.items : [])
         .filter((it) => it && typeof it.id === 'string' && it.id && Object.prototype.hasOwnProperty.call(I, it.icon))
@@ -3244,6 +3258,20 @@ function setFirstSendHash(v) { firstSendHash = v }
       toast('设置失败 · 模型不在凭据池或网关未连接')
     }
   }
+  // 外部卡片清单同步（卡片化二期）：清单属于「当前 .preview-frame 所指项目」——与 clearRailExt 同点
+  // 调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过 preview.json，registerExtCards 再校
+  // 一遍（postMessage 那条不过网关，两条外部输入共用 ext-card.js 的同一份过滤器）。
+  // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
+  let extCardsSeq = 0
+  function syncExtCards(label) {
+    const seq = ++extCardsSeq
+    clearExtCards()
+    fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then((d) => { if (seq === extCardsSeq) registerExtCards(label, d && d.cards, true) })
+      .catch(() => {}) // 清单拿不到 = 该项目无外部卡（不猜不兜底）
+  }
+
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。
   // 预览页加载三级策略（2026-08-19 Web 容器）：
   //  ① preview.json 声明 backend → 网关 /gateway/backend 懒加载 spawn 后端进程，iframe 直连 http://127.0.0.1:<port>/
@@ -3291,7 +3319,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const cur = body.querySelector('.preview-frame')
       if (cur) {
         // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
-        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
+        if (cur.getAttribute('src') !== src) { clearRailExt(); syncExtCards(label); cur.setAttribute('src', src) }
         state.previewMounted = src.includes('/default-preview/') ? null : label
         return
       }
@@ -3304,6 +3332,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
+      syncExtCards(label) // 同上：清上一份文档的侧栏快捷按钮 + 上一份预览页申报的外部卡，重取本项目清单
       body.innerHTML =
         `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
         (already
@@ -4068,6 +4097,61 @@ function setFirstSendHash(v) { firstSendHash = v }
     )
   }
 
+  // ---------- 外部卡片（卡片化二期）----------
+  // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
+  // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
+  // **不解释卡片内容**（内容永远跑在它自己的文档里）。声明文件与 backend 段同一份申报表。
+  // 渲染 = 一卡一 iframe（`/preview/<label>/<path>`，同源）：preview 保持自包含（自带 css/js/
+  // 相对路径），与宿主 DOM/CSS/JS 零互相污染——一期 SPEC-视图卡化 §7「外部插件 = iframe」边界的延续。
+  // 契约：preview.json cards（网关 GET /gateway/preview-cards 读出，见 docs/gateway.md §6）
+  //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
+  //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
+  // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
+  //        （清空点收在 sidebar/mgr.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
+
+  // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
+  // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
+  function normExtCards(raw) {
+    return (Array.isArray(raw) ? raw : [])
+      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      .map((c) => ({
+        id: typeof c.id === 'string' ? c.id.trim() : '',
+        title: typeof c.title === 'string' ? c.title.trim() : '',
+        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+        path: typeof c.path === 'string' ? c.path.trim() : '',
+        host: typeof c.host === 'string' ? c.host : '',
+        tab: c.tab !== false,
+      }))
+      .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
+  }
+  // 资源路径必须是 preview 目录内的相对文件路径（绝对路径 / 反斜杠 / query / 空段 / `.` `..` 段
+  // 一律拒；允许尾随 #片段）。与网关 isPreviewRelPath 同款规则——网关侧挡 preview.json 来源，
+  // 这里挡 postMessage 来源，两条外部输入各自守门。
+  function isExtPath(p) {
+    if (!p || p.startsWith('/') || p.includes('\\') || p.includes('?')) return false
+    const i = p.indexOf('#')
+    const file = i >= 0 ? p.slice(0, i) : p
+    let rel
+    try { rel = decodeURIComponent(file) } catch { return false } // 非法 % 序列
+    if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes('?')) return false
+    return rel.split('/').every((s) => s && s !== '.' && s !== '..')
+  }
+  // 卡页 URL：/preview/<label>/<path>（+token 供未授权设备首链；#片段原样带上，由卡页自我定位）
+  function extCardSrc(label, card) {
+    const i = card.path.indexOf('#')
+    const file = i >= 0 ? card.path.slice(0, i) : card.path
+    const frag = i >= 0 ? card.path.slice(i) : ''
+    const q = gToken ? '?token=' + encodeURIComponent(gToken) : ''
+    return `/preview/${encodeURIComponent(label)}/${file}${q}${frag}`
+  }
+  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 showView 的 render(卡体)）
+  function mountExtCard(body, label, card) {
+    body.innerHTML =
+      '<div class="ext-shell">' +
+      `<iframe class="ext-frame" title="${esc(card.title)}" data-ext-card="${esc(card.id)}" src="${esc(extCardSrc(label, card))}"></iframe>` +
+      '</div>'
+  }
+
 
   // ---------- 视图注册表 ----------
   const VIEWS = [
@@ -4079,14 +4163,49 @@ function setFirstSendHash(v) { firstSendHash = v }
     { id: 'models', title: '模型', tip: '模型配置', icon: 'chip', tab: true, render: renderMgrModels },
     { id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true, render: renderMgrNeurons },
   ]
-  const viewOf = (id) => VIEWS.find((v) => v.id === id)
+  const viewOf = (id) => VIEWS.find((v) => v.id === id) || EXT.find((v) => v.id === id)
 
-  // 侧栏 tab 生成（启动时一次）。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
-  // app.js 点击绑定读 dataset.mgr、route.js syncMgrTabs 按 state.mgr 切 .on。
+  // ---------- 运行时外部卡表（卡片化二期）----------
+  // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 VIEWS 分表存放：外部卡没有 render
+  // 代码，只有宿主生成的 iframe 壳（views/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
+  // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
+  // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
+  // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
+  // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
+  // 清（清点收在 sidebar/mgr.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由不清**，
+  // 否则用户点外部卡 tab 的瞬间卡就被清没了。
+  let EXT = []
+  let EXT_LABEL = ''
+  function registerExtCards(label, cards, replace) {
+    if (!label) return
+    if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
+    for (const c of normExtCards(cards)) {
+      const id = `ext:${label}:${c.id}`
+      EXT = EXT.filter((v) => v.id !== id) // 同 id 覆盖，不改位置语义（后注册者在列表尾）
+      EXT.push({
+        id,
+        title: c.title,
+        tip: `${c.title} · ${label}`,
+        icon: I[c.icon] ? c.icon : 'plug',
+        tab: c.tab,
+        render: (body) => mountExtCard(body, label, c),
+      })
+    }
+    renderMgrTabs()
+  }
+  function clearExtCards() {
+    if (!EXT.length && !EXT_LABEL) return
+    EXT = []
+    EXT_LABEL = ''
+    renderMgrTabs()
+  }
+
+  // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
+  // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = VIEWS.filter((v) => v.tab)
+    box.innerHTML = VIEWS.concat(EXT).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
@@ -4137,39 +4256,24 @@ function setFirstSendHash(v) { firstSendHash = v }
   renderMgrTabs()
 
   // ---------- 事件绑定 ----------
-  // rail
-  $('rail-logo').innerHTML = I.logo
-  $('rail-logo').addEventListener('click', () => setPanel(true))
-  $('rail-toggle').innerHTML = I.toggle
-  $('rail-toggle').addEventListener('click', () => setPanel(true))
+  // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
+  //  · #menu-btn 汉堡（左上角，全视口共用一枚）：点击 = 打开并钉住（钉住后鼠标移出侧栏不自动收）
+  //  · 左缘唤出（桌面，预览式打开、不钉住）：判据 = 「指针到达窗口左缘」，两种观测合一——
+  //    ①窗口内取样到 clientX ≤ EDGE_PX；②指针直接从左缘离开窗口（document mouseout：relatedTarget
+  //    为 null 且 clientX ≤ 0）。快速左移常在同一个取样间隔内直接冲出窗口，靠细条 mouseenter 会被整段
+  //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
+  const EDGE_PX = 8
+  const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
+  $('menu-btn').addEventListener('click', () => setPanel(true, { pin: true }))
+  document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
+  document.addEventListener('mouseout', (e) => {
+    if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)
+  })
+  $('scrim').addEventListener('click', () => setPanel(false))
   $('panel-collapse').innerHTML = I.collapse
   $('panel-collapse').addEventListener('click', () => setPanel(false))
   $('panel-search').innerHTML = I.mag
   $('panel-search').addEventListener('click', openSearch)
-  $('rail-new').innerHTML = I.pen
-  $('rail-new').addEventListener('click', () => { state.newProject = null; navigate('#/'); if (isMobile()) setPanel(false) })
-  $('rail-search').innerHTML = I.mag
-  $('rail-search').addEventListener('click', openSearch)
-
-  // 移动端：汉堡按钮打开抽屉、遮罩关闭抽屉
-  $('menu-btn').addEventListener('click', () => setPanel(true))
-  $('scrim').addEventListener('click', () => setPanel(false))
-  $('rail-bubble').innerHTML = I.bubble
-  $('rail-bubble').addEventListener('click', () => {
-    const willShow = !bubblePop.classList.contains('show')
-    if (willShow) {
-      renderBubble()
-      // 先以不可见方式测量，把弹窗锚定到气泡按钮右侧并垂直居中，避免闪现/错位
-      bubblePop.style.visibility = 'hidden'
-      bubblePop.classList.add('show')
-      const r = $('rail-bubble').getBoundingClientRect()
-      bubblePop.style.left = Math.round(r.right + 8) + 'px'
-      bubblePop.style.top = Math.round(r.top + r.height / 2 - bubblePop.offsetHeight / 2) + 'px'
-      bubblePop.style.visibility = 'visible'
-    } else {
-      bubblePop.classList.remove('show')
-    }
-  })
   $('recent-write').innerHTML = I.pen
   $('recent-write').addEventListener('click', () => { state.newProject = null; navigate('#/'); if (isMobile()) setPanel(false) })
   // 2026-08-24 定案：开启新会话只用「笔」图标（recent-write → 回首页空态），
@@ -4185,15 +4289,17 @@ function setFirstSendHash(v) { firstSendHash = v }
     }),
   )
 
-  // 管理入口 tab（插件，含技能预览）：点击 → 主区切换管理视图（侧栏会话列表不变）；再点已选中 tab → 退出管理
-  document.querySelectorAll('.mgr-tab').forEach((b) =>
-    b.addEventListener('click', () => {
-      const k = b.dataset.mgr
-      // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
-      if (state.mgr === k) navigate('#/')
-      else { saveMgrView(); navigate('#mgr/' + k) }
-    }),
-  )
+  // 管理入口 tab（插件，含技能预览）：点击 → 主区切换管理视图（侧栏会话列表不变）；再点已选中 tab → 退出管理。
+  // 委托绑在容器上（非逐钮）：卡片化二期起 renderMgrTabs 会在运行期重渲（外部卡注册/清空），
+  // 逐钮绑定会被 innerHTML 一并抹掉。
+  $('mgr-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('.mgr-tab')
+    if (!b) return
+    const k = b.dataset.mgr
+    // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
+    if (state.mgr === k) navigate('#/')
+    else { saveMgrView(); navigate('#mgr/' + k) }
+  })
 
   // 整理会话弹层
   document.querySelectorAll('.org-opt').forEach((b) =>
@@ -4307,7 +4413,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     if (!e.target.closest('#mention-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
-    if (!bubblePop.contains(e.target) && !e.target.closest('#rail-bubble')) bubblePop.classList.remove('show')
+    if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
   })
   // 风险确认门：Escape 关闭（dsh Modal 的 Escape onClose 监听；输入栏 keydown 不覆盖遮罩态）
   document.addEventListener('keydown', (e) => {
@@ -4572,6 +4678,26 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-file{margin-bottom:2px;color:var(--text);font-family:var(--mono);font-size:13px;line-height:20px;word-break:break-all;overflow-wrap:anywhere}
       .appr-meta{margin-bottom:2px;color:var(--text-3);font-size:12px;line-height:18px}
       .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:#f7f8fa;color:#0f1115;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+      /* ExitPlanMode 计划正文的 Markdown 作用域（approval.js prettyToolInput → mdHtml）：
+         审批卡不在 .msg/.done-think 内，故 mdHtml 产出的块级标签在此重新给样式，语义对齐 styles.css 同名规则。 */
+      .appr-md{color:var(--text);font-size:13px;line-height:20px;word-break:break-word}
+      .appr-md p{margin:4px 0}
+      .appr-md h1,.appr-md h2,.appr-md h3,.appr-md h4{margin:12px 0 4px;font-weight:700;color:var(--text);line-height:1.4}
+      .appr-md h1{font-size:16px}.appr-md h2{font-size:15px}.appr-md h3{font-size:14px}.appr-md h4{font-size:13px}
+      .appr-md ul,.appr-md ol{margin:4px 0;padding-left:20px}
+      .appr-md li{margin:2px 0}
+      .appr-md blockquote{border-left:3px solid var(--border);margin:4px 0;padding:2px 10px;color:var(--text-2)}
+      .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
+      .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+      .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
+      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#f7f8fa}
+      .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
+      .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
+      .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
+      .appr-md .md-table{margin:6px 0;overflow-x:auto}
+      .appr-md .md-table table{border-collapse:collapse;font-size:12.5px;width:100%}
+      .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}
+      .appr-md .md-table th{background:var(--rail-bg);font-weight:600}
       .appr-diff{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
       .appr-diff-h{padding:5px 10px;background:#f7f8fa;color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
       .appr-diff-b{margin:0;padding:8px 10px;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
@@ -6161,6 +6287,14 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     if (Array.isArray(o.edits) && o.edits.length) { // MultiEdit 形态：逐处并列
       const head = str(o.file_path) ? `<div class="appr-file">${esc(str(o.file_path))}</div>` : ''
       return head + o.edits.map((e, i) => diffBlock(`第 ${i + 1} 处修改`, str(e.old_string), str(e.new_string), '')).join('')
+    }
+    // ExitPlanMode：输入里的 plan 是模型写的 Markdown 计划正文，走 mdHtml 渲染（.appr-md 作用域样式），
+    // 与 CLI 弹窗 <Markdown> 同源语义；其余字段（allowedPrompts 等）仍按通用字段列表渲染。
+    if (toolName === 'ExitPlanMode') {
+      const plan = str(o.plan)
+      const rest = Object.keys(o).filter((k) => k !== 'plan' && present(k))
+      const restHtml = rest.length ? `<div class="appr-kvs">${rest.map((k) => fieldRow(k, o[k], desc)).join('')}</div>` : ''
+      return (plan.trim() ? `<div class="appr-md">${mdHtml(plan)}</div>` : '') + restHtml
     }
     const order = TOOL_FIELD_ORDER[toolName] || []
     const keys = order.filter(present).concat(Object.keys(o).filter((k) => !order.includes(k) && present(k)))

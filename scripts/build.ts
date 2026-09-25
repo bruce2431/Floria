@@ -7,6 +7,10 @@ const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json() a
   version: string
 }
 
+// 子脚本一律用「当前正在跑的 bun」启动，而非 PATH 里的 `bun`——本机 bun 是便携副本
+// （F:\@WrokSpace\.tools\bun\bun.exe），不在 PATH；裸名会 ENOENT 打断构建。
+const BUN_BIN = process.execPath
+
 const args = process.argv.slice(2)
 const compile = args.includes('--compile')
 const dev = args.includes('--dev')
@@ -230,7 +234,7 @@ const defines = {
 // ——故用自写拼接器按切割区间行序拼回（行序=原执行序，语义保真），锚点检索防呆，产物可 diff 等价验证。
 // web/app.js 是生成物勿手改；产物文件名/引用不变（?v= cache-bust、sw CORE、gen-web-assets 全链零改动）。
 const bundleWeb = Bun.spawnSync({
-  cmd: ['bun', 'scripts/bundle-web-modules.ts'],
+  cmd: [BUN_BIN, 'scripts/bundle-web-modules.ts'],
   cwd: process.cwd(),
   stdout: 'inherit',
   stderr: 'inherit',
@@ -243,7 +247,7 @@ if (bundleWeb.exitCode !== 0) {
 // 前端资源打包：把 src/gateway/web/ → web-assets.generated.ts（内置网关 PRIVATE_GATEWAY 内嵌 serve 用）
 // 生成产物会打进 exe，因此每次构建都自动重跑，保证 exe 内前端为最新。
 const genWeb = Bun.spawnSync({
-  cmd: ['bun', 'scripts/gen-web-assets.ts'],
+  cmd: [BUN_BIN, 'scripts/gen-web-assets.ts'],
   cwd: process.cwd(),
   stdout: 'inherit',
   stderr: 'inherit',
@@ -296,7 +300,7 @@ console.log(`Built ${builtPath}`)
 // scripts/postprocess-icon.mjs. Failure here is non-fatal (bun's icon remains).
 if (existsSync(builtPath)) {
   const post = Bun.spawnSync({
-    cmd: ['bun', 'scripts/postprocess-icon.mjs', builtPath, 'assets/icon.ico'],
+    cmd: [BUN_BIN, 'scripts/postprocess-icon.mjs', builtPath, 'assets/icon.ico'],
     cwd: process.cwd(),
     stdout: 'inherit',
     stderr: 'inherit',

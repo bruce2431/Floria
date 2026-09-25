@@ -83,7 +83,7 @@
 }
 ```
 
-- `cmd`：spawn 命令数组；可含 `{port}` 占位符（网关 spawn 时替换为实际分配端口）；`cmd[0]` 相对路径按 `cwd` resolve（node spawn 只按进程 cwd 解析，须手动 resolve）。
+- `cmd`：spawn 命令数组；`cmd[0]` 相对路径按 `cwd` resolve（node spawn 只按进程 cwd 解析，须手动 resolve）。占位符 spawn 时由 `expandBackendCmdArg` 替换：`{port}`=实际分配端口，`{previewDir}`=`<项目>/.claude/preview`，`{projectRoot}`=项目根（previewDir 上两级）。**不变量：后端 argv 的路径来源只有 preview.json 与 previewDir —— 项目无需自备 launcher 脚本去算根目录。**
 - `cwd`：相对 preview.json 所在目录。
 - `port`：`0` = 网关从 8130 起探测顺延（上限 8160）；显式端口则固定。
 - `idleMinutes`：后端无活跃持续该时长被空闲回收（默认继承 `GATEWAY_IDLE_MINUTES`=10 分钟）。
@@ -93,7 +93,7 @@
 
 - `findProjects` 读 `<项目>/.claude/preview/preview.json`，有 `backend` → 项目附 `hasBackend` + `backendCfg`。
 - `GET /gateway/backend?label=`（受 token 保护）：ensureBackend（未起则 spawn）→ `{url, port, pid}`；无 backend → 404。
-- spawn：`{port}` 替换 → cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘**该项目自己的** `<项目>/.claude/preview/backend.log`，5MB 截断轮转）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
+- spawn：占位符展开（`expandBackendCmdArg`）→ cmd[0] resolve 到 cwd → `spawn`（env 加 PORT，日志落盘**该项目自己的** `<项目>/.claude/preview/backend.log`，5MB 截断轮转）；就绪探测窗口 120×200ms（容忍 ~22s 冷启动）。
 - **解释器解析 = 工作区内置便携 runtime**（`backendRuntimeDirs()`）：spawn 把 `<portableRoot>/.claude/runtime/{python,python/Scripts,node}` 前置进子进程 `PATH`，故 `cmd[0]` 裸名（`python`/`node`）命中的是内置 runtime 而非机器级安装或系统 PATH（目录不存在时该 PATH 条目被系统静默忽略）——工作区整体拷走即可用。**不变量：preview 后端不依赖机器 PATH 状态。**
 - spawn 失败（缺解释器 ENOENT 等）经 `child.on('error')` 记入 `spawnError` → 就绪探测循环即时退出 → 抛给路由回 500 JSON（网关不退出）。**不变量：单个后端配置失败不得终止网关进程。**
 - **就绪探测用原生 net socket**（`backendReady`）：编译产物 node:http 的 request 对 aiohttp/Python 后端会挂起，net 直连写 HTTP 头读响应状态（200/404 即就绪）。

@@ -121,14 +121,16 @@ let idleTimer: NodeJS.Timeout | null = null
 // ============================================================================
 interface BackendCfg {
   name?: string // 显示名（前端启动覆盖层提示用），缺省 = 项目 label；可插拔：任意后端在 preview.json 声明
-  cmd: string[] // 命令数组，{port} 占位符在 spawn 时替换为实际分配端口
-  cwd?: string // 工作目录，缺省 = 该项目 .claude/preview 目录
+  // 命令数组。占位符 spawn 时替换（expandBackendCmdArg）：{port}=分配到的端口；
+  // {previewDir}=该项目 .claude/preview；{projectRoot}=项目根（previewDir 上两级）。
+  cmd: string[]
+  cwd: string // 工作目录（readBackendCfg 恒回填：preview.json 声明值解析后，或 preview 目录本身）
   port: number // 0 = 动态分配（网关从 8130 起探测顺延）
   idleMinutes?: number // 空闲回收阈值，缺省继承 GATEWAY_IDLE_MINUTES
   readyPath?: string // 就绪探测路径，缺省 /api/system_stats（项目后端自身 API，非网关前缀）
   // 该项目 .claude/preview 目录（readBackendCfg 回填，非 preview.json 字段）：后端日志
   // 落该目录下的 backend.log（2026-09-19 定案「一个文件就直接放」，不建 logs/ 子目录）。
-  previewDir?: string
+  previewDir: string
 }
 interface BackendProc {
   pid: number
@@ -2980,7 +2982,7 @@ const backendPending = new Map<string, Promise<BackendProc>>()
 // 后端日志落「该项目自己的」<previewDir>/backend.log（2026-09-19 定案：一个项目一份 preview.json
 // = 一个后端 = 单文件 ⇒ 直接放 preview/ 根，不建 logs/ 子目录）。
 function backendLogPath(cfg: BackendCfg): string {
-  return join(cfg.previewDir ?? resolve(getPortableRoot(), '.claude'), 'backend.log')
+  return join(cfg.previewDir, 'backend.log')
 }
 
 // O3：backend 日志轮转 —— 超过上限截断重写，防长期运行无限增长（stdout/stderr 落盘只追加）
@@ -3040,10 +3042,21 @@ function backendRuntimeDirs(): string[] {
   return [join(base, 'python'), join(base, 'python', 'Scripts'), join(base, 'node')]
 }
 
+// cmd 占位符展开（2026-09-25 定案）：{projectRoot}/{previewDir} 让项目后端直接声明根目录参数，
+// 不必再自备一份 live_server.py 样板去算路径（Pj18 型 launcher 由此可删）。
+// previewDir = <项目>/.claude/preview，恒由 readBackendCfg 回填。
+function expandBackendCmdArg(arg: string, port: number, previewDir: string): string {
+  if (!arg.includes('{')) return arg
+  return arg
+    .replaceAll('{port}', String(port))
+    .replaceAll('{previewDir}', previewDir)
+    .replaceAll('{projectRoot}', resolve(previewDir, '..', '..'))
+}
+
 async function doSpawnBackend(label: string, cfg: BackendCfg): Promise<BackendProc> {
   const port = cfg.port > 0 ? cfg.port : await allocBackendPort()
   if (!port) throw new Error(`backend ${label}: 无可用端口（${BACKEND_PORT_BASE}-${BACKEND_PORT_MAX} 均被占用）`)
-  const cmd = cfg.cmd.map((a) => (a.includes('{port}') ? a.replaceAll('{port}', String(port)) : a))
+  const cmd = cfg.cmd.map((a) => expandBackendCmdArg(a, port, cfg.previewDir))
   // cmd[0] 若是相对路径（含 / 或 \），node spawn 按进程 cwd 而非选项 cwd 解析 → 手动 resolve 到 cfg.cwd
   if (cmd[0] && !isAbsolute(cmd[0]) && /[\\/]/.test(cmd[0])) cmd[0] = resolve(cfg.cwd, cmd[0])
   // 子进程 stdout/stderr 落盘到该项目自己的 .claude/preview/backend.log（stdio ignore 会丢启动报错，难诊断）

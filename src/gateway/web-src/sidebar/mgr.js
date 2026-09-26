@@ -332,40 +332,48 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
   //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
   //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
   function openProjectPreview(label, hasPreview) {
-    // 2026-09-04 预览重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
-    // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
-    // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
-    // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
-    // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat（时间相关性=会话活跃期
-    // 用户切屏频繁 → WS 重连频繁 → 重挂频繁）。改两级重入：同 label 且 iframe 在场（data-label 锚定）=
-    // 软重入——不重写 shell、不清槽，三级链照跑但 mount 按 iframe 现有 src 校正（同 src 零操作 = 零导航
-    // 扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；异 label 或 iframe 不在场 = 硬挂载。
-    // 2026-09-23 视图卡化：预览不再是「把 shell 塞进 #messages」，而是自己的整张卡（.view-card，
-    // data-view='preview'，见 views/registry.js showPreviewCard）。卡体一律经 viewBody('preview') 取——
-    // 预览卡不在槽里则返回 null（异步回程不写别人家的卡）；槽里的会话卡已随之 hidden，旧版
-    // inputWrap/chatArea 三条 mgr-on 压制规则的前提消失。
     showPreviewCard()
     const body = viewBody('preview')
     if (!body) return
-    const curFrame = body.querySelector('.preview-frame')
-    const soft = state.preview === label && !!curFrame && curFrame.dataset.label === label
-    if (!soft) {
+    // 离开会话视图必须清全局槽（清槽清单与不变量见 route.js clearSessionSlots）。软重入（同 label
+    // 且帧在场）不清、不重建 shell——异 label / 帧不在场才动，见 mountPreview 的两级重入说明。
+    if (state.preview !== label || !body.querySelector('.preview-frame')) {
       state.currentHash = ''
       stopLiveFoldTimer()
       stageRelease()
-      // 2026-09-16 项目页被实时流洗成 chat 根治：离开会话视图必须清全局槽（清槽清单与不变量
-      // 见 route.js clearSessionSlots；2026-09-19 收敛为共享出口，管理视图同款）。
       clearSessionSlots()
       state.preview = label
-      body.innerHTML =
+    }
+    mountPreview(body, label, hasPreview)
+  }
+
+  // 预览渲染器（三级链的唯一一份实现：后端容器 → 静态 preview → 默认主页）。两个消费方——
+  // 槽位预览卡（openProjectPreview，独占主区）与 work 个性化工作区第三栏（sidebar/work.js），
+  // 到 iframe 这一层没有第二套代码。
+  // 2026-09-04 重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
+  // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
+  // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
+  // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
+  // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat。故两级重入：同 label 且
+  // iframe 在场（data-label 锚定）= 软重入——不重写 shell，三级链照跑但 mount 按 iframe 现有 src 校正
+  // （同 src 零操作 = 零导航扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；
+  // 异 label 或 iframe 不在场 = 硬挂载。
+  function mountPreview(container, label, hasPreview) {
+    if (!container) return
+    // 换项目 = 换源：上一份的帧留不得（软重入只对同 label 成立）
+    const prev = container.querySelector('.preview-frame')
+    if (prev && prev.dataset.label !== label) container.innerHTML = ''
+    // 预览 iframe 挂在 .preview-body 里（该层由下面的 shell 建立，软重入时原样保留）
+    if (!container.querySelector('.preview-body')) {
+      container.innerHTML =
         '<div class="preview-shell">' +
         '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
         '</div>'
     }
-    // 预览 iframe 挂在 .preview-body 里（该层由上面的 shell 建立，软重入时原样保留）
     const mount = (src, name, already) => {
-      const vbody = viewBody('preview') // 预览卡仍在槽里才挂（三级链是异步的，回程时视图可能已被换走）
-      const body = vbody && vbody.querySelector('.preview-body')
+      // 异步回程守卫：三级链是异步的，回来时容器可能已离场（槽位换卡 / work 关掉预览栏）
+      if (!container.isConnected) return
+      const body = container.querySelector('.preview-body')
       if (!body) return
       // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
       // 一律不走下方整区重建
@@ -511,6 +519,7 @@ export {
   mgrProjHtml,
   modelCapHtml,
   modelProviderOf,
+  mountPreview,
   openProjectPreview,
   renderList,
   renderMgr,

@@ -2013,7 +2013,9 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 
 /* work 模式隐藏顶栏「搜索会话」入口：work 侧栏自带 🔍（过滤当前 tab），同为放大镜同屏即重复观感。
    类由 applySbMode() 落在 #panel 上；chat 模式自动复原。 */
-#panel.work #panel-search { display: none; }
+/* work 模式下侧栏折叠入口并入 #wk-view-pop 的「侧边栏」开关（同一个浮层管三栏），
+   故顶栏只留模式 tab；chat 模式没有该浮层，折叠按钮照旧在顶栏 */
+#panel.work #panel-search, #panel.work #panel-collapse { display: none; }
 
 /* ---------- work 侧栏 ---------- */
 .wk-head { display: flex; align-items: center; gap: 2px; padding: 10px 8px 6px 12px; position: relative; }
@@ -2026,7 +2028,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #wk-proj-seat.empty .wk-proj-label { color: var(--text-3); font-weight: 500; }
 
 #wk-proj-pop { top: calc(100% - 2px); left: 10px; right: 10px; padding: 4px; max-height: 60vh; overflow-y: auto; }
-#wk-proj-pop[hidden], #wk-view-pop[hidden] { display: none; }
+#wk-proj-pop[hidden], #wk-view-pop[hidden], #wk-new-pop[hidden] { display: none; }
 .wkp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
 .wkp-row:hover { background: var(--hover); }
 .wkp-row.on { background: var(--active); font-weight: 600; }
@@ -2037,13 +2039,20 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-tab { padding: 4px 12px; border-radius: 999px; font-size: 12.5px; color: var(--text-2); transition: background 0.15s, color 0.15s; }
 .wk-tab:hover { background: var(--hover); color: var(--text); }
 .wk-tab.on { background: var(--active); color: var(--text); font-weight: 600; }
-.wk-tools { display: flex; align-items: center; gap: 1px; margin-left: auto; }
+.wk-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .wk-ico { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--text-2); transition: background 0.15s, color 0.15s; }
 .wk-ico:hover { background: var(--hover); color: var(--text); }
 .wk-ico svg { width: 16px; height: 16px; display: block; }
+/* hidden 须显式声明：.wk-ico 的 display:inline-flex 会盖掉 UA 的 [hidden]{display:none} */
+.wk-ico[hidden] { display: none; }
 
-/* 视图开关浮层 */
-#wk-view-pop { right: 6px; top: calc(100% - 4px); width: 186px; padding: 8px; }
+/* 文件 tab 加号的菜单（对齐 Prism 侧栏；功能暂未接入，见 work.js 注释） */
+#wk-new-pop { right: 6px; top: calc(100% - 2px); width: 168px; padding: 4px; }
+.wkn-row { display: block; width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
+.wkn-row:hover { background: var(--hover); }
+
+/* 视图开关浮层（触发器已移到项目行右端，浮层随之落下一行） */
+#wk-view-pop { right: 8px; top: calc(100% - 2px); width: 186px; padding: 8px; }
 .wkv-title { font-size: 12px; color: var(--text-3); padding: 2px 6px 6px; }
 .wkv-row { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
 .wkv-row:hover { background: var(--hover); }
@@ -2074,13 +2083,8 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-row.dir .wk-name { font-weight: 600; }
 .wk-row.dir svg { color: var(--text-2); }
 
-.wk-newchat-wrap { padding: 10px 4px; }
-.wk-newchat { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 10px; border-radius: 10px; font-size: 13.5px; font-weight: 600; color: var(--text); background: var(--active); transition: background 0.15s; }
-.wk-newchat:hover { background: var(--border); }
-.wk-newchat svg { width: 14px; height: 14px; display: block; }
-
 /* 聊天 tab 的会话列表：条目复用全局 .sess-item（recent.js itemHtml），此处只管纵向排布 */
-.wk-chats { display: flex; flex-direction: column; gap: 1px; padding: 0 2px; }
+.wk-chats { display: flex; flex-direction: column; gap: 1px; padding: 6px 2px 0; }
 
 .wk-foot { display: flex; align-items: center; gap: 8px; margin: 4px 10px 10px; padding: 9px 12px; border-radius: 11px; background: var(--bg); border: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text-2); cursor: pointer; }
 .wk-foot:hover { background: var(--hover); }
@@ -2097,6 +2101,13 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > #session-card { flex: 1 1 50%; min-width: 0; }
 #chat-area.work.hide-editor > #work-editor { display: none; }
 #chat-area.work.hide-assist > #session-card { display: none; }
+
+/* 个性化工作区（第三栏，预览）：开关 = #wk-view-pop 的「预览」。与 #work-editor 同构的常驻栏，
+   内容由 mgr.js mountPreview 写进 .preview-shell；三栏并排时均分（1 1 0），关掉即隐藏不销毁。 */
+#work-preview { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
+#chat-area.work.wk-preview > #work-preview { display: flex; flex: 1 1 0; min-width: 0; }
+#chat-area.work.wk-preview > #work-editor,
+#chat-area.work.wk-preview > #session-card { flex: 1 1 0; }
 
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
 .wk-ed-back { display: none; }
@@ -2118,5 +2129,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   #chat-area.work.wk-file-open > #work-editor {
     display: flex; position: absolute; inset: 2px; z-index: 20; margin: 0; border-radius: var(--radius);
   }
+  /* 窄屏三栏不成立：预览栏不出（开关状态照常持久化，回宽屏即恢复） */
+  #chat-area.work.wk-preview > #work-preview { display: none; }
   .wk-ed-back { display: inline-flex; }
 }

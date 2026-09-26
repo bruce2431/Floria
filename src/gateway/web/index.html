@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=358" />
+  <link rel="stylesheet" href="/styles.css?v=360" />
 </head>
 <body>
 <div id="app">
@@ -72,20 +72,28 @@
             <button id="wk-proj-seat" class="wk-proj" title="切换项目" aria-haspopup="menu">
               <span class="wk-proj-ico"></span><span class="wk-proj-label">选择项目</span><span class="chevron"></span>
             </button>
-            <button id="wk-refresh" class="act-btn" title="刷新项目与文件树"></button>
+            <button id="wk-view" class="act-btn" title="视图开关" aria-haspopup="dialog"></button>
             <div id="wk-proj-pop" class="popup" hidden></div>
+            <div id="wk-view-pop" class="popup" hidden>
+              <div class="wkv-title">视图</div>
+              <button class="wkv-row on" data-wkpane="editor"><span>编辑区</span><span class="wkv-sw"></span></button>
+              <button class="wkv-row on" data-wkpane="sidebar"><span>侧边栏</span><span class="wkv-sw"></span></button>
+              <button class="wkv-row on" data-wkpane="assist"><span>助手</span><span class="wkv-sw"></span></button>
+              <button class="wkv-row" data-wkpane="workspace"><span>预览</span><span class="wkv-sw"></span></button>
+            </div>
           </div>
           <div class="wk-tabs">
             <button class="wk-tab on" data-wktab="files">文件</button>
             <button class="wk-tab" data-wktab="chat">聊天</button>
             <div class="wk-tools">
               <button id="wk-find" class="wk-ico" title="过滤文件"></button>
-              <button id="wk-view" class="wk-ico" title="视图开关" aria-haspopup="dialog"></button>
-            </div>
-            <div id="wk-view-pop" class="popup" hidden>
-              <div class="wkv-title">视图</div>
-              <button class="wkv-row on" data-wkpane="editor"><span>编辑区</span><span class="wkv-sw"></span></button>
-              <button class="wkv-row on" data-wkpane="assist"><span>助手</span><span class="wkv-sw"></span></button>
+              <button id="wk-new" class="wk-ico" title="新建聊天" aria-haspopup="menu"></button>
+              <div id="wk-new-pop" class="popup" hidden>
+                <button class="wkn-row" data-wknew="file">创建文件</button>
+                <button class="wkn-row" data-wknew="dir">创建文件夹</button>
+                <button class="wkn-row" data-wknew="upload-file">上传文件</button>
+                <button class="wkn-row" data-wknew="upload-dir">上传文件夹</button>
+              </div>
             </div>
           </div>
           <div class="wk-find-row" id="wk-find-row" hidden>
@@ -159,6 +167,11 @@
       </div>
       <div class="wk-ed-body" id="wk-ed-body"></div>
     </section>
+
+    <!-- 个性化工作区（2026-09-26 work 模式第三栏）：由视图浮层的「预览」开关驱动，内容 = 当前项目的
+         项目预览（/preview/<label>/ 或后端容器），渲染复用 mgr.js 的 mountPreview（与槽位预览卡同一份
+         实现）。同 #work-editor，不用 .view-card —— 它是 work 模式的常驻栏，不是槽位卡。 -->
+    <section id="work-preview"></section>
 
     <!-- 会话卡（视图注册表 tab:false 一条，视图卡化 2026-09-23）：#char / #chat-scroll / #empty-hint
          承载模块级 const 引用的单例 DOM（messagesEl / inputWrap / charEl），不能随卡销毁重建
@@ -287,6 +300,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=384"></script>
+<script src="/app.js?v=388"></script>
 </body>
 </html>

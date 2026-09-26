@@ -31,8 +31,9 @@ import { ctx } from '../inputbar/ctx-meter.js'
   const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
     // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
-    // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关。
-    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true }
+    // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
+    // wkPreview = 个性化工作区（第三栏，渲染当前项目预览，见 sidebar/work.js renderWorkPreview）。
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -58,7 +59,7 @@ import { ctx } from '../inputbar/ctx-meter.js'
   }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview })
   }
   function loadWork() {
     try {
@@ -71,6 +72,7 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (typeof d.workFile === 'string') state.workFile = d.workFile
       if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
+      if (typeof d.wkPreview === 'boolean') state.wkPreview = d.wkPreview
     } catch { /* 忽略 */ }
   }
   let ALL = []

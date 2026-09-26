@@ -6,6 +6,7 @@ import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, esc, isMobile, loadWork, saveWork, state, toast } from '../core/state.js'
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
+import { mountPreview } from './mgr.js'
 import { itemHtml, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
   // ---------- work 模式侧栏（Prism 式） ----------
@@ -58,41 +59,81 @@ import { renderProjSeat } from '../inputbar/commands.js'
     $('chat-panel').hidden = on
     $('work-panel').hidden = !on
     chatArea.classList.toggle('work', on)
-    if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open')
+    if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open', 'wk-preview')
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
-    if (on) ensureWork()
-    else hideWkPops()
+    if (on) {
+      ensureWork()
+      startWorkAuto()
+    } else {
+      hideWkPops()
+      stopWorkAuto()
+    }
   }
 
-  // 两栏开关落地。不变量：编辑区与助手至少一栏可见（都关 → 强制回助手栏）。
+  // 浮层各开关的真源：编辑区/助手 = work 主区栏，预览 = 第三栏（个性化工作区），
+  // 侧边栏 = 侧栏自身开合（state.panelOpen，见 recent.js setPanel）。
+  function paneOn(k) {
+    if (k === 'editor') return state.wkEditor
+    if (k === 'assist') return state.wkAssist
+    if (k === 'workspace') return state.wkPreview
+    return !!state.panelOpen
+  }
+
+  // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
+  // 三栏都算数——只看编辑区+助手会让「预览还开着时关掉助手」被误判成全关（2026-09-26 实报）。
   function applyPanes() {
     if (state.sbMode === 'work') {
-      if (!state.wkEditor && !state.wkAssist) state.wkAssist = true
+      if (!state.wkEditor && !state.wkAssist && !state.wkPreview) {
+        state.wkAssist = true
+        toast('至少保留一栏')
+      }
       chatArea.classList.toggle('hide-editor', !state.wkEditor)
       chatArea.classList.toggle('hide-assist', !state.wkAssist)
+      chatArea.classList.toggle('wk-preview', !!state.wkPreview)
     }
-    document.querySelectorAll('.wkv-row').forEach((b) => {
-      b.classList.toggle('on', b.dataset.wkpane === 'editor' ? state.wkEditor : state.wkAssist)
-    })
+    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+  }
+
+  // ---------- 个性化工作区（第三栏：项目预览） ----------
+  // 内容渲染一律走 mgr.js 的 mountPreview（与槽位预览卡同一份后端容器/静态页/默认页三级链），
+  // 本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
+  function hasPreviewOf(label) {
+    return wkProjGroups().some((g) => g.label === label && g.hasPreview)
+  }
+  function renderWorkPreview() {
+    const el = $('work-preview')
+    if (!el || !state.wkPreview || !state.workProj) return
+    const f = el.querySelector('.preview-frame')
+    if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
+    mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
 
   function hideWkPops() {
-    for (const id of ['wk-proj-pop', 'wk-view-pop']) {
+    for (const id of ['wk-proj-pop', 'wk-view-pop', 'wk-new-pop']) {
       const el = $(id)
       if (el) el.hidden = true
     }
   }
 
   function setPane(k, on) {
+    if (k === 'sidebar') {
+      // 侧栏开合不走「至少保留一栏」判定——那是主区两栏之间的约束，与侧栏无关。
+      // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属 #edge-hot 唤出）。
+      setPanel(on, { pin: on })
+      applyPanes()
+      return
+    }
+    if (k === 'workspace') {
+      state.wkPreview = on
+      applyPanes()
+      saveWork()
+      renderWorkPreview() // 开：挂当前项目预览；关：停在这里（帧留着，CSS 隐藏），重开零重载
+      return
+    }
     if (k === 'editor') state.wkEditor = on
     else state.wkAssist = on
-    if (!state.wkEditor && !state.wkAssist) {
-      if (k === 'editor') state.wkEditor = true
-      else state.wkAssist = true
-      toast('至少保留一栏')
-    }
-    applyPanes()
+    applyPanes() // 「至少保留一栏」由 applyPanes 统一兜底（含预览栏）
     saveWork()
   }
 
@@ -138,9 +179,32 @@ import { renderProjSeat } from '../inputbar/commands.js'
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
   }
 
+  // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；🔍 的提示词随 tab 走——过滤对象不同，
+  // 写死「过滤文件」会在聊天 tab 里给出错位提示（与 #panel-search 的「两个搜索」定案同源）。
+  // 文件 tab 的加号（新建文件/文件夹）待新建写接口定案后接入，届时同一按钮按 tab 分派。
+  function updateWkTools() {
+    const nb = $('wk-new')
+    const isChat = wkTab === 'chat'
+    if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
+    const pop = $('wk-new-pop')
+    if (pop && isChat) pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
+    const fb = $('wk-find')
+    if (fb) fb.title = isChat ? '过滤聊天' : '过滤文件'
+    const fi = $('wk-find-input')
+    if (fi) fi.placeholder = isChat ? '过滤聊天…' : '过滤文件…'
+  }
+
+  // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
+  // innerHTML 会让文件树的滚动位置与展开动画反复归零（内容没变就没有重写的理由）。
   function renderWorkBody() {
     const body = $('wk-body')
     if (!body) return
+    updateWkTools()
+    const html = wkBodyHtml()
+    if (body.innerHTML !== html) body.innerHTML = html
+  }
+
+  function wkBodyHtml() {
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行菜单（…）依赖 #recent-body 机制，此处 more:false 关掉。
@@ -155,29 +219,15 @@ import { renderProjSeat } from '../inputbar/commands.js'
         : list.length
           ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false, { more: false })).join('')}</div>`
           : `<div class="wk-empty">${f ? '没有匹配的聊天' : '该项目还没有聊天'}</div>`
-      body.innerHTML =
-        `<div class="wk-newchat-wrap"><button class="wk-newchat" id="wk-newchat">${I.dshPlus}<span>新聊天</span></button></div>` +
-        rows
-      return
+      // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
+      return rows
     }
-    if (!state.workProj) {
-      body.innerHTML = '<div class="wk-empty">先在上方选择一个项目</div>'
-      return
-    }
-    if (wkLoading) {
-      body.innerHTML = '<div class="wk-empty">加载中…</div>'
-      return
-    }
-    if (wkErr) {
-      body.innerHTML = `<div class="wk-empty">${esc(wkErr)}</div>`
-      return
-    }
-    if (!wkTree || !wkTree.length) {
-      body.innerHTML = '<div class="wk-empty">项目内没有可列出的文件</div>'
-      return
-    }
+    if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
+    if (wkLoading) return '<div class="wk-empty">加载中…</div>'
+    if (wkErr) return `<div class="wk-empty">${esc(wkErr)}</div>`
+    if (!wkTree || !wkTree.length) return '<div class="wk-empty">项目内没有可列出的文件</div>'
     const f = wkFilter.trim().toLowerCase()
-    body.innerHTML = wkTreeHtml(wkTree, 0, '', f) || '<div class="wk-empty">没有匹配的文件</div>'
+    return wkTreeHtml(wkTree, 0, '', f) || '<div class="wk-empty">没有匹配的文件</div>'
   }
 
   // 目录命中判定：过滤词命中自身或任一子孙即保留（否则目录被过滤掉，里面的命中项也没了）
@@ -211,23 +261,27 @@ import { renderProjSeat } from '../inputbar/commands.js'
   }
 
   // ---------- 数据 ----------
-  async function loadProjectTree(label) {
+  // silent = 自动对账调用：不置加载态、失败保留旧树（瞬时网络错误不该把已展开的树清成错误页）
+  async function loadProjectTree(label, silent) {
     if (!label || needToken()) return
-    wkLoading = true
-    wkErr = ''
-    wkTree = null
-    renderWorkBody()
+    if (!silent) {
+      wkLoading = true
+      wkErr = ''
+      wkTree = null
+      renderWorkBody()
+    }
     try {
       const res = await fetch(apiUrl('/gateway/project?label=' + encodeURIComponent(label)))
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error || '加载失败')
       wkTree = Array.isArray(data.files) ? data.files : []
     } catch (e) {
+      if (silent) return
       wkErr = e.message || String(e)
     } finally {
-      wkLoading = false
-      renderWorkBody()
+      if (!silent) wkLoading = false
     }
+    renderWorkBody()
   }
 
   async function selectProject(label) {
@@ -243,18 +297,44 @@ import { renderProjSeat } from '../inputbar/commands.js'
     saveWork()
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
+    renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
     await loadProjectTree(label)
   }
 
-  async function refreshWork() {
-    hideWkPops()
+  // silent = 自动对账（见 workAutoTick）：不收起浮层、不动滚动位置、失败静默
+  async function refreshWork(silent) {
+    if (!silent) hideWkPops()
+    const body = $('wk-body')
+    const sc = body ? body.scrollTop : 0
     try {
       await loadSessions()
     } catch {
       /* 列表刷新失败不阻断文件树刷新 */
     }
     renderWorkChrome()
-    if (state.workProj) await loadProjectTree(state.workProj)
+    if (state.workProj) await loadProjectTree(state.workProj, silent)
+    else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
+    if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
+  }
+
+  // ---------- 自动刷新（2026-09-26 取代手动 ⟳） ----------
+  // 三条前置：work 模式 + 页面可见 + 已过 token 门。会话列表由 /gateway/events SSE 增量推，
+  // 但 work 侧栏的列表/树不在 SSE 的重渲出口里（live.js refreshList 只渲 #recent-body），
+  // 所以这里定时对账一次全量，静默无变化即不写 DOM（renderWorkBody 的 HTML 比对）。
+  const WK_AUTO_MS = 5000
+  let wkAutoT = 0
+  function startWorkAuto() {
+    if (!wkAutoT) wkAutoT = setInterval(workAutoTick, WK_AUTO_MS)
+  }
+  function stopWorkAuto() {
+    if (wkAutoT) {
+      clearInterval(wkAutoT)
+      wkAutoT = 0
+    }
+  }
+  async function workAutoTick() {
+    if (state.sbMode !== 'work' || document.visibilityState !== 'visible' || needToken()) return
+    await refreshWork(true)
   }
 
   // 项目列表落地（ensureWork / 下拉打开时共用）。needToken 未解锁或网络失败时 state.projects 保持原值。
@@ -277,6 +357,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
     await ensureProjectList()
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
+    renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
   }
 
   // ---------- 编辑区（主区左栏，只读） ----------
@@ -369,8 +450,8 @@ import { renderProjSeat } from '../inputbar/commands.js'
 
   // ---------- 事件 ----------
   function mountWork() {
-    $('wk-refresh').innerHTML = I.refresh
     $('wk-find').innerHTML = I.mag
+    $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
     $('wk-ed-back').innerHTML = I.collapse
     const ico = document.querySelector('#wk-proj-seat .wk-proj-ico')
@@ -407,7 +488,24 @@ import { renderProjSeat } from '../inputbar/commands.js'
       const b = e.target.closest('[data-wkpane]')
       if (b) setPane(b.dataset.wkpane, !b.classList.contains('on'))
     })
-    $('wk-refresh').addEventListener('click', () => refreshWork())
+    // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
+    $('wk-new').addEventListener('click', (e) => {
+      e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
+      if (wkTab !== 'files') {
+        newWorkChat()
+        return
+      }
+      const pop = $('wk-new-pop')
+      const willShow = pop.hidden
+      hideWkPops()
+      pop.hidden = !willShow
+    })
+    $('wk-new-pop').addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (!e.target.closest('[data-wknew]')) return
+      $('wk-new-pop').hidden = true
+      toast('创建 / 上传功能暂未接入')
+    })
     $('wk-find').addEventListener('click', () => {
       const row = $('wk-find-row')
       row.hidden = !row.hidden
@@ -456,7 +554,6 @@ import { renderProjSeat } from '../inputbar/commands.js'
         if (isMobile()) setPanel(false)
         return
       }
-      if (e.target.closest('#wk-newchat')) newWorkChat()
     })
     $('wk-ed-back').addEventListener('click', closeWorkFile)
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
@@ -464,10 +561,15 @@ import { renderProjSeat } from '../inputbar/commands.js'
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#wk-proj-pop') && !e.target.closest('#wk-proj-seat')) $('wk-proj-pop').hidden = true
       if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view')) $('wk-view-pop').hidden = true
+      if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
     // 窗口跨越手机断点时收起覆盖层：两栏本身能重新排开，覆盖层留着会挡住助手
     window.addEventListener('resize', () => {
       if (!isMobile() && chatArea.classList.contains('wk-file-open')) closeWorkFile()
+    })
+    // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') workAutoTick()
     })
   }
 

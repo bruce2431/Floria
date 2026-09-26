@@ -1,7 +1,7 @@
 // Markdown 渲染 + relTime（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { esc } from './state.js'
-import { MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../inputbar/mention.js'
+import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../inputbar/mention.js'
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
   const MD_MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Courier New', monospace"
   const MD_LINK_OK = (u) => /^(https?:)?\/\//.test(u) || /^[a-z0-9][a-z0-9./_-]*$/i.test(u)
@@ -19,6 +19,7 @@ import { MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../input
     // 令牌替换命中不到代码内文本，避免 chip 嵌套进 <code>（白胶囊+灰代码气泡叠一起）。
     s = s.replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
+         .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }

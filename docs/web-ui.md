@@ -17,7 +17,7 @@
 
 ## 2. 会话创建与首条消息链
 
-**新建流程 = 笔与项目「+」一致，先到初始化界面（空态），发送首条消息才真正建会话**：笔（`#recent-write`）清 `state.newProject` 回全局首页；项目文件夹行「+」仅设 `state.newProject=label` + `navigate('#/')`。**seat 三态**：空态=白底 chip 可点弹层选项目、label 显示项目全称（max-width 240px）；会话态（`#chat-area.in-session` 门控）=工作文件夹标识保留显示（按 projectScope/projectLabel 渲染、全局会话显示「全局」）但 `.locked` 锁定只读；管理/预览态挂载点不在 chat-area 自动隐藏。`gwSend` 空态分支带 project 调 `newWebSession(project)`（创建失败恢复 newProject）→ 建会话后才弹 CLI 窗口。
+**新建流程 = 笔与项目「+」一致，先到初始化界面（空态），发送首条消息才真正建会话**：笔（`#recent-write`）清 `state.newProject` 回全局首页；项目文件夹行「+」仅设 `state.newProject=label` + `navigate('#/')`。**seat 两态**：**可改**=白底 chip 可点弹层选项目、label 显示 `newSessionProject()`（max-width 240px）；**锁定只读**（`inputbar/commands.js` `projSeatLocked()`，点击直接返回不弹层）= 会话态（按 projectScope/projectLabel 渲染、全局会话显示「全局」）∪ work 模式已选工作项目（在项目中工作只能在对应项目建会话，见 §43）。管理/预览态挂载点不在 chat-area 自动隐藏。`gwSend` 空态分支按 `newSessionProject()` 带 project 调 `newWebSession(project)`（创建失败恢复 `state.newProject` 原值）→ 建会话后才弹 CLI 窗口。
 
 **首条消息立即上屏**：renderSession 首屏 fetch 常抢在 CLI 写入首条 user 消息前返回空，此时乐观上屏（用户气泡 + 正在处理折叠），真实数据经 SSE 整页替换。**丝滑建会**：乐观渲染前移到发送瞬间（不等 wsession 返回）+ `flipInput(false)` 沉底，失败回滚空态；`flipInput(toStage)` 为 FLIP 补间（变更前测旧矩形 → 统一施加类/父容器变更 → transform 从旧位滑到新位），renderHome/renderSession 换向均走它。
 
@@ -155,6 +155,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **审批栏正文按工具语义渲染**：`prettyToolInput(toolName,input,desc)`（`inputbar/approval.js`）：Edit/MultiEdit（`input.edits[]`）=文件名 + **红/绿两段文本 diff**（`.appr-diff`）；其余工具=**中文字段标签 + 值**列表（`FIELD_LABELS` + `TOOL_FIELD_ORDER`，未列字段追加在后）；命令/正文类字段（`command`/`content`/`new_source`/`prompt`）恒落 mono 代码块（`.appr-pre`），多行/超 140 字符值自动升级成块；`boolean true`→「是」，`false`/`null`/空串不渲染；与卡头 `a.description` 逐字重复的字段不再渲染。**ExitPlanMode**：`input.plan`（模型写的计划正文）走 `mdHtml` 渲染（`.appr-md` 作用域，样式注入于 `core/gateway.js` 的 `gatewayCss()`——审批卡不在 `.msg .body`/`.done-think`/`.tr-body` 内，故 md 块级标签在此重复挂样式），其余字段（`allowedPrompts`）仍按通用字段列表渲染；与 CLI 弹窗 `<Markdown>` 同源语义。纯 web 展示层：进料仍是 CLI `sendRequest` 原样透传的 `a.input`。探针 `probes/probe-approval-pretty.ts`（含转义/XSS 断言 + ExitPlanMode 分支接线断言，mdHtml 注入记录型 stub）。
 
 **审批栏入场动效**：`.appr-in`（`@keyframes apprInUp`：`opacity 0→1` + `translateY(10px→0)`，220ms ease-out）与高度长出（320ms）**同帧起播**；卡面本体在 `.bar-takeover` 态不退场 ⇒ 内容淡入不露首帧空洞；10px 位移落在卡片底部内边距内 ⇒ 按钮行不被裁角；**只在「普通输入栏 → 卡片」那一次播放**（`showTakeover` 的 `firstShow` 门）。
+
+**接管期输入内容组的退场方式（不变量）**：`.bar-takeover` 下 `#input-bar` 的非卡子件走 `position:absolute; visibility:hidden; pointer-events:none`（**禁止 `display:none`**）——聚焦中的 `contenteditable` 一旦被移出渲染树，WebKit（iPad Safari / iOS 各浏览器）连带销毁其文本内容，草稿在卡弹出时整段丢失；绝对定位不参与流布局 ⇒ 输入栏高度仍只由卡决定（与 `display:none` 同几何），元素与内容留在渲染树内故草稿存活。配套不变量：`showTakeover` 显式 `inputEl.blur()`（非渲染退场不再顺带失焦）⇒ 接管卡在场恒 `isEditing()` 为假，`viewport.js` 的键盘几何/整页平移不会把已收起的软键盘当编辑态处理。
 
 **审批栏高度视口预算 + 收起并行式**：①**高度**：`.appr-body` 改视口预算 `max-height:calc(100vh - 260px)`（`100dvh` 后置声明；预算＝黄条带 38 + 按钮行 60 + 底距 22 + 聊天区至少可见 ~140）。②**收起 = 单一时间轴并行**：`collapseTakeover` 并入 `clearTakeover`，同帧起播三件事——`.appr-out`（`clip-path:inset()` 底边插值 + opacity，170ms，须 ≤ `HEIGHT_MS`=320ms）、`.bar-collapsing` + 撤 `.bar-takeover`、`.bar-reveal`（170ms）。**几何关键**：收起期卡片仍走 `.composer-growing` 的 `absolute bottom:0`（底边钉原位）⇒「卡自下而上被削掉」与「下方同步露出输入内容」同方向交叉过渡。常量：`HEIGHT_MS` 须 = `styles.css #input-bar` 的 `height 0.32s`。配套不变量：`syncTakeoverPad` 在收起启动同帧清零（须在 `wrapAnimating` 置位前直接写）；`cancelClose()` 在新 takeover 到来时撤三态残留；`showTakeover` 先清 `inputBarEl` 内联高度再实测；`finishClear` 复位 `wrapAnimating/wrapClosing`。**审批卡是同链唯一在场者**（只读 question 卡已移除，见 §17）。
 
@@ -415,7 +417,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
   - `#menu-btn` 汉堡（内容卡左上角 `top/left:10px`，全视口共用一枚，即手机端原有抽屉把手）：点击 = `setPanel(true,{pin:true})` 打开并**钉住**；`#sidebar.open ~ #chat-area #menu-btn` 展开态隐藏，收回入口在面板头部（`.floria-logo` / `#panel-collapse`，均 `setPanel(false)`）。
   - **左缘唤出**（`web-src/app.js` 的 `document` 级监听，无对应元素）：判据 = 「指针到达窗口左缘」的两种观测合一——①`mousemove` 取样到 `clientX ≤ 8`；②`mouseout` 且 `relatedTarget === null && clientX ≤ 0`（指针**直接从左缘离开窗口**）。守卫 `edgeArmed()`：`!state.panelOpen && !isMobile() && !body.token-gate`。**为何不用细条元素**：快速左移常在同一个取样间隔内直接冲出窗口，8px 细条的 `mouseenter` 会被整段跳过（用户实测「向左后再向右一点点才唤出」）。唤出为**不钉住**的预览式，移出侧栏即自动收（`sidebar/recent.js` 的 `#sidebar` `mouseleave` → 未钉住则 `setPanel(false)`）。
 - **钉住单一状态源 = `recent.js` 模块内 `panelPinned`**：`setPanel(open, opt)` 里 `panelPinned = !!open && !!opt.pin`（收起一律清），`mouseleave` 只读它裁决收不收。全项目仅 `#menu-btn` 的 click 传 `{pin:true}`。
-- **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中；空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
+- **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中；**`.g-stage` 宽度基准 = 包含块**（`min(88%, 620px, calc(100vh - 160px))`，手机档去 620 上限）——**不得用 `vw`**：work 两栏 / 侧栏展开 / 窄窗口下卡比 `88vw` 窄时，stage 会溢出卡外被 `.view-card` 的 `overflow:hidden` 裁掉，而空态底栏（`#input-wrap`）宽度 = stage + 40px 且随之居中 ⇒ 底栏连同「发送消息」占位、右侧模型 chip 一并被裁。空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
 - **token 门**：`body.token-gate #sidebar { width: 0; overflow: hidden }`——侧栏在 flex 流内，`transform` 位移**不释放宽度**，必须收宽才不挤主区；门解除后随 `#sidebar` 的 width 过渡 0→280 拉伸，与门图淡出、趴栏淡入同一时序。
 - **panel 无独立定位规则**：`#panel` 宽 0 ↔ `var(--panel-w)` 随 `#sidebar.open` 同步过渡，内容靠定宽 `.panel-inner` 逐帧揭示；手机（≤720px）改覆盖式抽屉（`transform: translateX(-100%)`，不受影响）。
 - **手机抽屉宽度 = `min(300px, 84vw)`，且选择器必须写成 `#sidebar, #sidebar.open`**：桌面那条 `#sidebar.open { width: var(--panel-w) }` 特指度 (1,1,0) 高于手机档的 `#sidebar` (1,0,0)，展开态会被按 `--panel-w`（≤1023px 档 240px）窄化——宽度声明整条形同废弃（2026-09-25 手机实测：抽屉 240px、头部「已连接」断行）。**不变量：手机档抽屉宽度只由该 media 内一条声明给值。**
@@ -488,6 +490,27 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **聊天 tab 列表**：列出 `state.workProj` 的会话（`ALL` 取 `projectScope==='project' && projectLabel===state.workProj`，`sessCmp` 排序），条目**复用 `recent.js` 的 `itemHtml(s, false, { more: false })`**——与侧栏「项目展开」同一份行渲染，零复刻。`more:false` 是必需的：行菜单（`toggleRowMenu`）挂靠 `#recent-body` 的浮起/内嵌机制，work 侧栏不提供该机制，留着就是点不动的死控件。点击委托在 `#wk-body`（整块 `innerHTML` 重渲，逐行绑定会被抹掉），语义同 `bindSessClicks`（已在该会话内不重复 navigate；移动端收面板）。
 - **过滤词按 tab 各判各的**：`wkFilter` 单一状态源，文件 tab 走 `wkNodeHit`（文件名/路径，命中自身或任一子孙即保留该目录），聊天 tab 按会话标题子串。**切 tab 清词**——两 tab 判据不同，留旧词会渲染出假空态。
 - **图标 SVG 无自带尺寸**：`core/icons.js` 的 `I.*` 全是裸 `<svg viewBox>`（不带 width/height），**每个使用点必须落在有 `svg{width;height}` 规则的 slot 里**；裸插会取替换元素默认 300×150（巨型图标撑爆行高）。文件树目录行与文件行同用 `.wk-fic` slot。
-- **新聊天**：work 模式「聊天」tab 的按钮（在会话列表上方）→ `state.newProject = state.workProj` + `navigate('#/')`，复用 `recent.js` 的 `state.newProject` 首条消息落项目契约。**不切回 chat 模式**：`#/` 空态由 `renderHome()` 渲进会话卡（非视图卡），work 两栏布局照样成立；模式互斥只对 mgr/preview 两张视图卡生效。
+- **在项目中工作（不变量，两半各一个判定点）**：work 模式 + 已选工作项目时——①**落项目**：新会话/新上传的目标项目恒 = `state.workProj`，唯一真源 = `core/state.js` `newSessionProject()`（work 模式解析 `workProj`，否则回落 `state.newProject`）；消费点 `inputbar/send.js` 建会话、`inputbar/images.js` 上传落点，**任何消费点直读 `state.newProject` 都会在 work 模式下把会话/文件落到全局**。②**助手栏范围**：只看工作项目的会话，唯一判定点 = `sidebar/work.js` `workScopeOk(hash)`（非 work 模式 / 未选项目 / 空 hash / `findSession` 查无一律放行——「未知」≠「别的项目」），三处入口共用：`chat/route.js` `renderSession` 首句守卫（含刷新恢复的直连路径）、`applySbMode()`（切模式）、`selectProject()`（切项目）——命中即 `navigate('#/')` 退回该项目的新对话空态。seat 由同一判定锁定只读（`inputbar/commands.js` `projSeatLocked()` = 会话态 ∪ work+工作项目，渲染与点击守卫共用），label 读 `newSessionProject()`。
+- **新聊天**：work 模式「聊天」tab 的按钮（在会话列表上方）→ `navigate('#/')`（落项目由 `newSessionProject()` 按工作项目解析，**不写 `state.newProject`**——目标项目槽只有一个真源）。**不切回 chat 模式**：`#/` 空态由 `renderHome()` 渲进会话卡（非视图卡），work 两栏布局照样成立；模式互斥只对 mgr/preview 两张视图卡生效。
 - **侧栏控件不复设（work 模式）**：顶栏 `#panel-search`（搜索会话）在 work 模式隐藏（`#panel.work #panel-search`，类由 `applySbMode()` 落在 `#panel` 上）——work 自带 🔍（`#wk-find` 过滤当前 tab），两个放大镜同屏即「重复」观感。刷新/重载只有 `#wk-refresh`（`.wk-head` 内，= `refreshWork()`：`loadSessions()` + 当前项目文件树）一个入口，`.wk-tools` 不再有第二个 ⟳（`.wk-tools` = 🔍 + ⚙）。
 - **构建登记**：`scripts/bundle-web-modules.ts` MODULES 表内 `sidebar/work.js` 区间号 2932（只作执行序排序，排在 `views/registry.js` 之后、`__app__` 之前）。
+- **探针锚点**：`probes/probe-work-scope.ts`（结构与真源断言：`newSessionProject` 唯一真源 + 两处消费点接线 + `workScopeOk` 四条放行判据 + 三处入口接线与顺序 + seat 锁定判据 + `.g-stage` 宽度基准无 `vw` + 产物内三函数定义唯一）。
+
+## 44. @ 提及「目录 / 文件」：逐级浏览 + 路径 chip
+
+**能力**：`@` 浮窗与「+」菜单都可引用**目录/文件**，选中文件即插入一枚显示为 `@<相对路径>` 的 chip；**路径基准恒 = 工作区根**（`getPortableRoot()`），与网关 `/gateway/fs` 同基准。
+
+**浏览起点 = 当前上下文项目目录**（`pickHome()`，用户定案「先显示本项目的文件」）：会话态取该会话所属项目（`projectScope==='project'` 的 `projectLabel`，全局会话取空），非会话态取 `newSessionProject()`（work 模式即工作项目）。空串 = 无项目上下文 → 起点即工作区根。**基准仍是工作区根**——`pick.path` 自始至终是相对工作区根的路径，项目层不过是它的一个子级；首行「上级目录」从项目层退回工作区根（`pickParent()` 单段路径 → `''`）。
+
+- **两个浮窗**：「+」菜单（`inputbar/commands.js`，`#cmd-pop`）与 `@` 浮窗（`inputbar/mention.js`，`#mention-pop`）；后者无「上传/指令」组（本就不提供图片/文件上传与斜杠命令），组序仍是同一份 `GROUP_ORDER` 的子序列。
+- **两入口共用一份 pick 数据层**（`inputbar/mention.js`，`commands.js` 只 import 复用，零复刻）：状态对象 `pick = { path, entries, loading, err, seq }`；`loadPickPath(path)` 打 `GET /gateway/fs?path=`，**`seq` 序号守卫**丢弃迟到的旧响应（连点下钻防串层）；`pickItems(q)` 产出 `{kind:'pathup'}`（仅非工作区根层）+ `{kind:'path', ptype:'dir'|'file', name, path}`，`q` 只过滤**当前层**名字；`pickEnter(it)` 下钻/返回；`refreshPick(after)` = **定位到 `pickHome()`** 后回调重渲。
+- **浮窗打开即回项目层**：`openMentionPopAtCaret()` 与 `toggleCmdPop()` 各调一次 `refreshPick(...)`（回调内先判 `mention.open`/`cmd.open` 再渲，防迟到响应写进已关的浮窗）；打开是新的一轮手势，不延续上次浏览到的层（同 `q`/`sel` 每次重置），且**先清 `pick.entries`**——否则换项目后先闪一帧上一个项目的条目。
+- **「上级目录」不依赖当前层内容**：`pickItems` 先压上级行（只要 `pick.path` 非空），再判 `loading`/`entries`。某一层拉不到（目录已删/请求失败）时，上级行照旧在 ⇒ 文件组不会变成退不回去的死层。
+- **组序与每组上限（`arrangeItems`，唯一真源，两个浮窗都过）**：组序固定 **上传 → 聊天 → 文件 → 技能 → 指令**，每组只列 `GROUP_MAX = 3` 行（超出的不渲染，没有「更多…」折叠）。`GROUP_OF` 是 kind→组的唯一映射（`imgpick`/`filepick`→上传、`session`→聊天、`path`/`pathup`→文件、`skill`/`plugin`→技能、其余→指令；`commands.js` 的 `cmd` 即指令组），组标题也由它产出——**新增条目只声明 kind，不在各自浮窗里排位**（两处排位分开写迟早分叉）。**例外：「上级目录」是导航行**，既不占列表名额也不被截断（截掉会让子目录变成死层），故文件组最多呈现「上级目录 + 3 项」。
+- **渲染**：分组标题 = `groupOf(it)`，文件组额外拼当前层路径（`'文件 · ' + pickLabel()`，工作区根层显示「工作区根」）；行图标 `mentionChipIcon('path', ptype)`（dir→`I.folder`/file→`I.dshFile`），首行「上级目录」用 `MENTION_UP_ICON`（mention.js 自带，非 `I.*`——它不带尺寸槽，本行有 `svg{}` 规则）。行副标题显示完整相对路径。
+- **选中分流（唯一判定点 `selectMentionItem(it)`，点击与 Enter 共用）**：`pathup` 或 `path+dir` → 下钻（不插 chip）；`path+file` → 插 chip。`commands.js` 侧同判据内联在 `cmdSelect()`。
+- **令牌形态**：`[@目录:路径]` / `[@文件:路径]`（`serializeInput` 由 `chip.dataset.ptype` 决定字面量，`buildMentionChip` 只写 `dataset.name`/`dataset.ptype`）。**刻意不用 `[文件:路径]`**：该形态是上传附件占位（`inputbar/send.js` 上行、`chat/messages.js` 剥离、`userFilesHtml` 渲染成文件卡），复用会被附件链吞掉。
+- **渲染回显**：`mention.js` `renderUserText` 与 `core/markdown.js` `mdInline` 都按 `MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g` 还原成 chip——**两处都要加**（离线气泡走 mdInline、实时流走 renderUserText）。
+- **样式**：`.mention-chip.m-path`（等宽字体、`max-width: min(100%, 320px)`），内层 `.mc-t` 承担省略号（chip 是 inline-flex，直挂文本无法 `text-overflow`）；`#cmd-pop .grp` 与 `.mp-sec` 加 `nowrap + ellipsis`（分组标题带路径会撑破浮窗）。
+- **构建不变量**：`commands.js` 对 `mention.js` 的 import **必须单行**（拼接器只剥 `/^import /` 行，续行会漏进模块体）。
+- **探针锚点**：`probes/probe-gateway-fs.ts`（`resolveWithinRoot` 越界/根内 18 断言 + 端点分支只读/复用 `listOneLevel`/403/404 文本断言）、`probes/probe-web-module-scope.ts`（新增顶层名 `pick`/`pickItems` 等不得与他人撞名）。

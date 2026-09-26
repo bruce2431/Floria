@@ -5,7 +5,7 @@ import { navigate, mountInput, flipInput, renderSession } from '../chat/route.js
 import { stage } from '../chat/stage.js'
 import { GATEWAY, gws } from '../core/gateway.js'
 import { refreshSession } from '../core/live.js'
-import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live, toast } from '../core/state.js'
+import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live, toast, newSessionProject } from '../core/state.js'
 import { sessionCwd, setSessionCwd } from '../core/sessions.js'
 import { renderTransient, turnLive, setBtnMode } from './approval.js'
 import { pendingImages, pendingFiles, clearPendingImages, clearPendingFiles } from './images.js'
@@ -42,8 +42,9 @@ import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
     // 期间再发送直接忽略（否则每发一条都新建一个会话）；创建完成后 currentHash 已由 navigate 设置。
     if (!state.currentHash) {
       if (webCreating) { toast('正在创建会话，请稍候…'); return true }
-      const tgt = state.newProject
-      state.newProject = null
+      const tgt = newSessionProject() // work 模式 = 工作项目（seat 只读，见 state.newSessionProject）
+      const prevNew = state.newProject // 回滚用：清的是「目标项目」这一个槽，work 模式压根不读它
+      state.newProject = null // 消费即清：目标项目一次性，下一次回默认全局
       // 丝滑过渡（2026-08-30）：不等 wsession 返回（spawn CLI 窗口+注册常 >1s，期间空态冻结
       // 是「不丝滑」根源）——发送瞬间即进会话视觉：输入栏 FLIP 沉底 + 趴栏淡出 + 首条消息
       // 乐观上屏（气泡+正在处理折叠）。pre 标记 + hash 暂空：renderSession 创建中不洗
@@ -65,7 +66,7 @@ import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
         flipInput(true) // 回滚空态（FLIP 滑回 stage，docked/in-session 一并移除）
         inputEl.textContent = text
         syncGwSend()
-        state.newProject = tgt
+        state.newProject = prevNew
         inputEl.focus()
         return true
       }

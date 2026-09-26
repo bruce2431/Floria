@@ -476,9 +476,17 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 #composer-takeover { display: block; width: 100%; }
 #composer-takeover[hidden] { display: none; }
 /* 输入栏让位态：仅 padding 让位 0（卡内容全出血贴卡面，黄条头贴顶、圆角由裁溢出裁出）
-   +输入内容组隐藏；卡面铬一律不动 */
+   +输入内容组隐藏；卡面铬一律不动。2026-09-26 根修（用户实报：上一轮还在跑时打了草稿，审批/提问卡
+   一弹出草稿整段消失且不回来）——退场**禁用 display:none**：聚焦中的 contenteditable 一旦被移出
+   渲染树，WebKit（iPad Safari / iOS 各浏览器）会连同文本内容一起销毁（无图时用户正聚焦在 #input 里
+   打字；有图时刚用过文件选择器、焦点已离开输入栏，故现象只落在「无图」）。改脱流 + visibility:hidden：
+   ①绝对定位不参与流布局 ⇒ 栏高仍只由卡决定（与 display:none 同几何）；②元素与内容留在渲染树内不被
+   销毁 ⇒ 草稿存活；③不可见不可点 ⇒ 接管期输入栏确实让位。非渲染退场顺带丢掉的失焦由 approval.js
+   showTakeover 显式 blur() 补回（不变量 = 接管卡在场 isEditing() 必假）。 */
 #input-bar.bar-takeover { padding: 0; overflow: hidden; }
-#input-bar.bar-takeover > :not(#composer-takeover) { display: none !important; }
+#input-bar.bar-takeover > :not(#composer-takeover) {
+  position: absolute; visibility: hidden; pointer-events: none;
+}
 /* takeover 内的审批卡铺满输入栏宽度（去掉 chat 内的宽度上限），且剥掉自身卡面铬
    （独立边框/底色/阴影/圆角全去）——黄条头保留为状态带，卡面即输入栏卡面（2026-09-09 根修） */
 #composer-takeover .appr-card { width: 100%; max-width: none; margin: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; }
@@ -990,7 +998,8 @@ body.kb-open #input-wrap { transition: none; }
   overflow-y: auto; padding: 8px;
 }
 #mention-pop[hidden] { display: none; }
-.mp-sec { font-size: 12px; font-weight: 600; color: var(--text-3); padding: 7px 10px 4px; letter-spacing: 0.02em; }
+/* 分组标题（目录 / 文件 组的标题带当前层路径，可长）：单行省略号收口，不撑破浮窗 */
+.mp-sec { font-size: 12px; font-weight: 600; color: var(--text-3); padding: 7px 10px 4px; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mp-item {
   display: flex; align-items: center; gap: 10px; width: 100%;
   padding: 7px 10px; border-radius: 10px; text-align: left; cursor: pointer;
@@ -1031,6 +1040,9 @@ body.kb-open #input-wrap { transition: none; }
   padding: 0 9px; font-size: 12.5px; line-height: 1.7; color: var(--text);
   white-space: nowrap; max-width: 100%;
 }
+/* 目录 / 文件 chip（@ 路径可长）：内层 .mc-t 承担省略号（inline-flex 直挂文本无法 text-overflow） */
+.msg .mention-chip.m-path { max-width: min(100%, 320px); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.msg .mention-chip.m-path .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ===== 项目选择器 #proj-root（2026-09-02）：初始界面工具行 + 右侧目标项目切换 =====
    外观=dsh .trigger 同族（28px chip）；弹层=cmd-pop 同表面（r12 白底 shadow-lv3，向上弹出）。
@@ -1112,7 +1124,7 @@ body.kb-open #input-wrap { transition: none; }
 }
 #cmd-pop .viewport { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 /* 命令类别分组标题（2026-09-09：等宽浮窗对齐 ChatGPT + 菜单形态——分组标题 + 图标行；尺寸对齐 .mp-sec） */
-#cmd-pop .grp { font-size: 12px; font-weight: 600; color: #81858c; padding: 8px 8px 4px; letter-spacing: 0.02em; }
+#cmd-pop .grp { font-size: 12px; font-weight: 600; color: #81858c; padding: 8px 8px 4px; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cmd-pop .row {
   display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px;
   cursor: pointer; font-size: 13px; color: #0f1115;
@@ -1275,8 +1287,8 @@ body.token-gate #char { opacity: 0; pointer-events: none; }
 body.token-gate #input-wrap { display: none; }
 
 /* ===== token 门全屏背景层（2026-08-17 SubPj3 复刻）：全屏渐变背景 + 居中正方形角色画面 =====
-   .g-stage 与 SubPj3 demo 完全一致（min(88vw, 620px, 100vh-160px) 1:1，去卡片边框阴影融入背景），
-   图 cover 铺满 stage，UI 按 SubPj3 百分比定位。素材 gate/ 右下角水印已白覆盖。 */
+   .g-stage 与 SubPj3 demo 几何一致（1:1 正方形，宽度 = min(88% 包含块, 620px, 100vh-160px)，
+   去卡片边框阴影融入背景），图 cover 铺满 stage，UI 按 SubPj3 百分比定位。素材 gate/ 右下角水印已白覆盖。 */
 #gate-screen {
   position: absolute; inset: 0; z-index: 1;
   display: flex; align-items: center; justify-content: center;
@@ -1294,7 +1306,11 @@ body.token-gate #input-wrap { display: none; }
    不是浮窗卡片。背景白色底子，图只承载角色形象。 */
 .g-stage {
   position: relative; flex: none;
-  width: min(88vw, 620px, calc(100vh - 160px));
+  /* 宽度基准 = **包含块**（token 门 → 全屏层；空态 → 会话卡），不是视口：88vw 在卡比 88vw 窄时
+     让 stage 溢出卡外被 .view-card 的 overflow:hidden 裁掉，而空态底栏（#input-wrap）宽度 = stage
+     + 40px 且随之居中 ⇒ 底栏与「发送消息」占位、右侧模型 chip 一并被裁（work 两栏、侧栏展开、
+     窄窗口都会触发）。高度基准 calc(100vh-160px) 保持视口口径（卡恒通高，两者本就一致）。 */
+  width: min(88%, 620px, calc(100vh - 160px));
   aspect-ratio: 1 / 1;
   background: #fff;
 }
@@ -1734,8 +1750,9 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   #chat-area.in-session #chat-scroll { padding-top: 60px; padding-bottom: 140px; } /* 2026-08-21 dsh 高胶囊：docked bar 高度增加，同步留足底边距 */
   #messages { max-width: 100%; }
   .msg .body { max-width: 88%; }
-  /* 手机（≤720px）：空态 stage = 88vw 主导；输入栏在 stage 内相对定位（#empty-hint #input-wrap）自动适配 */
-  #empty-hint .g-stage { width: min(88vw, calc(100vh - 160px)); }
+  /* 手机（≤720px）：空态 stage = 88% 包含块主导（去掉 620px 上限）；输入栏在 stage 内相对定位
+     （#empty-hint #input-wrap）自动适配 */
+  #empty-hint .g-stage { width: min(88%, calc(100vh - 160px)); }
 
   /* 弹层小屏兜底：不超出可视区 */
   #bubble-pop { max-width: 80vw; }

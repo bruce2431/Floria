@@ -62,7 +62,8 @@ type State = {
   lastInteractionTime: number
   totalLinesAdded: number
   totalLinesRemoved: number
-  hasUnknownModelCost: boolean
+  /** 本次会话内查不到价目的模型短名；hasUnknownModelCost 由它派生 */
+  unpricedModels: Set<string>
   cwd: string
   modelUsage: { [modelName: string]: ModelUsage }
   mainLoopModelOverride: ModelSetting | undefined
@@ -291,7 +292,7 @@ function getInitialState(): State {
     lastInteractionTime: Date.now(),
     totalLinesAdded: 0,
     totalLinesRemoved: 0,
-    hasUnknownModelCost: false,
+    unpricedModels: new Set(),
     cwd: resolvedCwd,
     modelUsage: {},
     mainLoopModelOverride: undefined,
@@ -742,12 +743,17 @@ export function incrementBudgetContinuationCount(): void {
   budgetContinuationCount++
 }
 
-export function setHasUnknownModelCost(): void {
-  STATE.hasUnknownModelCost = true
+/** 登记一个「价目里查不到」的模型（短名），/cost 会列出这些名字 */
+export function markModelUnpriced(model: string): void {
+  STATE.unpricedModels.add(model)
+}
+
+export function getUnpricedModels(): string[] {
+  return [...STATE.unpricedModels]
 }
 
 export function hasUnknownModelCost(): boolean {
-  return STATE.hasUnknownModelCost
+  return STATE.unpricedModels.size > 0
 }
 
 export function getLastMainRequestId(): string | undefined {
@@ -891,7 +897,7 @@ export function resetCostState(): void {
   STATE.startTime = Date.now()
   STATE.totalLinesAdded = 0
   STATE.totalLinesRemoved = 0
-  STATE.hasUnknownModelCost = false
+  STATE.unpricedModels = new Set()
   STATE.modelUsage = {}
   STATE.promptId = null
 }

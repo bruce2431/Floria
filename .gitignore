@@ -6,4 +6,5 @@ temp/
 .env
 .env.*
 CLAUDE.md
+.claude/
 .trash/

@@ -16,7 +16,7 @@ import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
 import { clearRailExt } from '../sidebar/rail-ext.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
-import { setSbMode } from '../sidebar/work.js'
+import { setSbMode, workScopeOk } from '../sidebar/work.js'
 import { showView } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
@@ -203,6 +203,9 @@ import { showView } from '../views/registry.js'
   }
 
   function renderSession(hash) {
+    // work 模式不变量（判定点见 sidebar/work.js workScopeOk）：助手栏只显示工作项目的会话——
+    // 直接打开别的项目/全局的会话路径（含刷新恢复）时退回工作项目的新对话空态，与切模式/切项目同一条。
+    if (!workScopeOk(hash)) { navigate('#/'); return }
     stopLiveFoldTimer()
     setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：切会话先复位，busy 会话由下方 syncTurnLive 按实况恢复
     // 切换会话：丢空态（hash=null）乐观项；各会话 pending 保留（2026-08-29 用户反馈

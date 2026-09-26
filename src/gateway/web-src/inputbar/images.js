@@ -1,6 +1,6 @@
 // 图片附件（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { toast, esc, state } from '../core/state.js'
+import { toast, esc, state, newSessionProject } from '../core/state.js'
 import { I } from '../core/icons.js'
 import { apiUrl } from '../core/gateway.js'
 import { syncGwSend } from './send.js'
@@ -78,13 +78,14 @@ import { syncGwSend } from './send.js'
   }
   // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
   // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
-  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=state.newProject
-  //（项目「+」初始化界面）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
+  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=newSessionProject()
+  //（项目「+」初始化界面 / work 模式的工作项目）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
   // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
   async function addUploadFiles(files) {
+    const tgt = newSessionProject()
     const ctx = state.currentHash
       ? '&sid=' + encodeURIComponent(state.currentHash)
-      : (state.newProject ? '&project=' + encodeURIComponent(state.newProject) : '')
+      : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
       try {

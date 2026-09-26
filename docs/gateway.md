@@ -150,7 +150,7 @@ web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 h
 
 CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts`（模块级 set/get 回调）+ `src/utils/gatewayClient.ts`（`/clients` WS 上行 `approval-request`/`approval-local-resolved`/`approval-cancel`、下行 `approval-response`/`approval-cancel`）+ `src/hooks/useCanUseTool.tsx`（非 BRIDGE_MODE 时 `bridgeCallbacks` 改读网关回调）→ 本地终端弹窗与 floria 审批卡**竞速（claim），先操作者生效**、另一端自动收起；网关 `/clients` 增 message 监听（审批请求→broadcast `{type:'approval'}` 卡片、本地已决→broadcast `{type:'approval-dismiss'}` 撤卡），`handleWsMessage` `'approve'` 路由 `cliClients` 回 `approval-response`（allow 带 `updatedInput:{}`、deny 带 message）；前端 app.js 处理 `approval-dismiss` 撤卡。
 
-**floria 亦可答复提问**：AskUserQuestion 走同一中继——前端 `renderQuestionApproval` 渲染逐题单选交互表单，`sendApprove` 带 `{input, answers}`，网关 approve 路由对 `data.answers` 生成 `updatedInput={questions:数组, answers}`（questions 取数组本体勿嵌套），CLI 交互应答 `buildAllow(updatedInput)` 拿到 answers 执行工具。
+**floria 亦可答复提问**：AskUserQuestion 走同一中继——前端 `renderQuestionApproval` 渲染逐题单选交互表单，`sendApprove` 带 `{input, answers}`，网关 approve 路由对 `data.answers` 生成 `updatedInput={questions:数组, answers}`（questions 取数组本体勿嵌套），CLI 交互应答 `buildAllow(updatedInput)` 拿到 answers 执行工具。**一题只有一处高亮**：`pick[question]`（`'opt' | 'text'`）记录当前选中的答案来源——**点击**选项、或**点击/聚焦**自由输入行即切换（不等输入事件触发）；切换**不清空**另一侧内容（选过的选项、打过的字都留着），提交按 `pick` 取生效值（`ansOf`）。`.qa-opt.sel` 与 `.qa-inputrow.sel` 二者只其一；输入行**不再有独立的聚焦强调**（`:focus-within` 曾与选中态视觉同款 ⇒ 单选点选项后再点输入框就出现「两处高亮」）。
 
 **审批中继常驻化**：`permissionCallbacks` 为 `gatewayClient.ts` 模块级常量、**模块加载即 `setGatewayPermissionCallbacks(...)` 常驻注册**（open/close 两处注册与清空全部删除）。不变量：**「审批请求一旦产生，必入待发表」与 WS 连接状态彻底解耦**——回调若挂在 `sock.on('open')`，断连窗口内为 null，弹窗创建瞬间取快照拿到 null ⇒ bridge 分支被跳过、`sendRequest` 都不调用，请求既不上报也不进 `pendingApprovalRequests`，之后任何重连补发都无据可依。探针 `probes/probe-approval-relay-resident.ts` 6/6。
 
@@ -261,3 +261,13 @@ web「神经」tab（[web-ui.md](web-ui.md) §26）的两个只读数据源，�
 **连边派生在前端**（后端只给事实，不给边）：mem↔cog 由 `cogs[].mem_ids/rel_ids` 派生（同一 mem 挂多 cog 时每 cog 各一条=事实闭合）；cog↔社群由 `cogs[].community` 派生。`chars` 一律由 blocks 派生文本长度（`deriveEntryText`）。
 
 **不做 NEURON_RAG 门控**：本模块只读盘上 JSON/sqlite，不引入 embedder/transformers；库文件独立于该编译期 flag 存在，默认构建即可出图。**只读不写**，不触发 build_graph/detect_communities 管线。
+
+## 15. 工作区根目录浏览端点（`/gateway/fs`，只读，2026-09-26）
+
+web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](web-ui.md) §44）。`localGateway.ts` 注册在 `/gateway/file` 之后，token/cookie 鉴权同其它 `/gateway/*`。
+
+`GET /gateway/fs?path=<相对工作区根的可选子路径>` → `{ path, entries: [{name, type:'dir'|'file'}] }`；`path` 缺省/空串 = 工作区根（`root` = `getPortableRoot()`，与 `/gateway/project` 同一基准）。
+
+- **单层只读**：复用 `listOneLevel(dir)`——同一套裁剪（跳隐藏项与 `.git`/`node_modules`/`.claude`/`.trash` 等重型目录、目录在前、每层 ≤50），**不另立排除表**；端点内无任何写调用。
+- **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
+- **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。

@@ -3,9 +3,9 @@
 import { I } from '../core/icons.js'
 import { relTime } from '../core/markdown.js'
 import { findSession, hashOf } from '../core/sessions.js'
-import { inputEl, state, ALL, esc, toast, isTouch } from '../core/state.js'
+import { inputEl, state, ALL, esc, toast, isTouch, newSessionProject } from '../core/state.js'
 import { pendingImages, renderImgPills } from './images.js'
-import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, mention, serializeInput, closeMentionPop } from './mention.js'
+import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pickItems, pickLabel, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
@@ -28,8 +28,6 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     { name: 'skills', desc: '查看可用技能', bare: true },
     { name: 'plugins', desc: '查看插件清单', bare: true },
   ]
-  // 浮窗单页分组（2026-09-09 二轮定案：去顶层 tab，四类堆放一页）组名映射
-  const CMD_GROUP = { imgpick: '上传', filepick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
   // 推理等级（全局：Off/Low/High/Max，对齐 CLI effortValue 语义；Off=不发送 effort 参数。2026-08-22 由 per-model reasoning 改为全局）
   const EFFORT_LEVELS = [
     { id: 'low', name: 'Low' },
@@ -65,15 +63,22 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       return lb - la
     })
   }
+  // seat 只读的两个态：①会话态（工作文件夹 = 该会话所属项目）②work 模式且已选工作项目——在项目中
+  // 工作就只能在该项目建会话，目标项目不可改（唯一判定点，seat 渲染与点击守卫共用）。
+  function projSeatLocked() {
+    return !!state.currentHash || (state.sbMode === 'work' && !!state.workProj)
+  }
   function renderProjSeat() {
-    // 会话态=只读工作文件夹标识（显示当前会话所属项目全称，.locked 锁不可改）；空态=目标项目选择
-    const locked = !!state.currentHash
-    const s = locked ? findSession(state.currentHash) : null
-    const label = locked
+    const locked = projSeatLocked()
+    // 锁定态收口：已展开的选择层即刻收起——否则切到 work 模式（或进会话）时残留的浮层仍可点，
+    // 选中的目标项目在锁定态根本不生效，读起来像「改了没反应」。
+    if (locked) closeProjPop()
+    const s = state.currentHash ? findSession(state.currentHash) : null
+    const label = state.currentHash
       ? (s && s.projectScope === 'project' && s.projectLabel ? s.projectLabel : '全局')
-      : (state.newProject || '全局')
+      : (newSessionProject() || '全局')
     projSeatEl.querySelector('.projLabel').textContent = label
-    projSeatEl.title = locked ? '工作文件夹：' + label : (state.newProject ? '目标项目：' + state.newProject : '目标项目：全局（默认）')
+    projSeatEl.title = locked ? '工作文件夹：' + label : (newSessionProject() ? '目标项目：' + newSessionProject() : '目标项目：全局（默认）')
     projSeatEl.classList.toggle('locked', locked)
   }
   function renderProjPop() {
@@ -104,7 +109,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     projPop.hidden = true
   }
   projSeatEl.addEventListener('click', () => {
-    if (state.currentHash) return // 会话态锁定：工作文件夹标识只读，不弹选择层
+    if (projSeatLocked()) return // 锁定态：工作文件夹标识只读，不弹选择层
     psel.open ? closeProjPop() : openProjPop()
   })
 
@@ -125,7 +130,10 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
-    return items
+    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
+    items.push(...pickItems(cmd.search))
+    // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
+    return arrangeItems(items)
   }
   function toggleCmdPop() {
     if (cmd.open) { closeCmdPop(); return }
@@ -141,6 +149,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     renderCmdPop()
     // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
     loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
+    refreshPick(() => { if (cmd.open) renderCmdPop() })
   }
   function closeCmdPop() {
     if (!cmd.open) return
@@ -167,13 +176,15 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       }
       let lastGrp = ''
       html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
-        const grp = CMD_GROUP[it.kind] || ''
-        const gh = grp !== lastGrp ? `<div class="grp">${grp}</div>` : ''
+        const g = groupOf(it)
+        const grp = g === '文件' ? '文件 · ' + pickLabel() : g
+        const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : I.dshPlus
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
-        return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${it.desc ? `<span class="detail">${esc(it.desc)}</span>` : ''}</button>`
+        const detail = it.kind === 'path' ? it.path : it.desc
+        return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
       }).join('')}</div>`
     }
     cmdPop.innerHTML = html
@@ -253,6 +264,11 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
+    if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
+      loadPickPath(it.path).then(() => { if (cmd.open) renderCmdPop() })
+      return
+    }
+    if (it.kind === 'path') { appendMentionChip('path', it.path, '', 'file'); closeCmdPop(); return }
     if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
     if (it.kind === 'session') { appendMentionChip('session', it.name, it.sid); closeCmdPop(); return }
     const o = it.ref
@@ -261,14 +277,8 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   }
   // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
   // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
-  function appendMentionChip(kind, name, sid) {
-    const chip = document.createElement('span')
-    chip.className = 'mention'
-    chip.contentEditable = 'false'
-    chip.dataset.kind = kind
-    chip.dataset.name = name
-    if (kind === 'session' && sid) chip.dataset.sid = sid
-    chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
+  function appendMentionChip(kind, name, sid, ptype) {
+    const chip = buildMentionChip(kind, name, sid, ptype)
     inputEl.appendChild(chip)
     chip.after(document.createTextNode('\u00A0'))
     syncGwSend()
@@ -324,6 +334,7 @@ export {
   msel,
   openProjPop,
   projList,
+  projSeatLocked,
   projPop,
   projSeatEl,
   psel,

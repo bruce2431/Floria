@@ -227,6 +227,7 @@ description: <何时用/怎么用，一句话，供 Skill 工具自动命中>
 | 会话/记忆存储 | 全局 `~/.claude/projects/` 统一 | **会话/自动记忆均项目级、平铺**：会话 `<项目>/.claude/projects/*.jsonl`，记忆 `<项目>/.claude/projects/memory/` |
 | 权限规则 `@/` 前缀 | 无此语法 | **自定义特性，生效中**：`@/` 解析到便携根（`.claude-portable` 标记所在 `.claude` 的父目录 = `@WrokSpace`），Edit/Read 的 allow/deny 规则均有效（`filesystem.ts` `patternWithRoot`） |
 | `.claude` 目录编辑 | 可直接编辑 | **危险目录守卫**：路径任意段 = `.claude`（`.claude/worktrees`、`.claude/preview` 除外）→ acceptEdits 与项目级 allow 被无视，强制弹「编辑自己配置」审批；唯一豁免 = **会话级** allow 规则 `/.claude/**` 或 `~/.claude/**`（审批框选项 2 即写入，会话结束失效）。**`.claude/preview` 豁免（fork 改动，`filesystem.ts` worktrees 特例同款）**：预览产物是网关静态托管内容非可执行配置，回归 acceptEdits/allow 正常判定；preview 下嵌套 `.claude` 仍拦 |
+| `/cost` 单价来源 | 内置静态价目表（Anthropic 官方档） | **运行时抓厂商官网价目页**（deepseek / 智谱），官网未列回落 models.dev 目录；两者皆无 = 未定价计 0 并标注（**不套用其它模型费率**）；峰谷按时段（当前仅 DeepSeek，法定节假日自动抓取 + 可覆盖）；展示 ¥（内部计价仍 USD）→ [core.md](core.md)「动态模型定价」 |
 | 品牌身份 | Claude Code / Anthropic | **白标 Floria**：身份句族 + env 假情报 + 主提示散句 + 工具描述 + guide agent 改造为 Floria guide；`CLAUDE_CODE_ATTRIBUTION_HEADER` 全局关；D 层功能性标识 `.claude`/`CLAUDE_*`/工具协议等不动 |
 
 ## 11. 常见坑速查

@@ -15,6 +15,7 @@ import { safeParseJSON } from '../json.js'
 import type {
   ApiKeyEntry,
   CredentialsFile,
+  PricingConfig,
   ProviderConfig,
   WebSearchCredentials,
 } from './types.js'
@@ -97,6 +98,10 @@ export function loadCredentials(): CredentialsFile {
     // be silently wiped on the next write.
     if (typeof data.webSearch === 'object' && data.webSearch !== null) {
       creds.webSearch = data.webSearch as WebSearchCredentials
+    }
+    // 同理由：定价覆盖段必须原样带走，否则 /key 轮换会清掉用户的价格覆盖
+    if (typeof data.pricing === 'object' && data.pricing !== null) {
+      creds.pricing = data.pricing as PricingConfig
     }
     return creds
   } catch {

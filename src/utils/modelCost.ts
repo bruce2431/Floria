@@ -1,7 +1,7 @@
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
 import { logEvent } from 'src/services/analytics/index.js'
-import { setHasUnknownModelCost } from '../bootstrap/state.js'
+import { markModelUnpriced } from '../bootstrap/state.js'
 import { isFastModeEnabled } from './fastMode.js'
 import {
   CLAUDE_3_5_HAIKU_CONFIG,
@@ -19,9 +19,9 @@ import {
 import {
   firstPartyNameToCanonical,
   getCanonicalName,
-  getDefaultMainLoopModelSetting,
   type ModelShortName,
 } from './model/model.js'
+import { resolveSessionModelCost } from './modelPricing.js'
 
 // @see https://platform.claude.com/docs/en/about-claude/pricing
 export type ModelCosts = {
@@ -86,8 +86,6 @@ export const COST_HAIKU_45 = {
   webSearchRequests: 0.01,
 } as const satisfies ModelCosts
 
-const DEFAULT_UNKNOWN_MODEL_COST = COST_TIER_5_25
-
 /**
  * Get the cost tier for Opus 4.6 based on fast mode.
  */
@@ -141,7 +139,17 @@ function tokensToUSDCost(modelCosts: ModelCosts, usage: Usage): number {
   )
 }
 
-export function getModelCosts(model: string, usage: Usage): ModelCosts {
+/**
+ * 单价表。Anthropic 官方模型走上表（静态、与官方定价同源）；第三方 provider
+ * （deepseek / glm…）转 resolveModelCost 查厂商官网价目 / models.dev 目录。
+ * 返回 null = 未定价。
+ *
+ * 这里过去有个兜底分支：查不到就套用默认模型（Anthropic Sonnet 档）的费率。
+ * 那是 `/cost` 金额虚高的根源——¥0.15/M 的 flash 档被按 $3/$15 计，虚报十几倍。
+ * 现在绝不套用别的模型费率：查不到就是「未定价」，由调用方按 0 计并在输出里
+ * 显式标注。
+ */
+export function getModelCosts(model: string, usage: Usage): ModelCosts | null {
   const shortName = getCanonicalName(model)
 
   // Check if this is an Opus 4.6 model with fast mode active.
@@ -153,30 +161,32 @@ export function getModelCosts(model: string, usage: Usage): ModelCosts {
   }
 
   const costs = MODEL_COSTS[shortName]
-  if (!costs) {
-    trackUnknownModelCost(model, shortName)
-    return (
-      MODEL_COSTS[getCanonicalName(getDefaultMainLoopModelSetting())] ??
-      DEFAULT_UNKNOWN_MODEL_COST
-    )
+  if (costs) {
+    return costs
   }
-  return costs
+
+  return resolveSessionModelCost(model, usage, Date.now())?.cost ?? null
 }
 
-function trackUnknownModelCost(model: string, shortName: ModelShortName): void {
+// Calculate the cost of a query in US dollars (internal 计价单位；展示时按实时
+// 汇率折成人民币)。未定价的模型记 0 并登记，绝不用别的模型费率代替。
+export function calculateUSDCost(resolvedModel: string, usage: Usage): number {
+  const modelCosts = getModelCosts(resolvedModel, usage)
+  if (!modelCosts) {
+    trackUnpricedModel(resolvedModel)
+    return 0
+  }
+  return tokensToUSDCost(modelCosts, usage)
+}
+
+function trackUnpricedModel(model: string): void {
+  const shortName = getCanonicalName(model)
   logEvent('tengu_unknown_model_cost', {
     model: model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     shortName:
       shortName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  setHasUnknownModelCost()
-}
-
-// Calculate the cost of a query in US dollars.
-// If the model's costs are not found, use the default model's costs.
-export function calculateUSDCost(resolvedModel: string, usage: Usage): number {
-  const modelCosts = getModelCosts(resolvedModel, usage)
-  return tokensToUSDCost(modelCosts, usage)
+  markModelUnpriced(shortName)
 }
 
 /**

@@ -957,6 +957,22 @@ interface ProjectInfo {
   backendCfg?: BackendCfg
 }
 
+/**
+ * 把「相对工作区根的路径」解析为绝对路径，越界（`..` 逃逸、盘符/绝对路径）返回 null。
+ * /gateway/fs 与 /gateway/file 同源的穿越防护口径；抽成纯函数是要让探针能直测真实现
+ * （probe-gateway-fs.ts），而不是在探针里复刻一份算法。
+ */
+export function resolveWithinRoot(root: string, rel: string): string | null {
+  const base = resolve(root)
+  const p = String(rel || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+  if (!p) return base
+  const abs = resolve(base, p)
+  return abs === base || abs.startsWith(base + sep) ? abs : null
+}
+
 function findProjects(root: string): ProjectInfo[] {
   const groups: ProjectInfo[] = []
   const global = join(root, '.claude', 'projects')
@@ -2264,6 +2280,32 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     const fType = MIME[extname(fAbs)] ?? 'application/octet-stream'
     res.writeHead(200, { 'Content-Type': fType, 'Cache-Control': 'no-cache' })
     res.end(readFileSync(fAbs))
+    return
+  }
+  // 工作区根单层列目录（@ 提及「目录 / 文件」能力的数据源，2026-09-26）：
+  //   GET /gateway/fs?path=<相对工作区根的可选子路径> → { path, entries:[{name,type}] }
+  // path 缺省/空串 = 工作区根。相对路径基准恒为工作区根——与 @ chip 上行的 [@目录:]/[@文件:] 同基准。
+  // 只读单层，复用 listOneLevel（跳过隐藏项与 .git/node_modules/.claude 等重型目录、目录在前、每层 ≤50）
+  // ——与 /gateway/project 的文件树同一套裁剪口径，不另立一份排除表。
+  // 路径穿越防护同 /gateway/file（resolve 后必须仍在工作区根内）。受上方 /gateway/* token 校验保护。
+  if (req.method === 'GET' && url.pathname === '/gateway/fs') {
+    const qPath = (url.searchParams.get('path') || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
+    const qAbs = resolveWithinRoot(root, qPath)
+    if (!qAbs) {
+      sendJson(res, 403, { error: 'forbidden' })
+      return
+    }
+    let qIsDir = false
+    try {
+      qIsDir = statSync(qAbs).isDirectory()
+    } catch {
+      qIsDir = false
+    }
+    if (!qIsDir) {
+      sendJson(res, 404, { error: 'not a directory' })
+      return
+    }
+    sendJson(res, 200, { path: qPath, entries: listOneLevel(qAbs) })
     return
   }
 

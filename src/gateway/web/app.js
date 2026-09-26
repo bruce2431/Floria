@@ -234,6 +234,7 @@
     // 令牌替换命中不到代码内文本，避免 chip 嵌套进 <code>（白胶囊+灰代码气泡叠一起）。
     s = s.replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
+         .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }
@@ -348,6 +349,13 @@
     toastEl.hidden = false
     clearTimeout(timer)
     timer = setTimeout(() => (toastEl.hidden = true), 2600)
+  }
+
+  // 新会话的落项目（唯一真源）：work 模式 = 「在项目中工作」，目标项目恒 = 工作项目（state.workProj）；
+  // 其余情况 = chat 侧栏/初始界面选的 state.newProject（null = 全局）。所有建会话/上传的落项目判定
+  // 都读本函数——写死 state.newProject 的消费点会在 work 模式下漏掉工作项目（会话落到全局）。
+  function newSessionProject() {
+    return state.sbMode === 'work' && state.workProj ? state.workProj : state.newProject
   }
 
   // 手机端（≤720px）：侧栏为全屏抽屉，选择会话后自动收起
@@ -1410,6 +1418,9 @@ function setSessionCwd(v) { sessionCwd = v }
   }
 
   function renderSession(hash) {
+    // work 模式不变量（判定点见 sidebar/work.js workScopeOk）：助手栏只显示工作项目的会话——
+    // 直接打开别的项目/全局的会话路径（含刷新恢复）时退回工作项目的新对话空态，与切模式/切项目同一条。
+    if (!workScopeOk(hash)) { navigate('#/'); return }
     stopLiveFoldTimer()
     setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：切会话先复位，busy 会话由下方 syncTurnLive 按实况恢复
     // 切换会话：丢空态（hash=null）乐观项；各会话 pending 保留（2026-08-29 用户反馈
@@ -4319,6 +4330,20 @@ function setFirstSendHash(v) { firstSendHash = v }
     saveWork()
   }
 
+  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目/全局会话时，
+  // 回该项目的「新对话」空态（新会话的目标项目由 core/state.js newSessionProject 收口，seat 只读）。
+  // 调用点 = 进入 work 模式 / 切换工作项目 / 路由渲染会话前（chat/route.js renderSession）。
+  // 会话尚未落地（findSession 查无 = 列表未拉或刷新中）时不判——「未知」不等于「别的项目」。
+  function workScopeOk(hash) {
+    if (state.sbMode !== 'work' || !state.workProj || !hash) return true
+    const s = findSession(hash)
+    return !s || (s.projectScope === 'project' && s.projectLabel === state.workProj)
+  }
+  function enforceWorkScope() {
+    if (!workScopeOk(state.currentHash)) navigate('#/')
+    renderProjSeat()
+  }
+
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
   function applySbMode() {
     const on = state.sbMode === 'work'
@@ -4331,6 +4356,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     chatArea.classList.toggle('work', on)
     if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open')
     applyPanes()
+    enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) ensureWork()
     else hideWkPops()
   }
@@ -4511,6 +4537,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
+    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     await loadProjectTree(label)
   }
@@ -4628,10 +4655,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function newWorkChat() {
-    // 新会话落在当前 work 项目下（沿用 state.newProject 契约：首条消息按它落项目）。
+    // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
+    // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
     // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 两栏布局照样成立；
     // 模式互斥只对 mgr/preview 两张视图卡生效（route.js 内那一处 setSbMode('chat')）。
-    state.newProject = state.workProj || null
     navigate('#/')
     if (isMobile()) setPanel(false)
   }
@@ -5235,7 +5262,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       .qa-opt .qa-desc{color:var(--text-2);font-size:12px;line-height:18px}
       .qa-multi-hint{color:var(--text-3);font-size:11px;font-weight:400;margin-left:4px}
       .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:#fff}
-      .qa-inputrow:focus-within{border-color:#4176e6;background:#f7faff}
+      /* 2026-09-26 撤聚焦强调：.qa-inputrow:focus-within 曾与 .qa-opt.sel 视觉同款 ⇒ 单选点选项后
+         再点输入框就「两处高亮」。聚焦不再单独表态，点输入行即 pickText 上 .sel（选中态唯一）。 */
+      .qa-inputrow.sel{border-color:#4176e6;background:#eff5ff}
       .qa-input-ico{flex:none;width:14px;height:14px;color:var(--text-3);display:flex;align-items:center;justify-content:center}
       .qa-input-ico svg{width:14px;height:14px}
       .qa-inputrow .qa-input{flex:1;height:34px;border:none;outline:none;background:transparent;color:var(--text);font-size:14px;font-family:inherit}
@@ -5291,7 +5320,43 @@ function setFirstSendHash(v) { firstSendHash = v }
   // @ 提及 icon：与侧栏插件/项目 tab 一致，纯线条（stroke）风格，颜色走 currentColor
   const MENTION_PLUGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M10.2 3.5H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 3.5h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M10.2 13.7H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 13.7h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/></svg>'
   const MENTION_SESSION_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>'
+  // ---------- 目录 / 文件引用（2026-09-26）：@ 浮窗与 + 工具栏共用的一组「逐级浏览工作区根」状态 ----------
+  // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
+  // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
+  // 路径同基准（用户定案：相对全局根）。令牌 [@目录:路径] / [@文件:路径] 刻意与上传附件占位 [文件:<路径>]
+  // 不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
+  const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
+  const MENTION_DIR_ICON = I.folder
+  const MENTION_FILE_ICON = I.dshFile
+  const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
+  // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
+  const pick = { path: '', entries: null, loading: false, err: '', seq: 0 }
+
+  // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
+  // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
+  // 新增条目只声明 kind、不各自排位（否则两处排位迟早分叉）。
+  const GROUP_ORDER = ['上传', '聊天', '文件', '技能', '指令']
+  const GROUP_MAX = 3
+  const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件' }
+  function groupOf(it) {
+    return GROUP_OF[it.kind] || '指令'
+  }
+  // 组排序 + 每组截断。**「上级目录」是导航行**：既排在本组最前、也不占列表名额——截到 3 行的是可选项，
+  // 导航入口被截掉会让子目录变成死层。
+  function arrangeItems(items) {
+    const seen = {}
+    const kept = items.filter((it) => {
+      if (it.kind === 'pathup') return true
+      const g = groupOf(it)
+      seen[g] = (seen[g] || 0) + 1
+      return seen[g] <= GROUP_MAX
+    })
+    return kept
+      .map((it, i) => ({ it, i, g: GROUP_ORDER.indexOf(groupOf(it)) }))
+      .sort((a, b) => (a.g - b.g) || (a.i - b.i))
+      .map((x) => x.it)
+  }
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
   // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
@@ -5300,9 +5365,94 @@ function setFirstSendHash(v) { firstSendHash = v }
     return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
   }
 
+  // ---------- 目录 / 文件浏览（数据层；两个浮窗共用，渲染各自负责） ----------
+  // 文件组的落点 = 当前上下文项目目录（用户定案「先显示本项目的文件」）：会话态取该会话所属项目，
+  // 非会话态取目标项目（`newSessionProject()`——work 模式即工作项目）。空串 = 无项目上下文 → 从工作区根起。
+  function pickHome() {
+    const s = state.currentHash ? findSession(state.currentHash) : null
+    if (s) return s.projectScope === 'project' && s.projectLabel ? s.projectLabel : ''
+    return newSessionProject() || ''
+  }
+  function pickParent() {
+    const p = pick.path
+    const i = p.lastIndexOf('/')
+    return i < 0 ? '' : p.slice(0, i)
+  }
+  function pickLabel() {
+    if (pick.loading) return '加载中…'
+    if (pick.err) return '加载失败'
+    return pick.path || '工作区根'
+  }
+  // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
+  async function loadPickPath(path) {
+    const seq = ++pick.seq
+    pick.path = String(path || '')
+    pick.loading = true
+    pick.err = ''
+    try {
+      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(pick.path)))
+      const data = await res.json()
+      if (seq !== pick.seq) return false
+      if (!res.ok || data.error) throw new Error(data.error || '加载失败')
+      pick.entries = Array.isArray(data.entries) ? data.entries : []
+    } catch (e) {
+      if (seq !== pick.seq) return false
+      pick.entries = null
+      pick.err = e.message || String(e)
+    } finally {
+      if (seq === pick.seq) pick.loading = false
+    }
+    return seq === pick.seq
+  }
+  // 当前层的可选条目（q 在当前层内过滤名称）：上级目录行 + 目录 + 文件。
+  // 「上级目录」只取决于「当前是不是工作区根」，与**这一层的内容**无关——故加载中/加载失败时它照样在，
+  // 否则某一层拉不到（目录已删/端点失败）就退不回去，整个文件组成死层。条目本身不塞假行。
+  function pickItems(q) {
+    const ql = (q || '').trim().toLowerCase()
+    const items = []
+    if (pick.path) items.push({ kind: 'pathup', name: '上级目录', path: pickParent() })
+    if (pick.loading || !pick.entries) return items
+    for (const e of pick.entries) {
+      if (ql && !String(e.name).toLowerCase().includes(ql)) continue
+      const p = pick.path ? `${pick.path}/${e.name}` : e.name
+      items.push({ kind: 'path', ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: p })
+    }
+    return items
+  }
+  // 目录项进入下一层 / 上级目录返回（两个浮窗的选择入口共用同一处判定）
+  function pickEnter(it) {
+    return loadPickPath(it.path)
+  }
+  function mentionChipIcon(kind, ptype) {
+    if (kind === 'session') return MENTION_SESSION_ICON
+    if (kind === 'path') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
+    return MENTION_PLUGIN_ICON
+  }
+  // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
+  function mentionChipInner(kind, name, ptype) {
+    const label = kind === 'path' ? '@' + name : name
+    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span><span class="m-x" title="删除">×</span>`
+  }
+  function buildMentionChip(kind, name, sid, ptype) {
+    const chip = document.createElement('span')
+    chip.className = 'mention'
+    chip.contentEditable = 'false'
+    chip.dataset.kind = kind
+    chip.dataset.name = name
+    if (kind === 'session' && sid) chip.dataset.sid = sid
+    if (kind === 'path') chip.dataset.ptype = ptype === 'dir' ? 'dir' : 'file'
+    chip.innerHTML = mentionChipInner(kind, name, ptype)
+    return chip
+  }
+
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
-  function mentionChipHtml(kind, name) {
+  // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
+  function mentionChipHtml(kind, name, ptype) {
+    if (kind === 'path') {
+      const label = '@' + name
+      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
+    }
     const label = kind === 'session' ? splitSessionToken(name).title : name
     return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
@@ -5312,6 +5462,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     return esc(text)
       .replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
       .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
+      .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
   }
 
   // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
@@ -5324,9 +5475,13 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (n.classList && n.classList.contains('mention')) {
           // 会话 chip 带 sid → `[会话:标题|sid]`：sid 是会话的稳定键（改名免疫），CLI 侧会话暴露
           // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
-          out += n.dataset.kind === 'session'
+          // 路径 chip → `[@目录:路径]` / `[@文件:路径]`（路径相对工作区根，与网关 /gateway/fs 同基准）。
+          const k = n.dataset.kind
+          out += k === 'session'
             ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
-            : `[插件:${n.dataset.name}]`
+            : k === 'path'
+              ? `[@${n.dataset.ptype === 'dir' ? '目录' : '文件'}:${n.dataset.name}]`
+              : `[插件:${n.dataset.name}]`
         } else if (n.tagName === 'BR') {
           out += '\n'
         } else {
@@ -5375,6 +5530,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderMentionPop()
     // 首次打开确保插件/技能清单已加载（异步），加载完用当前查询重新渲染
     loadMgrData().then(() => { if (mention.open) renderMentionPop() }).catch(() => {})
+    refreshPick(() => { if (mention.open) renderMentionPop() })
+  }
+
+  // 浮窗打开时定位到当前上下文项目并加载该层（不缓存：目录内容是外部可变状态，缓存会让新建的文件不可见）。
+  // **每次打开都回到项目层**（同 @ 浮窗每次打开重置 q/sel）——打开是新的一轮手势，不是接着上次浏览的位置；
+  // 层内下钻/返回由 pickEnter 自己拉，走同一处 loadPickPath。
+  function refreshPick(after) {
+    pick.entries = null // 立刻清旧层：否则换项目后先闪一帧上一个项目的条目（在途请求由 loadPickPath 的 seq 作废）
+    pick.err = ''
+    loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
   function mentionItems(q) {
@@ -5390,7 +5555,8 @@ function setFirstSendHash(v) { firstSendHash = v }
       for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
       for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
     }
-    return items
+    items.push(...pickItems(q))
+    return arrangeItems(items)
   }
 
   function renderMentionPop() {
@@ -5404,11 +5570,13 @@ function setFirstSendHash(v) { firstSendHash = v }
     let lastGroup = ''
     let idx = 0
     for (const it of items) {
-      const group = it.kind === 'session' ? '会话' : '插件 / 技能'
-      if (group !== lastGroup) { html += `<div class="mp-sec">${group}</div>`; lastGroup = group }
+      const g = groupOf(it)
+      const group = g === '文件' ? '文件 · ' + pickLabel() : g
+      if (group !== lastGroup) { html += `<div class="mp-sec">${esc(group)}</div>`; lastGroup = group }
       const on = idx === mention.sel ? ' on' : ''
-      const icon = `<span class="mp-ic">${it.kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span>`
-      html += `<button type="button" class="mp-item${on}" data-idx="${idx}">${icon}<span class="mp-t"><span class="mp-nm">${esc(it.name)}</span>${it.desc ? `<span class="mp-d">${esc(it.desc)}</span>` : ''}</span></button>`
+      const icon = `<span class="mp-ic">${it.kind === 'pathup' ? MENTION_UP_ICON : mentionChipIcon(it.kind, it.ptype)}</span>`
+      const desc = it.kind === 'path' ? it.path : it.desc
+      html += `<button type="button" class="mp-item${on}" data-idx="${idx}">${icon}<span class="mp-t"><span class="mp-nm">${esc(it.name)}</span>${desc ? `<span class="mp-d">${esc(desc)}</span>` : ''}</span></button>`
       idx++
     }
     pop.innerHTML = html
@@ -5416,9 +5584,19 @@ function setFirstSendHash(v) { firstSendHash = v }
     pop.querySelectorAll('.mp-item').forEach((b) =>
       b.addEventListener('click', () => {
         const it = mention.items[+b.dataset.idx]
-        if (it) insertMention(it.kind, it.name, it.sid)
+        if (it) selectMentionItem(it)
       }),
     )
+  }
+
+  // 条目落地的唯一入口（点击与回车共用）：目录/上级=下钻重渲；文件=插 chip；会话/技能=插 chip。
+  function selectMentionItem(it) {
+    if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
+      pickEnter(it).then(() => { if (mention.open) renderMentionPop() })
+      return
+    }
+    if (it.kind === 'path') insertMention('path', it.path, '', 'file')
+    else insertMention(it.kind, it.name, it.sid)
   }
 
   function moveMentionSel(d) {
@@ -5434,12 +5612,12 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   function selectMention() {
     const it = mention.items[mention.sel]
-    if (it) insertMention(it.kind, it.name, it.sid)
+    if (it) selectMentionItem(it)
   }
 
   // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后。sid 仅会话 chip 有（寻址键，
   // 序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
-  function insertMention(kind, name, sid) {
+  function insertMention(kind, name, sid, ptype) {
     const sp = mention.sentinel
     if (sp && sp.isConnected) {
       const prev = sp.previousSibling
@@ -5449,13 +5627,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       let nx = sp.nextSibling
       while (nx && nx.nodeType === 3) { const t = nx; nx = nx.nextSibling; t.remove() }
-      const chip = document.createElement('span')
-      chip.className = 'mention'
-      chip.contentEditable = 'false'
-      chip.dataset.kind = kind
-      chip.dataset.name = name
-      if (kind === 'session' && sid) chip.dataset.sid = sid
-      chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
+      const chip = buildMentionChip(kind, name, sid, ptype)
       sp.replaceWith(chip)
       const space = document.createTextNode('\u00A0')
       chip.after(space)
@@ -5541,8 +5713,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     { name: 'skills', desc: '查看可用技能', bare: true },
     { name: 'plugins', desc: '查看插件清单', bare: true },
   ]
-  // 浮窗单页分组（2026-09-09 二轮定案：去顶层 tab，四类堆放一页）组名映射
-  const CMD_GROUP = { imgpick: '上传', filepick: '上传', skill: '技能', session: '引用会话', cmd: '指令' }
   // 推理等级（全局：Off/Low/High/Max，对齐 CLI effortValue 语义；Off=不发送 effort 参数。2026-08-22 由 per-model reasoning 改为全局）
   const EFFORT_LEVELS = [
     { id: 'low', name: 'Low' },
@@ -5623,15 +5793,22 @@ function setFirstSendHash(v) { firstSendHash = v }
       return lb - la
     })
   }
+  // seat 只读的两个态：①会话态（工作文件夹 = 该会话所属项目）②work 模式且已选工作项目——在项目中
+  // 工作就只能在该项目建会话，目标项目不可改（唯一判定点，seat 渲染与点击守卫共用）。
+  function projSeatLocked() {
+    return !!state.currentHash || (state.sbMode === 'work' && !!state.workProj)
+  }
   function renderProjSeat() {
-    // 会话态=只读工作文件夹标识（显示当前会话所属项目全称，.locked 锁不可改）；空态=目标项目选择
-    const locked = !!state.currentHash
-    const s = locked ? findSession(state.currentHash) : null
-    const label = locked
+    const locked = projSeatLocked()
+    // 锁定态收口：已展开的选择层即刻收起——否则切到 work 模式（或进会话）时残留的浮层仍可点，
+    // 选中的目标项目在锁定态根本不生效，读起来像「改了没反应」。
+    if (locked) closeProjPop()
+    const s = state.currentHash ? findSession(state.currentHash) : null
+    const label = state.currentHash
       ? (s && s.projectScope === 'project' && s.projectLabel ? s.projectLabel : '全局')
-      : (state.newProject || '全局')
+      : (newSessionProject() || '全局')
     projSeatEl.querySelector('.projLabel').textContent = label
-    projSeatEl.title = locked ? '工作文件夹：' + label : (state.newProject ? '目标项目：' + state.newProject : '目标项目：全局（默认）')
+    projSeatEl.title = locked ? '工作文件夹：' + label : (newSessionProject() ? '目标项目：' + newSessionProject() : '目标项目：全局（默认）')
     projSeatEl.classList.toggle('locked', locked)
   }
   function renderProjPop() {
@@ -5662,7 +5839,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     projPop.hidden = true
   }
   projSeatEl.addEventListener('click', () => {
-    if (state.currentHash) return // 会话态锁定：工作文件夹标识只读，不弹选择层
+    if (projSeatLocked()) return // 锁定态：工作文件夹标识只读，不弹选择层
     psel.open ? closeProjPop() : openProjPop()
   })
 
@@ -5683,7 +5860,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
-    return items
+    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
+    items.push(...pickItems(cmd.search))
+    // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
+    return arrangeItems(items)
   }
   function toggleCmdPop() {
     if (cmd.open) { closeCmdPop(); return }
@@ -5699,6 +5879,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderCmdPop()
     // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
     loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
+    refreshPick(() => { if (cmd.open) renderCmdPop() })
   }
   function closeCmdPop() {
     if (!cmd.open) return
@@ -5725,13 +5906,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       let lastGrp = ''
       html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
-        const grp = CMD_GROUP[it.kind] || ''
-        const gh = grp !== lastGrp ? `<div class="grp">${grp}</div>` : ''
+        const g = groupOf(it)
+        const grp = g === '文件' ? '文件 · ' + pickLabel() : g
+        const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : I.dshPlus
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
-        return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${it.desc ? `<span class="detail">${esc(it.desc)}</span>` : ''}</button>`
+        const detail = it.kind === 'path' ? it.path : it.desc
+        return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
       }).join('')}</div>`
     }
     cmdPop.innerHTML = html
@@ -5811,6 +5994,11 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
+    if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
+      loadPickPath(it.path).then(() => { if (cmd.open) renderCmdPop() })
+      return
+    }
+    if (it.kind === 'path') { appendMentionChip('path', it.path, '', 'file'); closeCmdPop(); return }
     if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
     if (it.kind === 'session') { appendMentionChip('session', it.name, it.sid); closeCmdPop(); return }
     const o = it.ref
@@ -5819,14 +6007,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
   // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
   // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
-  function appendMentionChip(kind, name, sid) {
-    const chip = document.createElement('span')
-    chip.className = 'mention'
-    chip.contentEditable = 'false'
-    chip.dataset.kind = kind
-    chip.dataset.name = name
-    if (kind === 'session' && sid) chip.dataset.sid = sid
-    chip.innerHTML = `<span class="m-ic">${kind === 'session' ? MENTION_SESSION_ICON : MENTION_PLUGIN_ICON}</span><span class="m-nm">${esc(name)}</span><span class="m-x" title="删除">×</span>`
+  function appendMentionChip(kind, name, sid, ptype) {
+    const chip = buildMentionChip(kind, name, sid, ptype)
     inputEl.appendChild(chip)
     chip.after(document.createTextNode('\u00A0'))
     syncGwSend()
@@ -6640,6 +6822,11 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     const h0 = inputBarEl.getBoundingClientRect().height
     if (firstShow) takeoverPlainH = h0
     inputBarEl.classList.add('bar-takeover')
+    // 2026-09-26：.bar-takeover 退场由 display:none 改脱流隐藏（根修注释见 styles.css）后，浏览器不再
+    // 顺带让聚焦的 contenteditable 失焦——显式补上。不变量 = 接管卡在场输入栏不可编辑 ⇒ isEditing()
+    // 必为假（否则 viewport.js 的键盘几何与整页平移会把已经收起的软键盘当仍在编辑态处理，界面卡在上移位）。
+    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。
+    inputEl.blur()
     const t = takeoverEl()
     if (t) { t.innerHTML = html; t.hidden = false }
     takeover = kind
@@ -6872,14 +7059,18 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     // 取消回答 = 右上 ×（sendApprove deny），不再设「拒绝」按钮；跳过本题 = 该题留空推进（允许空答）。
     const answers = {}     // question -> string（单选）/ string[]（多选）
     const customText = {}  // question -> 自由输入文本（非空时优先于选项答案）
+    const pick = {}        // question -> 'opt' | 'text'：本题选中的答案来源（点击即切换，见 pickText/pickOpt）
     let qi = 0
     let collapsed = false
     let submitting = false
-    const ansOf = (q) => {
-      const t = String(customText[q] || '').trim()
-      if (t) return t
+    const ansOf = (q) => { // 生效答案由 pick 决定（最后点击的那一侧）；另一侧内容留着但不参与提交
+      if (pick[q] === 'text') {
+        const t = String(customText[q] || '').trim()
+        return t || undefined
+      }
       const v = answers[q]
-      return Array.isArray(v) ? v.join(', ') : v
+      const s = Array.isArray(v) ? v.join(', ') : v
+      return s || undefined
     }
     const submit = () => {
       submitting = true
@@ -6919,42 +7110,61 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
       const fmt = (o) => (o && typeof o === 'object') ? String(o.label || '') : String(o || '')
       const descOf = (o) => (o && typeof o === 'object' && o.description) ? String(o.description) : ''
       const curAns = multi ? (Array.isArray(answers[question]) ? answers[question] : []) : answers[question]
+      const isText = pick[question] === 'text'
       let rows = ''
       opts.forEach((o, oi) => {
         const label = fmt(o)
         const desc = descOf(o)
-        const sel = multi ? curAns.includes(label) : curAns === label
+        const sel = isText ? false : (multi ? curAns.includes(label) : curAns === label)
         rows += `<button type="button" class="qa-opt${sel ? ' sel' : ''}" data-v="${esc(label)}"><span class="qa-num">${oi + 1}</span><span class="qa-copy"><span class="qa-label">${esc(label)}</span>${desc ? `<span class="qa-desc">${esc(desc)}</span>` : ''}</span></button>`
       })
       let html = '<div class="appr-card qa-card">'
       html += `<div class="qa-top"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
       html += `<div class="qa-main"><div class="qa-title">${esc(question)}</div>`
       html += `<div class="qa-opts">${rows}</div>`
-      html += `<div class="qa-inputrow"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="输入你的答案" value="${esc(String(customText[question] || ''))}"></div>`
+      html += `<div class="qa-inputrow${isText ? ' sel' : ''}"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="输入你的答案" value="${esc(String(customText[question] || ''))}"></div>`
       html += `<div class="qa-foot"><div class="qa-nav"><button type="button" class="qa-nav-btn prev${qi > 0 ? '' : ' off'}" data-nav="prev" title="上一题">${I.dshChevRight}</button><span class="qa-nav-pos">${qi + 1}/${qs.length}</span><button type="button" class="qa-nav-btn next${qi < qs.length - 1 ? '' : ' off'}" data-nav="next" title="下一题">${I.dshChevRight}</button></div>`
       html += `<div class="qa-foot-btns"><button type="button" class="qa-skip">跳过本题</button><button type="button" class="appr-allow">${isLast ? '提交答案' : '下一题'}</button></div></div>`
       html += '<div class="appr-state"></div></div></div>'
       showTakeover(html, 'approval')
       const t = takeoverEl()
       bindChrome(t)
+      // 2026-09-26 用户定案：①选中态由「点击」决定，不等输入；②切换来源不清空另一侧内容
+      // （选过的选项、打过的字都留着）；③单选任何时刻只有一处高亮——pick[question] 是唯一判据，
+      // `.qa-opt.sel` 与 `.qa-inputrow.sel` 二者只其一（聚焦态不再单独强调，见 gateway.js 的 qa-inputrow）。
+      const inp = t.querySelector('.qa-input')
+      const row = t.querySelector('.qa-inputrow')
+      const paintOpts = () => { // 选项高亮 = 当前来源非 text 且该 option 在 answers 里
+        const srcText = pick[question] === 'text'
+        t.querySelectorAll('.qa-opt').forEach((b) => {
+          const on = !srcText && (multi ? curAns.includes(b.dataset.v) : answers[question] === b.dataset.v)
+          b.classList.toggle('sel', on)
+        })
+      }
+      const pickText = () => { pick[question] = 'text'; row.classList.add('sel'); paintOpts() }
+      const pickOpt = () => { pick[question] = 'opt'; row.classList.remove('sel') }
+      row.addEventListener('click', () => { pickText(); inp.focus() }) // 点行任意处 = 选中本行并进入输入
+      inp.addEventListener('focus', pickText) // 键盘 Tab / 程序聚焦同语义
       // 选项点选：只 toggle 行高亮不整卡重渲染（输入框不闪不失焦）；多选互不影响、单选互斥
       t.querySelectorAll('.qa-opt').forEach((btn) => {
         btn.addEventListener('click', () => {
+          pickOpt()
           if (multi) {
             const v = btn.dataset.v
             const at = curAns.indexOf(v)
             if (at >= 0) curAns.splice(at, 1)
             else curAns.push(v)
-            btn.classList.toggle('sel')
+            answers[question] = curAns
           } else {
-            t.querySelectorAll('.qa-opt').forEach((b) => b.classList.remove('sel'))
-            btn.classList.add('sel')
             answers[question] = btn.dataset.v
           }
+          paintOpts()
         })
       })
-      const inp = t.querySelector('.qa-input')
-      inp.addEventListener('input', () => { customText[question] = inp.value })
+      inp.addEventListener('input', () => { // 只维护文本值（切换来源不丢字），选中态由点击决定
+        if (inp.value.trim()) customText[question] = inp.value
+        else delete customText[question]
+      })
       t.querySelectorAll('.qa-nav-btn').forEach((b) => {
         b.addEventListener('click', () => {
           if (b.classList.contains('off')) return
@@ -6966,6 +7176,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         if (submitting) return
         delete answers[question]
         delete customText[question]
+        delete pick[question]
         if (isLast) submit()
         else { qi++; render() }
       })
@@ -7431,13 +7642,14 @@ function setApprovalPending(v) { approvalPending = v }
   }
   // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
   // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
-  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=state.newProject
-  //（项目「+」初始化界面）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
+  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=newSessionProject()
+  //（项目「+」初始化界面 / work 模式的工作项目）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
   // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
   async function addUploadFiles(files) {
+    const tgt = newSessionProject()
     const ctx = state.currentHash
       ? '&sid=' + encodeURIComponent(state.currentHash)
-      : (state.newProject ? '&project=' + encodeURIComponent(state.newProject) : '')
+      : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
       try {
@@ -7488,8 +7700,9 @@ function setApprovalPending(v) { approvalPending = v }
     // 期间再发送直接忽略（否则每发一条都新建一个会话）；创建完成后 currentHash 已由 navigate 设置。
     if (!state.currentHash) {
       if (webCreating) { toast('正在创建会话，请稍候…'); return true }
-      const tgt = state.newProject
-      state.newProject = null
+      const tgt = newSessionProject() // work 模式 = 工作项目（seat 只读，见 state.newSessionProject）
+      const prevNew = state.newProject // 回滚用：清的是「目标项目」这一个槽，work 模式压根不读它
+      state.newProject = null // 消费即清：目标项目一次性，下一次回默认全局
       // 丝滑过渡（2026-08-30）：不等 wsession 返回（spawn CLI 窗口+注册常 >1s，期间空态冻结
       // 是「不丝滑」根源）——发送瞬间即进会话视觉：输入栏 FLIP 沉底 + 趴栏淡出 + 首条消息
       // 乐观上屏（气泡+正在处理折叠）。pre 标记 + hash 暂空：renderSession 创建中不洗
@@ -7511,7 +7724,7 @@ function setApprovalPending(v) { approvalPending = v }
         flipInput(true) // 回滚空态（FLIP 滑回 stage，docked/in-session 一并移除）
         inputEl.textContent = text
         syncGwSend()
-        state.newProject = tgt
+        state.newProject = prevNew
         inputEl.focus()
         return true
       }

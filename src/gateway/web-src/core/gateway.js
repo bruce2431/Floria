@@ -114,7 +114,9 @@ import { syncGwSend } from '../inputbar/send.js'
       .qa-opt .qa-desc{color:var(--text-2);font-size:12px;line-height:18px}
       .qa-multi-hint{color:var(--text-3);font-size:11px;font-weight:400;margin-left:4px}
       .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:#fff}
-      .qa-inputrow:focus-within{border-color:#4176e6;background:#f7faff}
+      /* 2026-09-26 撤聚焦强调：.qa-inputrow:focus-within 曾与 .qa-opt.sel 视觉同款 ⇒ 单选点选项后
+         再点输入框就「两处高亮」。聚焦不再单独表态，点输入行即 pickText 上 .sel（选中态唯一）。 */
+      .qa-inputrow.sel{border-color:#4176e6;background:#eff5ff}
       .qa-input-ico{flex:none;width:14px;height:14px;color:var(--text-3);display:flex;align-items:center;justify-content:center}
       .qa-input-ico svg{width:14px;height:14px}
       .qa-inputrow .qa-input{flex:1;height:34px;border:none;outline:none;background:transparent;color:var(--text);font-size:14px;font-family:inherit}

@@ -69,6 +69,23 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 - **密钥与选择走全局密钥池**：credentials.json（`getClaudeConfigHomeDir()`，本机=全局根 `@WrokSpace\.claude\`）顶层 `webSearch` 段——`{ backend?: string, searxngUrl?: string, keys?: { brave|tavily|exa: string } }`；`loadCredentials` 白名单放行该段（load→save round-trip，否则被 /key 写操作冲掉），取值口 `getWebSearchCredentials()`（pool.ts）。后端选择：显式 `backend` **严格不换道**（不可用即报错，不静默 reroute）→ 从未配置过才自动探测（tavily→exa→searxng→brave）→ 全无则工具隐藏 + call 返回配置指引。密钥单源=池（不做 env 双轨）。
 - **工具面**：isEnabled = 显式 backend 存在 ‖ 任一后端可用；输入 schema = `query + limit(1-100，默认 5)`（域名过滤走 `site:` 等运算符由后端自行支持）；输出 `Output` 形状 {query, results, durationSeconds}（SearchResult.tool_use_id 语义=后端名），UI 渲染链零改动；错误以字符串条目进 results（模型可见）。密钥写入暂为手编 credentials.json（/key 面板接入待做）。
 
+## 动态模型定价（`utils/modelPricing.ts` + `utils/modelCost.ts`）
+
+`/cost` 的第三方 provider（deepseek / glm…）单价不内置，运行时从**厂商官网价目页**抓取，官网未列模型回落 **models.dev 目录**兜底；两者皆无 = **未定价**，计 0 并在输出显式标注（`(unpriced)`），**绝不套用其它模型费率**（Anthropic 官方模型仍走 `modelCost.ts` 静态表）。
+
+- **解析顺序**（`resolveModelCost`，全程同步）：① `credentials.json` `pricing.models[模型]` 用户覆盖 ② 厂商官网适配器（`ADAPTERS`：`deepseek`→`api-docs.deepseek.com`、`zhipu`→`docs.bigmodel.cn`，按 provider `baseUrl` 主机后缀匹配）③ models.dev 目录（目录 id 由适配器 `catalogId` 或 `pricing.providers[key].source` 显式声明，**不反查猜测**）④ `null`。目录段读入时丢弃「全模型 0 价」的 provider（订阅制套餐）。
+- **峰谷只对带 `period` 的价目生效**（当前仅 DeepSeek）：时段 = 北京时间周一至周五 09:00-12:00 / 14:00-18:00（半开右边界），周末与法定节假日全天空闲；`pricing.holidays`（`YYYY-MM-DD`）/ `pricing.peakWindows`（`[[9,12],[14,18]]`）可覆盖。官网表直接给空闲/高峰两档原值，代码不做倍率乘法。
+- **法定节假日自动抓取**：`HOLIDAY_URL`（`timor.tech/api/holiday/year/<年>`，当年 + 次年并行拉，跨年会话也有表）取 `holiday === true` 的日期写入 `PricingTable.holidays`，`peakPeriodAt` 判当日 = 配置手填 ∪ 抓取日历；只认休息日，**调休补班日（`holiday: false` 的工作日调休）不并入**（周末恒空闲，补班日本就该按工作日走峰谷）。拉取失败/解析空保留上一份日历（不清空已知节假日）。抓取日历缺失（接口挂）时退回仅按周末判。
+- **长度分档**（智谱官网「上下文」列三类写法：`输入长度 [0, 32K)`、`输入长度 ≥32K`、`输入 [0, 32K)，输出 [0, 0.2K)`）解析为 `inputMinK/inputMaxK/outputMinK/outputMaxK` 半开区间；首个命中档生效，超出已列最大区间按最高档计；缓存命中的输入计入输入长度分档。DeepSeek 的 `cacheWrite` = 缓存未命中输入价；智谱 `cacheWrite` = 输入价（其「未命中缓存输入费用」已在输入单价内）。
+- **内部计价单位恒为 USD**（`totalCostUSD` / `calculateUSDCost` / `costUSD` 未改名）：CNY 原生价目在解析时除实时汇率，展示层（`cost-tracker.formatCost`）乘回并显示 `¥`；汇率缺失退回 `$` 原值 + 尾注（不硬算）。汇率取 `pricing.usdCnyRate` 覆盖值，否则 `open.er-api.com`。
+- **同步读路径不联网**：`calculateUSDCost` 在流式路径（`claude.ts`）同步调用，价格只读内存 + 缓存文件；网络仅在启动后台 `refreshModelPricing()`（`main.tsx`，与 `refreshModelCapabilities()` 并列、非阻塞，TTL 24h）。缓存 `<配置根>/cache/model-pricing.json` 原子写（tmp + rename），坏数据 `safeParse` 返回 null；拉取失败或官网页解析不出模型均保留 stale（fail-open）。
+- **家族别名在 provider 会话里落回 provider 模型**：`parseUserSpecifiedModel`（`utils/model/model.ts`）在 `getActiveProviderConfig()` 非空时，把 Anthropic 家族别名（`haiku`/`sonnet`/`opus`/`best`/`opusplan`，含 `[1m]` 变体）一律解析为**该会话绑定的 provider 模型**（`getActiveModel()`），不回落一号默认 ID；未绑 provider 时行为不变。否则请求会带着「属于 Anthropic 的模型名」打到 provider 的 endpoint（模型名与 endpoint 分属两家），且记账时被 Anthropic 静态表定价——Explore 等内置子代理 frontmatter 写 `model:'haiku'`，`getAgentModel` 因而拿到一号 Haiku ID。非别名全名（含池模型名）原样透传，不受影响。
+- **两个消费端共用同一格式化器**：`/cost`（`cost-tracker.formatTotalCost`）与状态行（`components/StatusLine.tsx` → `utils/statusLineBuiltin.ts`）都走 `cost-tracker.formatCost`（内部 USD → 按实时汇率折 ¥，缺汇率才回落 `$` 并尾注）。**改金额展示只动 `formatCost`**，勿在任一展示位另写 `$${...}`。
+- **用量不落盘：会话累计金额从转录派生**（`cost-tracker.deriveCostStateFromTranscript`）。进程内 `addToTotalCostState` 每次累加都同时写 `modelUsage`，故恒有 `totalCostUSD ≡ Σ modelUsage.costUSD`；**恢复时不再读任何落盘计数器**，而是扫该会话自己的转录（`getTranscriptPathForSession(sid)`）+ `<sid>/subagents/**/*.jsonl`，把每条 assistant 记录的 `message.usage` 折进来重新计价。转录是既有权威记录、append-only，进程被杀/关窗口都不会丢——「恢复源被别的会话顶掉」「退出钩子没跑成整段丢账」这类问题从根上消失（2026-09-26 实测 ¥5.04 → ¥0.0x 即此）。三个必须做对的细节：**同一 `message.id` 在流式下会被写多条快照**，逐字段取最大才是终值（不去重会重复计，曾据此误判「转录求和会高估」）；**子代理转录与主转录无交集**（Explore/Plan 等），必须一并折入；**但 `agent-acompact-*.jsonl`（压缩代理）转录里含有主链消息的副本**（同 `uuid`+同 `message.id`+同 usage），所以三处必须折进**同一张 `byMessageId`** 做全局去重——按文件各自去重再相加会虚高约 1.84 倍。非派生项（API/tool 时长、行数）转录里没有，一律归 0。峰谷档按派生时刻判定（整段历史统一按当前时段计价，跨峰谷边界会有档位差，刻意保留的近似）。**金额口径 = 按会话**：厂商平台台账是**按账号**的，同日多会话并行时把眼前几个会话相加必然对不上台账，不是缺陷。
+- **`restoreCostStateForSession` 是唯一恢复入口**：CLI 启动恢复与会话内 `/resume`（`REPL.tsx` 先 `resetCostState()` 再调它，须在 `switchSession` 之后——路径依赖 `sessionProjectDir`）都走它，没有第二条岔路。退出分析（`tengu_exit`）在 `costHook.ts` 的 exit 钩子里直接读进程内状态（`logSessionExitAnalytics`），不再有 `last*` 标量快照。
+
+探针 `probes/probe-model-pricing.ts`：官网价目命中 / 峰谷判定 / 节假日日历 / 长度分档 / 目录兜底 / 未定价 / 覆盖 / 缓存 TTL / provider 会话别名落回，42 项断言（需联网，全程在临时配置根内跑）。`probes/probe-session-cost-restore.ts`：流式重复 `message.id` 去重 / 子代理转录折入 / 压缩代理副本跨文件全局去重 / 金额 = 逐模型求和 / 恢复写进 STATE / 无转录与无 assistant 记录的边界，14 项断言（离线，临时配置根 + 临时项目目录）。
+
 ## 排队消息催办 / 生成级断流（`query.ts` + `utils/messageQueueManager.ts`）
 
 web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息由中链 drain 纳入**当前**回合（用户语义 → [web-ui.md](web-ui.md) §13）：

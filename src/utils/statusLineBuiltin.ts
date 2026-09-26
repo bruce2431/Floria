@@ -15,6 +15,8 @@
  * passed in-process (no JSON round-trip).
  */
 
+import { formatCost } from '../cost-tracker.js'
+
 export type BuiltinStatusLineInput = {
   model?: {
     display_name?: string
@@ -64,7 +66,8 @@ export function renderBuiltinStatusLine(input: BuiltinStatusLineInput): string {
     parts.push(`${formatTokens(cw.total_input_tokens ?? 0)} in`)
   }
   if (cost.total_cost_usd != null && cost.total_cost_usd > 0) {
-    parts.push(`$${cost.total_cost_usd.toFixed(2)}`)
+    // 内部单位是 USD，展示走与 /cost 同一个格式化器（按实时汇率折 ¥，缺汇率时才回落 $）
+    parts.push(formatCost(cost.total_cost_usd))
   }
 
   return parts.join(' · ')

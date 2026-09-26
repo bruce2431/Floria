@@ -68,6 +68,36 @@ export interface CredentialsFile {
    * `undefined` = never configured → tool hidden unless a default applies.
    */
   webSearch?: WebSearchCredentials
+  /**
+   * 模型定价覆盖（见 utils/modelPricing.ts）。全部字段可选，缺省即走
+   * 「厂商官网价目 → models.dev 目录」自动链路。
+   */
+  pricing?: PricingConfig
+}
+
+/**
+ * 模型定价覆盖。单价一律按**人民币 / 百万 token**、官方账单口径填写
+ * （与厂商价目页同单位），内部按实时汇率折算成计价单位。
+ */
+export interface PricingConfig {
+  /** USD→CNY 汇率覆盖；缺省 = 自动拉取（open.er-api.com） */
+  usdCnyRate?: number
+  /** 法定节假日（`YYYY-MM-DD`，北京时间），当天全天按空闲时段计 */
+  holidays?: string[]
+  /** 高峰时段 `[起, 止)`（北京时间整点小时）；缺省 [[9,12],[14,18]] */
+  peakWindows?: number[][]
+  /** 按 provider 名指定 models.dev 目录 id（如 `{ "glm": { "source": "zhipuai" } }`） */
+  providers?: Record<string, { source?: string }>
+  /** 按模型名覆盖单价（人民币 / 百万 token） */
+  models?: Record<
+    string,
+    {
+      input: number
+      output: number
+      cacheRead?: number
+      cacheWrite?: number
+    }
+  >
 }
 
 /**

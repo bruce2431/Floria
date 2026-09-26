@@ -455,6 +455,18 @@ export function parseUserSpecifiedModel(
     : normalizedModel
 
   if (isModelAlias(modelString)) {
+    // 第三方 provider 会话没有 Anthropic 的分档语义。家族别名（haiku/sonnet/opus/
+    // best…）若按一号默认回落，请求就会带着「属于 Anthropic 的模型名」打到 provider
+    // 的 endpoint（与 2026-09-10「模型名属于 A、endpoint/key 属于 B」同类缺陷），
+    // 且记账时被 Anthropic 静态表定价：实测 Explore 子代理（frontmatter
+    // model:'haiku'）被按 $1/$5/$0.1 计成 ¥1.64，而 provider 实际按 deepseek-flash
+    // 只收 ¥0.16。会话绑定 provider 时，别名一律落回该 provider 的模型。
+    if (getActiveProviderConfig()) {
+      const providerModel = getActiveModel()
+      if (providerModel) {
+        return providerModel
+      }
+    }
     switch (modelString) {
       case 'opusplan':
         return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '') // Sonnet is default, Opus in plan mode

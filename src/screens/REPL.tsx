@@ -29,7 +29,7 @@ import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js
 import { useTerminalNotification } from '../ink/useTerminalNotification.js';
 import { hasCursorUpViewportYankBug } from '../ink/terminal.js';
 import { createFileStateCacheWithSizeLimit, mergeFileStateCaches, READ_FILE_STATE_CACHE_SIZE } from '../utils/fileStateCache.js';
-import { updateLastInteractionTime, getLastInteractionTime, getOriginalCwd, getProjectRoot, getSessionId, switchSession, setCostStateForRestore, getTurnHookDurationMs, getTurnHookCount, resetTurnHookDuration, getTurnToolDurationMs, getTurnToolCount, resetTurnToolDuration, getTurnClassifierDurationMs, getTurnClassifierCount, resetTurnClassifierDuration, applyPendingSessionModelOverride } from '../bootstrap/state.js';
+import { updateLastInteractionTime, getLastInteractionTime, getOriginalCwd, getProjectRoot, getSessionId, switchSession, getTurnHookDurationMs, getTurnHookCount, resetTurnHookDuration, getTurnToolDurationMs, getTurnToolCount, resetTurnToolDuration, getTurnClassifierDurationMs, getTurnClassifierCount, resetTurnClassifierDuration, applyPendingSessionModelOverride } from '../bootstrap/state.js';
 import { applyPendingSessionProvider } from '../utils/credentials/pool.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
@@ -73,7 +73,7 @@ import { buildEffectiveSystemPrompt } from '../utils/systemPrompt.js';
 import { getSystemContext, getUserContext } from '../context.js';
 import { getMemoryFiles } from '../utils/claudemd.js';
 import { startBackgroundHousekeeping } from '../utils/backgroundHousekeeping.js';
-import { getTotalCost, saveCurrentSessionCosts, resetCostState, getStoredSessionCosts } from '../cost-tracker.js';
+import { getTotalCost, restoreCostStateForSession, resetCostState } from '../cost-tracker.js';
 import { useCostSummary } from '../costHook.js';
 import { useFpsMetrics } from '../context/fpsMetrics.js';
 import { useAfterFirstRender } from '../hooks/useAfterFirstRender.js';
@@ -1968,13 +1968,6 @@ export function REPL({
       setAbortController(null);
       setConversationId(sessionId);
 
-      // Get target session's costs BEFORE saving current session
-      // (saveCurrentSessionCosts overwrites the config, so we need to read first)
-      const targetSessionCosts = getStoredSessionCosts(sessionId);
-
-      // Save current session's costs before switching to avoid losing accumulated costs
-      saveCurrentSessionCosts();
-
       // Reset cost state for clean slate before restoring target session
       resetCostState();
 
@@ -2042,10 +2035,9 @@ export function REPL({
         saveMode(isCoordinatorMode() ? 'coordinator' : 'normal');
       }
 
-      // Restore target session's costs from the data we read earlier
-      if (targetSessionCosts) {
-        setCostStateForRestore(targetSessionCosts);
-      }
+      // 恢复目标会话的累计用量——与 CLI 启动恢复同一条路：从转录派生（含子代理）。
+      // 不再有「先读落盘快照再重算」两步，也就没有「绕过重算导致旧值复活」的岔口。
+      restoreCostStateForSession(sessionId);
 
       // Reconstruct replacement state for the resumed session. Runs after
       // setSessionId so any NEW replacements post-resume write to the

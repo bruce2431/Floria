@@ -82,32 +82,6 @@ export type ProjectConfig = {
   allowedTools: string[]
   mcpContextUris: string[]
   mcpServers?: Record<string, McpServerConfig>
-  lastAPIDuration?: number
-  lastAPIDurationWithoutRetries?: number
-  lastToolDuration?: number
-  lastCost?: number
-  lastDuration?: number
-  lastLinesAdded?: number
-  lastLinesRemoved?: number
-  lastTotalInputTokens?: number
-  lastTotalOutputTokens?: number
-  lastTotalCacheCreationInputTokens?: number
-  lastTotalCacheReadInputTokens?: number
-  lastTotalWebSearchRequests?: number
-  lastFpsAverage?: number
-  lastFpsLow1Pct?: number
-  lastSessionId?: string
-  lastModelUsage?: Record<
-    string,
-    {
-      inputTokens: number
-      outputTokens: number
-      cacheReadInputTokens: number
-      cacheCreationInputTokens: number
-      webSearchRequests: number
-      costUSD: number
-    }
-  >
   lastSessionMetrics?: Record<string, number>
   exampleFiles?: string[]
   exampleFilesGeneratedAt?: number

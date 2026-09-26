@@ -2,10 +2,7 @@
 
 import { feature } from 'bun:bundle'
 import chalk from 'chalk'
-import {
-  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-  logEvent,
-} from 'src/services/analytics/index.js'
+import { logEvent } from 'src/services/analytics/index.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { checkForReleaseNotes } from 'src/utils/releaseNotes.js'
 import { setCwd } from 'src/utils/Shell.js'
@@ -25,7 +22,7 @@ import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
 import { checkAndRestoreTerminalBackup } from './utils/appleTerminalBackup.js'
 import { prefetchApiKeyFromApiKeyHelperIfSafe } from './utils/auth.js'
 import { clearMemoryFileCaches } from './utils/claudemd.js'
-import { getCurrentProjectConfig, getGlobalConfig } from './utils/config.js'
+import { getGlobalConfig } from './utils/config.js'
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
 import { env } from './utils/env.js'
 import { envDynamic } from './utils/envDynamic.js'
@@ -439,37 +436,4 @@ export async function setup(
     }
   }
 
-  if (process.env.NODE_ENV === 'test') {
-    return
-  }
-
-  // Log tengu_exit event from the last session?
-  const projectConfig = getCurrentProjectConfig()
-  if (
-    projectConfig.lastCost !== undefined &&
-    projectConfig.lastDuration !== undefined
-  ) {
-    logEvent('tengu_exit', {
-      last_session_cost: projectConfig.lastCost,
-      last_session_api_duration: projectConfig.lastAPIDuration,
-      last_session_tool_duration: projectConfig.lastToolDuration,
-      last_session_duration: projectConfig.lastDuration,
-      last_session_lines_added: projectConfig.lastLinesAdded,
-      last_session_lines_removed: projectConfig.lastLinesRemoved,
-      last_session_total_input_tokens: projectConfig.lastTotalInputTokens,
-      last_session_total_output_tokens: projectConfig.lastTotalOutputTokens,
-      last_session_total_cache_creation_input_tokens:
-        projectConfig.lastTotalCacheCreationInputTokens,
-      last_session_total_cache_read_input_tokens:
-        projectConfig.lastTotalCacheReadInputTokens,
-      last_session_fps_average: projectConfig.lastFpsAverage,
-      last_session_fps_low_1_pct: projectConfig.lastFpsLow1Pct,
-      last_session_id:
-        projectConfig.lastSessionId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      ...projectConfig.lastSessionMetrics,
-    })
-    // Note: We intentionally don't clear these values after logging.
-    // They're needed for cost restoration when resuming sessions.
-    // The values will be overwritten when the next session exits.
-  }
 }

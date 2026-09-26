@@ -5,8 +5,9 @@ import { needToken, apiUrl } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, esc, isMobile, loadWork, saveWork, state, toast } from '../core/state.js'
-import { loadSessions, sessCmp } from '../core/sessions.js'
+import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
 import { itemHtml, setPanel } from './recent.js'
+import { renderProjSeat } from '../inputbar/commands.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
   // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。数据源全部是现成端点，本模块零后端改动：
@@ -33,6 +34,20 @@ import { itemHtml, setPanel } from './recent.js'
     saveWork()
   }
 
+  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目/全局会话时，
+  // 回该项目的「新对话」空态（新会话的目标项目由 core/state.js newSessionProject 收口，seat 只读）。
+  // 调用点 = 进入 work 模式 / 切换工作项目 / 路由渲染会话前（chat/route.js renderSession）。
+  // 会话尚未落地（findSession 查无 = 列表未拉或刷新中）时不判——「未知」不等于「别的项目」。
+  function workScopeOk(hash) {
+    if (state.sbMode !== 'work' || !state.workProj || !hash) return true
+    const s = findSession(hash)
+    return !s || (s.projectScope === 'project' && s.projectLabel === state.workProj)
+  }
+  function enforceWorkScope() {
+    if (!workScopeOk(state.currentHash)) navigate('#/')
+    renderProjSeat()
+  }
+
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
   function applySbMode() {
     const on = state.sbMode === 'work'
@@ -45,6 +60,7 @@ import { itemHtml, setPanel } from './recent.js'
     chatArea.classList.toggle('work', on)
     if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open')
     applyPanes()
+    enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) ensureWork()
     else hideWkPops()
   }
@@ -225,6 +241,7 @@ import { itemHtml, setPanel } from './recent.js'
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
+    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     await loadProjectTree(label)
   }
@@ -342,10 +359,10 @@ import { itemHtml, setPanel } from './recent.js'
   }
 
   function newWorkChat() {
-    // 新会话落在当前 work 项目下（沿用 state.newProject 契约：首条消息按它落项目）。
+    // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
+    // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
     // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 两栏布局照样成立；
     // 模式互斥只对 mgr/preview 两张视图卡生效（route.js 内那一处 setSbMode('chat')）。
-    state.newProject = state.workProj || null
     navigate('#/')
     if (isMobile()) setPanel(false)
   }
@@ -464,7 +481,9 @@ import { itemHtml, setPanel } from './recent.js'
 
 export {
   applySbMode,
+  enforceWorkScope,
   ensureWork,
   initWork,
   setSbMode,
+  workScopeOk,
 }

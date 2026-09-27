@@ -13,7 +13,7 @@ import { stageSync } from '../chat/stage.js'
   // →恢复」的往复；五轮再证：把该补的量补足，浏览器那半份就自然被吸收，无需迎战）。
   // 可视窗：app 顶部被推出屏外的条带高 = total，故 app 内的可视窗 = [total, L]（--kb-total）——
   // 消息流窗口（#chat-scroll margin-top）与三个覆盖层（top）同取此值；底栏恒在 app 底边（22px 口径），
-  // 空态底栏随 .g-stage 台面比例走（76.75%）——都不再各自补位移。
+  // 空态底栏随 .g-stage 台面比例（76.75%）一并被顶起——都不再各自补位移。
   // 相位（二轮）：--kb / --kb-total / kb-open 类全部在事件回调里**同步**写（只写样式属性，不读取
   // 布局、不触发布局）；仅「弹层余量实测 + stageSync 占位重算」走 rAF 合帧（连续量、晚一帧不可见；
   // 且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。

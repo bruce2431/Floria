@@ -33,7 +33,13 @@ import { ctx } from '../inputbar/ctx-meter.js'
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
     // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
     // wkPreview = 个性化工作区（第三栏，渲染当前项目预览，见 sidebar/work.js renderWorkPreview）。
-    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false }
+    // wkAssistMode = 助手栏形态（'side'=靠栏，主区一栏 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
+    // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
+    wkAssistMode: 'side', wkAssistH: 430,
+    // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
+    // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
+    wkFlex: { editor: 1, assist: 1, preview: 1 } }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -59,7 +65,7 @@ import { ctx } from '../inputbar/ctx-meter.js'
   }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
   }
   function loadWork() {
     try {
@@ -73,6 +79,11 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (typeof d.wkPreview === 'boolean') state.wkPreview = d.wkPreview
+      if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
+      if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      if (d.wkFlex && typeof d.wkFlex === 'object') {
+        for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
+      }
     } catch { /* 忽略 */ }
   }
   let ALL = []

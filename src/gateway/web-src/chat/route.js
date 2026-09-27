@@ -104,7 +104,7 @@ import { showView } from '../views/registry.js'
     route()
   }
 
-  // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（top=台面 76.75%−26px），
+  // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（台面中心锚），
   // 会话态移回会话卡沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
   // 2026-09-23 卡化：两处基准都在会话卡内（.g-stage 是卡的后代；docked 目标是卡本身），
   // 输入栏随会话卡生灭——不再有「挂槽位」的旧路径。
@@ -143,7 +143,7 @@ import { showView } from '../views/registry.js'
     apply()
     const r2 = el.getBoundingClientRect()
     if (!r2.width) { el.style.transition = ''; return }
-    // 类变换恒等盒换算：stage 态 translate(-50%,-50%)、docked 态 translate(-50%,-100%)
+    // 类变换恒等盒换算：stage 态 translate(-50%,-50%)（中心锚）、docked 态 translate(-50%,-100%)
     const anchorY = toStage ? 0.5 : 1
     const tx = r1.left - (r2.left + r2.width / 2)
     const ty = r1.top - (r2.top + r2.height * anchorY)

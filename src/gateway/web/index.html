@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=392" />
+  <link rel="stylesheet" href="/styles.css?v=404" />
 </head>
 <body>
 <div id="app">
@@ -168,19 +168,53 @@
       <div class="wk-ed-body" id="wk-ed-body"></div>
     </section>
 
+    <!-- 分界条（2026-09-27）：work 主区栏可拖拽调宽（参考 Pj18 preview 的 #divider/#divider-chat）。
+         位置固定两条（编辑区右、预览右），显隐由 work.js 的 applyWorkFlex 按「两侧是否都有可见栏」
+         实时判定——栏隐藏时对应的缝同步消失，故任意相邻可见栏之间恒有且只有一条缝。 -->
+    <div class="work-gutter"></div>
+
     <!-- 个性化工作区（2026-09-26 work 模式第三栏）：由视图浮层的「预览」开关驱动，内容 = 当前项目的
          项目预览（/preview/<label>/ 或后端容器），渲染复用 mgr.js 的 mountPreview（与槽位预览卡同一份
          实现）。同 #work-editor，不用 .view-card —— 它是 work 模式的常驻栏，不是槽位卡。 -->
     <section id="work-preview"></section>
 
+    <div class="work-gutter"></div>
+
     <!-- 会话卡（视图注册表 tab:false 一条，视图卡化 2026-09-23）：#char / #chat-scroll / #empty-hint
          承载模块级 const 引用的单例 DOM（messagesEl / inputWrap / charEl），不能随卡销毁重建
          → 常驻此处，离开会话视图只切 hidden。槽里同一时刻恰好一张卡：管理/预览卡由注册表按需创建。 -->
     <section id="session-card" class="view-card session">
+      <!-- 助手头部（work 模式专用，2026-09-27）：三态切换 + 关掉。chat 模式与细条态由 CSS 整体藏起，
+           不参与会话卡原有布局。图标 = 内联 SVG（16px 描线，与顶栏/侧栏 .wk-ico 同一套语言）。 -->
+      <div class="wk-assist-head">
+        <span class="wk-assist-title">助手</span>
+        <span class="wk-assist-acts">
+          <button class="wk-ico" id="wk-assist-slim" title="收成输入栏" aria-label="收成输入栏">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.2 8 10.2 12 6.2"/></svg>
+          </button>
+          <button class="wk-ico" id="wk-assist-dock" title="靠回栏" aria-label="靠回栏">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="2.2"/><path d="M9.9 3v10"/></svg>
+          </button>
+          <button class="wk-ico" id="wk-assist-float" title="浮起" aria-label="浮起">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="5.8" width="8.4" height="8.4" rx="2.2"/><path d="M6.6 1.8h5.4a2.2 2.2 0 0 1 2.2 2.2v5.4"/></svg>
+          </button>
+          <button class="wk-ico" id="wk-assist-close" title="关掉助手" aria-label="关掉助手">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 4.2 11.8 11.8M11.8 4.2 4.2 11.8"/></svg>
+          </button>
+        </span>
+      </div>
+      <!-- 悬浮卡高度把手（只在悬浮态露出）：左上角，只改高度——宽恒由锚栏宽给定 -->
+      <div class="wk-assist-grip" id="wk-assist-grip" title="拖动调整高度"></div>
+      <!-- 收敛态 = 一条输入栏（不是胶囊按钮）：点它弹回悬浮卡。同一张助手卡的第三种形态，无第二套发送链 -->
+      <button class="wk-assist-pill" id="wk-assist-pill" title="展开助手">
+        <span class="wap-ph">随便提问</span>
+        <!-- 箭头图标由 work.js mountWork 注入 I.dshSend（与正常底栏发送钮同源），勿在此内联自绘 -->
+        <span class="wap-arrow"></span>
+      </button>
       <img id="char" src="/char/1.jpg" alt="AI 形象" draggable="false" />
       <div id="chat-scroll"><div id="messages"></div></div>
       <!-- 空态（token 门验证后）：与 SubPj3 阶段3 一致——居中正方形趴栏图铺满；
-           输入栏（#input-wrap）在 stage 内真相对定位（SubPj3 同款：top=台面 76.75% − 半高 26px），
+           输入栏（#input-wrap）在 stage 内真相对定位（SubPj3 同款：台面中心锚 76.75%），
            任意窗口大小都贴图走不偏移；app.js 按界面在 stage（空态）↔ 会话卡（会话 docked）间移动挂载 -->
       <div id="empty-hint">
         <div class="g-stage">
@@ -300,6 +334,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=392"></script>
+<script src="/app.js?v=404"></script>
 </body>
 </html>

@@ -694,7 +694,7 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
    任意屏高下 icon 底 → 输入栏顶的间隙恒为 36px。 */
 /* 空态（2026-08-17 SubPj3 复刻；2026-08-18 输入栏改 stage 内真相对定位）：与 SubPj3 阶段3 一致——
    居中正方形趴栏画面（.g-stage，尺寸同 token 门，垂直居中）；输入栏 DOM 挂 stage 内，
-   相对 stage 定位（top = 台面中心 76.75% − 半高 26px，见 #empty-hint #input-wrap 规则），
+   相对 stage 定位（见 #empty-hint #input-wrap 规则），
    任意窗口大小都精确贴图，不再用视口百分比模拟。 */
 #empty-hint {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -717,7 +717,7 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
    底部 .row 工具行（padding 2px 8px 6px）：左 .tools（.add 28px 圆 + 空 .modes）+
    右 .trailing（margin-left auto，gap 12px：.trigger 模型·推理 chip + .primary 34px 主发送）。
    2026-08-18 定案（用户「按 SubPj3 实现」）：空态时输入栏 DOM 挂 #empty-hint .g-stage 内，
-   相对 stage 真定位（bar 中心锚在趴栏台面中心 76.75%，translate(-50%,-50%) 适配任意高度）；
+   相对 stage 真定位（台面中心锚，translate(-50%,-50%)）；
    会话态移回 #chat-area 沉底（top:100%−22px + translateY(-100%)，底边距 22px）。 */
 #input-wrap {
   position: absolute; left: 50%; transform: translateX(-50%);
@@ -763,11 +763,12 @@ body.kb-open #input-wrap { transition: none; }
 #composer-takeover.appr-in { animation: apprInUp 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 #input-bar.bar-collapsing { justify-content: flex-end; overflow: hidden; }
 #input-bar.bar-reveal > :not(#composer-takeover) { animation: barRevealIn 0.17s ease-out both; }
-/* 空态：相对 stage 真定位（SubPj3 .inputbar 同款——bar 中心锚在趴栏台面中心 76.75%，
-   translate(-50%,-50%) 让任意高度的高胶囊都精确居中于台面，任意窗口精确贴图） */
+/* 空态：相对 stage 真定位（SubPj3 .inputbar 同款基线）——台面中心锚定（76.75% + translate(-50%,-50%)）。
+   该锚点是**底栏相对立绘的位置**，2026-09-27 用户定案「和图片的相对位置不可以改」——任何改动都不得
+   移动底栏在立绘里的落点（曾试过改底边锚，底栏上移压住女孩手臂，被否）。 */
 #empty-hint #input-wrap {
   top: 76.75%;
-  /* 键盘节：不单独抬底栏——整页平移已把台面 76.75% 处的底栏连带顶起（键盘高 ≤ 台面留白时仍可见） */
+  /* 键盘节：不单独抬底栏——整页平移已把台面前缘处的底栏连带顶起（键盘高 ≤ 台面留白时仍可见） */
   transform: translate(-50%, -50%);
   /* 2026-09-07 用户定案：空态输入栏稍宽于趴栏 stage（每侧超出 20px），仍以视口宽 −32px 封顶
      （手机 stage=88vw 时该封顶生效，与 docked 手机档 calc(100% - 32px) 一致） */
@@ -782,11 +783,19 @@ body.kb-open #input-wrap { transition: none; }
 #input-wrap.docked {
   top: calc(100% - 22px); /* 键盘节：底栏钉在 app 底边上方 22px——整页平移已把 app 底边送到键盘上沿 */
   transform: translate(-50%, -100%);
-  width: min(780px, 70vw, calc(100% - 40px));
+  /* 下限 240px（2026-09-27 用户定案「增大最小宽度阈值」）：工具行的 min-content ≈234px
+     （左组 + 28 / 项目 chip 图标 14+箭头 14+内垫 16 / 右组 模型 chip 30 + 上下文 28 + 发送 34
+     + 各组 GAP 与行内垫），卡片再窄就无处可让——固定件互相挤压重叠（「上下文按钮和模型选择 tab
+     重叠」在极窄档复现）。设下限后卡片在此止步，宁可横向越出可视区也不压烂内部布局。 */
+  width: max(240px, min(780px, 70vw, calc(100% - 40px)));
 }
 /* dsh .card：白输入表面 + 22px 圆角 + 0.10 输入描边 + shadow-lv2 + 16/24 基础字 */
 #input-bar {
   position: relative; /* 2026-09-10：任务浮窗（#task-dock）的定位上下文——bottom:100% 贴本栏上沿 */
+  /* 2026-09-27：让下方 @container 档位以本栏宽度（而非视口）为参照——窗口宽而输入栏窄
+     （work 分栏 / 侧栏展开 / 分屏）时才会正确进入窄档。注意：工具行不依赖它保命——
+     chip 宽度走 flex 收缩链，容器查询不可用时只损失间距收敛，不会再出重叠。 */
+  container-type: inline-size;
   display: flex; flex-direction: column; gap: 12px;
   width: 100%; max-width: 780px; padding-top: 10px;
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -826,9 +835,12 @@ body.kb-open #input-wrap { transition: none; }
 #input-bar .trailing {
   display: flex; align-items: center; min-width: 0;
 }
-#input-bar .tools { gap: 16px; }
+#input-bar .tools { flex: 0 1 auto; gap: 16px; }
 #input-bar .modes { display: flex; align-items: center; gap: 12px; min-width: 0; }
-#input-bar .trailing { flex: none; margin-left: auto; gap: 12px; }
+/* .trailing 必须可缩（2026-09-27 根修）：原 flex:none 让它恒保持内容宽 ⇒ 窄容器下整组
+   溢出输入栏（右侧发送钮被推出卡片）。收缩链 = trailing → #model-root → #model-seat →
+   .triggerLabel 出省略号（与 .projLabel 同款）；ctx / send 等固定件本身 flex:none 不缩。 */
+#input-bar .trailing { flex: 0 1 auto; margin-left: auto; gap: 12px; }
 /* dsh .add —— 28px 圆、selector 底(#F5F6F7)、primary 字形；IconPlusOutline16(14)
    （2026-08-28 v137：图片上传独立按钮移除，入口改 + 浮窗「图片」tab，.add 恢复仅 #cmd-btn） */
 #cmd-btn.add {
@@ -930,10 +942,14 @@ body.kb-open #input-wrap { transition: none; }
   color: #e8eaed; font-size: 15px;
 }
 /* dsh ModelSelect .trigger —— 28px chip、透明无边框、24px 圆角、13/20/500 secondary 字、
-   4px gap、caption 色 14px chevron；max-width 跟随容器 45cqw */
+   4px gap、caption 色 14px chevron。
+   宽度上限 360px（2026-09-27 根修）：原写 `min(360px, 45cqw)`——cqw 依赖容器查询支持，
+   一旦不回落到 #input-bar（旧 Safari / container-type 未生效）就按视口取 45%，窄栏里 chip
+   恒 ~360px 顶住上下文圆钮（实报「上下文按钮和模型选择 tab 重叠」）。改为纯 px 上限 +
+   交给 flex 收缩链，宽度由「行里真正剩多少」决定，不再依赖容器查询是否可用。 */
 #model-seat.trigger {
-  display: flex; align-items: center; gap: 4px; min-width: 0;
-  max-width: min(360px, 45cqw);
+  display: flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto;
+  max-width: 360px;
   height: 28px; padding: 0 4px 0 8px;
   border: none; border-radius: 24px; outline: none; background: transparent;
   color: #61666b; font-size: 13px; line-height: 20px; font-weight: 500;
@@ -945,8 +961,11 @@ body.kb-open #input-wrap { transition: none; }
 #model-seat.trigger .chevron { flex: 0 0 auto; color: #adb2b8; display: flex; transition: transform 120ms ease; }
 #model-seat.trigger .chevron.open { transform: rotate(180deg); }
 #model-seat.trigger .chevron svg { width: 14px; height: 14px; display: block; }
-/* dsh ModelSelect .root —— menu 的定位上下文 */
-#model-root.model-root { position: relative; min-width: 0; }
+/* dsh ModelSelect .root —— menu 的定位上下文。
+   display:flex（2026-09-27 根修）：让 chip 成为本盒的 flex 项，本盒（.trailing 的 flex 项，
+   flex:0 1 auto）随工具行溢出而收缩时，chip 同步收到 <360px 的可用宽并让 .triggerLabel 出
+   省略号——这条链不依赖容器查询，窄栏/极窄栏都把 chip 压回可用宽。 */
+#model-root.model-root { position: relative; min-width: 0; display: flex; }
 /* dsh .primary —— 34px 圆、button-info-fill = deepseek-500 #4176E6、静态白字形、
    hover button-info-hover = deepseek-400 #679EFE、translateY(-2px) 抵消 row 顶部 2px 下沉 */
 #send-btn.primary {
@@ -961,12 +980,35 @@ body.kb-open #input-wrap { transition: none; }
 #send-btn.primary:disabled { opacity: 0.4; cursor: default; }
 #send-btn.primary svg { width: 16px; height: 16px; display: block; }
 
+/* 窄容器下的间距收敛（@container 参照 = #input-bar 自身宽度，非视口）：
+   文本省略交给收缩链（#model-root → #model-seat → .triggerLabel 省略号），这里只收 gap 与
+   chip 内垫，让「+ / 项目 chip / 模型 chip / 上下文 / 发送」在窄栏里仍齐整一行。
+   两档阈值 2026-09-27 上调（用户「增大最小宽度阈值」）：480 / 400——提前让位，别等贴到
+   工具行的 min-content（≈234px）才动。 */
+@container (max-width: 480px) {
+  #input-bar .tools { gap: 10px; }
+  #input-bar .trailing { gap: 8px; }
+  #input-bar .row { gap: 8px; }
+  #model-seat.trigger { padding: 0 2px 0 6px; }
+}
+/* 极窄容器：固定件（+ / 上下文 / 发送）与 chip 图标必须保住，让位的是可再生的文字——
+   推理等级「Low」（点开模型菜单仍可见）与项目 chip 的下拉箭头（图标文字仍在，仍可点开）。
+   两条合起来把工具行的 min-content 从 ~260px 压到 ~234px，与 #input-wrap.docked 的
+   240px 下限配套：下限之上永不重叠，下限之下卡片止步不再压烂。 */
+@container (max-width: 400px) {
+  #model-seat.trigger .triggerEffort { display: none; }
+  #proj-seat .chevron { display: none; }
+}
+
 /* ===== 上下文占用指示（dsh ContextMeter 完全移植：ContextMeter.module.css）=====
    发送钮左边环形小圆（28px 圆触发钮 + 14px/2px 圆环），点击展开 breakdown 面板
    （264px、r12、透明 hairline + 阴影，表面同 #model-pop 菜单）。token 映射：
    label-secondary=#61666b / label-tertiary=#adb2b8 / label-primary=#0f1115 /
    border-l3=rgba(0,0,0,0.12) / interactive-bg-hover=rgba(38,49,72,0.06) */
-#ctx-meter { position: relative; display: inline-flex; }
+/* flex:none（2026-09-27 根修）：#ctx-meter 此前无 flex 声明 ⇒ 作为 .trailing 的 flex 项
+   默认 flex:0 1 auto **会被压扁**（宽度缩到 <28px），27px 圆环溢出自身盒子与左侧模型 chip
+   重叠（实报「上下文按钮和模型选择 tab 重叠」）。圆钮不参与收缩，让位交给模型 chip 的文本。 */
+#ctx-meter { position: relative; display: inline-flex; flex: none; }
 #ctx-meter[hidden] { display: none; }
 #ctx-btn.ctx-trigger {
   display: grid; place-items: center; flex: none;
@@ -2105,17 +2147,86 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    「槽里同一时刻恰好一张卡」语义。几何复制 .view-card（margin 2px / --radius / --chat-bg）。 */
 #work-editor { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
 #chat-area.work { flex-direction: row; }
-#chat-area.work > #work-editor { display: flex; flex: 1 1 50%; min-width: 0; }
-#chat-area.work > #session-card { flex: 1 1 50%; min-width: 0; }
+/* 栏宽不再写死 50%/均分：由 work.js 的 applyWorkFlex 按 state.wkFlex（每栏 grow）设内联 flex，
+   下面只是 JS 落地前的默认值（basis 0 ⇒ 宽 ∝ grow）。 */
+#chat-area.work > #work-editor { display: flex; flex: 1 1 0; min-width: 0; }
+#chat-area.work > #session-card { flex: 1 1 0; min-width: 0; }
 #chat-area.work.hide-editor > #work-editor { display: none; }
 #chat-area.work.hide-assist > #session-card { display: none; }
+
+/* 分界条：拖动改左右相邻两栏的 grow 比（work.js）；.on 由 applyWorkFlex 判定（两侧都有可见栏）。
+   只在 work 模式 + 桌面出现；缝本身占 7px，视觉线是 ::before（hover / 拖拽中显形）。 */
+.work-gutter { display: none; flex: none; width: 7px; align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+#chat-area.work > .work-gutter.on { display: block; }
+.work-gutter::before { content: ''; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 2px; transform: translateX(-50%); border-radius: 1px; background: transparent; transition: background .15s; }
+.work-gutter:hover::before, .work-gutter.dragging::before { background: var(--border); }
+body.wk-resizing { cursor: col-resize; user-select: none; }
 
 /* 个性化工作区（第三栏，预览）：开关 = #wk-view-pop 的「预览」。与 #work-editor 同构的常驻栏，
    内容由 mgr.js mountPreview 写进 .preview-shell；三栏并排时均分（1 1 0），关掉即隐藏不销毁。 */
 #work-preview { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
 #chat-area.work.wk-preview > #work-preview { display: flex; flex: 1 1 0; min-width: 0; }
-#chat-area.work.wk-preview > #work-editor,
-#chat-area.work.wk-preview > #session-card { flex: 1 1 0; }
+
+/* ============ 助手三态（2026-09-27，与 Pj18 preview 的三态助手对齐） ============
+   同一张 #session-card 的三个形态，靠类切换 + 内联几何，**绝不搬 DOM**（卡里挂着模块级 const 的
+   messagesEl / inputWrap / charEl 单例，搬走会丢消息流与输入草稿）。状态类落在卡上、work 门控落在
+   #chat-area 上，故形态切换的可见性全由这两处类决定（无第二份 JS 显隐）：
+     side（靠栏，现状）/ .wk-assist-float（悬浮卡，脱流）/ .wk-assist-slim（收敛输入栏） */
+.wk-assist-head { display: none; position: relative; z-index: 2; flex: none; height: 40px; align-items: center; justify-content: space-between; padding: 0 8px 0 15px; border-bottom: 1px solid var(--border-soft); }
+#chat-area.work #session-card:not(.wk-assist-slim) > .wk-assist-head { display: flex; }
+.wk-assist-title { font-size: 13px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-2); }
+.wk-assist-acts { display: flex; gap: 2px; }
+/* 三态按钮逐态露出：默认全藏，靠态只给「浮起」，悬浮态给「收成输入栏 / 靠回栏」；关掉恒在 */
+#wk-assist-slim, #wk-assist-dock, #wk-assist-float { display: none; }
+#session-card.wk-assist-float #wk-assist-slim,
+#session-card.wk-assist-float #wk-assist-dock { display: inline-flex; }
+#chat-area.work #session-card:not(.wk-assist-float) #wk-assist-float { display: inline-flex; }
+/* 高度把手：只有悬浮态露出（宽由锚栏宽给定，故只 ns 方向可拖）；touch-action:none 让触屏拖拽
+   不被滚动手势抢走（iPad 上必须能用） */
+.wk-assist-grip { display: none; position: absolute; left: 0; top: 0; width: 14px; height: 14px; cursor: ns-resize; touch-action: none; }
+#session-card.wk-assist-float .wk-assist-grip { display: block; }
+/* 拖拽中（work.js 给 body 挂类）：内嵌内容不吃指针事件——拖拽跨过 #work-preview 的 iframe 时
+   事件仍全归把手（pointer capture 之外的二层保险），顺带禁选中 */
+body.wk-assist-dragging { user-select: none; }
+body.wk-assist-dragging iframe { pointer-events: none; }
+
+/* 悬浮卡：脱流（position:absolute，包含块 = #chat-area ⇒ 坐标全用主区局部系，键盘整页平移、
+   侧栏开合都不必换算视口）。left/top/width/height 由 work.js placeAssistFloat 写内联。
+   z-index 15：高于主区各栏，低于 .wk-file-open 的编辑区覆盖层（20，手机端点文件要看内容）。 */
+#session-card.wk-assist-float {
+  position: absolute; z-index: 15; margin: 0; min-width: 0;
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+/* 收敛输入栏：壳透明无边框，形状全由 .wk-assist-pill 自己给。
+   **横向与纵向几何全由 work.js 的 wkPlaceAssistSlim 写内联**（left/width/bottom 同源于锚栏），
+   这里刻意不写 left/bottom/transform —— 曾经 CSS 自带 `left:50% + translateX(-50%)` 而 JS 写左缘，
+   两个横向写口叠加成双重位移，整条栏被推出主区（2026-09-27 实报）。 */
+#session-card.wk-assist-slim {
+  position: absolute; z-index: 15;
+  margin: 0; min-width: 0; height: auto;
+  background: transparent; border: none; box-shadow: none; overflow: visible;
+}
+#session-card.wk-assist-slim > .wk-assist-head,
+#session-card.wk-assist-slim > .wk-assist-grip,
+#session-card.wk-assist-slim > #char,
+#session-card.wk-assist-slim > #chat-scroll,
+#session-card.wk-assist-slim > #empty-hint,
+#session-card.wk-assist-slim > #input-wrap { display: none; }
+.wk-assist-pill {
+  display: none; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; height: 46px; padding: 0 8px 0 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--chat-bg); box-shadow: var(--shadow);
+  color: var(--text-3); font-size: 13px; text-align: left;
+}
+#session-card.wk-assist-slim .wk-assist-pill { display: flex; }
+.wk-assist-pill:hover { border-color: var(--text-3); color: var(--text-2); }
+.wap-ph { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 收敛输入栏末端的箭头 = 正常底栏发送钮的同款：34px 圆、button-info-fill #4176E6、静态白字形
+   （图标由 work.js mountWork 注 I.dshSend，与 #send-btn.primary 同源）。箭头只作视觉，点击仍归 pill。 */
+.wap-arrow { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 999px; background: #4176e6; color: #fff; transition: background-color 100ms ease; }
+.wap-arrow svg { width: 16px; height: 16px; display: block; }
+.wk-assist-pill:hover .wap-arrow { background: #679efe; }
 
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
 .wk-ed-back { display: none; }
@@ -2132,6 +2243,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 手机端（≤720px）：两栏不成立——常态只显示助手，点文件时编辑区以覆盖层全屏打开（返回键收起） */
 @media (max-width: 720px) {
   #chat-area.work { flex-direction: column; }
+  #chat-area.work > .work-gutter { display: none; } /* 窄屏两栏不成立，分界条不出（开关状态照常持久化） */
   #chat-area.work > #work-editor { display: none; }
   #chat-area.work > #session-card { flex: 1; }
   #chat-area.work.wk-file-open > #work-editor {

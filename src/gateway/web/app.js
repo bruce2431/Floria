@@ -150,7 +150,13 @@
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
     // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
     // wkPreview = 个性化工作区（第三栏，渲染当前项目预览，见 sidebar/work.js renderWorkPreview）。
-    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false }
+    // wkAssistMode = 助手栏形态（'side'=靠栏，主区一栏 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
+    // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
+    wkAssistMode: 'side', wkAssistH: 430,
+    // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
+    // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
+    wkFlex: { editor: 1, assist: 1, preview: 1 } }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -176,7 +182,7 @@
   }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
   }
   function loadWork() {
     try {
@@ -190,6 +196,11 @@
       if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (typeof d.wkPreview === 'boolean') state.wkPreview = d.wkPreview
+      if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
+      if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      if (d.wkFlex && typeof d.wkFlex === 'object') {
+        for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
+      }
     } catch { /* 忽略 */ }
   }
   let ALL = []
@@ -1321,7 +1332,7 @@ function setSessionCwd(v) { sessionCwd = v }
     route()
   }
 
-  // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（top=台面 76.75%−26px），
+  // 2026-08-18 按 SubPj3 实现：空态输入栏挂 #empty-hint .g-stage 内真相对定位（台面中心锚），
   // 会话态移回会话卡沉底。界面切换时移动 DOM，保证定位基准正确且 transition 平滑。
   // 2026-09-23 卡化：两处基准都在会话卡内（.g-stage 是卡的后代；docked 目标是卡本身），
   // 输入栏随会话卡生灭——不再有「挂槽位」的旧路径。
@@ -1360,7 +1371,7 @@ function setSessionCwd(v) { sessionCwd = v }
     apply()
     const r2 = el.getBoundingClientRect()
     if (!r2.width) { el.style.transition = ''; return }
-    // 类变换恒等盒换算：stage 态 translate(-50%,-50%)、docked 态 translate(-50%,-100%)
+    // 类变换恒等盒换算：stage 态 translate(-50%,-50%)（中心锚）、docked 态 translate(-50%,-100%)
     const anchorY = toStage ? 0.5 : 1
     const tx = r1.left - (r2.left + r2.width / 2)
     const ty = r1.top - (r2.top + r2.height * anchorY)
@@ -4457,8 +4468,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 三栏都算数——只看编辑区+助手会让「预览还开着时关掉助手」被误判成全关（2026-09-26 实报）。
   function applyPanes() {
     if (state.sbMode === 'work') {
-      if (!state.wkEditor && !state.wkAssist && !state.wkPreview) {
-        state.wkAssist = true
+      // 不变量（2026-09-27 随助手脱流更新）：**编辑区 / 预览至少一栏**——助手悬浮或收成输入栏时不占列，
+      // 不能再用它兜底。全关 → 强制打开编辑区（唯一还能承载内容的常驻栏）。判定仍是这一处。
+      if (!state.wkEditor && !state.wkPreview && !wkAssistInFlow()) {
+        state.wkEditor = true
         toast('至少保留一栏')
       }
       chatArea.classList.toggle('hide-editor', !state.wkEditor)
@@ -4466,6 +4479,270 @@ function setFirstSendHash(v) { firstSendHash = v }
       chatArea.classList.toggle('wk-preview', !!state.wkPreview)
     }
     document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+    applyWorkFlex()
+  }
+
+  // ---------- 主区栏宽（分界条拖拽，参考 Pj18 preview 的 #divider/#divider-chat）----------
+  // 栏宽真源 = state.wkFlex（三栏各自的 flex-grow，basis 0 ⇒ 宽 ∝ grow），拖某条缝只重分配它左右
+  // 相邻两可见栏的 grow、其余不动。缝显隐同理按「左右是否都有可见栏」实时判定，故任意相邻可见栏之间
+  // 恒有且只有一条缝（栏隐藏时夹着它的缝自动消失，不会出现两条挨着的空缝）。
+  const PANE_EL = { editor: () => $('work-editor'), assist: () => $('session-card'), preview: () => $('work-preview') }
+  function paneEl(k) { return PANE_EL[k]() }
+  // 助手脱流（float / slim）时它不在 flex 流里，但仍 offsetWidth>0 —— 若不排除，预览列与浮卡之间会凭空
+  // 多出一条分界条（nearPane 把浮卡当右邻）。in-flow 判据由 wkAssistInFlow 单点给（见「助手三态」段）。
+  function paneVisible(el) {
+    if (el === sessionCard) return wkAssistInFlow()
+    return !!el && el.offsetWidth > 0 && getComputedStyle(el).display !== 'none'
+  }
+  // 沿 DOM 序找 el 左/右第一个可见栏（跳过另一条分界条与隐藏栏）；dir = -1 左 / +1 右
+  function nearPane(g, dir) {
+    const key = dir < 0 ? 'previousElementSibling' : 'nextElementSibling'
+    for (let el = g[key]; el; el = el[key]) {
+      if (el.classList.contains('work-gutter')) continue
+      if (paneVisible(el)) return el
+    }
+    return null
+  }
+  function paneKey(el) {
+    for (const k of Object.keys(PANE_EL)) if (paneEl(k) === el) return k
+    return ''
+  }
+  function applyWorkFlex() {
+    const on = state.sbMode === 'work'
+    // 去重：两条缝被一段「全隐藏」的栏隔开时（如 preview 关、editor 与助手分列 g1/g2 两侧），
+    // 二者的左右可见栏会是同一对 → 只保留靠左那条，否则会并排出现两条空缝。
+    let lastL = null
+    document.querySelectorAll('#chat-area > .work-gutter').forEach((g) => {
+      const L = nearPane(g, -1)
+      const R = L && nearPane(g, 1)
+      const show = on && !!L && !!R && L !== lastL
+      g.classList.toggle('on', show)
+      if (show) lastL = L
+    })
+    for (const k of Object.keys(PANE_EL)) {
+      const el = paneEl(k)
+      if (!el) continue
+      // 非 work 模式必须清掉内联 flex：#session-card 在 chat 模式是唯一视图卡（.view-card 的 flex:1）。
+      // 助手脱流时同样清掉——absolute 定位已脱出 flex 流，留着内联 flex 只会误导下一处读它的人。
+      const inFlow = k !== 'assist' || wkAssistInFlow()
+      if (on && inFlow) el.style.flex = `${state.wkFlex[k] || 1} 1 0`
+      else el.style.removeProperty('flex')
+    }
+    applyAssistMode() // 栏宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）
+  }
+
+  // 拖动一条缝：按指针在「左栏左缘 → 右栏右缘」区间的占比 p 重分配两栏 grow（和不变）。
+  // 每侧留 PANE_MIN 像素地板——拖不到把某栏挤成 0（窄屏时地板自动收窄，不会算出负区间）。
+  const PANE_MIN = 180
+  function bindGutter(g) {
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      const L = nearPane(g, -1)
+      const R = nearPane(g, 1)
+      if (!L || !R) return
+      const kL = paneKey(L)
+      const kR = paneKey(R)
+      if (!kL || !kR) return
+      const box = L.getBoundingClientRect()
+      const right = R.getBoundingClientRect().right
+      const w = right - box.left
+      if (w <= 0) return
+      const sum = (state.wkFlex[kL] || 1) + (state.wkFlex[kR] || 1)
+      const floor = Math.min(PANE_MIN, w / 3)
+      g.setPointerCapture(e.pointerId)
+      g.classList.add('dragging')
+      document.body.classList.add('wk-resizing')
+      e.preventDefault()
+      const move = (ev) => {
+        const p = Math.max(floor, Math.min(w - floor, ev.clientX - box.left)) / w
+        state.wkFlex[kL] = p * sum
+        state.wkFlex[kR] = (1 - p) * sum
+        applyWorkFlex()
+      }
+      g.addEventListener('pointermove', move)
+      const done = () => {
+        g.removeEventListener('pointermove', move)
+        g.classList.remove('dragging')
+        document.body.classList.remove('wk-resizing')
+        saveWork()
+      }
+      g.addEventListener('pointerup', done, { once: true })
+      g.addEventListener('pointercancel', done, { once: true })
+    })
+  }
+
+  // ---------- 助手三态（2026-09-27，与 Pj18 preview 的三态助手对齐） ----------
+  // 同一张 #session-card 的三个形态：'side'（靠栏，占主区一栏 = 现状）/ 'float'（悬浮卡，脱流不占列）/
+  // 'slim'（收敛成底部输入栏）。形态类落在卡上（.wk-assist-float / .wk-assist-slim），可见性与几何的
+  // 静态部分全由 CSS 给（web/styles.css「助手三态」段），本模块只写类 + 内联定位。
+  // **绝不 reparent**：卡里挂着 core/state.js 模块级 const 引用的 messagesEl / inputWrap / charEl 单例，
+  // 搬 DOM 会丢消息流与输入草稿（Pj18 #chat-pane 的同款约束）。
+  // 锚点 = 首个可见的 in-flow 主区栏（编辑区 → 预览列 → 整个 #chat-area）：编辑区在场就锚它（主阅读面，
+  // 且浮卡压编辑列时预览列完整可见）；编辑区关掉只剩预览时锚预览；两栏都不在（脱流且另一栏也关）兜整区。
+  // 不能照搬 Pj18「恒锚编辑列」——work 有第二个主角列，编辑区不在时必须有确定的下一档，不能锚到 0 宽的东西。
+  // 坐标一律在 #chat-area 局部系算：#app 在键盘态被 transform（body.kb-open），position:fixed 的视口
+  // 坐标会整体漂走，故用 absolute + #chat-area（position:relative）作包含块，左右上下全数相减。
+  const WK_ASSIST_PAD = 8      // 浮卡/输入栏与锚栏左右各留的白
+  const WK_ASSIST_BOT = 24     // 距主区底部的距离（浮卡写 top、输入栏写 bottom，两态共用这一个值）
+  // 正常底栏（#input-wrap.docked）在会话卡内的底距：top: calc(100% - 22px) —— 收敛输入栏要与它
+  // 落在同一处，故停在「卡片底边 −22px」= 浮卡的 WK_ASSIST_BOT 再让出这 22px。两处数值同源，
+  // 改一边必须改另一边（probe-work-scope F3c 锁这条耦合）。
+  const WK_INPUT_BOT = 22
+  const WK_ASSIST_MIN_W = 240
+  const WK_ASSIST_MIN_H = 200
+  const WK_ASSIST_MAX_VH = 0.7 // 高度上限 = 视口 70%（窄屏/横屏时浮卡不顶满）
+  const WK_DRAG_SLOP = 3       // 位移 ≤3px 不算拖拽（区分点按与拖动）
+
+  function wkAssistMode() {
+    return state.wkAssistMode === 'float' || state.wkAssistMode === 'slim' ? state.wkAssistMode : 'side'
+  }
+  // in-flow = 助手是否占着主区一栏（靠栏且开着）。不变量判定、分界条显隐、flex 落点三处共用这一条判据。
+  function wkAssistInFlow() {
+    return !!state.wkAssist && wkAssistMode() === 'side'
+  }
+  function wkAssistBase() {
+    const b = chatArea.getBoundingClientRect()
+    return b.width > 0 ? b : null
+  }
+  function wkAssistAnchor() {
+    for (const id of ['work-editor', 'work-preview']) {
+      const el = $(id)
+      if (!el) continue
+      const r = el.getBoundingClientRect()
+      if (r.width > 120) return r // 够宽才算「正在看的栏」，否则跳过（栏被关/未挂时不锚它）
+    }
+    return wkAssistBase()
+  }
+  function wkAssistW(a) {
+    return Math.max(WK_ASSIST_MIN_W, Math.round(a.width - WK_ASSIST_PAD * 2))
+  }
+  function wkAssistH() {
+    const max = Math.round(window.innerHeight * WK_ASSIST_MAX_VH)
+    return Math.max(WK_ASSIST_MIN_H, Math.min(state.wkAssistH || 430, max))
+  }
+  function wkClearAssistBox() {
+    for (const p of ['position', 'left', 'top', 'bottom', 'width', 'height']) sessionCard.style.removeProperty(p)
+  }
+  // 两态共用的横向公式：宽 = 锚栏宽 − 2×留白，左缘 = 锚栏左缘 + 剩余留白的一半（水平居中于锚栏）。
+  // **一律写左缘、不写中线**：CSS 里没有 translateX(-50%) 之类的自居中，横向只有一个写口（本函数），
+  // 中线公式 + CSS 自居中会在改宽度时双重位移（2026-09-27 实报「折叠形态定位有问题」的根因）。
+  function wkPlaceAssistBox(a, w, base) {
+    sessionCard.style.position = 'absolute'
+    sessionCard.style.width = w + 'px'
+    sessionCard.style.left = Math.round(a.left - base.left + (a.width - w) / 2) + 'px'
+  }
+  // 空态「底栏不压卡边界」的缺口（返 0 = 已达标或非空态）。不变量：空态底栏（#empty-hint #input-wrap，
+  // 锚在立绘台上、中心锚——用户保护项，绝不可动）的底边距卡底边 ≥ WK_INPUT_BOT（与正常底栏 .docked
+  // 在卡内的内缩同源，都是「底栏离卡底边 22px」）。台面在卡内垂直居中 ⇒ 卡高 h 时该底距 = h/2 − 常量
+  // （常量 = 台面高×0.2675 + 底栏高/2，只由台面与底栏尺寸决定）：h = 430 时该值为负 ⇒ 底栏下沿被卡边界
+  // 裁掉（2026-09-27 实报「低栏和卡片边界都挨上了」）。补法只能是**加高卡**（底栏与立绘同步上移，二者
+  // 相对位置不变）：底距随卡高以 1/2 变化 ⇒ 加高量 = 2×缺口；卡底边锚在主区底部不动 ⇒ 卡向上长。
+  function wkFloatEmptyDeficit() {
+    const bar = document.querySelector('#empty-hint #input-wrap')
+    if (!bar) return 0
+    const br = bar.getBoundingClientRect()
+    if (!br.width) return 0 // 门后 / 非空态：无盒，不参与
+    return WK_INPUT_BOT - (sessionCard.getBoundingClientRect().bottom - br.bottom)
+  }
+  // 悬浮卡：定宽（锚栏宽 − 2×留白）、定高（state.wkAssistH，收在 70vh 内），水平居中于锚栏、贴主区底部。
+  // 落位两拍：先按用户高放，量出空态缺口再补高（非空态缺口恒 0，只放一拍）——量算放在落位之后，是因为
+  // 缺口只能从已落位的几何上量得。补高量不写回 state.wkAssistH（用户值不被改写；把手拖动的起点读的是
+  // 实际渲染高，故拖一下即把当前高收进用户值，缺口随之归零，不来回弹）。
+  function wkPlaceAssistFloat() {
+    const base = wkAssistBase()
+    const a = wkAssistAnchor()
+    if (!base || !a) return
+    wkPlaceAssistBox(a, wkAssistW(a), base)
+    const put = (h) => {
+      sessionCard.style.height = h + 'px'
+      sessionCard.style.top = Math.round(base.height - h - WK_ASSIST_BOT) + 'px'
+      sessionCard.style.removeProperty('bottom')
+    }
+    put(wkAssistH())
+    const d = wkFloatEmptyDeficit()
+    if (d > 0.5) {
+      const max = Math.round(window.innerHeight * WK_ASSIST_MAX_VH)
+      put(Math.min(wkAssistH() + 2 * d, Math.max(max, WK_ASSIST_MIN_H)))
+    }
+  }
+  // 收敛输入栏：宽与左缘同浮卡，高度由 pill 内容给（清掉内联 height）。底距 = 浮卡底距 + 正常底栏
+  // 在卡内的 22px 内缩 ⇒ pill 底边与 #input-wrap.docked 的底边齐平（都停在卡片底边上方 22px，
+  // 2026-09-27 用户实报「两个底栏到卡片下边界的距离不一样」）。
+  function wkPlaceAssistSlim() {
+    const base = wkAssistBase()
+    const a = wkAssistAnchor()
+    if (!base || !a) return
+    wkPlaceAssistBox(a, wkAssistW(a), base)
+    sessionCard.style.bottom = WK_ASSIST_BOT + WK_INPUT_BOT + 'px'
+    sessionCard.style.removeProperty('height')
+    sessionCard.style.removeProperty('top')
+  }
+  // 三态唯一写口：形态类 + 几何一把落。side（或非 work / 助手关着）清掉全部内联几何，回到 CSS 的普通栏。
+  function applyAssistMode() {
+    const on = state.sbMode === 'work' && !!state.wkAssist
+    const m = wkAssistMode()
+    sessionCard.classList.toggle('wk-assist-float', on && m === 'float')
+    sessionCard.classList.toggle('wk-assist-slim', on && m === 'slim')
+    if (!on || m === 'side') {
+      wkClearAssistBox()
+      return
+    }
+    if (m === 'float') wkPlaceAssistFloat()
+    else wkPlaceAssistSlim()
+  }
+  // 重锚：主区尺寸 / 栏宽 / 显隐变化时（分界条拖拽、侧栏开合、窗口缩放、开关栏）由 ResizeObserver 触发。
+  function wkReflowAssist() {
+    if (state.sbMode !== 'work' || !state.wkAssist || wkAssistMode() === 'side') return
+    applyAssistMode()
+  }
+  // 形态切换入口（头部工具条 / 收敛输入栏的 pill 都走这里）。切形态 = 明确要用助手：顺手把它打开
+  // （关着的卡切形态无意义，用户看不到任何反馈）。
+  function setAssistMode(m) {
+    state.wkAssistMode = m === 'float' || m === 'slim' ? m : 'side'
+    state.wkAssist = true
+    applyPanes()
+    saveWork()
+  }
+
+  // 悬浮卡加高把手：只调高（宽由锚栏给定），触屏必须能用 → pointer events + setPointerCapture。
+  // 收尾三规矩照抄 Pj18（都是真踩过的坑）：① 只认主键且位移 >3px 才算拖；② 收尾看 ev.buttons 而不只等
+  // pointerup（up 若落在内嵌内容/窗口外，状态会永久卡死，之后指针一动高度就跟着走）；③ 拖拽期给 body 挂
+  // wk-assist-dragging，关掉内嵌内容的 pointer-events（拖过 #work-preview 的 iframe 时事件仍全归把手）。
+  function bindAssistGrip() {
+    const g = $('wk-assist-grip')
+    if (!g) return
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      const base = wkAssistBase()
+      if (!base) return
+      const y0 = e.clientY
+      const startH = sessionCard.getBoundingClientRect().height || state.wkAssistH || 430
+      let dragging = false
+      g.setPointerCapture(e.pointerId)
+      e.preventDefault()
+      const end = () => {
+        g.removeEventListener('pointermove', move)
+        g.removeEventListener('pointerup', end)
+        g.removeEventListener('pointercancel', end)
+        if (!dragging) return
+        document.body.classList.remove('wk-assist-dragging')
+        saveWork()
+      }
+      const move = (ev) => {
+        if (!ev.buttons) { end(); return } // ② 主键已松（up 落在内嵌内容/窗口外也走这里收尾）
+        if (!dragging) {
+          if (Math.abs(ev.clientY - y0) <= WK_DRAG_SLOP) return // ① 位移太小不算拖
+          dragging = true
+          document.body.classList.add('wk-assist-dragging') // ③ 拖拽期关掉内嵌内容 pointer-events
+        }
+        const max = Math.round(window.innerHeight * WK_ASSIST_MAX_VH)
+        state.wkAssistH = Math.round(Math.max(WK_ASSIST_MIN_H, Math.min(max, startH + (ev.clientY - y0))))
+        wkPlaceAssistFloat()
+      }
+      g.addEventListener('pointermove', move)
+      g.addEventListener('pointerup', end)
+      g.addEventListener('pointercancel', end)
+    })
   }
 
   // ---------- 个性化工作区（第三栏：项目预览） ----------
@@ -4906,10 +5183,33 @@ function setFirstSendHash(v) { firstSendHash = v }
   // ---------- 事件 ----------
   function mountWork() {
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
+    document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区两条分界条
+    // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。
+    const bindIco = (id, fn) => {
+      const b = $(id)
+      if (b) b.addEventListener('click', fn)
+    }
+    bindIco('wk-assist-slim', () => setAssistMode('slim'))
+    bindIco('wk-assist-float', () => setAssistMode('float'))
+    bindIco('wk-assist-dock', () => setAssistMode('side'))
+    bindIco('wk-assist-close', () => setPane('assist', false))
+    bindIco('wk-assist-pill', () => setAssistMode('float'))
+    bindAssistGrip()
+    // 主区尺寸变化 → 重锚悬浮卡：ResizeObserver 一把覆盖分界条拖拽、侧栏开合、窗口缩放、栏开关
+    // （比 window.resize + 视口算更准：锚栏宽变了就重算，没变就不动）。
+    const ro = new ResizeObserver(() => wkReflowAssist())
+    ro.observe(chatArea)
+    for (const id of ['work-editor', 'work-preview']) {
+      const el = $(id)
+      if (el) ro.observe(el)
+    }
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
     $('wk-ed-back').innerHTML = I.collapse
+    // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
+    const wap = document.querySelector('.wap-arrow')
+    if (wap) wap.innerHTML = I.dshSend
     const ico = document.querySelector('#wk-proj-seat .wk-proj-ico')
     if (ico) ico.innerHTML = I.folder
     const fic = document.querySelector('.wk-foot-ico')
@@ -8071,7 +8371,7 @@ function setApprovalPending(v) { approvalPending = v }
   // →恢复」的往复；五轮再证：把该补的量补足，浏览器那半份就自然被吸收，无需迎战）。
   // 可视窗：app 顶部被推出屏外的条带高 = total，故 app 内的可视窗 = [total, L]（--kb-total）——
   // 消息流窗口（#chat-scroll margin-top）与三个覆盖层（top）同取此值；底栏恒在 app 底边（22px 口径），
-  // 空态底栏随 .g-stage 台面比例走（76.75%）——都不再各自补位移。
+  // 空态底栏随 .g-stage 台面比例（76.75%）一并被顶起——都不再各自补位移。
   // 相位（二轮）：--kb / --kb-total / kb-open 类全部在事件回调里**同步**写（只写样式属性，不读取
   // 布局、不触发布局）；仅「弹层余量实测 + stageSync 占位重算」走 rAF 合帧（连续量、晚一帧不可见；
   // 且逐事件量算 getBoundingClientRect 会强制布局，拖累上顶过程）。

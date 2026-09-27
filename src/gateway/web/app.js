@@ -2479,9 +2479,11 @@ function setLastNavHash(v) { lastNavHash = v }
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
+    if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
-  // 侧栏折叠时宽度 0，本事件不会触发。
+  // 侧栏折叠时宽度 0，本事件不会触发。行浮窗挂在 #sidebar 内（见 openRowMenu），指针移到浮窗上
+  // 不算离开侧栏，故悬停预览下浮窗可用。
   sidebar.addEventListener('mouseleave', () => { if (!panelPinned) setPanel(false) })
 
   // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
@@ -2518,7 +2520,7 @@ function setLastNavHash(v) { lastNavHash = v }
     return m ? m[0] : label || ''
   }
 
-  function itemHtml(s, showProj, opts) {
+  function itemHtml(s, showProj) {
     const on = hashOf(s) === state.currentHash
     // 会话状态点：busy=绿（正在运行）· waiting=橘（等待用户）· idle=红（运行暂停/已完成）· 无=透明（CLI 未打开）
     const dotCls = s.state === 'busy' ? ' st-busy' : s.state === 'waiting' ? ' st-ask' : s.state === 'idle' ? ' st-wait' : ''
@@ -2526,16 +2528,13 @@ function setLastNavHash(v) { lastNavHash = v }
     // 平铺时项目会话混在根会话里，用短编号（Pj16）标识所属项目；项目文件夹视图已有文件夹名，不重复显示。
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
-    // 2026-08-24 会话行操作（DSH 侧栏 Menu 移植）：hover 显现 …，点击弹出行菜单（重命名/关闭）
-    // 行菜单挂靠 #recent-body 的浮起/内嵌机制（toggleRowMenu 按 bodyEl 定位），宿主不提供该机制时
-    // 传 opts.more=false 关掉，避免渲染出点不动的死控件（work 模式侧栏的聊天列表即此例）。
-    const more = opts && opts.more === false ? '' : '<span class="sess-more" role="button" tabindex="-1" title="会话操作">…</span>'
+    // 2026-09-26 行操作入口 = 右键（桌面）/ 长按（触屏）唤出浮窗，三点按钮已删除（见 openRowMenu）
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
-      <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}${more}</button>`
+      <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}</button>`
   }
 
   // ---------- 真触屏判定（2026-09-05）：iPadOS Safari 桌面模式报 hover:hover+pointer:fine（与 macOS
-  // 全同），CSS @media 骗不过 → 「hover 才显」规则（sess-more/folder-add 等）在 iPad 上生效，
+  // 全同），CSS @media 骗不过 → 「hover 才显」规则（folder-add 等）在 iPad 上生效，
   // 触发 iOS「hover 改变布局 → 首击只应用 hover 吞 click」双击（笔按钮实测首击选中二击才跳转）。
   // 判定 = hover:none（手机）或 MacIntel+多点触控（iPad，与 deviceHint 同式）→ body.touch，
   // CSS 对触屏恒显这些元素（见 styles.css body.touch 段），liftStart 同步禁用。
@@ -2561,15 +2560,9 @@ function setLastNavHash(v) { lastNavHash = v }
   let reLiftHash = null // 行点击触发的导航：renderRecent 重建后按 hash 重扶被点行（用后即清）
   let mouseXY = null // 最近光标落点：renderRecent 重建后按落点重扶 hover 行（页面加载前 null 不误扶）
   function liftClear(force) {
-    // 行菜单开着：还原冻结。2026-09-06 菜单子元素化后 mouseleave 在菜单悬停时不再触发（DOM 子树语义），
-    // 冻结只挡 scroll/resize 的非 force 还原——菜单是行子元素，行拍回=菜单失去 CB 基准悬空，closeRowMenu 统一还原。
-    if (!force && rowMenu) return
-    // 宿主行被力还原（切浮起目标：菜单开着划过另一行 → 该行 mouseenter → liftStart 开头清旧）
-    // → 浮窗跟随关闭（浮窗=tab 的一部分，tab 拍回浮窗不得悬空）。必须发生在拍回动作前：行一旦
-    // 摘掉 .lift（transform 消失），浮窗 fixed CB 瞬间从行变回视口，「相对行偏移」的 left/top 被
-    // 当视口坐标渲染 = 浮窗飞到视口顶部（2026-09-06 用户实测二轮）。closeRowMenu 尾部会再走一次
-    // liftClear(true) 完成拍回（届时 rowMenu 已 null 不递归），此处 return 防双拍。
-    if (rowMenu && liftEl && rowMenu.parentElement === liftEl) { closeRowMenu(); return }
+    // 操作浮窗开着：滚动/窗口变化这类非 force 还原先冻结（浮窗 fixed 于 body，与行的在流态互不依赖，
+    // 只是不该由背景事件把用户正在操作的行拍下去）；浮窗收口时由 closeRowMenu 统一还原。
+    if (!force && rowMenuPop) return
     if (liftEl) {
       liftEl.classList.remove('lift', 'lift-anim')
       liftEl.style.position = ''; liftEl.style.left = ''; liftEl.style.top = ''
@@ -2581,11 +2574,9 @@ function setLastNavHash(v) { lastNavHash = v }
   }
   document.addEventListener('mousemove', (e) => { mouseXY = [e.clientX, e.clientY] }, { passive: true, capture: true })
   function liftStart(el, opts = {}) {
-    // 触屏禁用已移至 bindSessLift（hover 扶起不绑）——菜单场景（toggleRowMenu）触屏也扶起：
-    // 行 fixed 化=菜单 CB+脱出 #recent-body 裁剪（2026-09-06 二轮根修，iPad 浮窗被列表截断随之根治）
+    // hover 扶起仅桌面指针设备绑定（bindSessLift）；触屏长按扶起由 openRowMenu 直调，不经 hover 路径
     if (liftEl === el) return // 幂等：已浮起（重扶/mouseenter 不重播扶起动画）
-    // 切换浮起目标必须无条件清旧：若被 rowMenu 冻结短路，旧浮起行的 fixed 态+占位 spacer 成孤儿
-    // （菜单开着划过另一行 → 列表残留空白，2026-09-05 实测），冻结语义只应作用于 mouseleave。
+    // 切换浮起目标必须无条件清旧（长按换行 / hover 换行）：否则旧浮起行的 fixed 态+占位 spacer 成孤儿
     liftClear(true)
     const r = el.getBoundingClientRect()
     if (!r.height) return
@@ -2595,11 +2586,8 @@ function setLastNavHash(v) { lastNavHash = v }
     el.parentNode.insertBefore(liftSpacer, el)
     el.style.position = 'fixed'; el.style.left = r.left + 'px'; el.style.top = r.top + 'px'
     el.style.zIndex = '60'; el.style.width = r.width + 'px'
-    // 目标宽 = 完整标题实测宽，上限 = 视口剩余空间。
-    // 测量必须带 .lift：桌面 … 默认 display:none（:hover/.lift 才显）。首次 hover 扶起测量时行有
-    // :hover 能测到 …；重建重扶（anim:false）新节点无 :hover，裸测漏 … 宽 ≈28px → 挂 .lift 后 …
-    // 挤压标题=展开仍省略号+右侧空隙，且每次重建重扶卡宽瞬间回缩（未选中行「重新浮起」动作，
-    // 2026-09-06 实测）。.lift 无过渡（lift-anim 未挂）且同一任务内无绘制，先挂后摘视觉零影响。
+    // 目标宽 = 完整标题实测宽，上限 = 视口剩余空间。测量须在 .lift 已挂（无过渡、同一任务内无绘制，
+    // 先挂后摘视觉零影响）的状态下做，测得的即浮起终态宽度。
     el.classList.add('lift')
     el.style.width = 'max-content'
     const target = Math.min(el.getBoundingClientRect().width, window.innerWidth - r.left - 12)
@@ -2628,20 +2616,18 @@ function setLastNavHash(v) { lastNavHash = v }
       // Chrome 还会按静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达
       // +0 scroll，v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表=滚动意图：
       // 同步拍回+强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
-      // non-passive 保证监听先于默认滚动动作执行。菜单开着=一并关闭（滚轮=菜单外交互；
-      // closeRowMenu 对鼠标在行内场景会保留浮起，故其后再无条件拍回，不变量：滚轮到达列表
-      // → 列表回纯在流态）。liftCool 与 scroll 门同参续期：滚轮持续=非静止态，防边界拍回/重扶循环。
+      // non-passive 保证监听先于默认滚动动作执行。浮窗开着=一并关闭（滚轮=菜单外交互）。
+      // liftCool 与 scroll 门同参续期：滚轮持续=非静止态，防边界拍回/重扶循环。
       bodyEl.addEventListener('wheel', () => {
-        if (!liftEl && !rowMenu) return
         liftCool = Date.now() + 150
-        if (rowMenu) closeRowMenu()
+        if (rowMenuPop) closeRowMenu()
         if (liftEl) { liftClear(true); void bodyEl.offsetHeight }
       }, { passive: false })
     }
   }
   function bindSessLift(root) {
     // hover 扶起仅桌面指针设备绑定；触屏不启用（iPad 桌面模式 matchMedia 伪装 hover:hover
-    // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——菜单场景扶起走 toggleRowMenu 直调，不经此处
+    // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——触屏长按扶起走 openRowMenu 直调，不经此处
     if (IS_TOUCH_DEVICE || !matchMedia('(hover: hover) and (pointer: fine)').matches) return
     root.querySelectorAll('.sess-item').forEach((el) => {
       el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el) })
@@ -2659,92 +2645,164 @@ function setLastNavHash(v) { lastNavHash = v }
         if (isMobile()) setPanel(false)
       }),
     )
-    // 2026-08-24 行菜单入口：…（span 嵌在 .sess-item button 内）
-    // 2026-09-05 … 点击统一「先切换、后落位」：navigate 可能整列重建（旧节点/浮起/rect 全失效），
-    // 菜单与浮起一律在重建后的新节点上落位（toggleRowMenu 内补扶）；已在该会话内不 navigate
-    // （零重建，浮起行保持原节点）。单击三个点 = 切换会话 + 弹出该行菜单（2026-08-25 定案语义不变）。
-    root.querySelectorAll('.sess-more').forEach((m) =>
-      m.addEventListener('click', (e) => {
-        e.stopPropagation() // 阻止事件冒泡到 .sess-item 的 click（避免重复 navigate）
-        const b = m.closest('.sess-item')
-        if (!b || !b.dataset.hash) return
-        if (b.dataset.hash !== state.currentHash) {
-          reLiftHash = b.dataset.hash
-          navigate('#/' + encodeURIComponent(b.dataset.hash))
-          if (isMobile()) setPanel(false)
-        }
-        const nb = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === b.dataset.hash)
-        const anchor = nb && nb.querySelector('.sess-more')
-        if (anchor) toggleRowMenu(anchor, b.dataset.hash)
-      }),
-    )
     bindSessLift(root)
   }
 
-  // ---------- 会话 tab 内嵌展开菜单（2026-09-07 用户定案：浮窗改 tab 自身长高）----------
-  // 选项不再弹独立浮窗，作为 .sess-menu 挂 tab 行内第二行（flex-wrap），height 0→实测高
-  // 过渡 = tab 高度展开动画；再点 … /点外部（mousedown）关闭（瞬时收起）。菜单是行子元素：
-  // 鼠标在菜单上=仍在行 DOM 子树内，mouseleave 不触发、浮起天然保持（2026-09-06 子元素化
-  // 定案语义延续）；浮窗时代的定位/免裁/行∪浮窗几何判定（positionRowMenu/menuRect）随浮窗
-  // 整体删除——内嵌后展开域 ⊆ 行 rect，且行浮起（fixed）天然脱出 #recent-body 裁剪。
-  // 仍沿用浮起前提：菜单只存在于浮起 tab 上（liftStart anim:false 直终态，折叠行等不可浮场景不弹）。
-  let rowMenu = null
-  function toggleRowMenu(anchor, hash) {
-    if (rowMenu && rowMenu.dataset.hash === hash) { closeRowMenu(); return }
-    closeRowMenu() // 换菜单（关旧开新）：旧行浮起去留交 closeRowMenu 的 hover 判定（鼠标已在新行 → 旧行拍回）
-    const row = anchor.closest('.sess-item')
-    // 菜单挂载前提=行已成浮起宿主（fixed+.lift=免裁+盖住下方行），anim:false 直终态
-    if (row) liftStart(row, { anim: false })
-    if (!row || !row.classList.contains('lift')) return // 折叠行等不可浮场景：不弹（不变量：菜单只存在于浮起 tab 上）
-    const m = document.createElement('div')
-    m.className = 'sess-menu'
-    m.dataset.hash = hash
-    m.innerHTML =
-      '<div class="sess-menu-in">' +
-      `<button type="button" class="rm-item" data-a="rename">${I.dshEdit}<span>重命名</span></button>` +
-      `<button type="button" class="rm-item" data-a="close">${I.dshStop}<span>关闭会话</span></button>` +
-      '</div>'
-    row.appendChild(m)
-    // 展开动画：class 基准 height:0 先强制 layout 提交，再落实测内容高触发 height 过渡
-    void m.offsetHeight
-    m.style.height = m.firstChild.offsetHeight + 'px'
-    m.addEventListener('click', (e) => e.stopPropagation()) // 挡冒泡到行 click（否则点菜单项误 navigate）
-    // 菜单挂着=鼠标 hover 命中行子树 → 原生 title（文件名）tooltip 会在菜单上弹出，暂存抑制
-    row.dataset.title = row.title
-    row.title = ''
-    m.querySelector('.rm-item[data-a="rename"]').addEventListener('click', () => {
+  // ---------- 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；2026-09-27 泛化为注册式）----------
+  // 两个入口：桌面右键（contextmenu）、触屏长按（pointerdown 计时 480ms）。浮窗是 document.body 下
+  // 独立 fixed 卡片（脱出 #recent-body / #wk-body 这类 overflow 裁剪容器），落位在被操作行近旁
+  // （长按：行左下）/ 指针处（右键），越界翻折 + clamp 回视口。长按同时扶起该行（触屏不绑 hover 扶起，
+  // 故 liftStart 直调）——浮起与浮窗同生同灭：点两者之外任意空白（mousedown / pointerdown）→
+  // closeRowMenu 一并还原。菜单不切换当前选中项：操作对象由行的 dataset 显式携带。
+  //
+  // 泛化（2026-09-27）：本模块只负责「唤出手势 + 浮窗 DOM + 浮起联动」，不认具体是哪种行。
+  // 谁拥有行谁注册：registerRowMenu({ sel, key, items, pick })，items(el) 返回菜单项
+  // [{a,icon,label,danger?}]（空数组 = 该行无菜单，右键保留浏览器默认），pick(a, el) 执行动作。
+  const rowMenuSources = []
+  function registerRowMenu(src) { rowMenuSources.push(src) }
+  function rowMenuHit(target) {
+    for (const src of rowMenuSources) {
+      const el = target.closest(src.sel)
+      if (el) return { src, el }
+    }
+    return null
+  }
+  let rowMenuPop = null
+  let rowMenuTouch = false // 长按开启：浮起由本浮窗负责，关闭时必须显式拍回（触屏无 mouseleave 自然回位）
+  let rowMenuGuard = 0 // 长按抬手会补发 mousedown，短时守卫防「刚弹出就被自己关掉」
+  let rowMenuSrc = null // 当前浮窗的行源 + 行标识：列表重建后按此重扶（见 reliftRowMenu）
+  let rowMenuKey = null
+  function openRowMenu(hit, x, y, rowEl) {
+    closeRowMenu()
+    if (!hit) return
+    const items = hit.src.items(hit.el)
+    if (!items || !items.length) return
+    rowMenuTouch = !!rowEl
+    rowMenuGuard = Date.now() + 600
+    const pop = document.createElement('div')
+    pop.className = 'row-menu-pop'
+    pop.innerHTML = items
+      .map(
+        (it) =>
+          `<button type="button" class="rm-item${it.danger ? ' rm-danger' : ''}" data-a="${esc(it.a)}">` +
+          `${it.icon || ''}<span>${esc(it.label)}</span></button>`,
+      )
+      .join('')
+    // 宿主 = 行所属的 #sidebar（行属于侧栏时），否则 document.body（如 #bubble-pop 里的会话行）。
+    // 挂在 #sidebar 内是本浮窗与「侧栏悬停预览」共存的前提：#sidebar 的 mouseleave 是收起侧栏的
+    // 唯一入口，浮窗若是 body 子节点，指针从行移到浮窗上就等于「离开侧栏」→ 侧栏连带浮窗一起收。
+    // .row-menu-pop 是 position:fixed，无 transform 祖先时仍以视口定位，故宿主变更不影响落点。
+    const host = hit.el.closest('#sidebar') || document.body
+    host.appendChild(pop)
+    // 期望落点 = 行左下（长按）/ 指针右下（右键），越界翻折回视口内
+    const r = rowEl ? rowEl.getBoundingClientRect() : null
+    let lx = r ? r.left + 8 : x
+    let ly = r ? r.bottom + 4 : y
+    const w = pop.offsetWidth
+    const h = pop.offsetHeight
+    lx = Math.max(8, Math.min(lx, window.innerWidth - w - 8))
+    ly = Math.max(8, Math.min(ly, window.innerHeight - h - 8))
+    pop.style.left = Math.round(lx) + 'px'
+    pop.style.top = Math.round(ly) + 'px'
+    pop.addEventListener('click', (e) => {
+      const b = e.target.closest('.rm-item')
+      if (!b) return
+      const src = hit.src
       closeRowMenu()
-      openRenameDialog(hash)
+      src.pick(b.dataset.a, hit.el)
     })
-    m.querySelector('.rm-item[data-a="close"]').addEventListener('click', () => {
-      closeRowMenu()
-      closeSession(hash)
-    })
-    rowMenu = m
+    pop.addEventListener('contextmenu', (e) => e.preventDefault()) // 浮窗上右键不弹浏览器菜单
+    rowMenuPop = pop
+    rowMenuSrc = hit.src
+    rowMenuKey = hit.src.key(hit.el)
+    if (rowEl) liftStart(rowEl, { anim: false })
   }
   function closeRowMenu() {
-    if (rowMenu) {
-      const host = rowMenu.parentElement
-      if (host && host.classList && host.classList.contains('sess-item')) {
-        if (host.dataset.title !== undefined) { host.title = host.dataset.title; delete host.dataset.title }
-      }
-      rowMenu.remove()
-      rowMenu = null
-    }
-    // 鼠标仍悬在浮起行（如点同一 … 关菜单、点菜单项）：浮起保持到移开鼠标（mouseleave 自然回位）。
-    // 菜单是行子元素，展开域 ⊆ 行 rect，行矩形一个判定即可。几何判定而非 :hover：菜单开着时的
-    // 列表重建会整列换节点（renderRecent 重扶的新节点 Chrome 不恢复 :hover），:hover 判定恒假
-    // → closeRowMenu 把刚重扶的行拍回 → 下方补扶 liftStart 走 anim 路径重播扶起动画（2026-09-06
-    // 用户实测「直点 tab 没事、点 … 必现重新浮起」根因）。mouseXY=最近光标落点，重建换节点后依然成立。
-    if (liftEl && mouseXY) {
+    if (rowMenuPop) { rowMenuPop.remove(); rowMenuPop = null }
+    // 浮起还原：桌面右键场景鼠标仍在该行则不拍回（几何判定而非 :hover——鼠标未动时 :hover 判定不稳）。
+    if (!rowMenuTouch && liftEl && mouseXY) {
       const r = liftEl.getBoundingClientRect()
       if (mouseXY[0] >= r.left && mouseXY[0] <= r.right && mouseXY[1] >= r.top && mouseXY[1] <= r.bottom) return
     }
-    liftClear(true) // 菜单关闭=还原冻结解除：浮起行回位
+    liftClear(true)
   }
+  // 列表重建后重扶：浮窗锚定的旧节点已被换掉（innerHTML 重渲），按 (行源, 行标识) 找新节点补浮起。
+  // 由各列表的渲染出口在重渲后调用（recent.js renderRecent / work.js renderWorkBody）。
+  function reliftRowMenu() {
+    if (!rowMenuPop || !rowMenuTouch || !rowMenuSrc || rowMenuKey == null) return
+    const el = [...document.querySelectorAll(rowMenuSrc.sel)].find((x) => rowMenuSrc.key(x) === rowMenuKey)
+    if (el) liftStart(el, { anim: false })
+  }
+  // 桌面右键：只认已注册的行（其它区域保留浏览器默认菜单）
+  document.addEventListener('contextmenu', (e) => {
+    const hit = rowMenuHit(e.target)
+    if (!hit || !hit.src.items(hit.el).length) return
+    e.preventDefault()
+    openRowMenu(hit, e.clientX, e.clientY)
+  })
+  // 触屏长按：480ms 未移动即触发（浮起 + 浮窗）；移动 >8px / 抬手 / 取消即作废。长按后抬手若
+  // 补发 click（误导航），在 capture 阶段吞掉——它先于元素自身的 click 处理器到达。
+  let lpTimer = 0
+  let lpFired = false
+  let lpHit = null
+  let lpXY = null
+  const lpCancel = () => { clearTimeout(lpTimer); lpTimer = 0; lpHit = null }
+  document.addEventListener('pointerdown', (e) => {
+    lpFired = false
+    // 浮窗开着时，落在浮窗与行之外的按下 = 明确的关闭意图，即刻收口（触屏抬手补发的 mousedown
+    // 没有配套的新 pointerdown，故不受此支路影响，只受 rowMenuGuard 约束）
+    if (rowMenuPop && !rowMenuPop.contains(e.target) && !rowMenuHit(e.target)) { closeRowMenu(); return }
+    if (e.pointerType !== 'touch') return
+    const hit = rowMenuHit(e.target)
+    if (!hit || !hit.src.items(hit.el).length) return
+    lpHit = hit
+    lpXY = [e.clientX, e.clientY]
+    clearTimeout(lpTimer)
+    lpTimer = setTimeout(() => {
+      lpTimer = 0
+      const h = lpHit
+      if (!h) return
+      lpFired = true
+      openRowMenu(h, 0, 0, h.el)
+    }, 480)
+  }, { passive: true })
+  document.addEventListener('pointermove', (e) => {
+    if (!lpTimer || !lpXY) return
+    if (Math.abs(e.clientX - lpXY[0]) > 8 || Math.abs(e.clientY - lpXY[1]) > 8) lpCancel()
+  }, { passive: true })
+  document.addEventListener('pointerup', () => {
+    lpCancel()
+    // 长按抬手发生在守卫之后（长按更久）时续期：iOS 抬手会补发 mousedown，不得关掉刚弹出的浮窗
+    if (rowMenuPop && rowMenuTouch) rowMenuGuard = Date.now() + 600
+  }, { passive: true })
+  document.addEventListener('pointercancel', lpCancel, { passive: true })
+  document.addEventListener('click', (e) => {
+    if (!lpFired) return
+    lpFired = false
+    e.stopPropagation()
+    e.preventDefault()
+  }, true)
+  // 点空白（浮窗 / 行之外）→ 浮窗与浮起一并消失
   document.addEventListener('mousedown', (e) => {
-    // … 按钮上的按下不关菜单，交给 click 的 toggle（否则 mousedown 关 → click 重开 = 三点永远关不掉菜单）
-    if (rowMenu && !rowMenu.contains(e.target) && !e.target.closest('.sess-more')) closeRowMenu()
+    if (!rowMenuPop || Date.now() < rowMenuGuard) return
+    if (!rowMenuPop.contains(e.target)) closeRowMenu()
+  })
+  // 列表滚动 / 窗口尺寸变化：浮窗 fixed 会漂离锚点，直接收（与浮起还原同一时机）
+  window.addEventListener('scroll', () => { if (rowMenuPop) closeRowMenu() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { if (rowMenuPop) closeRowMenu() })
+
+  // 会话行源：操作对象 = dataset.hash；已从列表消失的会话不弹菜单（items 返回空）。
+  registerRowMenu({
+    sel: '.sess-item',
+    key: (el) => el.dataset.hash || null,
+    items: (el) =>
+      ALL.find((v) => hashOf(v) === el.dataset.hash)
+        ? [
+            { a: 'rename', icon: I.dshEdit, label: '重命名' },
+            { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
+          ]
+        : [],
+    pick: (a, el) => (a === 'rename' ? openSessionRename(el.dataset.hash) : closeSession(el.dataset.hash)),
   })
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
@@ -2781,18 +2839,23 @@ function setLastNavHash(v) { lastNavHash = v }
     }
   }
 
-  // ---------- 会话重命名（2026-08-24 DSH 侧栏 rename dialog 移植）----------
-  // 弹窗 DOM 在 index.html（#rename-modal，复用 risk-modal 的 mask/dialog 样式骨架）；
-  // 提交 POST /gateway/session/rename → 网关 append custom-title 记录（对已停止会话同样生效）。
-  let renameTarget = null // { hash, title }
+  // ---------- 重命名弹窗（2026-08-24 DSH 侧栏 rename dialog 移植；2026-09-27 泛化为通用入口）----------
+  // 弹窗 DOM 在 index.html（#rename-modal，复用 risk-modal 的 mask/dialog 样式骨架）。本模块只管
+  // 表单壳（标题/占位/初值/校验/错误回显），提交语义由调用方以 onSubmit 注入——会话重命名走
+  // POST /gateway/session/rename（网关 append custom-title，已停止会话同样生效），文件重命名走
+  // POST /gateway/file/rename（work.js 注册），两者共用同一对话框实例，不各建一套弹窗。
+  let renameTarget = null // { heading, placeholder, okText, onSubmit }
   const renameModal = $('rename-modal')
   const renameInput = $('rename-input')
   const renameErr = $('rename-error')
-  function openRenameDialog(hash) {
-    const s = ALL.find((x) => hashOf(x) === hash)
-    if (!s) return toast('未找到该会话')
-    renameTarget = { hash, title: s.title || '' }
-    renameInput.value = renameTarget.title
+  const renameTitle = renameModal.querySelector('.title')
+  const renameOk = $('rename-ok')
+  function openRenameDialog(opt) {
+    renameTarget = opt
+    renameTitle.textContent = opt.heading || '重命名'
+    renameInput.placeholder = opt.placeholder || '输入新名称'
+    renameOk.textContent = opt.okText || '重命名'
+    renameInput.value = opt.value || ''
     renameErr.hidden = true
     renameModal.hidden = false
     renameInput.focus()
@@ -2804,31 +2867,42 @@ function setLastNavHash(v) { lastNavHash = v }
   }
   async function confirmRename() {
     if (!renameTarget) return
-    const title = renameInput.value.trim()
-    if (!title) {
-      renameErr.textContent = '标题不能为空'
+    const value = renameInput.value.trim()
+    if (!value) {
+      renameErr.textContent = '名称不能为空'
       renameErr.hidden = false
       return
     }
     try {
-      const s = ALL.find((x) => hashOf(x) === renameTarget.hash)
-      const res = await fetch(apiUrl('/gateway/session/rename'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: s ? s.id : '', title }),
-      })
-      const body = await res.json()
-      if (!res.ok || !body.ok) throw new Error(body.error || '重命名失败')
-      if (s) {
-        s.title = title
-        renderRecent()
-        toast('已重命名为「' + title + '」')
-      }
+      await renameTarget.onSubmit(value)
       closeRenameDialog()
     } catch (e) {
       renameErr.textContent = e.message || String(e)
       renameErr.hidden = false
     }
+  }
+  // 会话重命名：查不到（列表已刷新掉）才报错；提交成功同步内存标题并重渲列表。
+  function openSessionRename(hash) {
+    const s = ALL.find((x) => hashOf(x) === hash)
+    if (!s) return toast('未找到该会话')
+    openRenameDialog({
+      heading: '重命名会话',
+      placeholder: '输入新标题',
+      okText: '重命名',
+      value: s.title || '',
+      onSubmit: async (title) => {
+        const res = await fetch(apiUrl('/gateway/session/rename'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: s.id, title }),
+        })
+        const body = await res.json()
+        if (!res.ok || !body.ok) throw new Error(body.error || '重命名失败')
+        s.title = title
+        renderRecent()
+        toast('已重命名为「' + title + '」')
+      },
+    })
   }
   $('rename-cancel').addEventListener('click', closeRenameDialog)
   $('rename-ok').addEventListener('click', confirmRename)
@@ -2887,9 +2961,6 @@ function setLastNavHash(v) { lastNavHash = v }
   }
 
   function renderRecent() {
-    // 菜单挂行内（2026-09-07 内嵌展开定案）：整列 innerHTML='' 会连菜单销毁 → 先摘到 body 暂存，
-    // 重建后按新行重挂；行已不在则 closeRowMenu 一并关。
-    if (rowMenu) document.body.appendChild(rowMenu)
     // 重建前快照浮起行（hash + 终态视口矩形）：elementFromPoint 只认拍回后的列表行，
     // 鼠标悬在浮起拉宽区（超出行列表宽）/上移 2px 顶边缝时落空 → 鼠标未动 tab 无故下沉
     // （2026-09-06 用户实测根因），末尾 mouseXY 分支按矩形兜底重扶。
@@ -2923,18 +2994,15 @@ function setLastNavHash(v) { lastNavHash = v }
       }
     }
     if (prevTop) bodyEl.scrollTop = prevTop
-    // 2026-09-05 重建后统一重扶出口：① 行菜单开着 → 按菜单 hash 重扶对应行（菜单挂浮卡下不落空）；
+    // 2026-09-05 重建后统一重扶出口：① 触屏长按菜单开着 → 按菜单 hash 重扶对应行（浮起须随新节点重建）；
     // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
     // 不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标。
-    // ③ 纯 hover 重建（无菜单无点击）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
-    //    光标所在行同样拍回且 … 隐藏——用户「点 … 拍回」与点击竞速的根源；按最近光标落点重扶。
+    // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
+    //    光标所在行同样拍回；按最近光标落点重扶。
     //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
-    if (rowMenu) {
-      const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === rowMenu.dataset.hash)
-      if (el) {
-        liftStart(el, { anim: false })
-        el.appendChild(rowMenu) // 菜单重挂到新行内（内嵌高度态随节点保留，无需重定位/不重播展开动画）
-      } else closeRowMenu() // 行已不在（删除/换视图）→ 菜单一并关
+    if (rowMenuPop && rowMenuTouch) {
+      // 触屏长按的浮起：整列重建会换掉行节点，浮窗（body 下）不受影响但浮起须按行标识重扶
+      reliftRowMenu()
     } else if (reLiftHash) {
       const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
@@ -4506,13 +4574,17 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!body) return
     updateWkTools()
     const html = wkBodyHtml()
-    if (body.innerHTML !== html) body.innerHTML = html
+    if (body.innerHTML !== html) {
+      body.innerHTML = html
+      // 重渲换掉了行节点：长按浮窗若开着，按行标识把新节点重新扶起（浮窗本身挂在 body 下不受影响）
+      reliftRowMenu()
+    }
   }
 
   function wkBodyHtml() {
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
-      // 不另写一套行）；行菜单（…）依赖 #recent-body 机制，此处 more:false 关掉。
+      // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const f = wkFilter.trim().toLowerCase()
       const list = state.workProj
         ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj)
@@ -4522,7 +4594,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const rows = !state.workProj
         ? '<div class="wk-empty">先在上方选择一个项目</div>'
         : list.length
-          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false, { more: false })).join('')}</div>`
+          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
           : `<div class="wk-empty">${f ? '没有匹配的聊天' : '该项目还没有聊天'}</div>`
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       return rows
@@ -4744,6 +4816,84 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (state.sbMode === 'work') $('work-panel').hidden = false
   }
 
+  // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
+  // 两个写接口落在网关（POST /gateway/file/rename | /delete），本模块只做「弹出菜单 + 提交 + 刷新树」。
+  // 删除 = 移入项目根 .trash/（工作区规范禁止真删），故不设二次确认——.trash/ 本身就是撤销位。
+  function baseOf(p) {
+    const i = p.lastIndexOf('/')
+    return i < 0 ? p : p.slice(i + 1)
+  }
+  function openFileRename(p) {
+    if (!p) return
+    openRenameDialog({
+      heading: '重命名',
+      placeholder: '输入新名称',
+      okText: '重命名',
+      value: baseOf(p),
+      onSubmit: async (name) => {
+        const res = await fetch(apiUrl('/gateway/file/rename'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: state.workProj, path: p, name }),
+        })
+        const data = await res.json()
+        if (!res.ok || !data.ok) throw new Error(data.error || '重命名失败')
+        // 展开态与编辑区都按旧路径记着，须同步搬到新路径（目录改名 = 整棵子树的路径前缀都变）
+        for (const k of [...wkOpen]) {
+          if (k === p) { wkOpen.delete(k); wkOpen.add(data.path) }
+          else if (k.startsWith(p + '/')) { wkOpen.delete(k); wkOpen.add(data.path + k.slice(p.length)) }
+        }
+        if (state.workFile === p) state.workFile = data.path
+        else if (state.workFile.startsWith(p + '/')) state.workFile = data.path + state.workFile.slice(p.length)
+        saveWork()
+        await loadProjectTree(state.workProj)
+        renderEditor()
+        renderWorkBody()
+        toast('已重命名为「' + data.name + '」')
+      },
+    })
+  }
+  async function deleteWorkEntry(p) {
+    if (!p) return
+    try {
+      const res = await fetch(apiUrl('/gateway/file/delete'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: state.workProj, path: p }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || '删除失败')
+      if (state.workFile === p || state.workFile.startsWith(p + '/')) state.workFile = ''
+      for (const k of [...wkOpen]) if (k === p || k.startsWith(p + '/')) wkOpen.delete(k)
+      saveWork()
+      await loadProjectTree(state.workProj)
+      renderEditor()
+      renderWorkBody()
+      toast('已移入 ' + data.trash)
+    } catch (e) {
+      toast('删除失败：' + (e.message || e))
+    }
+  }
+  // 文件树行源：文件与目录同一套菜单（目录删除 = 整棵子树进 .trash/）；操作对象 = 行的项目内相对路径。
+  function registerWorkRows() {
+    registerRowMenu({
+      sel: '.wk-row',
+      key: (el) => el.dataset.wkfile || el.dataset.wkdir || null,
+      items: (el) =>
+        el.dataset.wkfile || el.dataset.wkdir
+          ? [
+              { a: 'rename', icon: I.dshEdit, label: '重命名' },
+              { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
+            ]
+          : [],
+      pick: (a, el) => {
+        const p = el.dataset.wkfile || el.dataset.wkdir
+        if (a === 'rename') openFileRename(p)
+        else deleteWorkEntry(p)
+      },
+    })
+  }
+
   function newWorkChat() {
     // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
     // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
@@ -4755,6 +4905,7 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   // ---------- 事件 ----------
   function mountWork() {
+    registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle

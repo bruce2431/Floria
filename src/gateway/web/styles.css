@@ -49,6 +49,14 @@ button { font-family: inherit; background: none; border: none; padding: 0; color
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 6px; }
 a { text-decoration: none; color: inherit; }
 
+/* WebKit（iOS Safari）给「可点」元素（button/a/带 click 的元素）默认叠一层 tap highlight（半透明灰），
+   它与 `:active` 同在**抬手的合成鼠标事件**里落定，于是松手瞬间行上会闪一帧灰（2026-09-27 用户 iPad 实测：
+   长按 tab 唤出行浮窗、松手时 tab 闪一下——长按此前被文本选择吃掉，加 user-select:none 后这层才显形）。
+   本项目全部按压反馈都是自绘的（`.sess-item:hover` / `.lift` 浮起 / 长按手势），不需要系统这层叠加；
+   用它就要逐元素维护（浮窗菜单项、气泡行、将来新行型），故在唯一入口关掉一次。
+   不变量：WebKit 不得给任何元素叠 tap highlight。 */
+* { -webkit-tap-highlight-color: transparent; }
+
 /* ================= 键盘弹出（移动端）=================
    唯一真源 = visualViewport（core/viewport.js 写入三个变量，缺省全 0 = 无键盘行为）：
      --kb       我们写给 #app 的整体位移（= html 高 − 浏览器上顶 − 可视视口高；浏览器已顶掉的那份
@@ -1566,15 +1574,17 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 #recent-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
 .sess-item {
-  /* flex-wrap：常规行内容恒单行（title flex:1+overflow:hidden 可缩到 0 溢不出），仅为
-     菜单开启时 .sess-menu（flex-basis 100%）折到第二行 = tab 长高（2026-09-07 内嵌展开定案） */
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   padding: 7px 10px; border-radius: 8px; color: var(--text); font-size: 13px; line-height: 1.4;
   /* 变深不做动画（2026-09-06 用户定案）：hover/选中深底是「保存的状态」不浮起时静态展示。
      原 0.12s 背景过渡与扶起 .lift-anim 抢同一属性——未选中行 hover 有可见变深脉冲，
      选中行 .on 盖过 :hover 背景从不变深故无感；移除后扶起过渡成为唯一背景动画，
      恢复路径（anim:false）也因此真正做到直接终态。 */
   cursor: pointer; border: none;
+  /* 长按唤出行浮窗 = 手势，不是选字（2026-09-27 用户 iPad 实机：长按 tab 选中了标题文字并弹出系统
+     选择菜单「拷贝/查找所选内容/查询」，与行浮窗打架）。user-select: none 掐掉选中，touch-callout: none
+     掐掉 iOS 长按呼出的系统 callout（链接/图片那条通路）。子元素不另设 user-select: text，随父不可选。 */
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 .sess-item:hover { background: var(--hover); }
 .sess-item.on { background: var(--active); }
@@ -1772,30 +1782,10 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   #input-wrap.docked { width: calc(100% - 32px); }
 }
 
-/* ===== 侧栏行 hover 操作（2026-08-24 DSH 侧栏行菜单移植：会话 … 重命名/归档 · 项目 + 新建）===== */
-.sess-item .sess-more {
-  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; margin-left: 2px; border-radius: 6px;
-  font-size: 13px; line-height: 1; color: var(--text-3); cursor: pointer;
-}
-/* 触摸设备（hover:none）：… 始终显示，避免 iOS「hover 改变布局 → 首次 tap 只激活 hover 不派发 click」导致双击切换。
-   桌面（有 hover + 精指针）：默认隐藏、hover 显示。 */
-@media (hover: hover) and (pointer: fine) {
-  .sess-item .sess-more { display: none; }
-  .sess-item:hover .sess-more { display: inline-flex; }
-  /* 浮起行三点恒显：列表重建重扶后新节点不恢复 :hover，靠 .lift 兜底（菜单行三点不因重建消失） */
-  .sess-item.lift .sess-more { display: inline-flex; }
-}
-/* 真触屏（body.touch，JS 判定）：iPadOS 桌面模式报 hover:hover+pointer:fine 骗过媒体查询，
-   上列「hover 才显」规则在 iPad 生效 → iOS「hover 改变布局 → 首击吞 click」双击（笔按钮实测）。
-   触屏一律恒显，与下方 hover:none 分支语义对齐。 */
-body.touch .sess-item .sess-more { display: inline-flex; }
-.sess-item .sess-more:hover { background: rgba(0, 0, 0, 0.06); color: var(--text); }
-
 /* ===== 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸露出完整标题 =====
    JS 把 hover 行临时 position:fixed（#recent-body overflow 裁剪容器，行内加宽必被裁）。
    .lift = 扶起终态（白卡+描边阴影+上移 2px），.lift-anim = 四路过渡（背景/阴影/上移/宽度）；
-   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一白卡。z-index 60 盖过主区与列表普通行（内嵌展开菜单随之盖住下方行）。 */
+   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一白卡。z-index 60 盖过主区与列表普通行。 */
 .sess-item.lift {
   background: #fff; border-radius: 10px;
   box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgba(0, 0, 0, 0.12);
@@ -1811,30 +1801,37 @@ body.touch .sess-item .sess-more { display: inline-flex; }
   .folder-head .folder-add { display: none; }
   .folder-head:hover .folder-add { display: inline-flex; }
 }
-body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显（iPad 伪装 hover:hover，见 sess-more 段注释） */
+body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显（iPad 伪装 hover:hover） */
 .folder-head .folder-add:hover { background: rgba(0, 0, 0, 0.06); color: var(--text); }
 
-/* 会话 tab 内嵌展开菜单（2026-09-07 用户定案：浮窗改 tab 自身长高，选项内嵌行内）
-   菜单挂 .sess-item 行内第二行（flex-basis 100% 强制折行），height 0↔JS 实测高过渡 =
-   tab 高度展开动画；宿主是浮起行（.lift fixed 白卡），展开域随行 rect、天然脱出列表裁剪。
-   选项行样式沿用 2026-08-24 DSH ui-primitives Menu 移植（40px 行 icon16+label）。 */
-.sess-menu {
-  flex: 0 0 100%; min-width: 0;
-  height: 0; overflow: hidden;
-  transition: height 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-.sess-menu .sess-menu-in {
+/* ===== 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；参考 deepseek 菜单范式）=====
+   浮窗由 JS 挂在行所属的 #sidebar（行不在侧栏内则挂 document.body；position:fixed，脱离 #recent-body /
+   #wk-body 裁剪，且 DOM 上是侧栏子节点 ⇒ 悬停预览下指针移到浮窗不会触发 #sidebar 的 mouseleave），
+   落点 = 行左下 / 指针处。长按触发的浮起行 .lift 在上，浮窗 z-index 更高。菜单项由各列表注册
+   （会话行 / work 文件行）。user-select 同 .sess-item：长按/选择手势不得选中菜单文字。 */
+.row-menu-pop {
+  position: fixed; z-index: 70; min-width: 156px;
   display: flex; flex-direction: column; gap: 2px;
-  padding: 6px 0 2px; border-top: 1px solid var(--border);
+  padding: 4px; border-radius: 12px;
+  background: var(--bg); border: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  animation: rowMenuIn 0.12s ease-out;
 }
-.sess-menu .rm-item {
-  display: flex; align-items: center; gap: 8px;
-  min-height: 32px; padding: 5px 10px;
+@keyframes rowMenuIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.row-menu-pop .rm-item {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 36px; padding: 6px 12px;
   border: none; border-radius: 8px; background: transparent;
-  cursor: pointer; font-size: 13px; line-height: 20px; color: #0f1115; text-align: left;
+  cursor: pointer; font-size: 13px; line-height: 20px; color: var(--text); text-align: left;
 }
-.sess-menu .rm-item:hover { background: rgba(38, 49, 72, 0.06); }
-.sess-menu .rm-item svg { flex: none; width: 14px; height: 14px; color: #81858c; }
+.row-menu-pop .rm-item:hover { background: var(--hover); }
+.row-menu-pop .rm-item svg { flex: none; width: 15px; height: 15px; color: #81858c; }
+.row-menu-pop .rm-item.rm-danger { color: #d93b3b; }
+.row-menu-pop .rm-item.rm-danger svg { color: #d93b3b; }
 
 /* ===== 会话重命名弹窗 #rename-modal（2026-08-24 对齐 DSH Modal.module.css + WorkspaceBrowser.renameInput）=====
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·
@@ -2072,7 +2069,11 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 空态/加载态文案用 --text-2：--text-3(#c4c4c9) 在白底浮层上肉眼等同空白，
    2026-09-25「下拉纯空白」实报的次因——失败必须看得见 */
 .wk-empty { padding: 18px 12px; font-size: 12.5px; color: var(--text-2); text-align: center; }
-.wk-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; border-radius: 7px; font-size: 12.5px; color: var(--text); text-align: left; }
+.wk-row {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; border-radius: 7px;
+  font-size: 12.5px; color: var(--text); text-align: left;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; /* 同 .sess-item：长按是唤出浮窗的手势，不选中文字 */
+}
 .wk-row:hover { background: var(--hover); }
 .wk-row.file.on { background: var(--active); font-weight: 600; }
 .wk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2082,6 +2083,13 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-fic svg { width: 15px; height: 15px; display: block; }
 .wk-row.dir .wk-name { font-weight: 600; }
 .wk-row.dir svg { color: var(--text-2); }
+/* 长按扶起（触屏唤出文件行操作浮窗）：与 .sess-item.lift 同一份外观，宽度不动（文件树是缩进层级，
+   拉宽会盖住右侧栏位）——.lift 只负责脱出 #wk-body 的 overflow 裁剪并浮到浮窗之下。 */
+.wk-row.lift {
+  background: #fff; border-radius: 7px;
+  box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
 
 /* 聊天 tab 的会话列表：条目复用全局 .sess-item（recent.js itemHtml），此处只管纵向排布 */
 .wk-chats { display: flex; flex-direction: column; gap: 1px; padding: 6px 2px 0; }

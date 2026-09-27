@@ -271,3 +271,15 @@ web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](
 - **单层只读**：复用 `listOneLevel(dir)`——同一套裁剪（跳隐藏项与 `.git`/`node_modules`/`.claude`/`.trash` 等重型目录、目录在前、每层 ≤50），**不另立排除表**；端点内无任何写调用。
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
+
+## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`，2026-09-27）
+
+work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两端点只解析 `label` 找项目根，语义与防护全在导出纯函数里——端点即「纯函数结果码 → HTTP 码」的直译，写法与 `/gateway/fs` 复用 `resolveWithinRoot` 同源。
+
+**`POST /gateway/file/rename`** body `{label, path, name}` → `renameProjectEntry(projRoot, path, name)`。只改 basename、不跨目录移动。新名走 `sanitizeEntryName`（同 `/gateway/upload` 的清洗口径，已抽出共用：basename 化 + `\/:*?"<>|` 与控制符换 `_` + Windows 保留名加 `_` 前缀 + 截断 120 字符且保扩展名）；新名里的路径/盘符式前缀被 basename 剥掉（只可能「少字」，不可能逃出项目根）。**目标已存在 → 409 拒绝，不覆盖也不自动序号**——改名是用户显式输入，静默换成别的名字比报错更糟；新名与原名相同 → 200 幂等 no-op。响应 `{ok, name, path}`（`path` 为改名后的项目内相对路径，正斜杠）。
+
+**`POST /gateway/file/delete`** body `{label, path}` → `trashProjectEntry(projRoot, path)`。**「删除」= 移动**（工作区规范禁止 `rm`）：`renameSync` 到 `<项目根>/.trash/`，永不真删、永不覆盖——`.trash/` 下同名冲突加 `<YYYYMMDDHHMMSS>-` 前缀（同秒再撞加 `-N`）。目录删除 = 整棵子树一次搬走。响应 `{ok, trash:'.trash/<名>'}`。`.trash` 以 `.` 开头，本就不进 `/gateway/project` 文件树（`walkProjectTree` 跳过点开头条目，且在 `SKIP_TREE_DIRS` 内）。
+
+**共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` 命中 `scope==='project'` 后才动盘。
+
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 三件真实现：重命名 13 例 + 删除 12 例 + 端点转译/`SKIP_TREE_DIRS` 文本断言，31 项；临时树建在 `os.tmpdir()`，跑完自清）。

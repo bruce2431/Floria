@@ -7,7 +7,7 @@ import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, esc, isMobile, loadWork, saveWork, state, toast } from '../core/state.js'
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
 import { mountPreview } from './mgr.js'
-import { itemHtml, setPanel } from './recent.js'
+import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
@@ -201,13 +201,17 @@ import { renderProjSeat } from '../inputbar/commands.js'
     if (!body) return
     updateWkTools()
     const html = wkBodyHtml()
-    if (body.innerHTML !== html) body.innerHTML = html
+    if (body.innerHTML !== html) {
+      body.innerHTML = html
+      // 重渲换掉了行节点：长按浮窗若开着，按行标识把新节点重新扶起（浮窗本身挂在 body 下不受影响）
+      reliftRowMenu()
+    }
   }
 
   function wkBodyHtml() {
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
-      // 不另写一套行）；行菜单（…）依赖 #recent-body 机制，此处 more:false 关掉。
+      // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const f = wkFilter.trim().toLowerCase()
       const list = state.workProj
         ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj)
@@ -217,7 +221,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
       const rows = !state.workProj
         ? '<div class="wk-empty">先在上方选择一个项目</div>'
         : list.length
-          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false, { more: false })).join('')}</div>`
+          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
           : `<div class="wk-empty">${f ? '没有匹配的聊天' : '该项目还没有聊天'}</div>`
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       return rows
@@ -439,6 +443,84 @@ import { renderProjSeat } from '../inputbar/commands.js'
     if (state.sbMode === 'work') $('work-panel').hidden = false
   }
 
+  // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
+  // 两个写接口落在网关（POST /gateway/file/rename | /delete），本模块只做「弹出菜单 + 提交 + 刷新树」。
+  // 删除 = 移入项目根 .trash/（工作区规范禁止真删），故不设二次确认——.trash/ 本身就是撤销位。
+  function baseOf(p) {
+    const i = p.lastIndexOf('/')
+    return i < 0 ? p : p.slice(i + 1)
+  }
+  function openFileRename(p) {
+    if (!p) return
+    openRenameDialog({
+      heading: '重命名',
+      placeholder: '输入新名称',
+      okText: '重命名',
+      value: baseOf(p),
+      onSubmit: async (name) => {
+        const res = await fetch(apiUrl('/gateway/file/rename'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: state.workProj, path: p, name }),
+        })
+        const data = await res.json()
+        if (!res.ok || !data.ok) throw new Error(data.error || '重命名失败')
+        // 展开态与编辑区都按旧路径记着，须同步搬到新路径（目录改名 = 整棵子树的路径前缀都变）
+        for (const k of [...wkOpen]) {
+          if (k === p) { wkOpen.delete(k); wkOpen.add(data.path) }
+          else if (k.startsWith(p + '/')) { wkOpen.delete(k); wkOpen.add(data.path + k.slice(p.length)) }
+        }
+        if (state.workFile === p) state.workFile = data.path
+        else if (state.workFile.startsWith(p + '/')) state.workFile = data.path + state.workFile.slice(p.length)
+        saveWork()
+        await loadProjectTree(state.workProj)
+        renderEditor()
+        renderWorkBody()
+        toast('已重命名为「' + data.name + '」')
+      },
+    })
+  }
+  async function deleteWorkEntry(p) {
+    if (!p) return
+    try {
+      const res = await fetch(apiUrl('/gateway/file/delete'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: state.workProj, path: p }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || '删除失败')
+      if (state.workFile === p || state.workFile.startsWith(p + '/')) state.workFile = ''
+      for (const k of [...wkOpen]) if (k === p || k.startsWith(p + '/')) wkOpen.delete(k)
+      saveWork()
+      await loadProjectTree(state.workProj)
+      renderEditor()
+      renderWorkBody()
+      toast('已移入 ' + data.trash)
+    } catch (e) {
+      toast('删除失败：' + (e.message || e))
+    }
+  }
+  // 文件树行源：文件与目录同一套菜单（目录删除 = 整棵子树进 .trash/）；操作对象 = 行的项目内相对路径。
+  function registerWorkRows() {
+    registerRowMenu({
+      sel: '.wk-row',
+      key: (el) => el.dataset.wkfile || el.dataset.wkdir || null,
+      items: (el) =>
+        el.dataset.wkfile || el.dataset.wkdir
+          ? [
+              { a: 'rename', icon: I.dshEdit, label: '重命名' },
+              { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
+            ]
+          : [],
+      pick: (a, el) => {
+        const p = el.dataset.wkfile || el.dataset.wkdir
+        if (a === 'rename') openFileRename(p)
+        else deleteWorkEntry(p)
+      },
+    })
+  }
+
   function newWorkChat() {
     // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
     // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
@@ -450,6 +532,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
 
   // ---------- 事件 ----------
   function mountWork() {
+    registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle

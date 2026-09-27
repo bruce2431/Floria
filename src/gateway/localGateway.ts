@@ -21,9 +21,9 @@
  * HTTP/WS 用 node:http + ws（已验证可打包进 bun 编译产物），不依赖 Bun.serve。
  */
 import { createServer, request as httpRequest, type Server } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, renameSync, type FSWatcher } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { join, resolve, extname, basename, sep, isAbsolute, delimiter } from 'node:path'
+import { join, resolve, dirname, extname, basename, sep, isAbsolute, delimiter } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { UUID } from 'crypto'
 import { networkInterfaces } from 'node:os'
@@ -971,6 +971,73 @@ export function resolveWithinRoot(root: string, rel: string): string | null {
   if (!p) return base
   const abs = resolve(base, p)
   return abs === base || abs.startsWith(base + sep) ? abs : null
+}
+
+/**
+ * 落盘条目名清洗（上传文件名 / 文件树重命名共用同一口径）：basename 化（禁带路径）+
+ * Windows 非法字符 `\/:*?"<>|` 与控制符换 `_` + 保留名（con/prn/aux/nul/com1-9/lpt1-9）前缀 `_` +
+ * 长度钳到 120（尽保扩展名）。空串/`.`/`..` 返回 ''，由调用方决定回落（上传回落 'file'，重命名报错）。
+ */
+export function sanitizeEntryName(raw: string): string {
+  let name = basename(String(raw || '').trim())
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .trim()
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)) name = '_' + name
+  if (name === '.' || name === '..') name = ''
+  if (name.length > 120) {
+    const ext = extname(name)
+    name = name.slice(0, 120 - ext.length) + ext
+  }
+  return name
+}
+
+/** 文件树写操作结果。code 与 HTTP 状态同码，由 /gateway/file/* 端点直译。 */
+export type EntryOpResult =
+  | { ok: true; path?: string; name?: string; trash?: string }
+  | { ok: false; code: number; error: string }
+
+/**
+ * 项目内条目重命名（GET /gateway/file 的写侧对应件）：只改 basename，不跨目录移动。
+ * 目标已存在 → 409（不覆盖、不自动序号——改名是用户显式输入，静默换成别的名字比报错更糟）。
+ * 抽成纯函数是要让探针能直测真实现（probe-file-tree-ops.ts），不在探针里复刻一份算法。
+ */
+export function renameProjectEntry(projRoot: string, rel: string, rawName: string): EntryOpResult {
+  const abs = resolveWithinRoot(projRoot, rel)
+  if (!abs || abs === projRoot) return { ok: false, code: 403, error: 'forbidden' }
+  if (!existsSync(abs)) return { ok: false, code: 404, error: 'not found' }
+  const name = sanitizeEntryName(rawName)
+  if (!name) return { ok: false, code: 400, error: '名称不合法' }
+  const from = rel.replace(/\\/g, '/').replace(/\/+$/, '')
+  const to = join(dirname(abs), name)
+  if (to === abs) return { ok: true, name, path: from }
+  if (existsSync(to)) return { ok: false, code: 409, error: '同名条目已存在' }
+  renameSync(abs, to)
+  const parent = dirname(from)
+  return { ok: true, name, path: parent === '.' ? name : `${parent}/${name}` }
+}
+
+/**
+ * 项目内条目删除 = 移入项目根 .trash/（工作区规范禁止 rm）：永不真删、永不覆盖——
+ * .trash/ 下同名冲突加 <YYYYMMDDHHMMSS>- 前缀（同秒再撞加 -N）。.trash 以 `.` 开头，
+ * 本就不进 /gateway/project 文件树（walkProjectTree 跳过点开头条目）。
+ */
+export function trashProjectEntry(projRoot: string, rel: string): EntryOpResult {
+  const abs = resolveWithinRoot(projRoot, rel)
+  if (!abs || abs === projRoot) return { ok: false, code: 403, error: 'forbidden' }
+  if (!existsSync(abs)) return { ok: false, code: 404, error: 'not found' }
+  const trash = join(projRoot, '.trash')
+  mkdirSync(trash, { recursive: true })
+  const base = basename(abs)
+  let to = join(trash, base)
+  if (existsSync(to)) {
+    const d = new Date()
+    const p2 = (n: number): string => String(n).padStart(2, '0')
+    const ts = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`
+    to = join(trash, `${ts}-${base}`)
+    for (let i = 1; existsSync(to); i++) to = join(trash, `${ts}-${i}-${base}`)
+  }
+  renameSync(abs, to)
+  return { ok: true, trash: `.trash/${basename(to)}` }
 }
 
 function findProjects(root: string): ProjectInfo[] {
@@ -2282,6 +2349,51 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     res.end(readFileSync(fAbs))
     return
   }
+  // 项目内文件 / 目录重命名：POST /gateway/file/rename {label, path, name} → 同目录改名（2026-09-27）
+  // 语义与防护全在 renameProjectEntry（纯函数，探针 probe-file-tree-ops 直测）；此处只管解析 label。
+  // 穿越防护口径同 GET /gateway/file（resolveWithinRoot）。受上方 /gateway/* token 校验保护。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/rename') {
+    try {
+      const rp = await readReportBody(req)
+      const rProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof rp.label === 'string' ? rp.label : ''),
+      )
+      if (!rProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const rOut = renameProjectEntry(
+        resolve(rProj.dir, '..', '..'),
+        typeof rp.path === 'string' ? rp.path : '',
+        typeof rp.name === 'string' ? rp.name : '',
+      )
+      if (!rOut.ok) sendJson(res, rOut.code, { error: rOut.error })
+      else sendJson(res, 200, rOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内文件 / 目录删除：POST /gateway/file/delete {label, path} → 移入项目根 .trash/（2026-09-27）
+  // 「删除」= 移动（工作区规范：禁止 rm），语义与冲突命名全在 trashProjectEntry（纯函数，同上探针直测）。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/delete') {
+    try {
+      const dp = await readReportBody(req)
+      const dProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof dp.label === 'string' ? dp.label : ''),
+      )
+      if (!dProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const dOut = trashProjectEntry(resolve(dProj.dir, '..', '..'), typeof dp.path === 'string' ? dp.path : '')
+      if (!dOut.ok) sendJson(res, dOut.code, { error: dOut.error })
+      else sendJson(res, 200, dOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
   // 工作区根单层列目录（@ 提及「目录 / 文件」能力的数据源，2026-09-26）：
   //   GET /gateway/fs?path=<相对工作区根的可选子路径> → { path, entries:[{name,type}] }
   // path 缺省/空串 = 工作区根。相对路径基准恒为工作区根——与 @ chip 上行的 [@目录:]/[@文件:] 同基准。
@@ -2319,13 +2431,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // Windows 非法字符/保留名清洗；单文件上限 20MB。
   if (req.method === 'POST' && url.pathname === '/gateway/upload') {
     try {
-      let name = basename((url.searchParams.get('name') || '').trim())
-        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
-        .trim()
-      if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(name)) name = '_' + name
-      if (!name || name === '.' || name === '..') name = 'file'
+      const name = sanitizeEntryName(url.searchParams.get('name') || '') || 'file'
       const nameExt = extname(name)
-      if (name.length > 120) name = name.slice(0, 120 - nameExt.length) + nameExt
       let upRoot: string | null = null
       const upSid = (url.searchParams.get('sid') || '').trim()
       const upProj = (url.searchParams.get('project') || '').trim()

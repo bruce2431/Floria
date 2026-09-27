@@ -44,20 +44,21 @@
 | 展开面板 | `#panel` | 展开态 280px：模式行 + 两个面板（chat / work，同一时刻恰一个非 hidden）；底色同底板、**不画右缘分隔线**（侧栏是通高平面，分隔由底板色从卡缝露出承担，web-ui §41） | |
 | 模式切换 tab | `.mode-switch` > `.ms-btn` | 侧栏模式分段控件（`floria·chat` / `floria·work`），占原位品牌行；两钮恒 `font-weight:600`（颜色区分选中，防 CJK 字宽跳动）。原 `.floria-logo` 品牌按钮退役，折叠入口仍是右侧 `#panel-collapse`。见 web-ui §43 | 品牌行/logo 行 |
 | chat 面板 | `#chat-panel` | 现行侧栏（管理 tabs + 最近列表）；`sbMode=chat` 时在场 | |
-| work 面板 | `#work-panel` | Prism 式工作区侧栏：项目切换（`#wk-proj-seat` + `#wk-proj-pop`）/ 文件·聊天 tab / 文件树（`#wk-body`）/ 视图开关浮层（`#wk-view-pop`）/ 工作区卡（`#wk-foot`）；`sbMode=work` 时在场。见 web-ui §43 | 项目态侧栏 |
-| 工作区编辑区 | `#work-editor` | work 模式主区左栏（只读查看项目内文件），与 `#session-card` 并排组成两栏；**刻意不用 `.view-card` 类**（常驻栏，不参与「槽里恰好一张卡」语义）。手机 ≤720px 不成立两栏，改为 `.wk-file-open` 覆盖层（头部 `#wk-ed-back` 返回） | 编辑器/预览栏 |
-| 两栏开关浮层 | `#wk-view-pop` | work 模式「编辑区 / 助手」两个开关（`.wkv-row`）；不变量 = 至少保留一栏（全关会强制回助手栏并 toast） | 视图浮层 |
+| work 面板 | `#work-panel` | Prism 式工作区侧栏：项目切换（`#wk-proj-seat` + `#wk-proj-pop`）/ 文件·聊天 tab / 新建入口（`#wk-new` + `#wk-new-pop`）/ 文件树（`#wk-body`）/ 视图开关浮层（`#wk-view-pop`，侧栏右上角 `#wk-view` 展开）/ 工作区卡（`#wk-foot`）；`sbMode=work` 时在场。见 web-ui §43 | 项目态侧栏 |
+| 工作区编辑区 | `#work-editor` | work 模式主区左栏（只读查看项目内文件），与 `#session-card`（助手）、`#work-preview`（预览）并排组成三栏；**刻意不用 `.view-card` 类**（常驻栏，不参与「槽里恰好一张卡」语义）。手机 ≤720px 不成立多栏，改为 `.wk-file-open` 覆盖层（头部 `#wk-ed-back` 返回） | 编辑器/预览栏 |
+| 视图开关浮层 | `#wk-view-pop` | work 模式「编辑区 / 侧边栏 / 助手 / 预览」四个开关（`.wkv-row`，`data-wkpane` = editor/sidebar/assist/workspace），由侧栏右上角 `#wk-view`（`\|\|` 图标）展开；**与「折叠侧栏」合并成同一个浮层**（`sidebar` 行走 `setPanel(on,{pin:on})`，work 模式下 `#panel-collapse` 隐藏）。不变量 = 三栏至少保留一栏（`applyPanes()` 全关时强制回助手栏并 toast） | 两栏开关浮层 |
+| 个性化工作区预览栏 | `#work-preview` | work 模式主区第三栏（`state.wkPreview` 门控，`#chat-area.work.wk-preview`），渲染当前工作项目的项目预览——**复用 `mgr.js` `mountPreview()` 三级链**（backend 容器 → `.claude/preview/` 静态页 → 默认项目页），切项目跟随、关掉不销毁重开零重载。**持久列、非 `.view-card`**，不清会话槽、不切模式（区别于打开「项目」页的槽预览卡，web-ui §43） | 预览栏 |
+| 新建入口「+」 | `#wk-new` / `#wk-new-pop` | work 侧栏 tab 行右侧加号：聊天 tab = 新建聊天（`navigate('#/')`）；文件 tab = 弹 `#wk-new-pop`（新建文件/新建文件夹/上传文件/上传文件夹，**功能暂未接入**）。按钮 title 与 🔍 提示随 tab 切换 | 加号/新建 |
 | 最近列表 | `#recent`/`#recent-body` | 会话容器（「最近」头 + 整理会话 + 模式 tabs）；连接状态点 `#floria-conn` 随模式行改址落在此头左侧 | |
 | 整理会话弹层 | `#organize-pop` | 「一个列表 / 按项目展开」切换浮层 | |
 | 模式 tabs | `#mode-tabs` | 项目/聊天两种列表排列 | |
 | 项目文件夹分组 | `.folder` | 按项目分组的折叠头（含行内「+」新建） | |
 | 会话 tab | `button.sess-item` | 最近列表里的单个会话条目；**排序 = 有状态（运行态点在场）置顶 + 组内 createdAt 降序**（`core/sessions.js` `sessCmp` 单一排序器，createdAt 由网关 `/gateway/sessions` 透传 jsonl birthtime；气泡弹层/搜索覆盖层同序；项目胶囊与文件夹维持最近活跃不动） | 会话tab/会话行 |
 | 状态点 | `.dot` | tab 左侧运行态小点（web/CLI 同一判定链） | |
-| 三点钮 | `.sess-more` | tab 行内「…」按钮 | 三个点 |
-| 三点菜单 | `.sess-menu` | 三点唤出的菜单（重命名/关闭），**内嵌展开为 tab 第二行**（非浮窗） | 行菜单/浮窗 |
+| 行操作浮窗 | `.row-menu-pop` | 行右键（桌面）/ 长按（触屏）唤出的浮窗，挂 `document.body` 的 fixed 卡片，落点 = 行左下（长按）/ 指针处（右键）；与浮起同生同灭。**注册式（`registerRowMenu`）一源多用**：会话行（`recent.js`，重命名 / 关闭会话）与 work 文件树行（`work.js`，重命名 / 删除=移入 `.trash/`）——菜单项由各列表声明（web-ui §7 / §45） | 三点菜单/会话行菜单/文件行菜单/浮窗 |
 | 侧栏浮起 | `.lift`/`.lift-anim` | 桌面 hover 时 tab 浮起动画态 | |
 | 搜索覆盖层 | `#search-overlay` | 全屏搜索全部对话 | |
-| 重命名弹窗 | `#rename-modal` | 会话重命名对话框 | |
+| 重命名弹窗 | `#rename-modal` | 重命名对话框，**一件两用**（`openRenameDialog({heading,placeholder,okText,value,onSubmit})`）：会话行 → 会话标题、work 文件行 → 文件/目录名（web-ui §7） | |
 
 ## 消息流（`#messages` 内）
 

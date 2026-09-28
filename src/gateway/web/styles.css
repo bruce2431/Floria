@@ -1083,6 +1083,18 @@ body.kb-open #input-wrap { transition: none; }
 .mention .m-x { color: var(--text-3); font-size: 13px; line-height: 1; padding: 0 2px; cursor: pointer; border-radius: 50%; }
 .mention .m-x:hover { color: var(--text); background: var(--active); }
 
+/* 选中引用 chip（2026-09-28）：输入栏内 .mention.ref 与消息内 .mention-chip.m-ref 同族观感——
+   透明胶囊 + 细描边 + 文件图标 + 「引用自 <文件名>」（用户定案：第一个是文件 icon）。
+   路径/会话名过长时内层 .mc-t 省略号收口（inline-flex 直挂文本无法 text-overflow）。 */
+.mention.ref { background: transparent; border: 1px solid var(--border); padding: 1px 6px 1px 4px; gap: 5px; }
+.mention.ref .m-ic { width: 14px; height: 14px; color: var(--text-2); }
+.mention.ref .m-ic svg { width: 12px; height: 12px; }
+.mention.ref .m-nm { max-width: 220px; }
+.msg .mention-chip.m-ref { gap: 5px; max-width: min(100%, 320px); }
+.msg .mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--text-2); }
+.msg .mention-chip.m-ref .mc-ic svg { width: 12px; height: 12px; }
+.msg .mention-chip.m-ref .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 /* 消息气泡里渲染的 @ chip（2026-08-15 19:2x 透明胶囊：去图标/背景/阴影，仅细边圆角轮廓 + 名称文本） */
 .msg .mention-chip {
   display: inline-flex; align-items: center; vertical-align: middle;
@@ -1874,6 +1886,59 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .row-menu-pop .rm-item svg { flex: none; width: 15px; height: 15px; color: #81858c; }
 .row-menu-pop .rm-item.rm-danger { color: #d93b3b; }
 .row-menu-pop .rm-item.rm-danger svg { color: #d93b3b; }
+
+/* ===== 选中引用浮窗 .quote-pop（2026-09-28）=====
+   在编辑区或消息流里选中文本 → **松开鼠标那一刻**自动唤出（inputbar/quote.js；右键不拦，浏览器原生
+   菜单照旧）。竖排菜单形态（浅色）：上行「使用 AI 编辑」= 只把引用胶囊塞进输入栏；下行内嵌输入栏
+   （话术）+ 尾部发送钮 = 立即把「引用 + 话术」作为一条消息发出。两处尾部箭头同源（core/icons.js 的
+   I.dshSend，与底栏发送钮同一图标）。浮窗是 body 下的 fixed 卡片（脱出 #chat-scroll 裁剪），落点 =
+   选区下方、越界 clamp 回视口（与 .row-menu-pop 同一算法）。
+   浅色是定案（2026-09-28 用户点名「对应换成浅色」）⇒ 此块**不跟随 --bg/--text 主题变量**，色值硬编码。 */
+.quote-pop {
+  position: fixed; z-index: 80; width: 268px; max-width: calc(100vw - 16px);
+  display: flex; flex-direction: column;
+  padding: 6px; border-radius: 14px;
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: rowMenuIn 0.12s ease-out;
+}
+/* 菜单行 = 图标位（可选）+ 标签 + 尾部动作箭头；hover 整行浅灰高亮 */
+.qp-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; height: 44px; padding: 0 12px;
+  border: none; border-radius: 10px; background: transparent;
+  font: inherit; font-size: 14px; color: #1f2328; text-align: left; cursor: pointer;
+}
+.qp-row:hover { background: rgba(0, 0, 0, 0.06); }
+.qp-row .qp-lb { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qp-row .qp-go { flex: none; width: 16px; height: 16px; color: #6b7280; }
+.qp-row .qp-go svg { width: 16px; height: 16px; display: block; }
+/* 输入行：与菜单行同高，单独描边以别于菜单行（浅色下唯一的分组线） */
+.qp-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; padding: 0 6px 0 12px;
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+.qp-in {
+  flex: 1 1 auto; min-width: 0; height: 42px;
+  border: none; outline: none; background: transparent;
+  font: inherit; font-size: 14px; color: #1f2328;
+}
+.qp-in::placeholder { color: #9aa1a9; }
+/* 聚焦指示落在**整行**（描边变色），不用浏览器默认 focus ring——全局那条 `input:focus-visible`
+   （2px outline + offset + 6px 圆角）与输入行的 10px 圆角/内垫不齐，用户 2026-09-28 实报
+   「蓝色矩形的大小和位置都有点问题」。可键盘可见性不丢：焦点态仍在（换个载体而已）。 */
+.quote-pop .qp-in:focus-visible { outline: none; }
+.qp-bar:focus-within { border-color: #4176e6; }
+.qp-send {
+  flex: none; display: grid; place-items: center;
+  width: 30px; height: 30px; border: none; border-radius: 999px;
+  background: #4176e6; color: #fff; cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.qp-send:hover { background: #679efe; }
+.qp-send svg { width: 15px; height: 15px; display: block; }
 
 /* ===== 会话重命名弹窗 #rename-modal（2026-08-24 对齐 DSH Modal.module.css + WorkspaceBrowser.renameInput）=====
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·

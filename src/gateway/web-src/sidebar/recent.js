@@ -12,10 +12,11 @@ import { renderBubble, renderSearch } from './bubble-search.js'
 import { renderList, renderProject } from './mgr.js'
   // ---------- 侧栏 ----------
   // 开合唯一入口。opt.pin 只在打开时有意义：钉住 = 鼠标移出侧栏不自动收（汉堡/抽屉把手点击），
-  // 不钉 = 预览式（#edge-hot 悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
-  let panelPinned = false
+  // 不钉 = 预览式（左缘悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
+  // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
+  // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
   function setPanel(open, opt) {
-    panelPinned = !!open && !!(opt && opt.pin)
+    state.panelPinned = !!open && !!(opt && opt.pin)
     state.panelOpen = open
     sidebar.classList.toggle('open', open)
     // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
@@ -24,11 +25,12 @@ import { renderList, renderProject } from './mgr.js'
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
     if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
+    syncPaneRows() // work 视图浮层的「侧边栏」行随钉住态刷新（悬停唤出不改 pin ⇒ 行状态不动）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
   // 侧栏折叠时宽度 0，本事件不会触发。行浮窗挂在 #sidebar 内（见 openRowMenu），指针移到浮窗上
   // 不算离开侧栏，故悬停预览下浮窗可用。
-  sidebar.addEventListener('mouseleave', () => { if (!panelPinned) setPanel(false) })
+  sidebar.addEventListener('mouseleave', () => { if (!state.panelPinned) setPanel(false) })
 
   // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
   // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联

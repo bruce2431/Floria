@@ -4,7 +4,7 @@ import { messagesHtml, addUser } from '../chat/messages.js'
 import { GATEWAY, gateAwait, apiUrl } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
-import { findSession } from '../core/sessions.js'
+import { findSession, sessionCwd } from '../core/sessions.js'
 import { inputEl, state, esc, newSessionProject } from '../core/state.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
@@ -22,6 +22,20 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 路径同基准（用户定案：相对全局根）。令牌 [@目录:路径] / [@文件:路径] 刻意与上传附件占位 [文件:<路径>]
   // 不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
   const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
+  // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
+  // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
+  // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
+  // 不会抢「引用」。
+  const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
+  // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
+  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
+  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
+  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
+  // 回复引用的**原文块**：`[@引用回复:N|标题]\n<原文>\n[/引用回复]`。原文是给模型看的 payload
+  // （回复无文件位置可查，原文必须进消息），**气泡里不得出现**（2026-09-28 用户实报「为什么文本
+  // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
+  // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
   const MENTION_DIR_ICON = I.folder
   const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
@@ -153,12 +167,56 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
+  // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
+  // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
+  function quoteRefChipHtml(path, l0, l1) {
+    const name = String(path).split('/').pop()
+    const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
+    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+  }
+  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
+  function quoteReplyChipHtml(idx, title) {
+    const t = String(title || '').trim() || '本会话'
+    const label = `引用自「${t}」· 第 ${idx} 条回复`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
+  }
+
+  // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
+  //  文件引用 = 只给位置，模型自己 Read；
+  //  回复引用 = 原文必须进消息——回复不属于任何文件，没有位置可查。原文包在令牌块里（`QUOTE_REPLY_BODY_RE`），
+  //  渲染层整块剥掉只留锚点令牌 → 胶囊。首尾不留多余换行（留了会撑出多余行距，2026-09-28 用户实报「自带一个换行」）。
+  function refToken(d) {
+    if (d.rkind !== 'file') {
+      const title = String(d.title || '本会话').replace(/[\]|\r\n]/g, ' ').trim() || '本会话'
+      return `[@引用回复:${d.idx || 0}|${title}]\n${String(d.quote || '')}\n[/引用回复]`
+    }
+    const p = refPath(d.file, d.proj)
+    return d.l0 ? `[@引用:${p}#L${d.l0}-${d.l1}]` : `[@引用:${p}]`
+  }
+
+  // 引用路径基准 = 模型能直接 Read 的形式：会话启动根（模型 cwd）就是该 work 项目本身时用项目内
+  // 相对路径；否则带项目 label（工作区相对——会话开在别的项目下时仍指向同一文件）。cwd 未知同样带 label。
+  function refPath(file, proj) {
+    const cwd = String(sessionCwd || '').replace(/\\/g, '/').replace(/\/+$/, '')
+    if (proj && cwd.split('/').pop() === proj) return file
+    return proj ? proj + '/' + file : file
+  }
+
+  // 回复引用的**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE 出胶囊。
+  // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
+  // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
+  function stripQuoteReplyBody(text) {
+    return String(text || '').replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+  }
+
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
   function renderUserText(text) {
     return esc(text)
       .replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
       .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
+      .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
+      .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
   }
 
   // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
@@ -173,6 +231,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
           // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
           // 路径 chip → `[@目录:路径]` / `[@文件:路径]`（路径相对工作区根，与网关 /gateway/fs 同基准）。
           const k = n.dataset.kind
+          // 选中引用 chip：文件类出位置令牌、回复类展开原文（见 refToken）
+          if (k === 'ref') { out += refToken(n.dataset); continue }
           out += k === 'session'
             ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
             : k === 'path'
@@ -399,6 +459,8 @@ export {
   MENTION_SESSION_ICON,
   MENTION_SESSION_RE,
   MENTION_UP_ICON,
+  QUOTE_REF_RE,
+  QUOTE_REPLY_RE,
   arrangeItems,
   buildMentionChip,
   groupOf,
@@ -420,6 +482,8 @@ export {
   pickHome,
   pickItems,
   pickLabel,
+  quoteRefChipHtml,
+  quoteReplyChipHtml,
   refreshPick,
   removeChip,
   renderMentionPop,
@@ -427,4 +491,5 @@ export {
   selectMention,
   selectMentionItem,
   serializeInput,
+  stripQuoteReplyBody,
 }

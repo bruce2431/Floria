@@ -145,7 +145,10 @@
   // currentHash 无会话态 = ''（与 recent.js firstSendHash 同一表示，禁止再引入 null）：乐观项
   // pendingUserMsgs.hash 的「未归属」判定（p.hash === ''）依赖此约定——两套空值表示会让首页
   // 发送的乐观气泡在 navigate 进会话时被 renderSession 的归属守卫判为异类而丢弃（消息先闪现后消失）。
-  const state = { mode: 'list', pt: 'projects', panelOpen: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
+  // panelOpen = 侧栏**此刻可见**（含左缘悬停预览式唤出）；panelPinned = 侧栏**被主动打开**（汉堡/视图浮层
+  // 开关，鼠标移出不自动收）。二者不同源：悬停唤出只置 panelOpen，故「侧边栏」开关的真源是 panelPinned
+  // ——开关亮 = 侧栏常在，不是「此刻恰好露出」（见 sidebar/recent.js setPanel、sidebar/work.js paneOn）。
+  const state = { mode: 'list', pt: 'projects', panelOpen: false, panelPinned: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
     // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
     // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
@@ -248,16 +251,24 @@
     s = s.replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
+         .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
+         .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }
-  function mdHtml(src) {
+  // lineAttr（可选）= 行锚属性名（如 'data-l'）：渲染期把**源行号**写进 DOM，供编辑区选中引用
+  // 反查选区位置（core/markdown.js 只做渲染，不知道选区；落锚是渲染时唯一能拿到源行号的地方）。
+  // 不传 = 现状（会话消息渲染照旧，不带锚）。
+  function mdHtml(src, lineAttr) {
     if (!src) return ''
     const lines = esc(String(src)).split('\n')
+    const la = (n) => (lineAttr ? ` ${lineAttr}="${n}"` : '')
+    // 段落内按源行拆成带锚的 span（一个段落可跨多行，锚落在每一行上而不是段落首行）
+    const lw = (n, inner) => (lineAttr ? `<span ${lineAttr}="${n}">${inner}</span>` : inner)
     let html = ''
     let para = []
     const flushPara = () => { if (para.length) { html += `<p>${para.join('<br>')}</p>`; para = [] } }
-    let inCode = false, codeLang = '', codeBuf = []
+    let inCode = false, codeLang = '', codeBuf = [], codeNums = []
     // ---- 嵌入式图表（```chart 双段围栏，2026-09-12 定案）----
     // 契约（全局根 CLAUDE.md）：模型输出 ```chart 围栏，内含 %%html / %%ascii 两个哨兵段（同一图表的两种等价表达）。
     // web 取 %%html 段进 sandbox iframe（opaque origin，BOOT 上报高度），%%ascii 段弃用（「源码」按钮看全文）；
@@ -284,13 +295,14 @@
       if (!inCode) return
       const raw = codeBuf.join('\n')
       const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
+      const inner = lineAttr ? codeBuf.map((l, k) => lw(codeNums[k], l)).join('\n') : raw
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
-        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${inner}</code></pre></div>`
       } else {
-        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += `<div class="code-block"><pre><code>${inner}</code></pre>${langTag}</div>`
       }
-      codeBuf = []; codeLang = ''; inCode = false
+      codeBuf = []; codeNums = []; codeLang = ''; inCode = false
     }
     let list = null
     const closeList = () => { if (list) { html += `</${list}>`; list = null } }
@@ -305,39 +317,39 @@
         if (inCode) { closeCode(true) } else { inCode = true; codeLang = t.slice(3).trim() }
         continue
       }
-      if (inCode) { codeBuf.push(line); continue }
+      if (inCode) { codeBuf.push(line); codeNums.push(i + 1); continue }
       const h = /^(#{1,4})\s+(.*)$/.exec(t)
-      if (h) { flushPara(); closeList(); html += `<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`; continue }
+      if (h) { flushPara(); closeList(); html += `<h${h[1].length}${la(i + 1)}>${mdInline(h[2])}</h${h[1].length}>`; continue }
       if (t.startsWith('&gt;')) {
         flushPara(); closeList()
-        html += `<blockquote>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
+        html += `<blockquote${la(i + 1)}>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
         continue
       }
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        html += `<li${la(i + 1)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        html += `<li${la(i + 1)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
         continue
       }
-      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += '<hr>'; continue }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${la(i + 1)}>`; continue }
       if (t.startsWith('|') && lines[i + 1] && isSep(lines[i + 1].trim())) {
         flushPara(); closeList()
-        html += '<div class="md-table"><table><thead><tr>' + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
+        html += `<div class="md-table"><table><thead><tr${la(i + 1)}>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
         i += 1
         while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
           i += 1
-          html += '<tr>' + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
+          html += `<tr${la(i + 1)}>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
         }
         html += '</tbody></table></div>'
         continue
       }
-      para.push(mdInline(t))
+      para.push(lw(i + 1, mdInline(t)))
     }
     flushPara(); closeCode(false); closeList()
     return html
@@ -2016,6 +2028,8 @@ function setLastNavHash(v) { lastNavHash = v }
     }
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
+    // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
+    txt = stripQuoteReplyBody(txt)
     const hasImg = m.blocks.some((b) => b.kind === 'image')
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
@@ -2479,10 +2493,11 @@ function setLastNavHash(v) { lastNavHash = v }
 
   // ---------- 侧栏 ----------
   // 开合唯一入口。opt.pin 只在打开时有意义：钉住 = 鼠标移出侧栏不自动收（汉堡/抽屉把手点击），
-  // 不钉 = 预览式（#edge-hot 悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
-  let panelPinned = false
+  // 不钉 = 预览式（左缘悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
+  // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
+  // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
   function setPanel(open, opt) {
-    panelPinned = !!open && !!(opt && opt.pin)
+    state.panelPinned = !!open && !!(opt && opt.pin)
     state.panelOpen = open
     sidebar.classList.toggle('open', open)
     // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
@@ -2491,11 +2506,12 @@ function setLastNavHash(v) { lastNavHash = v }
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
     if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
+    syncPaneRows() // work 视图浮层的「侧边栏」行随钉住态刷新（悬停唤出不改 pin ⇒ 行状态不动）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
   // 侧栏折叠时宽度 0，本事件不会触发。行浮窗挂在 #sidebar 内（见 openRowMenu），指针移到浮窗上
   // 不算离开侧栏，故悬停预览下浮窗可用。
-  sidebar.addEventListener('mouseleave', () => { if (!panelPinned) setPanel(false) })
+  sidebar.addEventListener('mouseleave', () => { if (!state.panelPinned) setPanel(false) })
 
   // ---------- 侧栏拖拽调宽（2026-09-12）：仅桌面展开态生效（#panel-resizer 由 CSS 按
   // #sidebar.open + ≥721px 门控显示，pointerdown 再复核 .open 双保险）。拖动改 :root 内联
@@ -4456,12 +4472,19 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // 浮层各开关的真源：编辑区/助手 = work 主区栏，预览 = 第三栏（个性化工作区），
-  // 侧边栏 = 侧栏自身开合（state.panelOpen，见 recent.js setPanel）。
+  // 侧边栏 = 侧栏是否**被主动打开**（state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen
+  // ——后者含左缘悬停预览式唤出，那种瞬时露出不是「界面常在」，开关不该跟亮。
   function paneOn(k) {
     if (k === 'editor') return state.wkEditor
     if (k === 'assist') return state.wkAssist
     if (k === 'workspace') return state.wkPreview
-    return !!state.panelOpen
+    return !!state.panelPinned
+  }
+
+  // 视图浮层行状态落地（唯一处）：本模块 applyPanes 与 recent.js setPanel（钉住态可被汉堡/收起钮/
+  // 遮罩任一处翻转）两处调用。
+  function syncPaneRows() {
+    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
   }
 
   // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
@@ -4478,7 +4501,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       chatArea.classList.toggle('hide-assist', !state.wkAssist)
       chatArea.classList.toggle('wk-preview', !!state.wkPreview)
     }
-    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+    syncPaneRows()
     applyWorkFlex()
   }
 
@@ -4769,7 +4792,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function setPane(k, on) {
     if (k === 'sidebar') {
       // 侧栏开合不走「至少保留一栏」判定——那是主区两栏之间的约束，与侧栏无关。
-      // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属 #edge-hot 唤出）。
+      // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
       return
@@ -5061,8 +5084,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       const text = await res.text()
       if (seq !== edSeq) return
+      // markdown 预览带行锚（mdHtml 第二参数）：渲染期把每个源行号写进 DOM（data-l），
+      // 选中引用据此取选区首尾所在行——渲染后的文本已丢格式符，回查原文不可靠（inputbar/quote.js）。
       body.innerHTML = MD_EXT.test(p)
-        ? `<div class="wk-ed-md md">${mdHtml(text)}</div>`
+        ? `<div class="wk-ed-md md">${mdHtml(text, 'data-l')}</div>`
         : `<pre class="wk-code">${esc(text)}</pre>`
     } catch (e) {
       if (seq !== edSeq) return
@@ -5888,6 +5913,20 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 路径同基准（用户定案：相对全局根）。令牌 [@目录:路径] / [@文件:路径] 刻意与上传附件占位 [文件:<路径>]
   // 不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
   const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
+  // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
+  // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
+  // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
+  // 不会抢「引用」。
+  const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
+  // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
+  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
+  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
+  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
+  // 回复引用的**原文块**：`[@引用回复:N|标题]\n<原文>\n[/引用回复]`。原文是给模型看的 payload
+  // （回复无文件位置可查，原文必须进消息），**气泡里不得出现**（2026-09-28 用户实报「为什么文本
+  // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
+  // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
   const MENTION_DIR_ICON = I.folder
   const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
@@ -6019,12 +6058,56 @@ function setFirstSendHash(v) { firstSendHash = v }
     return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
+  // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
+  // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
+  function quoteRefChipHtml(path, l0, l1) {
+    const name = String(path).split('/').pop()
+    const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
+    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+  }
+  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
+  function quoteReplyChipHtml(idx, title) {
+    const t = String(title || '').trim() || '本会话'
+    const label = `引用自「${t}」· 第 ${idx} 条回复`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
+  }
+
+  // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
+  //  文件引用 = 只给位置，模型自己 Read；
+  //  回复引用 = 原文必须进消息——回复不属于任何文件，没有位置可查。原文包在令牌块里（`QUOTE_REPLY_BODY_RE`），
+  //  渲染层整块剥掉只留锚点令牌 → 胶囊。首尾不留多余换行（留了会撑出多余行距，2026-09-28 用户实报「自带一个换行」）。
+  function refToken(d) {
+    if (d.rkind !== 'file') {
+      const title = String(d.title || '本会话').replace(/[\]|\r\n]/g, ' ').trim() || '本会话'
+      return `[@引用回复:${d.idx || 0}|${title}]\n${String(d.quote || '')}\n[/引用回复]`
+    }
+    const p = refPath(d.file, d.proj)
+    return d.l0 ? `[@引用:${p}#L${d.l0}-${d.l1}]` : `[@引用:${p}]`
+  }
+
+  // 引用路径基准 = 模型能直接 Read 的形式：会话启动根（模型 cwd）就是该 work 项目本身时用项目内
+  // 相对路径；否则带项目 label（工作区相对——会话开在别的项目下时仍指向同一文件）。cwd 未知同样带 label。
+  function refPath(file, proj) {
+    const cwd = String(sessionCwd || '').replace(/\\/g, '/').replace(/\/+$/, '')
+    if (proj && cwd.split('/').pop() === proj) return file
+    return proj ? proj + '/' + file : file
+  }
+
+  // 回复引用的**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE 出胶囊。
+  // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
+  // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
+  function stripQuoteReplyBody(text) {
+    return String(text || '').replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+  }
+
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
   function renderUserText(text) {
     return esc(text)
       .replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
       .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
+      .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
+      .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
   }
 
   // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
@@ -6039,6 +6122,8 @@ function setFirstSendHash(v) { firstSendHash = v }
           // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
           // 路径 chip → `[@目录:路径]` / `[@文件:路径]`（路径相对工作区根，与网关 /gateway/fs 同基准）。
           const k = n.dataset.kind
+          // 选中引用 chip：文件类出位置令牌、回复类展开原文（见 refToken）
+          if (k === 'ref') { out += refToken(n.dataset); continue }
           out += k === 'session'
             ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
             : k === 'path'
@@ -7159,7 +7244,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
         const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
         const filesHtml = files.length ? fileCardsHtml(files) : ''
-        const bodyText = String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+        const bodyText = stripQuoteReplyBody(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
         // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
         // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
         // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
@@ -7176,7 +7261,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+            const txt = stripQuoteReplyBody(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
             // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
@@ -8506,6 +8591,206 @@ function setApprovalPending(v) { approvalPending = v }
 
 function setGateAwait(v) { gateAwait = v }
 function setGateVerified(v) { gateVerified = v }
+  // ---------- 选中引用（quote）----------
+  // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
+  // 两条链的落地形态不同（用户定案）：文件引用只给位置——模型自己 Read 该文件；回复引用必须带原文——
+  // 回复不属于任何文件，没有位置可查。两者都在输入栏里显示成同一族「引用胶囊」（透明胶囊 + 图标）。
+  //
+  // 浮窗竖排菜单 = 两个动作（浅色，2026-09-28 定案）：上行「使用 AI 编辑」= 只把引用胶囊塞进主输入栏，
+  // 用户补完话术自己发；下行内嵌输入栏（话术）+ 尾部发送钮 = 立即把「引用 + 话术」作为一条消息发出。
+  // 两者共用 insertRefChip，发送一律走 inputbar/send.js 的 gwSend（唯一发送口，不另起链路）。
+  //
+  // 唤出手势 = **松开鼠标那一刻**（document mouseup，主键；用户 2026-09-28 定案）——右键不再被拦截，
+  // 浏览器原生菜单照旧弹出。选区必须在**开浮窗那一刻快照**：点浮窗里的输入框会把 DOM 选区清掉，
+  // 靠 selection 现场取已来不及。
+
+  // 可引用区（选区落在其中才认，其它区域不唤出）
+  const QUOTE_ZONE = '#chat-scroll, #work-editor'
+
+  let quoteSnap = null // 当前浮窗的引用快照
+  let quotePop = null
+  let quoteSkipNextUp = false // 「点浮窗外关窗」的那一下 mousedown 已消费：紧随的 mouseup 不得重开
+
+  // ---------- 1. 选区 → 快照 ----------
+  function quoteBase(p) {
+    return String(p || '').split('/').pop()
+  }
+  // 编辑区行号唯一来源 = DOM 本身：
+  //  · 纯文本预览（pre.wk-code）是**原样**文本，Range 起点/终点的字符偏移换算行号，精确到行；
+  //  · markdown 预览渲染成 HTML（**格式符已丢、文本经过变换**，拿渲染文本回查原文必然对不上——
+  //    「**加粗**：」这类选中就跨在格式符边界上），故行号由渲染期落下的行锚 `data-l` 提供
+  //    （core/markdown.js mdHtml 第二参数，每源行一个锚）。
+  // 拿不到 → null（令牌退化为纯路径，不编造行号）。
+  const QUOTE_LINE_ATTR = 'data-l'
+  function quoteLineOf(node) {
+    let el = node && node.nodeType === 1 ? node : node && node.parentElement
+    while (el) {
+      const v = el.getAttribute && el.getAttribute(QUOTE_LINE_ATTR)
+      if (v) return Number(v)
+      el = el.parentElement
+    }
+    return 0
+  }
+  function quoteEditorLines(range) {
+    const body = $('wk-ed-body')
+    const pre = body && body.querySelector('pre.wk-code')
+    const n = pre && pre.firstChild
+    if (n && n.nodeType === 3 && range.startContainer === n) {
+      const s = range.startOffset
+      const e = range.endContainer === n ? range.endOffset : n.nodeValue.length
+      return [n.nodeValue.slice(0, s).split('\n').length, n.nodeValue.slice(0, e).split('\n').length]
+    }
+    const a = quoteLineOf(range.startContainer)
+    const b = quoteLineOf(range.endContainer)
+    return a && b ? [Math.min(a, b), Math.max(a, b)] : null
+  }
+  function quoteSnapOf() {
+    const sel = window.getSelection()
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
+    const text = sel.toString()
+    if (!text.trim()) return null
+    const range = sel.getRangeAt(0)
+    const node = range.startContainer
+    const el = node.nodeType === 1 ? node : node.parentElement
+    if (!el || !el.closest || !el.closest(QUOTE_ZONE)) return null
+    const rect = range.getBoundingClientRect()
+    const inEditor = el.closest('#work-editor')
+    if (inEditor) {
+      // 空态提示行 / 未打开文件：没有可引用的文件位置
+      if (!state.workFile) return null
+      const lines = quoteEditorLines(range)
+      return { kind: 'file', text, rect, file: state.workFile, proj: state.workProj, l0: lines && lines[0], l1: lines && lines[1] }
+    }
+    const msg = el.closest('.msg')
+    if (!msg) return null
+    const all = [...messagesEl.querySelectorAll('.msg')]
+    const idx = all.indexOf(msg) + 1
+    const cur = state.currentHash ? findSession(state.currentHash) : null
+    return { kind: 'reply', text, rect, title: (cur && cur.title) || '本会话', idx }
+  }
+
+  // ---------- 2. 引用胶囊（输入栏内）----------
+  // 复用 .mention 类：× 删除与退格删除由 ctx-meter.js 的既有委托按 .mention 统一处理，勿另写一套。
+  function insertRefChip(snap) {
+    const chip = document.createElement('span')
+    chip.className = 'mention ref'
+    chip.contentEditable = 'false'
+    chip.dataset.kind = 'ref'
+    chip.dataset.rkind = snap.kind
+    let inner
+    if (snap.kind === 'file') {
+      chip.dataset.file = snap.file
+      chip.dataset.proj = snap.proj || ''
+      if (snap.l0) { chip.dataset.l0 = String(snap.l0); chip.dataset.l1 = String(snap.l1) }
+      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}</span>`
+    } else {
+      chip.dataset.quote = snap.text
+      chip.dataset.title = snap.title || '本会话'
+      chip.dataset.idx = String(snap.idx || 0)
+      inner = `<span class="m-ic">${I.msg}</span><span class="m-nm">引用自「${esc(snap.title || '本会话')}」· 第 ${snap.idx} 条回复</span>`
+    }
+    chip.innerHTML = inner + '<span class="m-x" title="删除">×</span>'
+    // 追加到输入栏末尾：与 @ chip 一样前后各留一个 nbsp 作分隔（序列化时还原成空格）
+    inputEl.appendChild(document.createTextNode('\u00A0'))
+    inputEl.appendChild(chip)
+    inputEl.appendChild(document.createTextNode('\u00A0'))
+    syncGwSend()
+    return chip
+  }
+
+  // ---------- 3. 浮窗 ----------
+  function closeQuotePop() {
+    if (quotePop) { quotePop.remove(); quotePop = null }
+    quoteSnap = null
+  }
+
+  // 立即发送：引用 + 浮窗话术进输入栏 → gwSend（输入栏原有草稿一并发出，不丢内容）
+  async function quoteSendNow() {
+    const snap = quoteSnap
+    if (!snap) return
+    const note = (quotePop.querySelector('.qp-in').value || '').trim()
+    insertRefChip(snap)
+    if (note) {
+      inputEl.appendChild(document.createTextNode(' '))
+      inputEl.appendChild(document.createTextNode(note))
+    }
+    closeQuotePop()
+    inputEl.focus()
+    await gwSend()
+  }
+  // 只入输入栏（「使用 AI 编辑」行）：不发送，关浮窗把焦点交还输入栏，**光标落在胶囊之后**
+  // （用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
+  function quoteStash() {
+    const snap = quoteSnap
+    if (!snap) return
+    const chip = insertRefChip(snap)
+    closeQuotePop()
+    inputEl.focus()
+    caretAfter(chip)
+  }
+  // 折叠光标到 node 之后（与 mention.js insertMention 落光标同一手法）
+  function caretAfter(node) {
+    if (!node || !node.parentNode) return
+    const sel = window.getSelection()
+    if (!sel) return
+    const r = document.createRange()
+    r.setStartAfter(node)
+    r.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(r)
+  }
+  function openQuotePop(snap) {
+    closeQuotePop()
+    quoteSnap = snap
+    const pop = document.createElement('div')
+    pop.className = 'quote-pop'
+    pop.innerHTML =
+      '<button type="button" class="qp-row qp-ai">' +
+        '<span class="qp-lb">使用 AI 编辑</span>' +
+        '<span class="qp-go"></span>' +
+      '</button>' +
+      '<div class="qp-bar">' +
+        '<input class="qp-in" type="text" placeholder="对这段说点什么…" aria-label="引用说明" />' +
+        '<button type="button" class="qp-send" title="发送" aria-label="发送"></button>' +
+      '</div>'
+    pop.querySelector('.qp-go').innerHTML = I.dshSend
+    pop.querySelector('.qp-send').innerHTML = I.dshSend
+    document.body.appendChild(pop)
+    // 落点 = 选区下方（与图片一致：菜单挂在选中行下面），越界 clamp 回视口（与 recent.js 行菜单同一算法）
+    const r = snap.rect || { left: 0, bottom: 0 }
+    const w = pop.offsetWidth
+    const h = pop.offsetHeight
+    pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
+    pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
+    pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮窗内按下不算「点外部」
+    pop.querySelector('.qp-row').addEventListener('click', quoteStash)
+    pop.querySelector('.qp-send').addEventListener('click', quoteSendNow)
+    pop.querySelector('.qp-in').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); quoteSendNow() }
+      else if (e.key === 'Escape') { e.preventDefault(); closeQuotePop() }
+    })
+    quotePop = pop
+  }
+
+  // ---------- 4. 手势 ----------
+  // 松开鼠标那一刻（document mouseup，主键）—— 有非空选区且落在可引用区即开浮窗；右键不拦，原生菜单照旧。
+  // 浮窗内的 mouseup 不算（那一处是点菜单行/输入框）。「点浮窗外关窗」的那一下同样不算——某些元素上
+  // 按下并不会清掉选区，不挡就会「关掉又立刻重开」。
+  document.addEventListener('mouseup', (e) => {
+    if (e.button !== 0) return
+    if (quoteSkipNextUp) { quoteSkipNextUp = false; return }
+    if (quotePop && quotePop.contains(e.target)) return
+    const snap = quoteSnapOf()
+    if (snap) openQuotePop(snap)
+  })
+  // 点浮窗外任意处 / 滚动 / 窗口尺寸变化 / Esc → 关（fixed 浮窗会漂离锚点）
+  document.addEventListener('mousedown', (e) => {
+    if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
+  })
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
+  window.addEventListener('scroll', () => { if (quotePop) closeQuotePop() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
+
   // ---------- 启动 ----------
   ;(async () => {
     await detectGateway()

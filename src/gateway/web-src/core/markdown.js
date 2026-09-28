@@ -1,7 +1,7 @@
 // Markdown 渲染 + relTime（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { esc } from './state.js'
-import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml } from '../inputbar/mention.js'
+import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quoteRefChipHtml, quoteReplyChipHtml } from '../inputbar/mention.js'
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
   const MD_MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Courier New', monospace"
   const MD_LINK_OK = (u) => /^(https?:)?\/\//.test(u) || /^[a-z0-9][a-z0-9./_-]*$/i.test(u)
@@ -20,16 +20,24 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml
     s = s.replace(MENTION_PLUGIN_RE, (_, n) => mentionChipHtml('plugin', n))
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
+         .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
+         .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }
-  function mdHtml(src) {
+  // lineAttr（可选）= 行锚属性名（如 'data-l'）：渲染期把**源行号**写进 DOM，供编辑区选中引用
+  // 反查选区位置（core/markdown.js 只做渲染，不知道选区；落锚是渲染时唯一能拿到源行号的地方）。
+  // 不传 = 现状（会话消息渲染照旧，不带锚）。
+  function mdHtml(src, lineAttr) {
     if (!src) return ''
     const lines = esc(String(src)).split('\n')
+    const la = (n) => (lineAttr ? ` ${lineAttr}="${n}"` : '')
+    // 段落内按源行拆成带锚的 span（一个段落可跨多行，锚落在每一行上而不是段落首行）
+    const lw = (n, inner) => (lineAttr ? `<span ${lineAttr}="${n}">${inner}</span>` : inner)
     let html = ''
     let para = []
     const flushPara = () => { if (para.length) { html += `<p>${para.join('<br>')}</p>`; para = [] } }
-    let inCode = false, codeLang = '', codeBuf = []
+    let inCode = false, codeLang = '', codeBuf = [], codeNums = []
     // ---- 嵌入式图表（```chart 双段围栏，2026-09-12 定案）----
     // 契约（全局根 CLAUDE.md）：模型输出 ```chart 围栏，内含 %%html / %%ascii 两个哨兵段（同一图表的两种等价表达）。
     // web 取 %%html 段进 sandbox iframe（opaque origin，BOOT 上报高度），%%ascii 段弃用（「源码」按钮看全文）；
@@ -56,13 +64,14 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml
       if (!inCode) return
       const raw = codeBuf.join('\n')
       const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
+      const inner = lineAttr ? codeBuf.map((l, k) => lw(codeNums[k], l)).join('\n') : raw
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
-        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${inner}</code></pre></div>`
       } else {
-        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += `<div class="code-block"><pre><code>${inner}</code></pre>${langTag}</div>`
       }
-      codeBuf = []; codeLang = ''; inCode = false
+      codeBuf = []; codeNums = []; codeLang = ''; inCode = false
     }
     let list = null
     const closeList = () => { if (list) { html += `</${list}>`; list = null } }
@@ -77,39 +86,39 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, mentionChipHtml
         if (inCode) { closeCode(true) } else { inCode = true; codeLang = t.slice(3).trim() }
         continue
       }
-      if (inCode) { codeBuf.push(line); continue }
+      if (inCode) { codeBuf.push(line); codeNums.push(i + 1); continue }
       const h = /^(#{1,4})\s+(.*)$/.exec(t)
-      if (h) { flushPara(); closeList(); html += `<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`; continue }
+      if (h) { flushPara(); closeList(); html += `<h${h[1].length}${la(i + 1)}>${mdInline(h[2])}</h${h[1].length}>`; continue }
       if (t.startsWith('&gt;')) {
         flushPara(); closeList()
-        html += `<blockquote>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
+        html += `<blockquote${la(i + 1)}>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
         continue
       }
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        html += `<li${la(i + 1)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        html += `<li${la(i + 1)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
         continue
       }
-      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += '<hr>'; continue }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${la(i + 1)}>`; continue }
       if (t.startsWith('|') && lines[i + 1] && isSep(lines[i + 1].trim())) {
         flushPara(); closeList()
-        html += '<div class="md-table"><table><thead><tr>' + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
+        html += `<div class="md-table"><table><thead><tr${la(i + 1)}>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
         i += 1
         while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
           i += 1
-          html += '<tr>' + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
+          html += `<tr${la(i + 1)}>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
         }
         html += '</tbody></table></div>'
         continue
       }
-      para.push(mdInline(t))
+      para.push(lw(i + 1, mdInline(t)))
     }
     flushPara(); closeCode(false); closeList()
     return html

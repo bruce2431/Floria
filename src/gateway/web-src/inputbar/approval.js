@@ -8,7 +8,7 @@ import { I } from '../core/icons.js'
 import { refreshSession, bindLiveFoldTimer } from '../core/live.js'
 import { mdHtml } from '../core/markdown.js'
 import { messagesEl, inputWrap, inputBarEl, inputEl, sendBtn, state, live, connUp, esc, toast } from '../core/state.js'
-import { renderUserText } from './mention.js'
+import { renderUserText, stripQuoteReplyBody } from './mention.js'
 import { syncGwSend } from './send.js'
 import { firstSendHash } from '../sidebar/recent.js'
   function renderTransient() {
@@ -84,7 +84,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
         const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
         const filesHtml = files.length ? fileCardsHtml(files) : ''
-        const bodyText = String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+        const bodyText = stripQuoteReplyBody(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
         // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
         // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
         // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
@@ -101,7 +101,7 @@ import { firstSendHash } from '../sidebar/recent.js'
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, '')
+            const txt = stripQuoteReplyBody(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
             // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高

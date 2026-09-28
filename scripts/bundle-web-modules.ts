@@ -46,6 +46,9 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   // 区间号仅作执行序排序（拼接按锚点检索切片，非定长行数）：键盘适配置于启动序列（5379）之前，
   // 保证 initViewport 被调用时模块顶层 let 已完成初始化
   { file: 'core/viewport.js', ranges: [[5351, 5351]], first: [''] },
+  // 选中文本引用浮窗（2026-09-28）：区间号仅作执行序排序 —— 顶层立即注册 contextmenu / mousedown
+  // 委托，依赖 core/state.js 的 $/inputEl/state 与 core/icons.js 的 I，故排在启动序列（5379）之前。
+  { file: 'inputbar/quote.js', ranges: [[5352, 5352]], first: ['  // ---------- 选中引用（quote）----------'] },
 ]
 
 // ---------- 读取模块文件并剥离切割壳（头注释/import/setter 注释/export 块） ----------

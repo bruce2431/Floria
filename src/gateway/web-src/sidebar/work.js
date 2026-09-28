@@ -72,12 +72,19 @@ import { renderProjSeat } from '../inputbar/commands.js'
   }
 
   // 浮层各开关的真源：编辑区/助手 = work 主区栏，预览 = 第三栏（个性化工作区），
-  // 侧边栏 = 侧栏自身开合（state.panelOpen，见 recent.js setPanel）。
+  // 侧边栏 = 侧栏是否**被主动打开**（state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen
+  // ——后者含左缘悬停预览式唤出，那种瞬时露出不是「界面常在」，开关不该跟亮。
   function paneOn(k) {
     if (k === 'editor') return state.wkEditor
     if (k === 'assist') return state.wkAssist
     if (k === 'workspace') return state.wkPreview
-    return !!state.panelOpen
+    return !!state.panelPinned
+  }
+
+  // 视图浮层行状态落地（唯一处）：本模块 applyPanes 与 recent.js setPanel（钉住态可被汉堡/收起钮/
+  // 遮罩任一处翻转）两处调用。
+  function syncPaneRows() {
+    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
   }
 
   // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
@@ -94,7 +101,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
       chatArea.classList.toggle('hide-assist', !state.wkAssist)
       chatArea.classList.toggle('wk-preview', !!state.wkPreview)
     }
-    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+    syncPaneRows()
     applyWorkFlex()
   }
 
@@ -385,7 +392,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
   function setPane(k, on) {
     if (k === 'sidebar') {
       // 侧栏开合不走「至少保留一栏」判定——那是主区两栏之间的约束，与侧栏无关。
-      // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属 #edge-hot 唤出）。
+      // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
       return
@@ -677,8 +684,10 @@ import { renderProjSeat } from '../inputbar/commands.js'
       }
       const text = await res.text()
       if (seq !== edSeq) return
+      // markdown 预览带行锚（mdHtml 第二参数）：渲染期把每个源行号写进 DOM（data-l），
+      // 选中引用据此取选区首尾所在行——渲染后的文本已丢格式符，回查原文不可靠（inputbar/quote.js）。
       body.innerHTML = MD_EXT.test(p)
-        ? `<div class="wk-ed-md md">${mdHtml(text)}</div>`
+        ? `<div class="wk-ed-md md">${mdHtml(text, 'data-l')}</div>`
         : `<pre class="wk-code">${esc(text)}</pre>`
     } catch (e) {
       if (seq !== edSeq) return

@@ -13,7 +13,7 @@ import { bodyEl, overlay, state, saveMgrView, ALL, esc, toast, isMobile } from '
 import { closeMentionPop } from '../inputbar/mention.js'
 import { apiSetModel } from '../inputbar/model-select.js'
 import { gwSend } from '../inputbar/send.js'
-import { clearExtCards, registerExtCards, showPreviewCard, showView, viewBody } from '../views/registry.js'
+import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteActions, showPreviewCard, showView, viewBody } from '../views/registry.js'
 import { MGR, MGR_LOADING, MGR_ERR, loadMgrData, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, mgrColor } from './mgr-data.js'
 import { renderMgrNeurons } from './neurons.js'
 import { clearRailExt } from './rail-ext.js'
@@ -311,18 +311,24 @@ import { setPanel, itemHtml, bindSessClicks, newWebSession } from './recent.js'
       toast('设置失败 · 模型不在凭据池或网关未连接')
     }
   }
-  // 外部卡片清单同步（卡片化二期）：清单属于「当前 .preview-frame 所指项目」——与 clearRailExt 同点
-  // 调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过 preview.json，registerExtCards 再校
-  // 一遍（postMessage 那条不过网关，两条外部输入共用 ext-card.js 的同一份过滤器）。
+  // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
+  // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
+  // preview.json，registerExtCards / registerQuoteActions 再校一遍（postMessage 那条不过网关，
+  // 两条外部输入共用 ext-card.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
   // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
   let extCardsSeq = 0
   function syncExtCards(label) {
     const seq = ++extCardsSeq
     clearExtCards()
+    clearQuoteActions()
     fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-      .then((d) => { if (seq === extCardsSeq) registerExtCards(label, d && d.cards, true) })
-      .catch(() => {}) // 清单拿不到 = 该项目无外部卡（不猜不兜底）
+      .then((d) => {
+        if (seq !== extCardsSeq) return
+        registerExtCards(label, d && d.cards, true)
+        registerQuoteActions(label, d && d.quoteActions)
+      })
+      .catch(() => {}) // 清单拿不到 = 该项目无外部卡/无浮窗动作（不猜不兜底）
   }
 
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。

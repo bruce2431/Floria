@@ -28,6 +28,24 @@ import { esc } from '../core/state.js'
       }))
       .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
   }
+  // 浮窗动作字段校验（2026-09-28，与 normExtCards 同款风格）：preview.json 的 quoteActions 段。
+  // 动作是**纯数据**（无 path / host，不指向文件）——宿主只渲染动作行，点击把 id 回发预览页。
+  // id 非法 / 重名、title 空 → 丢（不猜不兜底）；icon 缺省 plug。整个 quoteActions 缺失 = 空集。
+  function normQuoteActions(raw) {
+    const seen = new Set()
+    return (Array.isArray(raw) ? raw : [])
+      .filter((a) => a && typeof a === 'object' && !Array.isArray(a))
+      .map((a) => ({
+        id: typeof a.id === 'string' ? a.id.trim() : '',
+        title: typeof a.title === 'string' ? a.title.trim() : '',
+        icon: typeof a.icon === 'string' && a.icon ? a.icon : 'plug',
+      }))
+      .filter((a) => {
+        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(a.id) || !a.title || seen.has(a.id)) return false
+        seen.add(a.id)
+        return true
+      })
+  }
   // 资源路径必须是 preview 目录内的相对文件路径（绝对路径 / 反斜杠 / query / 空段 / `.` `..` 段
   // 一律拒；允许尾随 #片段）。与网关 isPreviewRelPath 同款规则——网关侧挡 preview.json 来源，
   // 这里挡 postMessage 来源，两条外部输入各自守门。
@@ -59,4 +77,5 @@ import { esc } from '../core/state.js'
 export {
   mountExtCard,
   normExtCards,
+  normQuoteActions,
 }

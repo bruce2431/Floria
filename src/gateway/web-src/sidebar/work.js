@@ -4,14 +4,16 @@ import { navigate } from '../chat/route.js'
 import { needToken, apiUrl } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
-import { ALL, chatArea, esc, isMobile, loadWork, saveWork, sessionCard, state, toast } from '../core/state.js'
+import { ALL, chatArea, esc, isMobile, loadWork, loadWorkPanes, saveWork, sessionCard, stashWorkPanes, state, toast } from '../core/state.js'
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
 import { mountPreview } from './mgr.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
-  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。数据源全部是现成端点，本模块零后端改动：
+  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
+  // 另按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽（见 selectProject）。
+  // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
@@ -63,6 +65,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) {
+      applySidebarPin() // 进 work：侧栏开合按工作项目槽里的开关恢复（桌面）
       ensureWork()
       startWorkAuto()
     } else {
@@ -85,6 +88,14 @@ import { renderProjSeat } from '../inputbar/commands.js'
   // 遮罩任一处翻转）两处调用。
   function syncPaneRows() {
     document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+  }
+
+  // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
+  // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
+  // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
+  function applySidebarPin() {
+    if (isMobile()) return
+    setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
   }
 
   // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
@@ -395,6 +406,7 @@ import { renderProjSeat } from '../inputbar/commands.js'
       // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
+      saveWork() // 四开关之一：归档进工作项目的槽
       return
     }
     if (k === 'workspace') {
@@ -564,7 +576,9 @@ import { renderProjSeat } from '../inputbar/commands.js'
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
+    loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
     state.workFile = ''
     wkOpen.clear()
     wkFilter = ''
@@ -572,6 +586,8 @@ import { renderProjSeat } from '../inputbar/commands.js'
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
+    applyPanes() // 四开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
+    applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）

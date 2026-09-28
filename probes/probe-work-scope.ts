@@ -162,5 +162,26 @@ ok('G1 mouseleave 收起判据读 panelPinned（悬停唤出可收）', /if \(!s
 ok('G1 state.js 有 panelPinned 初始位', /panelPinned: false/.test(stateJs))
 ok('G1 浮层行同步定义唯一 + 两处调用', count(appJs, /function syncPaneRows\(/g) === 1 && count(appJs, /syncPaneRows\(\)/g) >= 2)
 
+// ---------- ⑪ 视图浮层四开关按项目分槽（2026-09-28）----------
+// 不变量：四开关（编辑区/助手/预览/侧边栏）是**项目级**状态——切项目换槽（有槽用槽，无槽回落缺省），
+// 尚未选项目时不落槽。读写各一个口：stashWorkPanes（saveWork 内调）/ loadWorkPanes（loadWork 与切项目调）。
+ok('H1 state.js 有 wkPanes 槽 + 四开关缺省表', /wkPanes: \{\}/.test(stateJs) && /const WK_PANES_DEF = \{ editor: true, assist: true, workspace: false, sidebar: false \}/.test(stateJs))
+const stash = body(stateJs, 'function stashWorkPanes()')
+ok('H1 归档唯一口：未选项目不落槽', stash.includes('if (!state.workProj) return') && /state\.wkPanes\[state\.workProj\] = \{/.test(stash))
+const lwp = body(stateJs, 'function loadWorkPanes(')
+ok('H1 读槽唯一口：无槽回落缺省（四键逐一）', lwp.length > 0 && /typeof s\[k\] === 'boolean' \? s\[k\] : WK_PANES_DEF\[k\]/.test(lwp) && ['editor', 'assist', 'workspace', 'sidebar'].every((k) => lwp.includes(`val('${k}')`)))
+ok('H1 saveWork 归档后与其余 work 状态同一次 patch', body(stateJs, 'function saveWork()').includes('stashWorkPanes()') && /wkPanes: state\.wkPanes/.test(body(stateJs, 'function saveWork()')))
+ok('H1 loadWork 读槽表 + 按恢复项目落四开关', /state\.wkPanes\[k\] = v/.test(body(stateJs, 'function loadWork()')) && body(stateJs, 'function loadWork()').includes('loadWorkPanes(state.workProj)'))
+ok('H1 旧全局扁平字段（wkEditor/wkAssist/wkPreview 顶层持久化）已清除', !/d\.wkEditor|d\.wkAssist\b|d\.wkPreview|wkEditor: state\.wkEditor/.test(stateJs))
+const sp = body(workJs, 'async function selectProject(')
+ok('H2 切项目：先归档旧项目（早于 workProj 赋值）', sp.includes('stashWorkPanes()') && sp.indexOf('stashWorkPanes()') < sp.indexOf('state.workProj = label'))
+ok('H2 切项目：换槽后落地四开关（loadWorkPanes → applyPanes）', sp.indexOf('loadWorkPanes(label)') > sp.indexOf('state.workProj = label') && sp.indexOf('applyPanes()') > sp.indexOf('loadWorkPanes(label)'))
+ok('H2 侧栏开合按新项目槽恢复（applySidebarPin 在切项目链内）', sp.includes('applySidebarPin()'))
+const asp = body(workJs, 'function applySidebarPin()')
+ok('H3 侧栏恢复走 setPanel（侧栏开合唯一口），移动端不恢复', asp.includes('setPanel(!!state.panelPinned, { pin: !!state.panelPinned })') && asp.includes('if (isMobile()) return'))
+ok('H3 进 work 模式接线（applySbMode 的 on 分支调 applySidebarPin）', body(workJs, 'function applySbMode()').includes('applySidebarPin()'))
+ok('H3 浮层「侧边栏」开关落盘（setPane sidebar 分支 saveWork）', body(workJs, 'function setPane(').split("if (k === 'sidebar')")[1]?.split('return')[0]?.includes('saveWork()') === true)
+ok('H4 产物 app.js 内两个新口定义唯一', count(appJs, /function stashWorkPanes\(/g) === 1 && count(appJs, /function loadWorkPanes\(/g) === 1 && count(appJs, /function applySidebarPin\(/g) === 1)
+
 console.log(`\n${pass}/${fail}`)
 process.exit(fail ? 1 : 0)

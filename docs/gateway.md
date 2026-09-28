@@ -124,6 +124,19 @@
 - 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）。
 - 解析行为真值表见 `probes/probe-web-ext-cards.ts`（从源码提取函数体、剥 TS 类型后直接跑，不另起网关）。
 
+### 6.6 preview.json 的 quoteActions 字段（浮窗动作申报，2026-09-28）
+
+同一份 `preview.json` 的**第三种能力申报**（与 `backend`、`cards` 并列）：项目声明要在宿主选中引用浮窗（web-ui §47/§48）里追加哪些动作行。
+
+```json
+{ "quoteActions": [ { "id": "vocab", "title": "生成单词卡", "icon": "plug" } ] }
+```
+
+- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…] }`（**同一端点、一次请求取两份申报**，不新增路由）。
+- 解析：`readPreviewQuoteActions(previewDir)` 复用同一 `readPreviewJson` 单一解析入口。逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空；不合格项整条丢弃（不猜不补）。`icon` 非空串即留（是否合法由前端 `I` 表判定，缺省回落 `plug`）。段缺失 = 空集（正常态）。
+- **动作是纯数据**：无 `path`、不指向文件——宿主只渲染动作行，点击把 `id` 回发预览页（`floria-quote-action`），**执行逻辑留在项目页面自己的运行上下文**（要调项目自己的 API 与页面状态）。
+- 前端对应件 `views/ext-card.js` `normQuoteActions()`（同款字段校验，与 `isExtPath` 之于 `isPreviewRelPath` 同理由：两条外部输入各自守门）。
+
 ## 7. web 独立会话进程链
 
 web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 headless 管道），与普通 CLI 同路径、同样可被远程审批。**会话落盘按来源**：「笔」新建（无 project）→ 全局根 `@WrokSpace/.claude/projects/`（projectScope:'global'）；「项目 +」新建（有 project）→ 该项目根 `.claude/projects/`；不落 Pj16 项目根。落盘位置与 exe 来源无关（cwd 由 `webSessionProjectRoot` 路由）。

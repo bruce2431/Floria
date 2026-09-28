@@ -3,6 +3,7 @@
 import { I } from '../core/icons.js'
 import { esc, inputEl, messagesEl, state } from '../core/state.js'
 import { findSession } from '../core/sessions.js'
+import { quoteActions } from '../views/registry.js'
 import { gwSend, syncGwSend } from './send.js'
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
@@ -16,6 +17,13 @@ import { gwSend, syncGwSend } from './send.js'
   // 唤出手势 = **松开鼠标那一刻**（document mouseup，主键；用户 2026-09-28 定案）——右键不再被拦截，
   // 浏览器原生菜单照旧弹出。选区必须在**开浮窗那一刻快照**：点浮窗里的输入框会把 DOM 选区清掉，
   // 靠 selection 现场取已来不及。
+  //
+  // 2026-09-28 扩展（项目注册）：浮窗改为「**内置动作 + 当前项目申报动作**分表合流」。动作表由项目在
+  // `<项目>/.claude/preview/preview.json` 的 `quoteActions` 段静态申报（与 cards 同构、同一拉取点），
+  // 经 views/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
+  // （iframe）——它的选区在宿主看来不可达（跨文档 getSelection 不达），故由预览页 postMessage 自报：
+  // `floria-quote-open`（开窗）/ `floria-quote-close`（关窗），宿主点申报动作行回发 `floria-quote-action`。
+  // 执行逻辑**留在项目页面自己的运行上下文**（要调 Pj13 的 API 与 pdf 状态），宿主只回发 id、不代执行。
 
   // 可引用区（选区落在其中才认，其它区域不唤出）
   const QUOTE_ZONE = '#chat-scroll, #work-editor'
@@ -91,7 +99,16 @@ import { gwSend, syncGwSend } from './send.js'
     chip.dataset.kind = 'ref'
     chip.dataset.rkind = snap.kind
     let inner
-    if (snap.kind === 'file') {
+    if (snap.kind === 'pdf') {
+      // PDF 引用（2026-09-28）：位置 = 路径 + 页码（跨页 s-e）。**原文必须进消息**（PDF 定位不精确、
+      // 大 PDF 必须给页码提示、选中原文才是要引用的 payload）⇒ dataset.quote 与回复引用同款带上。
+      chip.dataset.file = snap.file
+      chip.dataset.proj = snap.proj || ''
+      chip.dataset.quote = snap.text
+      if (snap.p0) { chip.dataset.p0 = String(snap.p0); if (snap.p1) chip.dataset.p1 = String(snap.p1) }
+      const pages = snap.p0 ? ' · 第 ' + snap.p0 + (snap.p1 && snap.p1 !== snap.p0 ? '-' + snap.p1 : '') + ' 页' : ''
+      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}${pages}</span>`
+    } else if (snap.kind === 'file') {
       chip.dataset.file = snap.file
       chip.dataset.proj = snap.proj || ''
       if (snap.l0) { chip.dataset.l0 = String(snap.l0); chip.dataset.l1 = String(snap.l1) }
@@ -152,21 +169,40 @@ import { gwSend, syncGwSend } from './send.js'
     sel.removeAllRanges()
     sel.addRange(r)
   }
+  // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
+  // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
+  const QUOTE_BUILTIN_ID = 'ai-edit'
+  function quoteActionRows() {
+    const rows = [{ id: QUOTE_BUILTIN_ID, title: '使用 AI 编辑', builtin: true }]
+    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID) rows.push(a)
+    return rows
+  }
+  function quoteActionRowHtml(a) {
+    const lead = a.builtin ? '' : `<span class="qp-ic">${I[a.icon] || I.plug}</span>`
+    return '<button type="button" class="qp-row" data-qact="' + esc(a.id) + '">' +
+      lead + '<span class="qp-lb">' + esc(a.title) + '</span><span class="qp-go"></span>' +
+      '</button>'
+  }
+  // 申报动作的落地：宿主**不代执行**（业务动作要调项目自己的 API 与页面状态）——只把 id 回发预览帧。
+  function quoteRunAction(id) {
+    const w = quoteSnap && quoteSnap.frame
+    closeQuotePop()
+    if (w) { try { w.postMessage({ type: 'floria-quote-action', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ } }
+  }
+  // 唯一开窗入口（两条来源共用）：宿主机内选区（quoteSnapOf）与项目预览页自报（floria-quote-open）。
+  // 后者多带 frame（回发锚点）与 kind:'pdf'，其余同构——外部来源不另开一套浮窗。
   function openQuotePop(snap) {
     closeQuotePop()
     quoteSnap = snap
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
-      '<button type="button" class="qp-row qp-ai">' +
-        '<span class="qp-lb">使用 AI 编辑</span>' +
-        '<span class="qp-go"></span>' +
-      '</button>' +
+      quoteActionRows().map(quoteActionRowHtml).join('') +
       '<div class="qp-bar">' +
         '<input class="qp-in" type="text" placeholder="对这段说点什么…" aria-label="引用说明" />' +
         '<button type="button" class="qp-send" title="发送" aria-label="发送"></button>' +
       '</div>'
-    pop.querySelector('.qp-go').innerHTML = I.dshSend
+    pop.querySelectorAll('.qp-go').forEach((g) => { g.innerHTML = I.dshSend })
     pop.querySelector('.qp-send').innerHTML = I.dshSend
     document.body.appendChild(pop)
     // 落点 = 选区下方（与图片一致：菜单挂在选中行下面），越界 clamp 回视口（与 recent.js 行菜单同一算法）
@@ -176,7 +212,13 @@ import { gwSend, syncGwSend } from './send.js'
     pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
     pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
     pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮窗内按下不算「点外部」
-    pop.querySelector('.qp-row').addEventListener('click', quoteStash)
+    pop.querySelectorAll('.qp-row').forEach((b) =>
+      b.addEventListener('click', () => {
+        const id = b.dataset.qact
+        if (id === QUOTE_BUILTIN_ID) quoteStash()
+        else quoteRunAction(id)
+      }),
+    )
     pop.querySelector('.qp-send').addEventListener('click', quoteSendNow)
     pop.querySelector('.qp-in').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); quoteSendNow() }
@@ -204,14 +246,69 @@ import { gwSend, syncGwSend } from './send.js'
   window.addEventListener('scroll', () => { if (quotePop) closeQuotePop() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
 
+  // ---------- 5. 项目预览桥（floria-quote-open / floria-quote-close / floria-quote-action）----------
+  // 预览页（<项目>/.claude/preview 的 iframe，src = 127.0.0.1:<port> 或 /backend/<label>/）里的选区
+  // 宿主看不到（跨文档 getSelection 不达）⇒ 由预览页自报开窗；关窗同理：iframe 内点击/滚动都不冒泡
+  // 到宿主 document，宿主那两条「点外部/滚动即关」的策略对帧内事件失效，故预览页必须显式发 close。
+  // **门 = e.source 必须是当前在场 .preview-frame 的 contentWindow**（与 rail-ext / ext-card 同一道）。
+  // **按 e.source 反查帧、不取 querySelector 第一个**：槽位预览卡与 work 预览栏可能同时在场，
+  // 取「第一个」会把 bridge 认到错误的帧（rail-ext 同病，本模块不重蹈）。
+  const QUOTE_FRAME_SEL = '.preview-frame'
+  function quoteFrameBySource(src) {
+    let hit = null
+    document.querySelectorAll(QUOTE_FRAME_SEL).forEach((el) => {
+      if (hit || !el.contentWindow) return
+      if (el.contentWindow === src) hit = el
+    })
+    return hit
+  }
+  // 坐标换算：预览页给的是 **iframe 内视口坐标**（0,0 = 帧左上角），叠上帧自身的位置即是宿主视口坐标。
+  // 浮窗落点只需 left/bottom（openQuotePop 用这两项 + 视口 clamp）。
+  function quoteFrameRect(frame, r) {
+    const b = frame.getBoundingClientRect()
+    const x = Number(r && r.x) || 0
+    const y = Number(r && r.y) || 0
+    const h = Number(r && r.h) || 0
+    return { left: b.left + x, bottom: b.top + y + h }
+  }
+  function quoteBridgeOnMessage(e) {
+    const d = e.data
+    if (!d || typeof d !== 'object') return
+    if (d.type !== 'floria-quote-open' && d.type !== 'floria-quote-close') return
+    const frame = quoteFrameBySource(e.source)
+    if (!frame) return // 非当前预览帧的输入一律不理（唯一守门）
+    if (d.type === 'floria-quote-close') { closeQuotePop(); return }
+    const text = typeof d.text === 'string' ? d.text : ''
+    if (!text.trim()) return
+    const p0 = Number(d.page) > 0 ? Number(d.page) : 0
+    const p1 = Number(d.pageEnd) > 0 ? Number(d.pageEnd) : 0
+    // 路径基准交给 refPath（会话开在 Pj13 时出项目内相对路径，否则带 label 前缀）——proj 取帧的 data-label。
+    openQuotePop({
+      kind: 'pdf',
+      text,
+      rect: quoteFrameRect(frame, d.rect),
+      frame: frame.contentWindow,
+      file: typeof d.pdf === 'string' ? d.pdf : '',
+      proj: frame.dataset.label || '',
+      p0,
+      p1: p1 || p0,
+    })
+  }
+  window.addEventListener('message', quoteBridgeOnMessage)
+
 export {
+  QUOTE_FRAME_SEL,
   QUOTE_ZONE,
   caretAfter,
   closeQuotePop,
   insertRefChip,
   openQuotePop,
+  quoteActionRows,
   quoteBase,
   quoteEditorLines,
+  quoteFrameBySource,
+  quoteFrameRect,
   quoteLineOf,
+  quoteRunAction,
   quoteSnapOf,
 }

@@ -1,7 +1,7 @@
 // Markdown 渲染 + relTime（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { esc } from './state.js'
-import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quoteRefChipHtml, quoteReplyChipHtml } from '../inputbar/mention.js'
+import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml } from '../inputbar/mention.js'
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
   const MD_MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Courier New', monospace"
   const MD_LINK_OK = (u) => /^(https?:)?\/\//.test(u) || /^[a-z0-9][a-z0-9./_-]*$/i.test(u)
@@ -22,6 +22,7 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_REF_RE, Q
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
          .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
          .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
+         .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }

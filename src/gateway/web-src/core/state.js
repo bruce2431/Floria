@@ -42,7 +42,14 @@ import { ctx } from '../inputbar/ctx-meter.js'
     wkAssistMode: 'side', wkAssistH: 430,
     // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
     // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
-    wkFlex: { editor: 1, assist: 1, preview: 1 } }
+    wkFlex: { editor: 1, assist: 1, preview: 1 },
+    // wkPanes = 视图浮层四开关（编辑区/助手/预览/侧边栏）按项目分槽：<项目 label> → 四开关取值。
+    // 无槽 = 用 WK_PANES_DEF（与上面 state 初值同源）；未选项目（workProj 空）不落槽——那时开关只是
+    // 当前会话内的即时值。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
+    wkPanes: {} }
+
+  // 四开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
+  const WK_PANES_DEF = { editor: true, assist: true, workspace: false, sidebar: false }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -66,9 +73,26 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
     } catch { /* 忽略 */ }
   }
+  // 四开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
+  // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
+  function stashWorkPanes() {
+    if (!state.workProj) return
+    state.wkPanes[state.workProj] = { editor: !!state.wkEditor, assist: !!state.wkAssist, workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+  }
+  // 槽 → 四开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
+  // applySidebarPin）负责——纯函数不许碰 DOM。
+  function loadWorkPanes(label) {
+    const s = (label && state.wkPanes[label]) || null
+    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
+    state.wkEditor = val('editor')
+    state.wkAssist = val('assist')
+    state.wkPreview = val('workspace')
+    state.panelPinned = val('sidebar')
+  }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
+    stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
   }
   function loadWork() {
     try {
@@ -79,9 +103,10 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
       if (typeof d.workFile === 'string') state.workFile = d.workFile
-      if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
-      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
-      if (typeof d.wkPreview === 'boolean') state.wkPreview = d.wkPreview
+      if (d.wkPanes && typeof d.wkPanes === 'object') {
+        for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
+      }
+      loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
       if (d.wkFlex && typeof d.wkFlex === 'object') {
@@ -144,6 +169,7 @@ export {
   live,
   loadMgrView,
   loadWork,
+  loadWorkPanes,
   messagesEl,
   modeTabsEl,
   newSessionProject,
@@ -152,6 +178,7 @@ export {
   sInput,
   saveMgrView,
   saveWork,
+  stashWorkPanes,
   sendBtn,
   sessionCard,
   sidebar,

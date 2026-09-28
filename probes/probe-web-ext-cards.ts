@@ -66,7 +66,7 @@ const syncBody = body(mgrJs, 'function syncExtCards(')
 ok('I1 mgr.js 定义 syncExtCards', syncBody.length > 0)
 ok('I1 syncExtCards 先清后取（旧项目卡不残留）', syncBody.indexOf('clearExtCards()') >= 0 && syncBody.indexOf('clearExtCards()') < syncBody.indexOf('fetch('))
 ok('I1 syncExtCards 走静态清单端点', syncBody.includes('/gateway/preview-cards?label='))
-ok('I1 syncExtCards 有 seq 守卫（先发请求的迟到响应不落表）', syncBody.includes('seq === extCardsSeq'))
+ok('I1 syncExtCards 有 seq 守卫（先发请求的迟到响应不落表）', /seq (?:===|!==) extCardsSeq/.test(syncBody))
 // 挂载点 = 与 clearRailExt 同点：iframe 换 src / 新文档重挂（2 处），每处紧邻在 clearRailExt() 之后
 const clearIdx = [...mgrJs.matchAll(/clearRailExt\(\)/g)].map((m) => m.index!)
 const syncIdx = [...mgrJs.matchAll(/syncExtCards\(label\)(?!\s*\{)/g)].map((m) => m.index!)

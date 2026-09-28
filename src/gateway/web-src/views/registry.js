@@ -9,7 +9,7 @@
 
 import { I } from '../core/icons.js'
 import { chatArea, esc, sessionCard } from '../core/state.js'
-import { mountExtCard, normExtCards } from './ext-card.js'
+import { mountExtCard, normExtCards, normQuoteActions } from './ext-card.js'
 
   // ---------- 视图注册表 ----------
   const VIEWS = [
@@ -56,6 +56,28 @@ import { mountExtCard, normExtCards } from './ext-card.js'
     EXT = []
     EXT_LABEL = ''
     renderMgrTabs()
+  }
+
+  // ---------- 项目申报的浮窗动作表（2026-09-28）----------
+  // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
+  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（sidebar/mgr.js syncExtCards /
+  // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
+  // 动作是纯数据、无 render 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
+  // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
+  let QACTIONS = []
+  let QACTIONS_LABEL = ''
+  function registerQuoteActions(label, actions) {
+    if (!label) return
+    QACTIONS = normQuoteActions(actions)
+    QACTIONS_LABEL = label
+  }
+  function clearQuoteActions() {
+    if (!QACTIONS.length && !QACTIONS_LABEL) return
+    QACTIONS = []
+    QACTIONS_LABEL = ''
+  }
+  function quoteActions() {
+    return QACTIONS
   }
 
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
@@ -116,7 +138,10 @@ import { mountExtCard, normExtCards } from './ext-card.js'
 export {
   VIEWS,
   clearExtCards,
+  clearQuoteActions,
+  quoteActions,
   registerExtCards,
+  registerQuoteActions,
   renderMgrTabs,
   showPreviewCard,
   showView,

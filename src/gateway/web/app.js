@@ -159,7 +159,14 @@
     wkAssistMode: 'side', wkAssistH: 430,
     // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
     // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
-    wkFlex: { editor: 1, assist: 1, preview: 1 } }
+    wkFlex: { editor: 1, assist: 1, preview: 1 },
+    // wkPanes = 视图浮层四开关（编辑区/助手/预览/侧边栏）按项目分槽：<项目 label> → 四开关取值。
+    // 无槽 = 用 WK_PANES_DEF（与上面 state 初值同源）；未选项目（workProj 空）不落槽——那时开关只是
+    // 当前会话内的即时值。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
+    wkPanes: {} }
+
+  // 四开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
+  const WK_PANES_DEF = { editor: true, assist: true, workspace: false, sidebar: false }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -183,9 +190,26 @@
       if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
     } catch { /* 忽略 */ }
   }
+  // 四开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
+  // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
+  function stashWorkPanes() {
+    if (!state.workProj) return
+    state.wkPanes[state.workProj] = { editor: !!state.wkEditor, assist: !!state.wkAssist, workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+  }
+  // 槽 → 四开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
+  // applySidebarPin）负责——纯函数不许碰 DOM。
+  function loadWorkPanes(label) {
+    const s = (label && state.wkPanes[label]) || null
+    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
+    state.wkEditor = val('editor')
+    state.wkAssist = val('assist')
+    state.wkPreview = val('workspace')
+    state.panelPinned = val('sidebar')
+  }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkEditor: state.wkEditor, wkAssist: state.wkAssist, wkPreview: state.wkPreview, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
+    stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
   }
   function loadWork() {
     try {
@@ -196,9 +220,10 @@
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
       if (typeof d.workFile === 'string') state.workFile = d.workFile
-      if (typeof d.wkEditor === 'boolean') state.wkEditor = d.wkEditor
-      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
-      if (typeof d.wkPreview === 'boolean') state.wkPreview = d.wkPreview
+      if (d.wkPanes && typeof d.wkPanes === 'object') {
+        for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
+      }
+      loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
       if (d.wkFlex && typeof d.wkFlex === 'object') {
@@ -253,6 +278,7 @@
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
          .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
          .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
+         .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return s
   }
@@ -2029,7 +2055,7 @@ function setLastNavHash(v) { lastNavHash = v }
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
-    txt = stripQuoteReplyBody(txt)
+    txt = stripQuoteBodies(txt)
     const hasImg = m.blocks.some((b) => b.kind === 'image')
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
@@ -3404,18 +3430,24 @@ function setFirstSendHash(v) { firstSendHash = v }
       toast('设置失败 · 模型不在凭据池或网关未连接')
     }
   }
-  // 外部卡片清单同步（卡片化二期）：清单属于「当前 .preview-frame 所指项目」——与 clearRailExt 同点
-  // 调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过 preview.json，registerExtCards 再校
-  // 一遍（postMessage 那条不过网关，两条外部输入共用 ext-card.js 的同一份过滤器）。
+  // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
+  // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
+  // preview.json，registerExtCards / registerQuoteActions 再校一遍（postMessage 那条不过网关，
+  // 两条外部输入共用 ext-card.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
   // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
   let extCardsSeq = 0
   function syncExtCards(label) {
     const seq = ++extCardsSeq
     clearExtCards()
+    clearQuoteActions()
     fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-      .then((d) => { if (seq === extCardsSeq) registerExtCards(label, d && d.cards, true) })
-      .catch(() => {}) // 清单拿不到 = 该项目无外部卡（不猜不兜底）
+      .then((d) => {
+        if (seq !== extCardsSeq) return
+        registerExtCards(label, d && d.cards, true)
+        registerQuoteActions(label, d && d.quoteActions)
+      })
+      .catch(() => {}) // 清单拿不到 = 该项目无外部卡/无浮窗动作（不猜不兜底）
   }
 
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。
@@ -4278,6 +4310,24 @@ function setFirstSendHash(v) { firstSendHash = v }
       }))
       .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
   }
+  // 浮窗动作字段校验（2026-09-28，与 normExtCards 同款风格）：preview.json 的 quoteActions 段。
+  // 动作是**纯数据**（无 path / host，不指向文件）——宿主只渲染动作行，点击把 id 回发预览页。
+  // id 非法 / 重名、title 空 → 丢（不猜不兜底）；icon 缺省 plug。整个 quoteActions 缺失 = 空集。
+  function normQuoteActions(raw) {
+    const seen = new Set()
+    return (Array.isArray(raw) ? raw : [])
+      .filter((a) => a && typeof a === 'object' && !Array.isArray(a))
+      .map((a) => ({
+        id: typeof a.id === 'string' ? a.id.trim() : '',
+        title: typeof a.title === 'string' ? a.title.trim() : '',
+        icon: typeof a.icon === 'string' && a.icon ? a.icon : 'plug',
+      }))
+      .filter((a) => {
+        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(a.id) || !a.title || seen.has(a.id)) return false
+        seen.add(a.id)
+        return true
+      })
+  }
   // 资源路径必须是 preview 目录内的相对文件路径（绝对路径 / 反斜杠 / query / 空段 / `.` `..` 段
   // 一律拒；允许尾随 #片段）。与网关 isPreviewRelPath 同款规则——网关侧挡 preview.json 来源，
   // 这里挡 postMessage 来源，两条外部输入各自守门。
@@ -4354,6 +4404,28 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderMgrTabs()
   }
 
+  // ---------- 项目申报的浮窗动作表（2026-09-28）----------
+  // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
+  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（sidebar/mgr.js syncExtCards /
+  // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
+  // 动作是纯数据、无 render 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
+  // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
+  let QACTIONS = []
+  let QACTIONS_LABEL = ''
+  function registerQuoteActions(label, actions) {
+    if (!label) return
+    QACTIONS = normQuoteActions(actions)
+    QACTIONS_LABEL = label
+  }
+  function clearQuoteActions() {
+    if (!QACTIONS.length && !QACTIONS_LABEL) return
+    QACTIONS = []
+    QACTIONS_LABEL = ''
+  }
+  function quoteActions() {
+    return QACTIONS
+  }
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
   function renderMgrTabs() {
@@ -4411,7 +4483,9 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
-  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。数据源全部是现成端点，本模块零后端改动：
+  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
+  // 另按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽（见 selectProject）。
+  // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
@@ -4463,6 +4537,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) {
+      applySidebarPin() // 进 work：侧栏开合按工作项目槽里的开关恢复（桌面）
       ensureWork()
       startWorkAuto()
     } else {
@@ -4485,6 +4560,14 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 遮罩任一处翻转）两处调用。
   function syncPaneRows() {
     document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
+  }
+
+  // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
+  // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
+  // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
+  function applySidebarPin() {
+    if (isMobile()) return
+    setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
   }
 
   // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
@@ -4795,6 +4878,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
+      saveWork() // 四开关之一：归档进工作项目的槽
       return
     }
     if (k === 'workspace') {
@@ -4964,7 +5048,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
+    loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
     state.workFile = ''
     wkOpen.clear()
     wkFilter = ''
@@ -4972,6 +5058,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
+    applyPanes() // 四开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
+    applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
@@ -5927,6 +6015,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
   // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
   const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
+  // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
+  // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
+  // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。带**原文块**（同回复引用
+  // `QUOTE_REPLY_BODY_RE` 手法）：① PDF 定位不精确 ② 大 PDF 必须给页码提示 ③ 选中原文才是要引用的 payload。
+  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.folder
   const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
@@ -6071,12 +6165,25 @@ function setFirstSendHash(v) { firstSendHash = v }
     const label = `引用自「${t}」· 第 ${idx} 条回复`
     return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
   }
+  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
+  // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
+  function quotePdfChipHtml(path, p0, p1) {
+    const name = String(path).split('/').pop()
+    const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
+    const label = `引用自 ${name}${pages}`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
+  }
 
   // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
   //  文件引用 = 只给位置，模型自己 Read；
   //  回复引用 = 原文必须进消息——回复不属于任何文件，没有位置可查。原文包在令牌块里（`QUOTE_REPLY_BODY_RE`），
   //  渲染层整块剥掉只留锚点令牌 → 胶囊。首尾不留多余换行（留了会撑出多余行距，2026-09-28 用户实报「自带一个换行」）。
   function refToken(d) {
+    if (d.rkind === 'pdf') {
+      const p = refPath(d.file, d.proj)
+      const loc = d.p0 ? `#p${d.p0}${d.p1 && d.p1 !== d.p0 ? '-' + d.p1 : ''}` : ''
+      return `[@引用PDF:${p}${loc}]\n${String(d.quote || '')}\n[/引用PDF]`
+    }
     if (d.rkind !== 'file') {
       const title = String(d.title || '本会话').replace(/[\]|\r\n]/g, ' ').trim() || '本会话'
       return `[@引用回复:${d.idx || 0}|${title}]\n${String(d.quote || '')}\n[/引用回复]`
@@ -6093,11 +6200,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     return proj ? proj + '/' + file : file
   }
 
-  // 回复引用的**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE 出胶囊。
+  // 引用**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE / QUOTE_PDF_RE 出胶囊。
   // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
   // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
-  function stripQuoteReplyBody(text) {
-    return String(text || '').replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+  // 回复块与 PDF 块共用这一个收口（两族形态不同，但不该有第三个剥块入口）。
+  function stripQuoteBodies(text) {
+    return String(text || '')
+      .replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+      .replace(QUOTE_PDF_BODY_RE, '$1')
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -6108,6 +6218,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
       .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
       .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
+      .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
   }
 
   // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
@@ -7244,7 +7355,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
         const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
         const filesHtml = files.length ? fileCardsHtml(files) : ''
-        const bodyText = stripQuoteReplyBody(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
+        const bodyText = stripQuoteBodies(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
         // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
         // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
         // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
@@ -7261,7 +7372,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = stripQuoteReplyBody(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
+            const txt = stripQuoteBodies(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
             // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
@@ -8603,6 +8714,13 @@ function setGateVerified(v) { gateVerified = v }
   // 唤出手势 = **松开鼠标那一刻**（document mouseup，主键；用户 2026-09-28 定案）——右键不再被拦截，
   // 浏览器原生菜单照旧弹出。选区必须在**开浮窗那一刻快照**：点浮窗里的输入框会把 DOM 选区清掉，
   // 靠 selection 现场取已来不及。
+  //
+  // 2026-09-28 扩展（项目注册）：浮窗改为「**内置动作 + 当前项目申报动作**分表合流」。动作表由项目在
+  // `<项目>/.claude/preview/preview.json` 的 `quoteActions` 段静态申报（与 cards 同构、同一拉取点），
+  // 经 views/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
+  // （iframe）——它的选区在宿主看来不可达（跨文档 getSelection 不达），故由预览页 postMessage 自报：
+  // `floria-quote-open`（开窗）/ `floria-quote-close`（关窗），宿主点申报动作行回发 `floria-quote-action`。
+  // 执行逻辑**留在项目页面自己的运行上下文**（要调 Pj13 的 API 与 pdf 状态），宿主只回发 id、不代执行。
 
   // 可引用区（选区落在其中才认，其它区域不唤出）
   const QUOTE_ZONE = '#chat-scroll, #work-editor'
@@ -8678,7 +8796,16 @@ function setGateVerified(v) { gateVerified = v }
     chip.dataset.kind = 'ref'
     chip.dataset.rkind = snap.kind
     let inner
-    if (snap.kind === 'file') {
+    if (snap.kind === 'pdf') {
+      // PDF 引用（2026-09-28）：位置 = 路径 + 页码（跨页 s-e）。**原文必须进消息**（PDF 定位不精确、
+      // 大 PDF 必须给页码提示、选中原文才是要引用的 payload）⇒ dataset.quote 与回复引用同款带上。
+      chip.dataset.file = snap.file
+      chip.dataset.proj = snap.proj || ''
+      chip.dataset.quote = snap.text
+      if (snap.p0) { chip.dataset.p0 = String(snap.p0); if (snap.p1) chip.dataset.p1 = String(snap.p1) }
+      const pages = snap.p0 ? ' · 第 ' + snap.p0 + (snap.p1 && snap.p1 !== snap.p0 ? '-' + snap.p1 : '') + ' 页' : ''
+      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}${pages}</span>`
+    } else if (snap.kind === 'file') {
       chip.dataset.file = snap.file
       chip.dataset.proj = snap.proj || ''
       if (snap.l0) { chip.dataset.l0 = String(snap.l0); chip.dataset.l1 = String(snap.l1) }
@@ -8739,21 +8866,40 @@ function setGateVerified(v) { gateVerified = v }
     sel.removeAllRanges()
     sel.addRange(r)
   }
+  // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
+  // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
+  const QUOTE_BUILTIN_ID = 'ai-edit'
+  function quoteActionRows() {
+    const rows = [{ id: QUOTE_BUILTIN_ID, title: '使用 AI 编辑', builtin: true }]
+    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID) rows.push(a)
+    return rows
+  }
+  function quoteActionRowHtml(a) {
+    const lead = a.builtin ? '' : `<span class="qp-ic">${I[a.icon] || I.plug}</span>`
+    return '<button type="button" class="qp-row" data-qact="' + esc(a.id) + '">' +
+      lead + '<span class="qp-lb">' + esc(a.title) + '</span><span class="qp-go"></span>' +
+      '</button>'
+  }
+  // 申报动作的落地：宿主**不代执行**（业务动作要调项目自己的 API 与页面状态）——只把 id 回发预览帧。
+  function quoteRunAction(id) {
+    const w = quoteSnap && quoteSnap.frame
+    closeQuotePop()
+    if (w) { try { w.postMessage({ type: 'floria-quote-action', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ } }
+  }
+  // 唯一开窗入口（两条来源共用）：宿主机内选区（quoteSnapOf）与项目预览页自报（floria-quote-open）。
+  // 后者多带 frame（回发锚点）与 kind:'pdf'，其余同构——外部来源不另开一套浮窗。
   function openQuotePop(snap) {
     closeQuotePop()
     quoteSnap = snap
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
-      '<button type="button" class="qp-row qp-ai">' +
-        '<span class="qp-lb">使用 AI 编辑</span>' +
-        '<span class="qp-go"></span>' +
-      '</button>' +
+      quoteActionRows().map(quoteActionRowHtml).join('') +
       '<div class="qp-bar">' +
         '<input class="qp-in" type="text" placeholder="对这段说点什么…" aria-label="引用说明" />' +
         '<button type="button" class="qp-send" title="发送" aria-label="发送"></button>' +
       '</div>'
-    pop.querySelector('.qp-go').innerHTML = I.dshSend
+    pop.querySelectorAll('.qp-go').forEach((g) => { g.innerHTML = I.dshSend })
     pop.querySelector('.qp-send').innerHTML = I.dshSend
     document.body.appendChild(pop)
     // 落点 = 选区下方（与图片一致：菜单挂在选中行下面），越界 clamp 回视口（与 recent.js 行菜单同一算法）
@@ -8763,7 +8909,13 @@ function setGateVerified(v) { gateVerified = v }
     pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
     pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
     pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮窗内按下不算「点外部」
-    pop.querySelector('.qp-row').addEventListener('click', quoteStash)
+    pop.querySelectorAll('.qp-row').forEach((b) =>
+      b.addEventListener('click', () => {
+        const id = b.dataset.qact
+        if (id === QUOTE_BUILTIN_ID) quoteStash()
+        else quoteRunAction(id)
+      }),
+    )
     pop.querySelector('.qp-send').addEventListener('click', quoteSendNow)
     pop.querySelector('.qp-in').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); quoteSendNow() }
@@ -8790,6 +8942,56 @@ function setGateVerified(v) { gateVerified = v }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
   window.addEventListener('scroll', () => { if (quotePop) closeQuotePop() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
+
+  // ---------- 5. 项目预览桥（floria-quote-open / floria-quote-close / floria-quote-action）----------
+  // 预览页（<项目>/.claude/preview 的 iframe，src = 127.0.0.1:<port> 或 /backend/<label>/）里的选区
+  // 宿主看不到（跨文档 getSelection 不达）⇒ 由预览页自报开窗；关窗同理：iframe 内点击/滚动都不冒泡
+  // 到宿主 document，宿主那两条「点外部/滚动即关」的策略对帧内事件失效，故预览页必须显式发 close。
+  // **门 = e.source 必须是当前在场 .preview-frame 的 contentWindow**（与 rail-ext / ext-card 同一道）。
+  // **按 e.source 反查帧、不取 querySelector 第一个**：槽位预览卡与 work 预览栏可能同时在场，
+  // 取「第一个」会把 bridge 认到错误的帧（rail-ext 同病，本模块不重蹈）。
+  const QUOTE_FRAME_SEL = '.preview-frame'
+  function quoteFrameBySource(src) {
+    let hit = null
+    document.querySelectorAll(QUOTE_FRAME_SEL).forEach((el) => {
+      if (hit || !el.contentWindow) return
+      if (el.contentWindow === src) hit = el
+    })
+    return hit
+  }
+  // 坐标换算：预览页给的是 **iframe 内视口坐标**（0,0 = 帧左上角），叠上帧自身的位置即是宿主视口坐标。
+  // 浮窗落点只需 left/bottom（openQuotePop 用这两项 + 视口 clamp）。
+  function quoteFrameRect(frame, r) {
+    const b = frame.getBoundingClientRect()
+    const x = Number(r && r.x) || 0
+    const y = Number(r && r.y) || 0
+    const h = Number(r && r.h) || 0
+    return { left: b.left + x, bottom: b.top + y + h }
+  }
+  function quoteBridgeOnMessage(e) {
+    const d = e.data
+    if (!d || typeof d !== 'object') return
+    if (d.type !== 'floria-quote-open' && d.type !== 'floria-quote-close') return
+    const frame = quoteFrameBySource(e.source)
+    if (!frame) return // 非当前预览帧的输入一律不理（唯一守门）
+    if (d.type === 'floria-quote-close') { closeQuotePop(); return }
+    const text = typeof d.text === 'string' ? d.text : ''
+    if (!text.trim()) return
+    const p0 = Number(d.page) > 0 ? Number(d.page) : 0
+    const p1 = Number(d.pageEnd) > 0 ? Number(d.pageEnd) : 0
+    // 路径基准交给 refPath（会话开在 Pj13 时出项目内相对路径，否则带 label 前缀）——proj 取帧的 data-label。
+    openQuotePop({
+      kind: 'pdf',
+      text,
+      rect: quoteFrameRect(frame, d.rect),
+      frame: frame.contentWindow,
+      file: typeof d.pdf === 'string' ? d.pdf : '',
+      proj: frame.dataset.label || '',
+      p0,
+      p1: p1 || p0,
+    })
+  }
+  window.addEventListener('message', quoteBridgeOnMessage)
 
   // ---------- 启动 ----------
   ;(async () => {

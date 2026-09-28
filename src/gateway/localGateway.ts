@@ -143,6 +143,14 @@ interface PreviewCard {
   host: 'view' // 渲染位置，由 preview 声明；本版只定义 view（主区独立视图卡）
   tab: boolean // host=view 时是否上侧栏 tab，缺省 true
 }
+// preview.json 的 quoteActions 声明（2026-09-28）：与 backend / cards 并列的第三种「项目向宿主申报
+// 界面能力」清单——宿主选中引用浮窗（.quote-pop）里追加的动作行。动作是**纯数据**（无 path、不指向
+// 文件）：点击后宿主只把 id 回发给预览页（floria-quote-action），执行逻辑留在项目页面自己的运行上下文。
+interface PreviewQuoteAction {
+  id: string
+  title: string
+  icon: string // core/icons.js I 表键（前端校验），缺省 plug
+}
 interface BackendProc {
   pid: number
   port: number
@@ -1122,6 +1130,25 @@ function readPreviewCards(previewDir: string): PreviewCard[] {
       host: 'view',
       tab: c.tab !== false,
     })
+  }
+  return out
+}
+
+// 读 <previewDir>/preview.json 的 quoteActions 声明。与 cards 同范式（不合格条目整条丢弃、不猜不兜底）：
+// id 非法 / 重名、title 空 → 丢。整个 quoteActions 缺失 = 空集。无 path/host —— 动作不指向文件。
+function readPreviewQuoteActions(previewDir: string): PreviewQuoteAction[] {
+  const list = readPreviewJson(previewDir)?.quoteActions
+  if (!Array.isArray(list)) return []
+  const out: PreviewQuoteAction[] = []
+  const seen = new Set<string>()
+  for (const it of list) {
+    if (!it || typeof it !== 'object' || Array.isArray(it)) continue
+    const a = it as Record<string, unknown>
+    const id = typeof a.id === 'string' ? a.id.trim() : ''
+    const title = typeof a.title === 'string' ? a.title.trim() : ''
+    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(id) || !title || seen.has(id)) continue
+    seen.add(id)
+    out.push({ id, title, icon: typeof a.icon === 'string' && a.icon ? a.icon : 'plug' })
   }
   return out
 }
@@ -2303,8 +2330,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 外部卡片清单：/gateway/preview-cards?label=<项目> → { label, cards:[…] }
-  // （卡片化二期）preview.json 的 cards 声明；无 preview 项目 / label 未命中 → 404，无卡片 → 空数组。
+  // 项目预览申报表：/gateway/preview-cards?label=<项目> → { label, cards:[…], quoteActions:[…] }
+  // （卡片化二期 + 2026-09-28）preview.json 的 cards / quoteActions 声明；无 preview 项目 / label 未命中
+  // → 404，无声明 → 各自空数组。一次请求取两份申报（消费点同 = sidebar/mgr.js syncExtCards）。
   if (req.method === 'GET' && url.pathname === '/gateway/preview-cards') {
     const cLabel = url.searchParams.get('label') || ''
     const cProj = findProjects(root).find((g) => g.scope === 'project' && g.label === cLabel)
@@ -2314,7 +2342,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     try {
       const cDir = resolve(cProj.dir, '..', 'preview') // cProj.dir = <root>/<label>/.claude/projects
-      sendJson(res, 200, { label: cLabel, cards: readPreviewCards(cDir) })
+      sendJson(res, 200, {
+        label: cLabel,
+        cards: readPreviewCards(cDir),
+        quoteActions: readPreviewQuoteActions(cDir),
+      })
     } catch (e) {
       sendError(res, e)
     }

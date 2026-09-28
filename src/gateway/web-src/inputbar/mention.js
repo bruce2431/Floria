@@ -36,6 +36,12 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
   // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
   const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
+  // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
+  // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
+  // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。带**原文块**（同回复引用
+  // `QUOTE_REPLY_BODY_RE` 手法）：① PDF 定位不精确 ② 大 PDF 必须给页码提示 ③ 选中原文才是要引用的 payload。
+  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.folder
   const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
@@ -180,12 +186,25 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const label = `引用自「${t}」· 第 ${idx} 条回复`
     return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
   }
+  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
+  // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
+  function quotePdfChipHtml(path, p0, p1) {
+    const name = String(path).split('/').pop()
+    const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
+    const label = `引用自 ${name}${pages}`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
+  }
 
   // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
   //  文件引用 = 只给位置，模型自己 Read；
   //  回复引用 = 原文必须进消息——回复不属于任何文件，没有位置可查。原文包在令牌块里（`QUOTE_REPLY_BODY_RE`），
   //  渲染层整块剥掉只留锚点令牌 → 胶囊。首尾不留多余换行（留了会撑出多余行距，2026-09-28 用户实报「自带一个换行」）。
   function refToken(d) {
+    if (d.rkind === 'pdf') {
+      const p = refPath(d.file, d.proj)
+      const loc = d.p0 ? `#p${d.p0}${d.p1 && d.p1 !== d.p0 ? '-' + d.p1 : ''}` : ''
+      return `[@引用PDF:${p}${loc}]\n${String(d.quote || '')}\n[/引用PDF]`
+    }
     if (d.rkind !== 'file') {
       const title = String(d.title || '本会话').replace(/[\]|\r\n]/g, ' ').trim() || '本会话'
       return `[@引用回复:${d.idx || 0}|${title}]\n${String(d.quote || '')}\n[/引用回复]`
@@ -202,11 +221,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return proj ? proj + '/' + file : file
   }
 
-  // 回复引用的**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE 出胶囊。
+  // 引用**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE / QUOTE_PDF_RE 出胶囊。
   // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
   // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
-  function stripQuoteReplyBody(text) {
-    return String(text || '').replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+  // 回复块与 PDF 块共用这一个收口（两族形态不同，但不该有第三个剥块入口）。
+  function stripQuoteBodies(text) {
+    return String(text || '')
+      .replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
+      .replace(QUOTE_PDF_BODY_RE, '$1')
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -217,6 +239,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
       .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
       .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
+      .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
   }
 
   // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
@@ -459,6 +482,7 @@ export {
   MENTION_SESSION_ICON,
   MENTION_SESSION_RE,
   MENTION_UP_ICON,
+  QUOTE_PDF_RE,
   QUOTE_REF_RE,
   QUOTE_REPLY_RE,
   arrangeItems,
@@ -482,6 +506,7 @@ export {
   pickHome,
   pickItems,
   pickLabel,
+  quotePdfChipHtml,
   quoteRefChipHtml,
   quoteReplyChipHtml,
   refreshPick,
@@ -491,5 +516,5 @@ export {
   selectMention,
   selectMentionItem,
   serializeInput,
-  stripQuoteReplyBody,
+  stripQuoteBodies,
 }

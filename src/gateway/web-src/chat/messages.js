@@ -8,7 +8,7 @@ import { mdHtml } from '../core/markdown.js'
 import { findSession, sessionCwd } from '../core/sessions.js'
 import { messagesEl, state, live, esc, toast } from '../core/state.js'
 import { renderTransient, claimStartTs, takeover, clearTakeover } from '../inputbar/approval.js'
-import { stripQuoteReplyBody } from '../inputbar/mention.js'
+import { stripQuoteBodies } from '../inputbar/mention.js'
 import { firstSendHash } from '../sidebar/recent.js'
   // ---------- 消息渲染 ----------
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）
@@ -442,7 +442,7 @@ import { firstSendHash } from '../sidebar/recent.js'
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
-    txt = stripQuoteReplyBody(txt)
+    txt = stripQuoteBodies(txt)
     const hasImg = m.blocks.some((b) => b.kind === 'image')
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }

@@ -4683,13 +4683,20 @@ function setFirstSendHash(v) { firstSendHash = v }
       g.classList.toggle('on', show)
       if (show) lastL = L
     })
+    // grow 归一化（唯一写口）：把**可见 in-flow 栏**的 grow 按比例缩放到总和 1 再落内联 flex。
+    // flex 规范：grow 总和 < 1 时只分配该比例的剩余空间、余下留白——wkFlex 存的是拖拽时「一对栏和不变」
+    // 的比例权重，隐藏掉另一栏后可见栏 grow 可 < 1，于是助手卡右侧空出一条 --plane 空白带（2026-09-29 实报：
+    // 仅编辑区关/预览关 + 助手在流时复现，gap = (1−Σgrow)×自由宽）。归一化保持栏宽比例不变，且任意
+    // 可见子集都填满容器。不可见栏（display:none / 助手脱流）不参与求和，也不落内联 flex。
+    const vis = Object.keys(PANE_EL).filter((k) => { const el = paneEl(k); return el && paneVisible(el) })
+    const sum = vis.reduce((s, k) => s + (state.wkFlex[k] || 1), 0)
     for (const k of Object.keys(PANE_EL)) {
       const el = paneEl(k)
       if (!el) continue
       // 非 work 模式必须清掉内联 flex：#session-card 在 chat 模式是唯一视图卡（.view-card 的 flex:1）。
       // 助手脱流时同样清掉——absolute 定位已脱出 flex 流，留着内联 flex 只会误导下一处读它的人。
       const inFlow = k !== 'assist' || wkAssistInFlow()
-      if (on && inFlow) el.style.flex = `${state.wkFlex[k] || 1} 1 0`
+      if (on && inFlow && vis.includes(k)) el.style.flex = `${(state.wkFlex[k] || 1) / sum} 1 0`
       else el.style.removeProperty('flex')
     }
     applyAssistMode() // 栏宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）

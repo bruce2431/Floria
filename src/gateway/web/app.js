@@ -29,10 +29,55 @@
     brain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/><path d="M12 4.5v13.5M12 18v1.5"/></svg>',
     // DeepSeek 鲸鱼 logo（deepseek-harness packages/client/ui-primitives/src/FishLogo.tsx，figma I39:24057 精确提取，fill=currentColor 随父级）
     whale: '<svg class="whale" viewBox="0 0 23.16 17.04" fill="none" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z" fill="currentColor"/></svg>',
-    // ---- dsh 输入栏图标（2026-08-21 完全移植：deepseek-harness ui-primitives/icons 精确 path，fill=currentColor）----
-    dshPlus: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8.64453 1.5V7.34961H14.5V8.65039H8.64453V14.5H7.34473V8.65039H1.5V7.34961H7.34473V1.5H8.64453Z"/></svg>',
-    dshImage: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.9" y="2.9" width="12.2" height="10.2" rx="1.6"/><circle cx="5.7" cy="6.7" r="1.15" fill="currentColor" stroke="none"/><path d="M2.5 11.6l3.4-3.2a1 1 0 0 1 1.38 0l2.1 2 1.5-1.4a1 1 0 0 1 1.36-.02l3.26 2.9"/></svg>',
-    dshFile: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 1.9H4.6a1.2 1.2 0 0 0-1.2 1.2v9.8a1.2 1.2 0 0 0 1.2 1.2h6.8a1.2 1.2 0 0 0 1.2-1.2V4.9z"/><path d="M9.6 1.9v3h3"/></svg>',
+    // ---- dsh 产品图标集（2026-09-28 整体换到 deepseek-harness v0.2.0-rc.1：packages/client/ui-primitives/src/icons/
+    //      index.tsx + shared-artwork.tsx 精确 path）。全族统一 16 viewBox / `stroke=currentColor` 描线：
+    //      Regular(1px) 用于列表行与内联胶囊，Medium(1.3px) 用于强调按钮（+ 等）——与 dsh InputBar/MenuView/
+    //      ReferenceChip 的取重一致（MenuView 与 ReferenceChip 均用 Regular，InputBar 的 + 用 Medium）。
+    //      ⚠️ 图标不设 stroke-linecap/linejoin：dsh 产品图标集默认即 butt/miter，圆头会让细描线发胖。
+    //      ⚠️ stroke 一律逐条挂在 path 上，**不可挂 `<svg>`**（dsh 原样：`strokeWidth` 在 `<svg>`、`stroke="currentColor"`
+    //         在各 path）。本族含 `fill="currentColor"` 实心路径的字形（dshFile/Browse、dshSkill）若在 `<svg>` 上写
+    //         stroke，该实心轮廓会被再描一遍 = 粗细翻倍（2026-09-29 用户点名「这几个莫名的粗」的根因）。
+    //      语义映射（floria 行 → dsh 图标）：会话=ChatLines / 目录=FolderClose / 文件=Browse / 技能=Skill /
+    //      插件=PluginPinwheel / 上级目录=ChevronUp / 上传文件=Paperclip / 「+」按钮本身=PlusMedium。
+    //      命令菜单各命令各有字形，见下方「命令菜单逐命令字形」段。----
+    dshPlus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2V14"/><path d="M2 8H14"/></svg>', // IconPlusOutlineMedium
+    // 图片：dsh 产品集**无**图片图标（v0.2.0-rc.1 全部 Icon 里无 image/photo/gallery；dsh 的图片走
+    //     ComposerAttachments 缩略图、与文件同一个 paperclip 入口）。改用 **Radix Icons** 的 `image`
+    //     （github.com/radix-ui/icons，MIT，packages/radix-icons/icons/image.svg，**原 path 一字未改**）：
+    //     15 视框、单条 fill=currentColor 路径 = 与 dsh 同族的「实心路径」画法（同 dshFile/Browse、dshPlan、
+    //     dshSkill），毛重与该族 1px 描线一致；此处只按本表格式外加 `<svg viewBox fill="none">` 外壳。
+    //     旧件是自绘 1.3 描边 + 圆头 + 实心点，比同排重一档、排在一起即「不齐」。
+    dshImage: '<svg viewBox="0 0 15 15" fill="none"><path d="M12.5 1C13.3284 1 14 1.67157 14 2.5V12.5C14 13.3284 13.3284 14 12.5 14H2.5C1.72334 14 1.08461 13.4097 1.00781 12.6533L1 12.5V2.5C1 1.67157 1.67157 1 2.5 1H12.5ZM2 9.63574V12.5L2.00977 12.6006C2.04966 12.7961 2.20392 12.9503 2.39941 12.9902L2.5 13H8.94141L7.52832 11.4395V11.4385L3.98828 7.64746L2 9.63574ZM8.4834 11.1523L10.1553 13H12.5L12.6006 12.9902C12.7961 12.9503 12.9503 12.7961 12.9902 12.6006L13 12.5V10.6367L11 8.63672L8.4834 11.1523ZM2.39941 2.00977C2.17145 2.05629 2 2.25829 2 2.5V8.36328L3.68164 6.68164L3.75195 6.625C3.82721 6.57522 3.91621 6.54823 4.00781 6.5498C4.1298 6.55192 4.24585 6.60417 4.3291 6.69336L7.87305 10.4893L10.6816 7.68164L10.752 7.62402C10.9266 7.50851 11.1645 7.5278 11.3184 7.68164L13 9.36328V2.5C13 2.25829 12.8286 2.05629 12.6006 2.00977L12.5 2H2.5L2.39941 2.00977ZM7.5 3.74902C8.46693 3.74902 9.25098 4.53307 9.25098 5.5C9.25098 6.46693 8.46693 7.25098 7.5 7.25098C6.53307 7.25098 5.74902 6.46693 5.74902 5.5C5.74902 4.53307 6.53307 3.74902 7.5 3.74902ZM7.5 4.64941C7.03013 4.64941 6.64941 5.03013 6.64941 5.5C6.64941 5.96987 7.03013 6.35059 7.5 6.35059C7.96987 6.35059 8.35059 5.96987 8.35059 5.5C8.35059 5.03013 7.96987 4.64941 7.5 4.64941Z" fill="currentColor"/></svg>',
+    dshFile: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M4.9375 5.90295H11.0625" stroke="currentColor"/><path d="M4.9375 9.02991H8.27841" stroke="currentColor"/><path d="M12.5 1.32617C13.3039 1.32617 14 1.95171 14 2.77637V13.2246C13.9996 14.0489 13.3036 14.6738 12.5 14.6738H3.5C2.69637 14.6738 2.00042 14.0489 2 13.2246V2.77637C2 1.95171 2.69613 1.32617 3.5 1.32617H12.5ZM3.5 2.32617C3.1993 2.32617 3 2.55186 3 2.77637V13.2246C3.00044 13.4489 3.19963 13.6738 3.5 13.6738H12.5C12.8004 13.6738 12.9996 13.4489 13 13.2246V2.77637C13 2.55186 12.8007 2.32617 12.5 2.32617H3.5Z" fill="currentColor"/></svg>', // BrowseOutlineArtwork（ReferenceIcon file）
+    dshChat: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M5 6.75H11"/><path d="M5 9H8"/><path d="M2.37067 11.2497C1.5872 9.89252 1.32042 8.29798 1.61945 6.7597C1.91847 5.22141 2.76317 3.84293 3.99801 2.87809C5.23285 1.91325 6.7747 1.427 8.33964 1.50888C9.90458 1.59076 11.3873 2.23526 12.5147 3.32369C13.6422 4.41232 14.3384 5.8717 14.4751 7.43304C14.6118 8.99438 14.1797 10.5525 13.2585 11.8205C12.3372 13.0885 10.9889 13.9809 9.4617 14.3334C8.18666 14.6277 6.8587 14.529 5.64964 14.0601C5.17095 13.8745 4.76937 13.4929 4.26509 13.3963C3.67389 13.2832 2.95232 13.5595 2.0377 14.3334"/></svg>', // ChatLinesOutlineArtwork（ReferenceIcon session）
+    dshFolder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M1.50439 3.11059C1.50439 2.55831 1.95211 2.1106 2.50439 2.1106H5.43389C5.67773 2.1106 5.91318 2.19969 6.09593 2.36113L7.71649 3.79265C7.89924 3.95409 8.1347 4.04319 8.3785 4.04319H13.4958C14.0481 4.04319 14.4958 4.4909 14.4958 5.04319V12.8894C14.4958 13.4417 14.0481 13.8894 13.4958 13.8894H2.50439C1.95211 13.8894 1.50439 13.4417 1.50439 12.8894V4.04319V3.11059Z"/><path d="M3.63501 7.66614H12.3647"/></svg>', // FolderCloseArtwork（ReferenceIcon folder）
+    dshSkill: '<svg viewBox="0 0 17 17" fill="none" stroke-width="1"><path d="M4.57788 5.77124H10.7029" stroke="currentColor"/><path d="M4.57788 8.89819H7.91879" stroke="currentColor"/><path d="M12.1404 1.19446C12.9442 1.19446 13.6404 1.81999 13.6404 2.64465V8.89856H12.6404V2.64465C12.6404 2.42015 12.4411 2.19446 12.1404 2.19446H3.14038C2.83968 2.19446 2.64038 2.42015 2.64038 2.64465V13.0929C2.64082 13.3172 2.84001 13.5421 3.14038 13.5421H8.88159V14.5421H3.14038C2.33675 14.5421 1.6408 13.9172 1.64038 13.0929V2.64465C1.64038 1.81999 2.33651 1.19446 3.14038 1.19446H12.1404Z" fill="currentColor"/><path d="M12.0051 15.1056C12.0051 13.6395 10.8166 12.451 9.35059 12.451C10.8166 12.451 12.0051 11.2626 12.0051 9.79651C12.0051 11.2626 13.1936 12.451 14.6597 12.451C13.1936 12.451 12.0051 13.6395 12.0051 15.1056Z" stroke="currentColor"/></svg>', // IconSkillOutlineRegular（技能：文档 + 星）
+    dshPlugin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M7.84457 5.06199C11.6605 4.93876 14.7962 6.14848 14.8484 7.76397C14.8875 8.97461 13.1838 10.0696 10.7215 10.5942"/><path d="M5.12742 8.07731C5.00419 4.26138 6.21391 1.12568 7.8294 1.07351C9.04004 1.03441 10.135 2.73808 10.6596 5.20037"/><path d="M8.02457 10.6802C4.20865 10.8034 1.07294 9.5937 1.02077 7.97821C0.981678 6.76758 2.68535 5.67262 5.14763 5.14798"/><path d="M10.7476 7.89535C10.8708 11.7113 9.66109 14.847 8.0456 14.8991C6.83496 14.9382 5.74 13.2346 5.21536 10.7723"/></svg>', // IconPluginPinwheelOutlineRegular（插件：风车）
+    dshUp: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 10L8.70711 6.70711C8.31658 6.31658 7.68342 6.31658 7.29289 6.70711L4 10"/></svg>', // IconChevronUpOutlineRegular（上级目录）
+    dshPaperclip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12.75 4.5V9.5C12.75 10.7598 12.2496 11.968 11.3588 12.8588C10.468 13.7496 9.25978 14.25 8 14.25C6.74022 14.25 5.53204 13.7496 4.64124 12.8588C3.75045 11.968 3.25 10.7598 3.25 9.5V5C3.25 4.13805 3.59241 3.3114 4.2019 2.7019C4.8114 2.09241 5.63805 1.75 6.5 1.75C7.36195 1.75 8.1886 2.09241 8.7981 2.7019C9.40759 3.3114 9.75 4.13805 9.75 5V9.5C9.75 9.96413 9.56563 10.4092 9.23744 10.7374C8.90925 11.0656 8.46413 11.25 8 11.25C7.53587 11.25 7.09075 11.0656 6.76256 10.7374C6.43437 10.4092 6.25 9.96413 6.25 9.5V5.5"/></svg>', // IconPaperclipOutlineRegular（上传文件）
+    // ---- 命令菜单逐命令字形（2026-09-29）--------------------------------------------------------
+    // 抄处：dsh `packages/client/ui-commands/src/client/presentation.ts` 的 HOST_FACES——dsh 给**每个**
+    // 内置命令各自的图标（goal/plan/feedback/compact/permission/export 各不同），不是整列共用一个「+」。
+    // floria 的 + 弹窗此前 11 行命令全渲染 I.dshPlus，读起来就是未完成的占位（用户点名「廉价感」）。
+    // 全部取自 ui-primitives/src/icons/index.tsx 精确 path，逐条按各 artwork 自身签名取（str. 1px）：
+    //   compact=IconCompactOutline / model=IconSlidersTwoOutline / permission=PermissionIcon.tsx
+    //   FullAccessArtwork / plan=IconPlanOutline(=ListPen) / rename=IconEditOutline /
+    //   resume=IconPlayOutline / retry=IconRefreshOutline / status=IconGaugeOutline。
+    // 备用件（当前无菜单行消费，先存字形）：goal=IconGoalOutline（floria 后端无 /goal 命令）、
+    //   trash=IconTrashOutline（原 /clear 行用；2026-09-29 该行已从 + 菜单删除）。
+    // 注意：IconQueueOutline 只是 ChatLines 的别名（=会话图标），故 resume 取 Play；IconShieldOutline
+    // 的 path 是 `SHIELD_OUTLINE_PATH` 常量，已就地展开。Sliders 的 stroke-linecap=round 是该 artwork
+    // 自带的（非本族默认），照抄不动。skills/plugins 复用 MENTION_SKILL_ICON / MENTION_PLUGIN_ICON。
+    dshCompact: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path opacity="0.35" d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z" stroke="currentColor"/><path d="M8 1.5C8.85359 1.5 9.69883 1.66813 10.4874 1.99478C11.2761 2.32144 11.9926 2.80022 12.5962 3.40381C13.1998 4.00739 13.6786 4.72394 14.0052 5.51256C14.3319 6.30117 14.5 7.14641 14.5 8" stroke="currentColor"/></svg>', // IconCompactOutlineArtwork
+    dshTrash: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M1.28149 3.88831H14.7187" stroke="currentColor"/><path d="M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833" stroke="currentColor"/><path d="M2.57349 3.88831L3.19366 13.2943C3.21937 13.5502 3.33952 13.7872 3.53065 13.9593C3.72178 14.1313 3.97016 14.2259 4.22729 14.2246H11.7728C12.0299 14.2259 12.2783 14.1313 12.4694 13.9593C12.6605 13.7872 12.7807 13.5502 12.8064 13.2943L13.4266 3.88831" stroke="currentColor"/><path d="M6.44946 6.98926V11.1238" stroke="currentColor"/><path d="M9.55054 6.98926V11.1238" stroke="currentColor"/></svg>', // IconTrashOutlineArtwork
+    dshSliders: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"><path d="M2.3 5h5.85M12.05 5h1.65"/><circle cx="9.95" cy="5" r="1.45"/><path d="M2.3 11h1.65M7.85 11h5.85"/><circle cx="5.75" cy="11" r="1.45"/></svg>', // IconSlidersTwoOutlineArtwork
+    dshShield: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M6.59624 2.14853C7.50155 1.80917 8.49914 1.80919 9.40444 2.14859L13.9245 3.84317V7.11961C13.9245 11.6089 10.5565 13.5975 8.00035 14.5779C5.44423 13.5975 2.07544 11.6089 2.07544 7.11961V3.84317L6.59624 2.14853Z" stroke="currentColor" stroke-linejoin="round"/><path d="M8 4.39209V9.89209" stroke="currentColor"/><path d="M8 10.8081V11.8081" stroke="currentColor"/></svg>', // PermissionIcon.tsx FullAccessArtwork（盾 + 感叹号）
+    dshPlan: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M4.9375 5.90295H11.0625" stroke="currentColor"/><path d="M4.9375 9.02991H8.27841" stroke="currentColor"/><path d="M12.5 1.32617C13.3039 1.32617 14 1.95171 14 2.77637V7.61328L13 8.68164V2.77637C13 2.55186 12.8007 2.32617 12.5 2.32617H3.5C3.1993 2.32617 3 2.55186 3 2.77637V13.2246C3.00044 13.4489 3.19963 13.6738 3.5 13.6738H8.32812L7.39258 14.6738H3.5C2.69637 14.6738 2.00042 14.0489 2 13.2246V2.77637C2 1.95171 2.69613 1.32617 3.5 1.32617H12.5Z" fill="currentColor"/><path d="M8.97212 14.3693C9.17511 14.5723 9.37811 14.7753 9.5811 14.9783C9.67012 14.8953 9.75914 14.8123 9.84815 14.7293C11.4505 13.2352 13.0528 11.7411 14.6551 10.247C14.7441 10.164 14.8331 10.081 14.9221 9.99803C14.5989 9.6748 14.2756 9.35157 13.9524 9.02834C13.8694 9.11736 13.7864 9.20637 13.7034 9.29539C12.2093 10.8977 10.7152 12.5 9.22113 14.1023C9.13813 14.1913 9.05513 14.2803 8.97212 14.3693Z" fill="currentColor"/><path d="M11.6323 13.7841C11.6323 14.0395 11.6323 14.295 11.6323 14.5504C11.6812 14.5523 11.7301 14.5543 11.779 14.5562C12.659 14.5913 13.539 14.6263 14.419 14.6614C14.4679 14.6633 14.5168 14.6653 14.5657 14.6672C14.5657 14.3339 14.5657 14.0006 14.5657 13.6672C14.5168 13.6692 14.4679 13.6711 14.419 13.6731C13.539 13.7081 12.659 13.7432 11.779 13.7783C11.7301 13.7802 11.6812 13.7821 11.6323 13.7841Z" fill="currentColor"/></svg>', // IconPlanOutlineArtwork（= IconListPenOutlineArtwork）
+    dshEditOutline: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M8.85596 2.69971H4.19971C3.37141 2.69971 2.69992 3.37146 2.69971 4.19971V11.8003C2.69992 12.6285 3.37141 13.3003 4.19971 13.3003H11.8003C12.6283 13.2999 13.3001 12.6283 13.3003 11.8003V7.89893H14.3003V11.8003C14.3001 13.1806 13.1806 14.2999 11.8003 14.3003H4.19971C2.81913 14.3003 1.69992 13.1808 1.69971 11.8003V4.19971C1.69992 2.81918 2.81913 1.69971 4.19971 1.69971H8.85596V2.69971Z" fill="currentColor"/><path d="M7.7849 8.23878L13.888 2.13574" stroke="currentColor"/></svg>', // IconEditOutlineArtwork（区别于行菜单的 dshEdit，同族 1px）
+    dshPlay: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z" stroke="currentColor"/><path d="M10.3329 7.91346C10.3996 7.95195 10.3996 8.04818 10.3329 8.08667L6.78304 10.1362C6.71638 10.1747 6.63304 10.1266 6.63304 10.0496L6.63304 5.95055C6.63304 5.87357 6.71638 5.82546 6.78304 5.86395L10.3329 7.91346Z" stroke="currentColor"/></svg>', // IconPlayOutlineArtwork
+    dshRefresh: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5C9.9001 1.5 11.7001 2.3 13.0001 3.6L14.5001 5.1" stroke="currentColor"/><path d="M14.4999 1.5V5.1H10.8999" stroke="currentColor"/></svg>', // IconRefreshOutlineArtwork（区别于 24 视框的 I.refresh）
+    dshGauge: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M3.4041 13.096C2.49514 12.187 1.87614 11.0288 1.62537 9.76798C1.37459 8.50716 1.50331 7.20028 1.99525 6.01261C2.48719 4.82494 3.32025 3.80981 4.3891 3.09557C5.45795 2.38134 6.71458 2.00008 8.0001 2C9.28563 2.00008 10.5423 2.38134 11.6111 3.09557C12.68 3.80981 13.513 4.82494 14.005 6.01261C14.4969 7.20028 14.6256 8.50716 14.3748 9.76798C14.1241 11.0288 13.5051 12.187 12.5961 13.096" stroke="currentColor"/><path d="M8 8.49994L11.6114 4.88855" stroke="currentColor"/><path d="M8 9.75C8.69036 9.75 9.25 9.19036 9.25 8.5C9.25 7.80964 8.69036 7.25 8 7.25C7.30964 7.25 6.75 7.80964 6.75 8.5C6.75 9.19036 7.30964 9.75 8 9.75Z" fill="currentColor"/></svg>', // IconGaugeOutlineArtwork
+    dshGoal: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5" stroke="currentColor"/><path d="M11.5 8C11.5001 8.69227 11.2948 9.36901 10.9102 9.94463C10.5257 10.5202 9.97901 10.9689 9.33944 11.2338C8.69986 11.4987 7.99609 11.5681 7.31712 11.433C6.63816 11.2979 6.01449 10.9645 5.52501 10.475C5.03548 9.98552 4.70209 9.36185 4.56702 8.68289C4.43195 8.00392 4.50127 7.30015 4.76619 6.66057C5.03112 6.021 5.47976 5.47436 6.05538 5.08978C6.631 4.70519 7.30774 4.49995 8.00001 4.5" stroke="currentColor"/><path d="M8.00024 7.99976L11.2 4.80005" stroke="currentColor"/><path d="M12.4719 5.62245C12.4246 5.66972 12.3569 5.69025 12.2913 5.67715L10.7814 5.37555C10.7022 5.35972 10.6402 5.29781 10.6244 5.2186L10.3228 3.70866C10.3097 3.6431 10.3302 3.57533 10.3775 3.52806L12.1826 1.723C12.2863 1.61929 12.4627 1.65879 12.5122 1.79684L12.9271 2.95225C12.9472 3.00847 12.9915 3.05272 13.0477 3.07291L14.2031 3.48774C14.3412 3.5373 14.3807 3.71368 14.277 3.81739L12.4719 5.62245Z" stroke="currentColor"/></svg>', // IconGoalOutlineArtwork（备用：floria 后端无 /goal 命令）
     dshSend: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"/></svg>',
     dshStop: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"/><rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1" fill="currentColor"/></svg>', // 2026-09-04 圆形方孔停止键（回合进行中）
     dshChevDown: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z"/></svg>',
@@ -2816,7 +2861,17 @@ function setLastNavHash(v) { lastNavHash = v }
       const h = lpHit
       if (!h) return
       lpFired = true
-      openRowMenu(h, 0, 0, h.el)
+      // 480ms 悬停期内列表可能整列重建（refreshList 按活动流签名随时重渲，处理中 2-3 次/秒），
+      // 此时捕获的节点已成孤儿：getBoundingClientRect 归零 ⇒ 落点被 clamp 到视口左上角。
+      // 不变量「浮窗与浮起锚定现役节点」——按 (行源, 行标识) 重解析；行已消失（删除/换视图）则放弃。
+      let el = h.el
+      if (!el.isConnected) {
+        const key = h.src.key(el)
+        if (key == null) return
+        el = [...document.querySelectorAll(h.src.sel)].find((x) => h.src.key(x) === key) || null
+        if (!el) return
+      }
+      openRowMenu({ src: h.src, el }, 0, 0, el)
     }, 480)
   }, { passive: true })
   document.addEventListener('pointermove', (e) => {
@@ -4600,11 +4655,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (el === sessionCard) return wkAssistInFlow()
     return !!el && el.offsetWidth > 0 && getComputedStyle(el).display !== 'none'
   }
-  // 沿 DOM 序找 el 左/右第一个可见栏（跳过另一条分界条与隐藏栏）；dir = -1 左 / +1 右
+  // 沿 DOM 序找 el 左/右第一个可见栏（跳过非栏兄弟与隐藏栏）；dir = -1 左 / +1 右。
+  // 只认主区三栏（paneKey 查表），不认 `#chat-area` 的其它槽级兄弟：`#gate-screen`（token 门全屏浮层，
+  // 满尺寸、display 非 none）会被 paneVisible 判成可见栏，令分界条 g1 误配有右邻 → 门后凭空多一条
+  // 7px 假缝（门已 hidden 但 applyWorkFlex 不再重跑）；`#menu-btn` 等绝对定位件同理。
   function nearPane(g, dir) {
     const key = dir < 0 ? 'previousElementSibling' : 'nextElementSibling'
     for (let el = g[key]; el; el = el[key]) {
-      if (el.classList.contains('work-gutter')) continue
+      if (!paneKey(el)) continue
       if (paneVisible(el)) return el
     }
     return null
@@ -5992,9 +6050,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
   const MENTION_SESSION_RE = /\[会话:([^\]]+)\]/g
-  // @ 提及 icon：与侧栏插件/项目 tab 一致，纯线条（stroke）风格，颜色走 currentColor
-  const MENTION_PLUGIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M10.2 3.5H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 3.5h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M10.2 13.7H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 13.7h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/></svg>'
-  const MENTION_SESSION_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>'
+  // @ 提及 icon（2026-09-28 换 dsh v0.2.0-rc.1 产品图标集，16 描线/currentColor；旧 24 手绘那套作废）。
+  // 语义与 dsh 一致：会话=ChatLines、插件=PluginPinwheel、技能=Skill、目录=FolderClose、文件=Browse
+  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。
+  const MENTION_PLUGIN_ICON = I.dshPlugin
+  const MENTION_SKILL_ICON = I.dshSkill
+  const MENTION_SESSION_ICON = I.dshChat
   // ---------- 目录 / 文件引用（2026-09-26）：@ 浮窗与 + 工具栏共用的一组「逐级浏览工作区根」状态 ----------
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
@@ -6021,9 +6082,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // `QUOTE_REPLY_BODY_RE` 手法）：① PDF 定位不精确 ② 大 PDF 必须给页码提示 ③ 选中原文才是要引用的 payload。
   const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
-  const MENTION_DIR_ICON = I.folder
+  const MENTION_DIR_ICON = I.dshFolder
   const MENTION_FILE_ICON = I.dshFile
-  const MENTION_UP_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.4 13 8.4l-.9.9L8.6 6.8V13H7.4V6.8L4 9.3l-.9-.9z"/></svg>'
+  const MENTION_UP_ICON = I.dshUp
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
   const pick = { path: '', entries: null, loading: false, err: '', seq: 0 }
@@ -6121,6 +6182,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function mentionChipIcon(kind, ptype) {
     if (kind === 'session') return MENTION_SESSION_ICON
     if (kind === 'path') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
+    if (kind === 'skill') return MENTION_SKILL_ICON
     return MENTION_PLUGIN_ICON
   }
   // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
@@ -6311,7 +6373,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     if (MGR) {
       for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
-      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'plugin', name: s.n, desc: s.d })
+      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'skill', name: s.n, desc: s.d })
     }
     items.push(...pickItems(q))
     return arrangeItems(items)
@@ -6460,7 +6522,6 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 待网关接口就绪后替换数据源，交互逻辑不变。
   const MOCK_COMMANDS = [
     { name: 'compact', desc: '压缩当前会话上下文', claim: true },
-    { name: 'clear', desc: '清除当前会话上下文', risk: '将清空当前会话的所有消息（含文件状态与上下文），不可恢复。' },
     { name: 'model', desc: '切换模型', claim: true },
     { name: 'permission', desc: '调整权限模式', claim: true },
     { name: 'plan', desc: '进入计划模式', claim: true },
@@ -6601,6 +6662,21 @@ function setFirstSendHash(v) { firstSendHash = v }
     psel.open ? closeProjPop() : openProjPop()
   })
 
+  // 逐命令字形（同 dsh ui-commands presentation.ts 的 HOST_FACES 语义：每个内置命令各有图标，
+  // 不是整列共用一个「+」）。表外命令回落 dshPlus。字形来源与说明见 core/icons.js 同段注释。
+  const CMD_ICON = {
+    compact: I.dshCompact,
+    model: I.dshSliders,
+    permission: I.dshShield,
+    plan: I.dshPlan,
+    rename: I.dshEditOutline,
+    resume: I.dshPlay,
+    retry: I.dshRefresh,
+    status: I.dshGauge,
+    skills: MENTION_SKILL_ICON,
+    plugins: MENTION_PLUGIN_ICON,
+  }
+
   // ---- 命令菜单（dsh PopupSelectController 移植：open→加载一次→本地过滤→高亮→选择→确认门）----
   // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
   // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
@@ -6669,7 +6745,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : (CMD_ICON[it.name] || I.dshPlus)
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         const detail = it.kind === 'path' ? it.path : it.desc
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
@@ -8725,7 +8801,6 @@ function setGateVerified(v) { gateVerified = v }
   // 可引用区（选区落在其中才认，其它区域不唤出）
   const QUOTE_ZONE = '#chat-scroll, #work-editor'
 
-  let quoteSnap = null // 当前浮窗的引用快照
   let quotePop = null
   let quoteSkipNextUp = false // 「点浮窗外关窗」的那一下 mousedown 已消费：紧随的 mouseup 不得重开
 
@@ -8762,12 +8837,13 @@ function setGateVerified(v) { gateVerified = v }
     const b = quoteLineOf(range.endContainer)
     return a && b ? [Math.min(a, b), Math.max(a, b)] : null
   }
-  function quoteSnapOf() {
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
-    const text = sel.toString()
+  // 快照构造的唯一入口，**两条来源共用**（桌面 mouseup 现场取选区 / 触屏引擎收编的选区）：
+  // 入参恒为 Range，不读 window.getSelection —— 触屏那条路的 Range 是程序化设回的，与「当前选区」同源但
+  // 未必同一对象（且收编靠的就是先清后设），读全局选区会在时序上分叉出第二份真源。
+  function quoteSnapOfRange(range) {
+    if (!range || range.collapsed) return null
+    const text = range.toString()
     if (!text.trim()) return null
-    const range = sel.getRangeAt(0)
     const node = range.startContainer
     const el = node.nodeType === 1 ? node : node.parentElement
     if (!el || !el.closest || !el.closest(QUOTE_ZONE)) return null
@@ -8785,6 +8861,12 @@ function setGateVerified(v) { gateVerified = v }
     const idx = all.indexOf(msg) + 1
     const cur = state.currentHash ? findSession(state.currentHash) : null
     return { kind: 'reply', text, rect, title: (cur && cur.title) || '本会话', idx }
+  }
+  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏路径不走这里，见 inputbar/quote-touch.js）
+  function quoteSnapOf() {
+    const sel = window.getSelection()
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
+    return quoteSnapOfRange(sel.getRangeAt(0))
   }
 
   // ---------- 2. 引用胶囊（输入栏内）----------
@@ -8828,12 +8910,10 @@ function setGateVerified(v) { gateVerified = v }
   // ---------- 3. 浮窗 ----------
   function closeQuotePop() {
     if (quotePop) { quotePop.remove(); quotePop = null }
-    quoteSnap = null
   }
 
   // 立即发送：引用 + 浮窗话术进输入栏 → gwSend（输入栏原有草稿一并发出，不丢内容）
-  async function quoteSendNow() {
-    const snap = quoteSnap
+  async function quoteSendNow(snap) {
     if (!snap) return
     const note = (quotePop.querySelector('.qp-in').value || '').trim()
     insertRefChip(snap)
@@ -8845,10 +8925,9 @@ function setGateVerified(v) { gateVerified = v }
     inputEl.focus()
     await gwSend()
   }
-  // 只入输入栏（「使用 AI 编辑」行）：不发送，关浮窗把焦点交还输入栏，**光标落在胶囊之后**
-  // （用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
-  function quoteStash() {
-    const snap = quoteSnap
+  // 只入输入栏（「使用 AI 编辑」行 / 触屏选中栏同款语义）：不发送，关浮窗把焦点交还输入栏，
+  // **光标落在胶囊之后**（用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
+  function quoteStash(snap) {
     if (!snap) return
     const chip = insertRefChip(snap)
     closeQuotePop()
@@ -8881,8 +8960,8 @@ function setGateVerified(v) { gateVerified = v }
       '</button>'
   }
   // 申报动作的落地：宿主**不代执行**（业务动作要调项目自己的 API 与页面状态）——只把 id 回发预览帧。
-  function quoteRunAction(id) {
-    const w = quoteSnap && quoteSnap.frame
+  function quoteRunAction(id, snap) {
+    const w = snap && snap.frame
     closeQuotePop()
     if (w) { try { w.postMessage({ type: 'floria-quote-action', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ } }
   }
@@ -8890,7 +8969,6 @@ function setGateVerified(v) { gateVerified = v }
   // 后者多带 frame（回发锚点）与 kind:'pdf'，其余同构——外部来源不另开一套浮窗。
   function openQuotePop(snap) {
     closeQuotePop()
-    quoteSnap = snap
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
@@ -8912,11 +8990,11 @@ function setGateVerified(v) { gateVerified = v }
     pop.querySelectorAll('.qp-row').forEach((b) =>
       b.addEventListener('click', () => {
         const id = b.dataset.qact
-        if (id === QUOTE_BUILTIN_ID) quoteStash()
-        else quoteRunAction(id)
+        if (id === QUOTE_BUILTIN_ID) quoteStash(snap)
+        else quoteRunAction(id, snap)
       }),
     )
-    pop.querySelector('.qp-send').addEventListener('click', quoteSendNow)
+    pop.querySelector('.qp-send').addEventListener('click', () => quoteSendNow(snap))
     pop.querySelector('.qp-in').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); quoteSendNow() }
       else if (e.key === 'Escape') { e.preventDefault(); closeQuotePop() }
@@ -8930,6 +9008,9 @@ function setGateVerified(v) { gateVerified = v }
   // 按下并不会清掉选区，不挡就会「关掉又立刻重开」。
   document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return
+    // 触屏接管中（触屏选区引擎在 hold 窗口内）⇒ 鼠标链让位：iOS 抬手会补发合成 mouseup，而收编后的
+    // 程序化选区正是「非空且在引用区内」，不挡就会在选中栏之外再开一份浮窗（见 inputbar/quote-touch.js）。
+    if (quoteTouchOwnsSelection()) return
     if (quoteSkipNextUp) { quoteSkipNextUp = false; return }
     if (quotePop && quotePop.contains(e.target)) return
     const snap = quoteSnapOf()
@@ -8992,6 +9073,320 @@ function setGateVerified(v) { gateVerified = v }
     })
   }
   window.addEventListener('message', quoteBridgeOnMessage)
+
+  // ---------- 触屏程序化选中（quote-touch）----------
+  // 宿主自己的「选中引用」（inputbar/quote.js）是**纯鼠标实现**（document mouseup + getSelection）：触屏上
+  // iOS 的原生长按选择 + 系统 callout 先接管手势，那条 mouseup 拿不到非空选区 ⇒ 长按消息文字弹出的是系统
+  // 「拷贝/查询/翻译」条。本模块 = 触屏专用接管：长按起选、拖动扩选、松手弹**我们自己的选中栏**，取代系统
+  // 菜单。**桌面鼠标路径一字不改** —— 本文件全部监听都先过 `IS_TOUCH_DEVICE` 与 `e.pointerType === 'touch'`
+  // 两道门（后者是事件级真门，前者挡住 iPadOS 桌面模式那种「设备是触屏但媒体查询撒谎」的场面）。
+  //
+  // 机制三条（取自 Pj13 项目 PDF 精读页 PdfViewer.tsx 的实机测量，非推测）：
+  //  ① **不引入 user-select:none**：user-select:none 的内容 `caretRangeFromPoint` 返回 null；宿主消息流是
+  //     任意 HTML、没有 Pj13 那种 canvas 几何兜底 ⇒ 命中测试唯一可用的 API 必须保住。
+  //  ② 「**清原生 + 设程序化**」就是替代系统菜单的机理：`removeAllRanges()` 收掉原生 callout，紧接着
+  //     `addRange()` 把蓝底画回来；**程序化选区不再唤起 callout**（且原生手势清不掉它）。
+  //  ③ 蓝底按住期即有、选中栏**留到松手才弹**（栏出现在指下会被抬手误触），touchend 还要
+  //     `preventDefault()` 吞掉长按抬手补发的合成 click。
+  // 抢时点：iOS 建原生词选区约 500ms，此处沿用行浮窗（sidebar/recent.js）的 480ms 长按参数，通常能抢在
+  // callout 出现前收编；抢不到也没关系 —— 原生词选区已建好时直接收编（第 ① 路），用户手感一致。
+
+  const QUOTE_LP_MS = 480 // 长按判定（与 sidebar/recent.js 行浮窗同参）
+  const QUOTE_LP_SLOP = 8 // 悬停期内漂移容忍像素（超出即作废，同参）
+  const QUOTE_MOUSE_HOLD = 800 // 抬手后压住鼠标链的窗口（覆盖 iOS 补发的合成 mouseup）
+  const QUOTE_BAR_GAP = 10 // 选中栏与选区的间距
+  const QUOTE_MORE_W = 62 // 折「更多 ›」时为它预留的宽度
+
+  let qtSt = 'idle' // idle | pressed | selecting | bar
+  let qtTimer = 0
+  let qtPress = null // 长按起点（宿主视口坐标）
+  let qtRange = null // 程序化选区（本模块唯一真源，不读 window.getSelection）
+  let qtAnchor = null // 同手势扩选的固定端点（词首）
+  let qtFixed = null // 柄拖拽期的固定端点
+  let qtBar = null
+  let qtKnobs = []
+  let qtMouseUntil = 0 // Date.now() < 此值 ⇒ 鼠标链让位
+
+  // 触屏接管期间为真（抬手后 QUOTE_MOUSE_HOLD 内亦真）：**同一次选择只允许一条开窗路径**。
+  // inputbar/quote.js 的 document mouseup 据此让位 —— iOS 抬手会补发合成鼠标事件，而收编后的程序化选区
+  // 正是「非空且落在引用区内」，不挡就会在选中栏之外再开一份竖排浮窗（同一次选择两份浮窗）。
+  function quoteTouchOwnsSelection() { return Date.now() < qtMouseUntil }
+
+  // ---------- 1. 命中测试 ----------
+  const QT_WORD_CH = /[\p{L}\p{N}]/u
+  function qtWordCh(ch) { return QT_WORD_CH.test(ch) || ch === '_' || ch === '-' || ch === "'" }
+  // 取插入点（Safari/Chrome = caretRangeFromPoint；Firefox = caretPositionFromPoint）
+  function qtCaretAt(x, y) {
+    if (document.caretRangeFromPoint) {
+      const r = document.caretRangeFromPoint(x, y)
+      if (r) return r
+    }
+    if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y)
+      if (p) {
+        const r = document.createRange()
+        r.setStart(p.offsetNode, p.offset)
+        r.collapse(true)
+        return r
+      }
+    }
+    return null
+  }
+  // 由插入点向两侧扩到词边界（ASCII 词 / CJK 连串；标点与空白为界）。落点不在文本节点上（元素边界）
+  // ⇒ 放弃（宁可不弹，也不编造一段选区）。
+  function qtWordRange(cr) {
+    const n = cr && cr.startContainer
+    if (!n || n.nodeType !== 3) return null
+    const v = n.nodeValue || ''
+    let s = cr.startOffset
+    let e = s
+    while (s > 0 && qtWordCh(v[s - 1])) s--
+    while (e < v.length && qtWordCh(v[e])) e++
+    if (s === e) return null
+    const r = document.createRange()
+    r.setStart(n, s)
+    r.setEnd(n, e)
+    return r
+  }
+  function qtInZone(node) {
+    const el = node && (node.nodeType === 1 ? node : node.parentElement)
+    return !!(el && el.closest && el.closest(QUOTE_ZONE))
+  }
+  // 两端点排序成 Range（DOM 的 setStart/setEnd 在「起点晚于终点」时会自行塌缩，故先比位置再落）
+  function qtMakeRange(a, b) {
+    const ta = document.createRange()
+    ta.setStart(a.node, a.off)
+    ta.collapse(true)
+    const tb = document.createRange()
+    tb.setStart(b.node, b.off)
+    tb.collapse(true)
+    const r = document.createRange()
+    if (ta.compareBoundaryPoints(Range.START_TO_START, tb) <= 0) { r.setStart(a.node, a.off); r.setEnd(b.node, b.off) }
+    else { r.setStart(b.node, b.off); r.setEnd(a.node, a.off) }
+    return r
+  }
+  // 落选区 = 清原生 + 设程序化（收编机理，见文件头 ②）。塌缩即作废（不落空选区）。
+  function qtApply(r) {
+    if (!r || r.collapsed) return false
+    qtRange = r
+    const sel = window.getSelection()
+    if (sel) { sel.removeAllRanges(); sel.addRange(r) }
+    return true
+  }
+
+  // ---------- 2. 长按收编 ----------
+  // 两条来源：① iOS 已建好的**原生词选区**（最贴近 iPad 手感，零自算）② 我们抢在 iOS 前面 ⇒
+  // caretRangeFromPoint 自建。两路都拿不到 ⇒ 放弃，什么都不弹（不留半截状态）。
+  function qtHarvest() {
+    qtTimer = 0
+    if (qtSt !== 'pressed') return
+    const sel = window.getSelection()
+    let r = null
+    if (sel && !sel.isCollapsed && sel.rangeCount) {
+      const cur = sel.getRangeAt(0)
+      if (qtInZone(cur.startContainer)) r = cur.cloneRange() // 先克隆：随即 removeAllRanges 会作废活引用
+    }
+    if (!r && qtPress) {
+      const cr = qtCaretAt(qtPress[0], qtPress[1])
+      if (cr && qtInZone(cr.startContainer)) r = qtWordRange(cr)
+    }
+    if (!r || !qtApply(r)) { qtSt = 'idle'; return }
+    qtAnchor = { node: r.startContainer, off: r.startOffset }
+    qtSt = 'selecting'
+    document.addEventListener('touchmove', qtExtend, { passive: false })
+  }
+  // 同手势拖动扩选：锚点 = 词首，焦点端点跟着手指走。touchmove 非 passive + preventDefault 冻结滚动 ——
+  // 不冻结的话 iOS 会把手势判成滚动（补发 pointercancel），扩选随之中断。
+  function qtExtend(e) {
+    if (qtSt !== 'selecting' || !qtAnchor) return
+    const t = e.touches && e.touches[0]
+    if (!t) return
+    e.preventDefault()
+    const cr = qtCaretAt(t.clientX, t.clientY)
+    const n = cr && cr.startContainer
+    if (!n || n.nodeType !== 3) return
+    qtApply(qtMakeRange(qtAnchor, { node: n, off: cr.startOffset }))
+  }
+  // 抬手：吞掉补发的合成 click（touchend preventDefault，与 Pj13 同款），选中栏留到这一刻才弹。
+  function qtEndGesture(e) {
+    if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle'; return }
+    if (qtSt !== 'selecting') return
+    if (e && e.cancelable) e.preventDefault()
+    document.removeEventListener('touchmove', qtExtend)
+    qtMouseUntil = Date.now() + QUOTE_MOUSE_HOLD
+    qtSt = 'bar'
+    qtShowBar()
+  }
+
+  // ---------- 3. 选中栏 ----------
+  function qtClose() {
+    document.removeEventListener('touchmove', qtExtend)
+    if (qtBar) { qtBar.remove(); qtBar = null }
+    qtClearKnobs()
+    qtSt = 'idle'
+    qtRange = null
+    qtAnchor = null
+    qtFixed = null
+    const sel = window.getSelection()
+    if (sel) sel.removeAllRanges()
+  }
+  // 栏与柄都锚在**现役选区**上（柄拖拽期选区一直在变，故定位逻辑独立成函数而不是写死在开栏那一次）。
+  function qtPlaceBar() {
+    if (!qtBar || !qtRange) return
+    const r = qtRange.getBoundingClientRect()
+    const w = qtBar.offsetWidth
+    const h = qtBar.offsetHeight
+    let top = r.top - h - QUOTE_BAR_GAP
+    if (top < 8) top = r.bottom + QUOTE_BAR_GAP // 选区上方放不下 ⇒ 翻到下方（同 iOS）
+    qtBar.style.left = Math.round(Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8))) + 'px'
+    qtBar.style.top = Math.round(Math.max(8, Math.min(top, window.innerHeight - h - 8))) + 'px'
+  }
+  // 动作行 = 内置「拷贝」+ quote.js 的动作表（内置「使用 AI 编辑」+ 当前项目申报行）。放不下时末尾折成
+  // 「更多 ›」——点开**复用既有竖排 .quote-pop**（自带全部动作行 + 话术输入行 + 立即发送），不另造动作表。
+  function qtShowBar() {
+    if (!qtRange) { qtClose(); return }
+    const rows = [{ id: 'copy', title: '拷贝' }].concat(quoteActionRows())
+    const bar = document.createElement('div')
+    bar.className = 'quote-bar'
+    bar.style.visibility = 'hidden' // 先量后放，避免首帧闪在视口左上角
+    for (const a of rows) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'qb-item'
+      b.dataset.qid = a.id
+      b.textContent = a.title
+      bar.appendChild(b)
+    }
+    document.body.appendChild(bar)
+    const maxW = window.innerWidth - 16
+    if (bar.offsetWidth > maxW) {
+      while (bar.children.length > 1 && bar.offsetWidth > maxW - QUOTE_MORE_W) bar.lastElementChild.remove()
+      const more = document.createElement('button')
+      more.type = 'button'
+      more.className = 'qb-item qb-more'
+      more.dataset.qid = '__more'
+      more.innerHTML = '<span class="qb-lb">更多</span><span class="qb-go">›</span>'
+      bar.appendChild(more)
+    }
+    qtBar = bar
+    qtPlaceBar()
+    bar.style.visibility = ''
+    // 栏内按下/抬手都不算「点栏外」（栏是 body 下的 fixed 卡片，与选区无 DOM 亲缘，故靠 contains 判）
+    bar.addEventListener('pointerdown', (e) => e.stopPropagation())
+    bar.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('.qb-item')
+      if (!b) return
+      qtRun(b.dataset.qid, rows)
+    })
+    qtPlaceKnobs()
+  }
+  // 动作落地。三条都**先取快照再收口**（快照要的是收口前的选区；收口会清掉它）。
+  function qtRun(id, rows) {
+    if (id === 'copy') {
+      const text = qtRange ? qtRange.toString() : ''
+      qtClose()
+      writeClipboard(text).then((ok) => toast(ok ? '已复制' : '复制失败'))
+      return
+    }
+    const snap = quoteSnapOfRange(qtRange)
+    qtClose()
+    if (id === '__more') { if (snap) openQuotePop(snap); return }
+    if (!snap) return
+    const row = rows.find((a) => a.id === id)
+    if (row && row.builtin) quoteStash(snap) // 内置「使用 AI 编辑」：胶囊进输入栏 + 光标落胶囊后
+    else quoteRunAction(id, snap) // 项目申报动作：宿主不代执行，只把 id 回发预览帧
+  }
+
+  // ---------- 4. 选中柄（松手后扩选的唯一入口）----------
+  // 两个自绘圆柄落在选区首/末行下沿（iOS 同形）。拖拽期 touch-action:none + 指针捕获；固定端点取**起手时**
+  // 的那一端 ⇒ 拖过对端即自然换向（与 iOS 一致），不会因「谁在左谁在右」中途翻车。
+  // 柄节点**只在开栏时建一次**，此后只改 left/top —— 拖拽中重建会在 setPointerCapture 的节点上拔掉
+  // 元素，指针捕获随之释放、拖动当场断掉（扩选每移动一次都会重定位，故此处必须复用节点）。
+  function qtClearKnobs() { qtKnobs.forEach((k) => k.remove()); qtKnobs = [] }
+  function qtPlaceKnobs() {
+    if (!qtBar || !qtRange) { qtClearKnobs(); return }
+    const rects = qtRange.getClientRects()
+    if (!rects.length) { qtClearKnobs(); return }
+    if (qtKnobs.length !== 2) {
+      qtClearKnobs()
+      qtKnobs = [qtAddKnob('a'), qtAddKnob('b')]
+    }
+    const a = rects[0]
+    const b = rects[rects.length - 1]
+    qtKnobs[0].style.left = Math.round(a.left) + 'px'
+    qtKnobs[0].style.top = Math.round(a.bottom) + 'px'
+    qtKnobs[1].style.left = Math.round(b.right) + 'px'
+    qtKnobs[1].style.top = Math.round(b.bottom) + 'px'
+  }
+  function qtAddKnob(which) {
+    const k = document.createElement('div')
+    k.className = 'qh-knob'
+    k.dataset.which = which
+    k.addEventListener('pointerdown', qtKnobDown)
+    document.body.appendChild(k)
+    return k
+  }
+  function qtKnobDown(e) {
+    if (e.pointerType !== 'touch' || !qtRange) return
+    e.preventDefault()
+    e.stopPropagation()
+    const k = e.currentTarget
+    k.setPointerCapture(e.pointerId)
+    qtFixed = k.dataset.which === 'a'
+      ? { node: qtRange.endContainer, off: qtRange.endOffset }
+      : { node: qtRange.startContainer, off: qtRange.startOffset }
+    k.addEventListener('pointermove', qtKnobMove)
+    k.addEventListener('pointerup', qtKnobUp)
+    k.addEventListener('pointercancel', qtKnobUp)
+  }
+  function qtKnobMove(e) {
+    if (qtSt !== 'bar' || !qtRange || !qtFixed) return
+    e.preventDefault()
+    const cr = qtCaretAt(e.clientX, e.clientY)
+    const n = cr && cr.startContainer
+    if (!n || n.nodeType !== 3 || !qtInZone(n)) return
+    if (!qtApply(qtMakeRange({ node: n, off: cr.startOffset }, qtFixed))) return
+    qtPlaceKnobs()
+    qtPlaceBar()
+  }
+  function qtKnobUp(e) {
+    const k = e.currentTarget
+    if (k.hasPointerCapture && k.hasPointerCapture(e.pointerId)) k.releasePointerCapture(e.pointerId)
+    k.removeEventListener('pointermove', qtKnobMove)
+    k.removeEventListener('pointerup', qtKnobUp)
+    k.removeEventListener('pointercancel', qtKnobUp)
+    qtFixed = null
+    qtMouseUntil = Date.now() + QUOTE_MOUSE_HOLD
+  }
+
+  // ---------- 5. 手势 ----------
+  document.addEventListener('pointerdown', (e) => {
+    if (!IS_TOUCH_DEVICE || e.pointerType !== 'touch') return
+    if (qtBar && qtBar.contains(e.target)) return // 栏内按下交给栏自己（点动作行）
+    if (qtKnobs.some((k) => k.contains(e.target))) return
+    if (qtSt === 'bar') qtClose() // 点栏外 = 收口（清选区 + 收柄）
+    if (!(e.target.closest && e.target.closest(QUOTE_ZONE))) return
+    clearTimeout(qtTimer)
+    qtPress = [e.clientX, e.clientY]
+    qtSt = 'pressed'
+    qtTimer = setTimeout(qtHarvest, QUOTE_LP_MS)
+  }, { passive: true })
+  document.addEventListener('pointermove', (e) => {
+    if (qtSt !== 'pressed' || !qtPress) return
+    if (Math.abs(e.clientX - qtPress[0]) > QUOTE_LP_SLOP || Math.abs(e.clientY - qtPress[1]) > QUOTE_LP_SLOP) {
+      clearTimeout(qtTimer)
+      qtTimer = 0
+      qtSt = 'idle'
+    }
+  }, { passive: true })
+  document.addEventListener('pointerup', () => { if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle' } }, { passive: true })
+  document.addEventListener('pointercancel', () => { if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle' } }, { passive: true })
+  document.addEventListener('touchend', qtEndGesture, { passive: false })
+  document.addEventListener('touchcancel', qtEndGesture, { passive: false })
+  // 收口四路（与 .quote-pop 同口径）：Escape / 滚动（含 #chat-scroll 内滚）/ 窗口尺寸变化 / 点栏外（上行）。
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && qtSt === 'bar') qtClose() })
+  window.addEventListener('scroll', () => { if (qtSt === 'bar') qtClose() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { if (qtSt === 'bar') qtClose() })
 
   // ---------- 启动 ----------
   ;(async () => {

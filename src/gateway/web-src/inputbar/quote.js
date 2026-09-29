@@ -28,7 +28,6 @@ import { gwSend, syncGwSend } from './send.js'
   // 可引用区（选区落在其中才认，其它区域不唤出）
   const QUOTE_ZONE = '#chat-scroll, #work-editor'
 
-  let quoteSnap = null // 当前浮窗的引用快照
   let quotePop = null
   let quoteSkipNextUp = false // 「点浮窗外关窗」的那一下 mousedown 已消费：紧随的 mouseup 不得重开
 
@@ -65,12 +64,13 @@ import { gwSend, syncGwSend } from './send.js'
     const b = quoteLineOf(range.endContainer)
     return a && b ? [Math.min(a, b), Math.max(a, b)] : null
   }
-  function quoteSnapOf() {
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
-    const text = sel.toString()
+  // 快照构造的唯一入口，**两条来源共用**（桌面 mouseup 现场取选区 / 触屏引擎收编的选区）：
+  // 入参恒为 Range，不读 window.getSelection —— 触屏那条路的 Range 是程序化设回的，与「当前选区」同源但
+  // 未必同一对象（且收编靠的就是先清后设），读全局选区会在时序上分叉出第二份真源。
+  function quoteSnapOfRange(range) {
+    if (!range || range.collapsed) return null
+    const text = range.toString()
     if (!text.trim()) return null
-    const range = sel.getRangeAt(0)
     const node = range.startContainer
     const el = node.nodeType === 1 ? node : node.parentElement
     if (!el || !el.closest || !el.closest(QUOTE_ZONE)) return null
@@ -88,6 +88,12 @@ import { gwSend, syncGwSend } from './send.js'
     const idx = all.indexOf(msg) + 1
     const cur = state.currentHash ? findSession(state.currentHash) : null
     return { kind: 'reply', text, rect, title: (cur && cur.title) || '本会话', idx }
+  }
+  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏路径不走这里，见 inputbar/quote-touch.js）
+  function quoteSnapOf() {
+    const sel = window.getSelection()
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
+    return quoteSnapOfRange(sel.getRangeAt(0))
   }
 
   // ---------- 2. 引用胶囊（输入栏内）----------
@@ -131,12 +137,10 @@ import { gwSend, syncGwSend } from './send.js'
   // ---------- 3. 浮窗 ----------
   function closeQuotePop() {
     if (quotePop) { quotePop.remove(); quotePop = null }
-    quoteSnap = null
   }
 
   // 立即发送：引用 + 浮窗话术进输入栏 → gwSend（输入栏原有草稿一并发出，不丢内容）
-  async function quoteSendNow() {
-    const snap = quoteSnap
+  async function quoteSendNow(snap) {
     if (!snap) return
     const note = (quotePop.querySelector('.qp-in').value || '').trim()
     insertRefChip(snap)
@@ -148,10 +152,9 @@ import { gwSend, syncGwSend } from './send.js'
     inputEl.focus()
     await gwSend()
   }
-  // 只入输入栏（「使用 AI 编辑」行）：不发送，关浮窗把焦点交还输入栏，**光标落在胶囊之后**
-  // （用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
-  function quoteStash() {
-    const snap = quoteSnap
+  // 只入输入栏（「使用 AI 编辑」行 / 触屏选中栏同款语义）：不发送，关浮窗把焦点交还输入栏，
+  // **光标落在胶囊之后**（用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
+  function quoteStash(snap) {
     if (!snap) return
     const chip = insertRefChip(snap)
     closeQuotePop()
@@ -184,8 +187,8 @@ import { gwSend, syncGwSend } from './send.js'
       '</button>'
   }
   // 申报动作的落地：宿主**不代执行**（业务动作要调项目自己的 API 与页面状态）——只把 id 回发预览帧。
-  function quoteRunAction(id) {
-    const w = quoteSnap && quoteSnap.frame
+  function quoteRunAction(id, snap) {
+    const w = snap && snap.frame
     closeQuotePop()
     if (w) { try { w.postMessage({ type: 'floria-quote-action', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ } }
   }
@@ -193,7 +196,6 @@ import { gwSend, syncGwSend } from './send.js'
   // 后者多带 frame（回发锚点）与 kind:'pdf'，其余同构——外部来源不另开一套浮窗。
   function openQuotePop(snap) {
     closeQuotePop()
-    quoteSnap = snap
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
@@ -215,11 +217,11 @@ import { gwSend, syncGwSend } from './send.js'
     pop.querySelectorAll('.qp-row').forEach((b) =>
       b.addEventListener('click', () => {
         const id = b.dataset.qact
-        if (id === QUOTE_BUILTIN_ID) quoteStash()
-        else quoteRunAction(id)
+        if (id === QUOTE_BUILTIN_ID) quoteStash(snap)
+        else quoteRunAction(id, snap)
       }),
     )
-    pop.querySelector('.qp-send').addEventListener('click', quoteSendNow)
+    pop.querySelector('.qp-send').addEventListener('click', () => quoteSendNow(snap))
     pop.querySelector('.qp-in').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); quoteSendNow() }
       else if (e.key === 'Escape') { e.preventDefault(); closeQuotePop() }
@@ -233,6 +235,9 @@ import { gwSend, syncGwSend } from './send.js'
   // 按下并不会清掉选区，不挡就会「关掉又立刻重开」。
   document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return
+    // 触屏接管中（触屏选区引擎在 hold 窗口内）⇒ 鼠标链让位：iOS 抬手会补发合成 mouseup，而收编后的
+    // 程序化选区正是「非空且在引用区内」，不挡就会在选中栏之外再开一份浮窗（见 inputbar/quote-touch.js）。
+    if (quoteTouchOwnsSelection()) return
     if (quoteSkipNextUp) { quoteSkipNextUp = false; return }
     if (quotePop && quotePop.contains(e.target)) return
     const snap = quoteSnapOf()
@@ -311,4 +316,6 @@ export {
   quoteLineOf,
   quoteRunAction,
   quoteSnapOf,
+  quoteSnapOfRange,
+  quoteStash,
 }

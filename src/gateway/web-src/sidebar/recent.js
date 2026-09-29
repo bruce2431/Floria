@@ -309,7 +309,17 @@ import { renderList, renderProject } from './mgr.js'
       const h = lpHit
       if (!h) return
       lpFired = true
-      openRowMenu(h, 0, 0, h.el)
+      // 480ms 悬停期内列表可能整列重建（refreshList 按活动流签名随时重渲，处理中 2-3 次/秒），
+      // 此时捕获的节点已成孤儿：getBoundingClientRect 归零 ⇒ 落点被 clamp 到视口左上角。
+      // 不变量「浮窗与浮起锚定现役节点」——按 (行源, 行标识) 重解析；行已消失（删除/换视图）则放弃。
+      let el = h.el
+      if (!el.isConnected) {
+        const key = h.src.key(el)
+        if (key == null) return
+        el = [...document.querySelectorAll(h.src.sel)].find((x) => h.src.key(x) === key) || null
+        if (!el) return
+      }
+      openRowMenu({ src: h.src, el }, 0, 0, el)
     }, 480)
   }, { passive: true })
   document.addEventListener('pointermove', (e) => {

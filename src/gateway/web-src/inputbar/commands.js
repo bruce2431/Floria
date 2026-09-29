@@ -5,7 +5,7 @@ import { relTime } from '../core/markdown.js'
 import { findSession, hashOf } from '../core/sessions.js'
 import { inputEl, state, ALL, esc, toast, isTouch, newSessionProject } from '../core/state.js'
 import { pendingImages, renderImgPills } from './images.js'
-import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pickItems, pickLabel, refreshPick, serializeInput } from './mention.js'
+import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pickItems, pickLabel, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
@@ -17,7 +17,6 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // 待网关接口就绪后替换数据源，交互逻辑不变。
   const MOCK_COMMANDS = [
     { name: 'compact', desc: '压缩当前会话上下文', claim: true },
-    { name: 'clear', desc: '清除当前会话上下文', risk: '将清空当前会话的所有消息（含文件状态与上下文），不可恢复。' },
     { name: 'model', desc: '切换模型', claim: true },
     { name: 'permission', desc: '调整权限模式', claim: true },
     { name: 'plan', desc: '进入计划模式', claim: true },
@@ -113,6 +112,21 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     psel.open ? closeProjPop() : openProjPop()
   })
 
+  // 逐命令字形（同 dsh ui-commands presentation.ts 的 HOST_FACES 语义：每个内置命令各有图标，
+  // 不是整列共用一个「+」）。表外命令回落 dshPlus。字形来源与说明见 core/icons.js 同段注释。
+  const CMD_ICON = {
+    compact: I.dshCompact,
+    model: I.dshSliders,
+    permission: I.dshShield,
+    plan: I.dshPlan,
+    rename: I.dshEditOutline,
+    resume: I.dshPlay,
+    retry: I.dshRefresh,
+    status: I.dshGauge,
+    skills: MENTION_SKILL_ICON,
+    plugins: MENTION_PLUGIN_ICON,
+  }
+
   // ---- 命令菜单（dsh PopupSelectController 移植：open→加载一次→本地过滤→高亮→选择→确认门）----
   // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
   // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
@@ -181,7 +195,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshFile : it.kind === 'skill' ? MENTION_PLUGIN_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : I.dshPlus
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : (CMD_ICON[it.name] || I.dshPlus)
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         const detail = it.kind === 'path' ? it.path : it.desc
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`

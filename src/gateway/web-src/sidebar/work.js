@@ -128,11 +128,14 @@ import { renderProjSeat } from '../inputbar/commands.js'
     if (el === sessionCard) return wkAssistInFlow()
     return !!el && el.offsetWidth > 0 && getComputedStyle(el).display !== 'none'
   }
-  // 沿 DOM 序找 el 左/右第一个可见栏（跳过另一条分界条与隐藏栏）；dir = -1 左 / +1 右
+  // 沿 DOM 序找 el 左/右第一个可见栏（跳过非栏兄弟与隐藏栏）；dir = -1 左 / +1 右。
+  // 只认主区三栏（paneKey 查表），不认 `#chat-area` 的其它槽级兄弟：`#gate-screen`（token 门全屏浮层，
+  // 满尺寸、display 非 none）会被 paneVisible 判成可见栏，令分界条 g1 误配有右邻 → 门后凭空多一条
+  // 7px 假缝（门已 hidden 但 applyWorkFlex 不再重跑）；`#menu-btn` 等绝对定位件同理。
   function nearPane(g, dir) {
     const key = dir < 0 ? 'previousElementSibling' : 'nextElementSibling'
     for (let el = g[key]; el; el = el[key]) {
-      if (el.classList.contains('work-gutter')) continue
+      if (!paneKey(el)) continue
       if (paneVisible(el)) return el
     }
     return null

@@ -1193,11 +1193,14 @@ body.kb-open #input-wrap { transition: none; }
   border: none; background: transparent; text-align: left; width: 100%;
 }
 #cmd-pop .row:hover, #cmd-pop .row.rowActive { background: rgba(38, 49, 72, 0.06); }
-/* 行图标块（按命令类别的复用图标：会话=msg / 模式与模型=toggle / 查看=mag） */
+/* 行图标块 = dsh MenuView `.itemIcon` 逐字（`width:14px;height:14px;display:inline-flex;
+   align-items:center;justify-content:center`）：**裸图标，无背景/圆角，颜色随行文本**。
+   旧版是 floria 自造件——26px 灰底 #f2f3f5 + 7px 圆角 + 灰字 #6b7076：1px 细描线坐在浅灰底上
+   对比度极低（灰上灰），整列看上去像贴了标签 ⇒ 用户报「廉价感」的根因；且 26px 块与 14px 图形的
+   内边距不对称，首行（图片）读起来像错位。现与同族弹窗一致：裸图标 + 行色。 */
 #cmd-pop .rowIco {
-  width: 26px; height: 26px; border-radius: 7px; flex: none;
+  width: 14px; height: 14px; flex: none;
   display: inline-flex; align-items: center; justify-content: center;
-  background: #f2f3f5; color: #6b7076;
 }
 #cmd-pop .rowIco svg { width: 14px; height: 14px; }
 #cmd-pop .label { flex: none; white-space: nowrap; }
@@ -1943,6 +1946,43 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 }
 .qp-send:hover { background: #679efe; }
 .qp-send svg { width: 15px; height: 15px; display: block; }
+
+/* ===== 触屏选中栏 .quote-bar + 选中柄 .qh-knob（2026-09-28，仅触屏）=====
+   触屏长按选中（inputbar/quote-touch.js）**松手后**弹出，取代 iOS 系统「拷贝/查询/翻译」条（长按举手
+   势被程序化接管，详见该模块文件头）。深色半透明 + 圆角 + 项间 1px 细分隔线 + 末尾 ›（用户实拍 iPad
+   系统条形态照此复刻）。项 = 拷贝 / 使用 AI 编辑 / 当前项目申报动作；放不下时末尾折成「更多 ›」（点开
+   复用竖排 .quote-pop，不另造动作表）。定位与 .quote-pop 同口径：body 下 fixed、选区上方（放不下翻
+   下方）、越界 clamp 回视口。色值硬编码不跟主题（同 .quote-pop 定案）。 */
+.quote-bar {
+  position: fixed; z-index: 81;
+  display: flex; align-items: stretch;
+  padding: 0 4px; border-radius: 12px;
+  background: rgba(28, 30, 34, 0.92);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  animation: rowMenuIn 0.12s ease-out;
+}
+.quote-bar .qb-item {
+  display: inline-flex; align-items: center;
+  height: 44px; padding: 0 14px;
+  border: none; background: transparent;
+  font: inherit; font-size: 14px; line-height: 1; color: #fff; white-space: nowrap; cursor: pointer;
+}
+.quote-bar .qb-item + .qb-item { border-left: 1px solid rgba(255, 255, 255, 0.18); }
+.quote-bar .qb-item:active { background: rgba(255, 255, 255, 0.12); }
+.quote-bar .qb-more { padding-right: 10px; }
+.quote-bar .qb-go { margin-left: 4px; color: rgba(255, 255, 255, 0.7); font-size: 15px; }
+/* 选中柄：松手后拖拽扩选（iOS 同形圆柄）。touch-action:none 是它唯一的职责 —— 拖柄不得被判成滚动，
+   故不接受浏览器的默认触摸行为；落点由 JS 给 left/top（选区首/末行下沿），margin 把圆心对到端点。 */
+.qh-knob {
+  position: fixed; z-index: 82;
+  width: 26px; height: 26px; margin: -13px 0 0 -13px;
+  border-radius: 999px;
+  background: #4176e6;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+}
 
 /* ===== 会话重命名弹窗 #rename-modal（2026-08-24 对齐 DSH Modal.module.css + WorkspaceBrowser.renameInput）=====
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·

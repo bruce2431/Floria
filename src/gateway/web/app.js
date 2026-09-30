@@ -7899,12 +7899,21 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     // join(", ") —— 与 CLI answers 契约对齐（record(question,string)，CLI join(", ") 同构）。
     // 取消回答 = 右上 ×（sendApprove deny），不再设「拒绝」按钮；跳过本题 = 该题留空推进（允许空答）。
     const answers = {}     // question -> string（单选）/ string[]（多选）
-    const customText = {}  // question -> 自由输入文本（非空时优先于选项答案）
-    const pick = {}        // question -> 'opt' | 'text'：本题选中的答案来源（点击即切换，见 pickText/pickOpt）
+    const customText = {}  // question -> 自由输入文本
+    const pick = {}        // question -> 'opt' | 'text'：单选本题的答案来源（点击即切换，见 pickText/pickOpt）
+    const multiOf = {}     // question -> bool：多选题 = 勾选项 + 自定义文本并存（不受 pick 约束）
     let qi = 0
     let collapsed = false
     let submitting = false
-    const ansOf = (q) => { // 生效答案由 pick 决定（最后点击的那一侧）；另一侧内容留着但不参与提交
+    // 2026-09-30 修：单选沿用 pick 单源（点选项/点输入行二者只其一高亮、只其一参与提交）；
+    // 多选下 pick 不再互斥——勾选项与自定义文本同时保留、一起提交（join(", ")，与 CLI concat 语义同构）。
+    const ansOf = (q) => {
+      if (multiOf[q]) {
+        const arr = Array.isArray(answers[q]) ? answers[q].slice() : []
+        const t = String(customText[q] || '').trim()
+        if (t) arr.push(t)
+        return arr.length ? arr.join(', ') : undefined
+      }
       if (pick[q] === 'text') {
         const t = String(customText[q] || '').trim()
         return t || undefined
@@ -7952,38 +7961,42 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
       const descOf = (o) => (o && typeof o === 'object' && o.description) ? String(o.description) : ''
       const curAns = multi ? (Array.isArray(answers[question]) ? answers[question] : []) : answers[question]
       const isText = pick[question] === 'text'
+      multiOf[question] = multi
+      const hasText = String(customText[question] || '').trim().length > 0
       let rows = ''
       opts.forEach((o, oi) => {
         const label = fmt(o)
         const desc = descOf(o)
-        const sel = isText ? false : (multi ? curAns.includes(label) : curAns === label)
+        const sel = multi ? curAns.includes(label) : (isText ? false : curAns === label)
         rows += `<button type="button" class="qa-opt${sel ? ' sel' : ''}" data-v="${esc(label)}"><span class="qa-num">${oi + 1}</span><span class="qa-copy"><span class="qa-label">${esc(label)}</span>${desc ? `<span class="qa-desc">${esc(desc)}</span>` : ''}</span></button>`
       })
       let html = '<div class="appr-card qa-card">'
       html += `<div class="qa-top"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
       html += `<div class="qa-main"><div class="qa-title">${esc(question)}</div>`
       html += `<div class="qa-opts">${rows}</div>`
-      html += `<div class="qa-inputrow${isText ? ' sel' : ''}"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="输入你的答案" value="${esc(String(customText[question] || ''))}"></div>`
+      html += `<div class="qa-inputrow${(multi ? hasText : isText) ? ' sel' : ''}"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="${multi ? '输入你的答案（与勾选项一并提交）' : '输入你的答案'}" value="${esc(String(customText[question] || ''))}"></div>`
       html += `<div class="qa-foot"><div class="qa-nav"><button type="button" class="qa-nav-btn prev${qi > 0 ? '' : ' off'}" data-nav="prev" title="上一题">${I.dshChevRight}</button><span class="qa-nav-pos">${qi + 1}/${qs.length}</span><button type="button" class="qa-nav-btn next${qi < qs.length - 1 ? '' : ' off'}" data-nav="next" title="下一题">${I.dshChevRight}</button></div>`
       html += `<div class="qa-foot-btns"><button type="button" class="qa-skip">跳过本题</button><button type="button" class="appr-allow">${isLast ? '提交答案' : '下一题'}</button></div></div>`
       html += '<div class="appr-state"></div></div></div>'
       showTakeover(html, 'approval')
       const t = takeoverEl()
       bindChrome(t)
-      // 2026-09-26 用户定案：①选中态由「点击」决定，不等输入；②切换来源不清空另一侧内容
+      // 2026-09-26 用户定案（单选）：①选中态由「点击」决定，不等输入；②切换来源不清空另一侧内容
       // （选过的选项、打过的字都留着）；③单选任何时刻只有一处高亮——pick[question] 是唯一判据，
       // `.qa-opt.sel` 与 `.qa-inputrow.sel` 二者只其一（聚焦态不再单独强调，见 gateway.js 的 qa-inputrow）。
+      // 2026-09-30 修：以上 ③ 只适用于单选；多选下 pick 不参与——勾选高亮与自定义输入高亮可同时存在，
+      // 输入行 `.sel` 由「有无自定义文本」驱动，选项高亮恒由勾选集合驱动（互不熄灭）。
       const inp = t.querySelector('.qa-input')
       const row = t.querySelector('.qa-inputrow')
-      const paintOpts = () => { // 选项高亮 = 当前来源非 text 且该 option 在 answers 里
-        const srcText = pick[question] === 'text'
+      const paintOpts = () => { // 选项高亮 = 该 option 在选中集合里（单选且来源为 text 时才熄灭）
+        const srcText = !multi && pick[question] === 'text'
         t.querySelectorAll('.qa-opt').forEach((b) => {
           const on = !srcText && (multi ? curAns.includes(b.dataset.v) : answers[question] === b.dataset.v)
           b.classList.toggle('sel', on)
         })
       }
-      const pickText = () => { pick[question] = 'text'; row.classList.add('sel'); paintOpts() }
-      const pickOpt = () => { pick[question] = 'opt'; row.classList.remove('sel') }
+      const pickText = () => { pick[question] = 'text'; if (multi) return; row.classList.add('sel'); paintOpts() }
+      const pickOpt = () => { pick[question] = 'opt'; if (multi) return; row.classList.remove('sel') }
       row.addEventListener('click', () => { pickText(); inp.focus() }) // 点行任意处 = 选中本行并进入输入
       inp.addEventListener('focus', pickText) // 键盘 Tab / 程序聚焦同语义
       // 选项点选：只 toggle 行高亮不整卡重渲染（输入框不闪不失焦）；多选互不影响、单选互斥
@@ -8003,8 +8016,10 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         })
       })
       inp.addEventListener('input', () => { // 只维护文本值（切换来源不丢字），选中态由点击决定
-        if (inp.value.trim()) customText[question] = inp.value
+        const has = !!inp.value.trim()
+        if (has) customText[question] = inp.value
         else delete customText[question]
+        if (multi) row.classList.toggle('sel', has) // 多选：输入行高亮 = 有无自定义文本
       })
       t.querySelectorAll('.qa-nav-btn').forEach((b) => {
         b.addEventListener('click', () => {

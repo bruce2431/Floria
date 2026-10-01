@@ -23,7 +23,7 @@
 
 **前端门控**：`needToken()` =「`GATEWAY && !gateVerified`」（gateVerified 声明提前）；`initGateway` 统一先 `connect()`（cookie 有效 WS 直过 → `hideGate` 直进空态，无效 onclose 回 token 门）；门内输入 token 先 HTTP 预验证（种 cookie）再 connect；`apiUrl` 仍附加 gToken（空串无害，网关看 cookie）。
 
-**访问地址（mDNS 自广播 `floria.local`）**：同 WiFi/热点设备一律 `http://floria.local:<port>/`，换网络/换 IP 免配置免重授权（授权按设备码恒定）；**仅支持 Apple/Windows**（`/server` 只输出该唯一地址、不列 IP 直连；Android `.local` 解析差不支持）。本机 hosts `127.0.0.1 floria.local` → 本机走 hosts、远程走 mDNS（floria.com 是公网真实注册域名，勿用作别名）。
+**访问地址（mDNS 自广播 `floria.local`）**：同 WiFi/热点设备一律 `http://floria.local:<port>/`，换网络/换 IP 免配置免重授权（授权按设备码恒定）；**仅支持 Apple/Windows**（`/server` 只输出该唯一地址、不列 IP 直连；Android `.local` 解析差不支持）。本机 hosts `127.0.0.1 floria.local` → 本机走 hosts、远程走 mDNS（floria.com 是公网真实注册域名，勿用作别名）。**红线：该 hosts 条目只允许存在于网关所在机**（解析到自身，经 `0.0.0.0` 监听可达）；其它设备一律靠 mDNS，在非网关设备上写 `127.0.0.1 floria.local` 会使其把域名解析到自身、页面恒打不开（网关代码从不读写 hosts，此条纯人工，**勿在客户端抄用**）。
 
 **设备自报类型 hint**：iPadOS Safari 桌面模式 UA 与 macOS 全同，网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（`navigator.platform==='MacIntel' && maxTouchPoints>1`，app.js `deviceHint()`），随 activate 轮询与 WS 连接 query `device=` 上报，网关记 `.claude/gateway/devices` 的 `hint`（`touchGatewayTicket` 第 4 参），`/server auth` 展示 hint 优先于 UA 判定（存量票证 WS 重连即补齐）。
 

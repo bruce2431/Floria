@@ -269,8 +269,8 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
 // ---- 4e. 项目申报的浮窗动作（2026-09-28）：纯数据表 + 与内置行合流 ----
 {
   const registry = read(resolve(SRC, 'views/registry.js'))
-  const extCard = read(resolve(SRC, 'views/ext-card.js'))
-  const mgr = read(resolve(SRC, 'sidebar/mgr.js'))
+  const extCard = read(resolve(SRC, 'views/cards/ext-card.js'))
+  const preview = read(resolve(SRC, 'views/cards/preview-card.js'))
   if (/function normQuoteActions\(/.test(extCard) && /function registerQuoteActions\(/.test(registry) && /function quoteActions\(/.test(registry)) ok('动作表：ext-card.normQuoteActions + registry.registerQuoteActions/quoteActions 齐')
   else bad('动作表缺失（normQuoteActions / registerQuoteActions / quoteActions）')
   if (/export \{[^}]*normQuoteActions,/.test(extCard) || /normQuoteActions,/.test(extCard)) ok('ext-card.js 导出 normQuoteActions')
@@ -278,9 +278,9 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
   if (/export \{[^}]*registerQuoteActions[\s\S]*?quoteActions/.test(registry) || (/registerQuoteActions/.test(registry.split('export {')[1] || '') && /quoteActions/.test(registry.split('export {')[1] || ''))) ok('registry.js 导出 registerQuoteActions / quoteActions')
   else bad('registry.js 未导出动作表接口')
   // 一次请求取两份申报：syncExtCards 同一 then 里落两张表，且清理点一致
-  if (/clearQuoteActions\(\)/.test(mgr) && /registerQuoteActions\(label, d && d\.quoteActions\)/.test(mgr)) ok('mgr.syncExtCards 同点取两份申报（不新增请求）')
-  else bad('mgr.syncExtCards 未同步动作表')
-  if (/clearExtCards\(\)[\s\S]{0,80}clearQuoteActions\(\)/.test(mgr)) ok('EXT 卡与动作表同点清理（生命周期一致）')
+  if (/clearQuoteActions\(\)/.test(preview) && /registerQuoteActions\(label, d && d\.quoteActions\)/.test(preview)) ok('previewCard.syncExtCards 同点取两份申报（不新增请求）')
+  else bad('previewCard.syncExtCards 未同步动作表')
+  if (/clearExtCards\(\)[\s\S]{0,80}clearQuoteActions\(\)/.test(preview)) ok('EXT 卡与动作表同点清理（生命周期一致）')
   else bad('动作表未与 EXT 卡同点清理（会残留上个项目动作）')
   // 动作 = 纯数据：normQuoteActions 不得带 path / host
   const nq = fnSlice(extCard, 'normQuoteActions')

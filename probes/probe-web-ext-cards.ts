@@ -4,7 +4,7 @@
 // 四条不变量（每条答得出守护什么）：
 //   I1 外部卡集属于「最近一次挂载的那份 preview 文档所属项目」——异 label / 文档重挂即清；离开预览路由**不清**。
 //   I2 只为「当前帧」作证——postMessage 的 e.source 必须等于当前 .preview-frame.contentWindow。
-//   I3 外部永不进第一方注册表——EXT 与 VIEWS 分表；外部卡没有 render 代码，只有宿主生成的 iframe 壳。
+//   I3 外部永不进第一方注册表——EXT 与 CARDS 分表；外部卡没有 render 代码，只有宿主生成的 iframe 壳。
 //   I4 非法声明丢弃不兜底——字段不合格 / 未知 host / 越界 path → 整条丢，不猜不补默认。
 // 用法：bun run ./probes/probe-web-ext-cards.ts   （输出 pass/fail，末行 pass/fail 计数）
 
@@ -36,8 +36,8 @@ function body(file: string, header: string): string {
 }
 
 const registryJs = await Bun.file(`${SRC}/views/registry.js`).text()
-const extCardJs = await Bun.file(`${SRC}/views/ext-card.js`).text()
-const mgrJs = await Bun.file(`${SRC}/sidebar/mgr.js`).text()
+const extCardJs = await Bun.file(`${SRC}/views/cards/ext-card.js`).text()
+const previewCardJs = await Bun.file(`${SRC}/views/cards/preview-card.js`).text()
 const railExtJs = await Bun.file(`${SRC}/sidebar/rail-ext.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const srcAppJs = await Bun.file(`${SRC}/app.js`).text()
@@ -48,32 +48,33 @@ const appJs = await Bun.file(`${WEB}/app.js`).text()
 
 const count = (s: string, re: RegExp) => [...s.matchAll(re)].length
 
-// ---------- I3 分表：EXT 与 VIEWS 分开存，查询点合流 ----------
+// ---------- I3 分表：EXT 与 CARDS 分开存，查询点合流 ----------
 ok('I3 registry.js 有独立运行时表 EXT', /let EXT = \[\]/.test(registryJs))
 ok('I3 registry.js 有 EXT_LABEL（记录本表属于哪个项目）', /let EXT_LABEL = ''/.test(registryJs))
-ok('I3 EXT 未被塞进 VIEWS 字面量（VIEWS 仍是 5 条静态项）', count(registryJs, /\{ id: '/g) === 5, `实体条数 ${count(registryJs, /\{ id: '/g)}`)
-ok('I3 viewOf 查两张表', /const viewOf = \(id\) => VIEWS\.find\(\(v\) => v\.id === id\) \|\| EXT\.find\(/.test(registryJs))
-ok('I3 renderMgrTabs 遍历 VIEWS + EXT', registryJs.includes('VIEWS.concat(EXT).filter((v) => v.tab)'))
+ok('I3 静态卡表 CARDS = 会话 + 4 管理 + 预览（6 条，全部来自卡组件）', /const CARDS = \[sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef\]/.test(registryJs))
+ok('I3 cardOf 查两张表', /const cardOf = \(id\) => CARDS\.find\(\(c\) => c\.id === id\) \|\| EXT\.find\(/.test(registryJs))
+ok('I3 renderMgrTabs 遍历 CARDS + EXT', registryJs.includes('CARDS.concat(EXT).filter((v) => v.tab)'))
 const regBody = body(registryJs, 'function registerExtCards(')
-ok('I3 外部卡 render 一律由宿主生成（mountExtCard），无外部代码注入点', regBody.includes('render: (body) => mountExtCard(body, label, c)'))
+ok('I3 EXT 注册只写 EXT、不碰静态卡表 CARDS', regBody.includes('EXT.push({') && !regBody.includes('CARDS'))
+ok('I3 外部卡 mount 一律由宿主生成（mountExtCard），无外部代码注入点', regBody.includes('mount: (body) => mountExtCard(body, label, c)'))
 ok('I3 外部卡 id 命名空间 ext:<label>:<id>（与第一方裸词 id 零撞车）', regBody.includes('`ext:${label}:${c.id}`'))
 ok('I3 外部卡字段校验委托给 ext-card.js 的同一份过滤器', regBody.includes('for (const c of normExtCards(cards))'))
 
 // ---------- I1 生命周期：清点受控（异 label / 文档重挂清；离开预览路由不清） ----------
 ok('I1 registry.js 定义 clearExtCards', /function clearExtCards\(\)/.test(registryJs))
 ok('I1 same-label 且非 replace 时保留既有卡（同 id 覆盖语义）', regBody.includes('if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }'))
-const syncBody = body(mgrJs, 'function syncExtCards(')
-ok('I1 mgr.js 定义 syncExtCards', syncBody.length > 0)
+const syncBody = body(previewCardJs, 'function syncExtCards(')
+ok('I1 preview-card.js 定义 syncExtCards', syncBody.length > 0)
 ok('I1 syncExtCards 先清后取（旧项目卡不残留）', syncBody.indexOf('clearExtCards()') >= 0 && syncBody.indexOf('clearExtCards()') < syncBody.indexOf('fetch('))
 ok('I1 syncExtCards 走静态清单端点', syncBody.includes('/gateway/preview-cards?label='))
 ok('I1 syncExtCards 有 seq 守卫（先发请求的迟到响应不落表）', /seq (?:===|!==) extCardsSeq/.test(syncBody))
 // 挂载点 = 与 clearRailExt 同点：iframe 换 src / 新文档重挂（2 处），每处紧邻在 clearRailExt() 之后
-const clearIdx = [...mgrJs.matchAll(/clearRailExt\(\)/g)].map((m) => m.index!)
-const syncIdx = [...mgrJs.matchAll(/syncExtCards\(label\)(?!\s*\{)/g)].map((m) => m.index!)
+const clearIdx = [...previewCardJs.matchAll(/clearRailExt\(\)/g)].map((m) => m.index!)
+const syncIdx = [...previewCardJs.matchAll(/syncExtCards\(label\)(?!\s*\{)/g)].map((m) => m.index!)
 const paired = clearIdx.filter((i) => syncIdx.some((j) => j > i && j - i < 200)).length
 ok('I1 syncExtCards 与 clearRailExt 同点（2 处）', clearIdx.length === 2 && syncIdx.length === 2 && paired === 2, `clearRailExt ${clearIdx.length} / syncExtCards ${syncIdx.length} / 配对 ${paired}`)
 ok('I1 离开预览路由**不清**外部卡（route.js 无 clearExtCards）', !routeJs.includes('clearExtCards'))
-ok('I1 clearExtCards 调用点只此一处（mgr.js syncExtCards）', count(mgrJs, /clearExtCards\(\)/g) === 1, `mgr.js 内 ${count(mgrJs, /clearExtCards\(\)/g)} 次`)
+ok('I1 clearExtCards 调用点只此一处（preview-card.js syncExtCards）', count(previewCardJs, /clearExtCards\(\)/g) === 1, `preview-card.js 内 ${count(previewCardJs, /clearExtCards\(\)/g)} 次`)
 
 // ---------- I2 只为当前帧作证：两条申报共用同一道门 ----------
 const bridgeBody = body(railExtJs, 'function bindRailExtBridge()')
@@ -148,9 +149,12 @@ ok('壳 = 一卡一 iframe（.ext-shell > .ext-frame）', extCardJs.includes("'<
 ok('壳不复用 .preview-frame/.preview-shell 类名（避免顶替宿主「当前预览帧」的定位）', !/class="preview-(frame|shell)"/.test(extCardJs) && /class="ext-shell"/.test(extCardJs) && /class="ext-frame"/.test(extCardJs))
 
 // ---------- 拼接与产物 ----------
-ok('B1 bundle-web-modules.ts 收编 views/ext-card.js', bundleTs.includes("views/ext-card.js"))
-const rows = [...bundleTs.matchAll(/\{ file: '(views\/[a-z-]+\.js)'/g)].map((m) => m[1])
-ok('B1 ext-card.js 排在 registry.js 之前（同区间号 → 稳定排序）', rows.indexOf('views/ext-card.js') === rows.indexOf('views/registry.js') - 1, rows.join(' < '))
+ok('B1 bundle-web-modules.ts 收编 views/cards/ext-card.js', bundleTs.includes("views/cards/ext-card.js"))
+const rows = [...bundleTs.matchAll(/\{ file: '(views\/[\w/-]+\.js)'/g)].map((m) => m[1])
+// 全部卡组件（views/cards/*.js）必须排在 registry.js 之前（registry 顶层 CARDS 引用各卡 CardDef const）
+const regAt = rows.indexOf('views/registry.js')
+const cardRows = rows.filter((f) => f.startsWith('views/cards/'))
+ok('B1 六张卡组件全排在 registry.js 之前（同区间号 → 稳定排序）', regAt > 0 && cardRows.length === 6 && cardRows.every((f) => rows.indexOf(f) < regAt), rows.join(' < '))
 ok('B2 产物 app.js 含 mountExtCard 定义', appJs.includes('function mountExtCard('))
 ok('B2 产物 app.js 含 registerExtCards / clearExtCards 定义', appJs.includes('function registerExtCards(') && appJs.includes('function clearExtCards('))
 ok('B2 产物 app.js 含实时申报分支', appJs.includes("if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }"))

@@ -5,8 +5,8 @@
  *   <项目>/.claude/neturon/neurons/Neuron-PjN/
  *     ├── config.yaml            （Pj16 模板：person.id=PJN + 项目专属 should_search/add_memory）
  *     ├── l1.cog/precog.db       （空）
- *     ├── l2.mem/mem.db          （LOG 条目 → memories，7 列 schema）
- *     ├── l2.mem/embeddings.npy + index_config.json（rebuildEmbeddings forceFull）
+ *     ├── l2.mem/mem.db          （LOG 条目 → memories；块级向量在 block_vectors 列）
+ *     ├── l2.mem/                （无 npy：向量随行存 mem.db，rebuildVectors 填充）
  *     └── l3.raw/LOG/LOG.md + message.db（原项目根 LOG.md 真移动进来 + 每条目一行 messages）
  *
  * 惯例照 Pj16（20260910152816 项目神经元初始化 + 09-15 blocks 标准定案）：
@@ -26,11 +26,11 @@ import {
   countMessages,
   insertMemory,
   openDb,
+  readMemoryVectors,
   type MemEntry,
 } from '../src/tools/neturon/db.ts'
-import { rebuildEmbeddings, splitBlock } from '../src/tools/neturon/memwriter.ts'
+import { rebuildVectors, splitBlock } from '../src/tools/neturon/memwriter.ts'
 import { getGlobalRoot } from '../src/tools/neturon/config.ts'
-import { readNpyF32 } from '../src/tools/neturon/npyio.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const WORKSPACE = resolve(here, '..', '..', '..') // Floria/scripts → Floria → Pj16 → @WrokSpace
@@ -70,20 +70,18 @@ memory:
 ranking:
   # 读取方：retriever.ts（w_cos 语义相似 + w_kw 关键词命中）
   fact:
-    w_cos: 0.30
-    w_kw: 0.70
+    w_cos: 0.60
+    w_kw: 0.40
 
 precog:
   default_top_k: 10
-  expand_threshold: 0.70
-  expand_factor: 2.0
   # consumed 记录的回收期（天）；pre 永不清（新节点入口 + 待标注队列）
   ttl_days: 90
 
 # blocks 标准（写入侧硬约束，读取方：memwriter.buildEntry）
 # BGE 编码是静默丢尾——超过模型位置上限 512 token 的部分完全不进向量。故每个
-# block 必须 ≤ max_chars，超长由 buildEntry 就近切分；块多且短还能让 max-pool
-# 拿到多个语义焦点（每块一票）。文案式约定见 prompts.add_memory。
+# block 必须 ≤ max_chars，超长由 buildEntry 就近切分；块多且短能让 max-sim
+# 各块独立投票、最匹配的块决定命中（条目 cos = max_r cos(q, block_r)）。文案式约定见 prompts.add_memory。
 blocks:
   max_chars: ${MAX_CHARS}
 
@@ -120,7 +118,7 @@ prompts:
     本库是 ${p.dir} 的项目知识库（改动 / 定案 / 根因 / 踩坑）。写之前先想清：这条未来被谁检索、用来回答什么？想不清就不写。
 
     1. content：写清「做了什么 / 怎么做的 / 结果」，结论前置。
-    2. blocks：检索的真正载体——每条 block 独立编码后 max-pool 成整条向量。规矩：
+    2. blocks：检索的真正载体——每条 block 独立编码成单位向量、随行存 mem.db；条目命中取各块与查询 cos 的最大值（max-sim，最匹配的块决定命中）。规矩：
        · 块数 ≥ 2，一块一件事（一个定案 / 一处根因 / 一次改动）。
        · 单块 ≤ ${MAX_CHARS} 字（约 180 token，安全落 bge-small-zh 512 上限内）；超长按 ；。 先切好再写。
          ⚠️ 超长块是静默丢尾：超出 512 token 的部分完全不进向量，尾部内容检索不到。
@@ -271,14 +269,7 @@ for (const p of targets) {
     if (!existsSync(logPath)) {
       // 骨架库（无 LOG.md，只建空三层，等活写入）
       openDb(memDb)
-      let note = '索引留待首条写入'
-      try {
-        const { shape } = await rebuildEmbeddings(neuron, [], MODEL_CACHE, true)
-        note = `空索引 ${JSON.stringify(shape)}`
-      } catch {
-        /* 0 行 npy 写失败无害 */
-      }
-      console.log(`OK ${p.id}（${p.dir}）：骨架库建成（无 LOG.md，不迁移），${note}`)
+      console.log(`OK ${p.id}（${p.dir}）：骨架库建成（无 LOG.md，不迁移），向量留待首条写入`)
       continue
     }
 
@@ -321,21 +312,25 @@ for (const p of targets) {
     const movedSize = statSync(join(rawDir, 'LOG.md')).size
     if (movedSize !== origSize) throw new Error(`移动后大小不一致 ${origSize} -> ${movedSize}`)
 
-    // 索引收口
-    const { shape } = await rebuildEmbeddings(neuron, memRows, MODEL_CACHE, true)
+    // 向量收口：逐条重编码 blocks 写入 mem.db（与行同表）
+    const { dim } = await rebuildVectors(neuron, memRows, MODEL_CACHE)
 
-    // 校验：raw ≡ mem ≡ npy
+    // 校验：raw ≡ mem；每条非空 blocks 的向量长度 ≡ n_blocks×dim
     const nRaw = countMessages(rawDb)
     const nMem = countMemories(memDb)
-    const npy = readNpyF32(join(neuron, 'l2.mem', 'embeddings.npy'))
-    if (!(nRaw === entries.length && nMem === entries.length && npy.shape[0] === entries.length)) {
-      throw new Error(
-        `计数不一致 raw=${nRaw} mem=${nMem} npy=${npy.shape[0]} entries=${entries.length}`,
-      )
+    const vecs = readMemoryVectors(memDb)
+    for (const r of memRows) {
+      const nb = r.blocks.length
+      if (!nb) continue
+      const v = vecs.get(r.memory_id)
+      if (!v || v.length !== nb * dim) throw new Error(`向量缺失/长度不符: ${r.memory_id}`)
+    }
+    if (!(nRaw === entries.length && nMem === entries.length)) {
+      throw new Error(`计数不一致 raw=${nRaw} mem=${nMem} entries=${entries.length}`)
     }
     const blocks = memRows.reduce((a, r) => a + r.blocks.length, 0)
     console.log(
-      `OK ${p.id}（${p.dir}）：${entries.length} 条 / ${blocks} 块 / npy ${JSON.stringify(shape)} / LOG.md 已迁 raw（${origSize} B）`,
+      `OK ${p.id}（${p.dir}）：${entries.length} 条 / ${blocks} 块 / ${dim} 维 / LOG.md 已迁 raw（${origSize} B）`,
     )
     totalRaw += nRaw
   } catch (e) {

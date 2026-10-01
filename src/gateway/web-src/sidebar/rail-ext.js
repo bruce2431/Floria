@@ -45,7 +45,7 @@ import { registerExtCards } from '../views/registry.js'
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
       // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
-      // views/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      // views/cards/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
       if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       railExtItems = (Array.isArray(d.items) ? d.items : [])

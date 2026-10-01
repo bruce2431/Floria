@@ -22,12 +22,20 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'sidebar/recent.js', ranges: [[1948, 2438]], first: ['  // ---------- 侧栏 ----------'] },
   { file: 'sidebar/rail-ext.js', ranges: [[2438, 2438]], first: ['  // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------'] },
   { file: 'sidebar/mgr.js', ranges: [[2439, 2893]], first: ['  // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。'] },
-  { file: 'sidebar/neurons.js', ranges: [[2893, 2893]], first: ['  // ---------- 神经元视图（web「神经」tab）----------'] },
   { file: 'sidebar/bubble-search.js', ranges: [[2894, 2932]], first: ['  // ---------- 气泡弹层 ----------'] },
-  // 视图注册表（2026-09-23 视图卡化）：区间号取 2932 只作执行序排序 —— 排在 tab 生成所需的
-  // core/icons.js(I) 与 core/state.js(esc/#chat-area/session-card) 之后、__app__ 事件绑定之前。
-  // 外部卡（卡片化二期）：定义件须排在 registry.js 之前（同区间号 → 稳定排序按本表顺序）
-  { file: 'views/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
+  // 视图卡组件（2026-10-01 卡片化二期）：一模块一卡（views/cards/<name>-card.js），区间号取 2932
+  // 只作执行序排序。**顺序=本表顺序**（同区间号走稳定排序）：各卡定义件全部排在 registry.js 之前
+  // （registry 顶层 `const CARDS` 引用各卡 CardDef const，须在其后）；卡描述符内只引用函数声明
+  // （hoist 安全），故卡之间互序无关。registry.js 之后才是 work.js（引用 registry 的 currentCardId）。
+  { file: 'views/cards/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
+  { file: 'views/cards/preview-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 预览卡 ----------'] },
+  { file: 'views/cards/plugins-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 插件卡（插件 / 技能）----------'] },
+  { file: 'views/cards/projects-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 项目卡 ----------'] },
+  { file: 'views/cards/models-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 模型卡 ----------'] },
+  { file: 'views/cards/neurons-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 神经元卡（web「神经」tab）----------'] },
+  // 视图注册表（2026-09-23 视图卡化；2026-10-01 卡片化二期：单通道 openCard）：区间号取 2932 只作
+  // 执行序排序 —— 排在 tab 生成所需的 core/icons.js(I) 与 core/state.js(esc/#chat-area/session-card) 之后、
+  // 各卡定义件之后、__app__ 事件绑定之前。
   { file: 'views/registry.js', ranges: [[2932, 2932]], first: [''] },
   // work 模式侧栏（2026-09-25）：区间号同为 2932 只作执行序排序 —— 依赖 views/registry.js 的
   // showCard（work 主区两栏与视图卡互斥）与 core/state.js 的 state/chatArea/#work-* 元素，故排其后。

@@ -6,9 +6,10 @@ import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, esc, isMobile, loadWork, loadWorkPanes, saveWork, sessionCard, stashWorkPanes, state, toast } from '../core/state.js'
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
-import { mountPreview } from './mgr.js'
+import { currentCardId } from '../views/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
+import { mountPreview } from '../views/cards/preview-card.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
   // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
@@ -54,6 +55,10 @@ import { renderProjSeat } from '../inputbar/commands.js'
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
   function applySbMode() {
     const on = state.sbMode === 'work'
+    // 进 work：槽里若停着非会话卡（管理/预览），先退卡回会话视图——work 助手栏就是 #session-card，
+    // 残留的 .view-card 会把助手栏顶成旧卡（「在预览页切到 work，助手栏还是预览页」的根因）。
+    // 退卡走 route('#/') 统一收口（顺带清管理/预览路由态、预览页注册件与后端保活心跳），不在此另起清点。
+    if (on && currentCardId() && currentCardId() !== 'session') navigate('#/')
     document.querySelectorAll('.ms-btn').forEach((b) => b.classList.toggle('on', b.dataset.sbmode === state.sbMode))
     // #panel.work：work 模式下隐藏顶栏 #panel-search（会话搜索的 chat 模式入口）——work 的 🔍 已覆盖
     // 当前 tab 的过滤，两者同为放大镜同屏并存即「两个搜索」的重复观感（样式见 styles.css 该段）

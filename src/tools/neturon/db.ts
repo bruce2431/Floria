@@ -3,7 +3,7 @@
  *
  * 定案（Pj11 CLAUDE.md「存储定案」+ SubPj7 rawdb.py 1:1 移植）：
  *   - l3.raw/<来源>/message.db   messages 表
- *   - l2.mem/mem.db              memories 表（embeddings.npy 仍二进制全量载内存，不进 DB）
+ *   - l2.mem/mem.db              memories 表（块级向量 block_vectors BLOB 与 blocks 同行）
  *   - l1.cog/precog.db           precog 表（纯追加 INSERT + AI 标注 UPDATE by record_id）
  * 统一 schema：缺字段 = NULL（标记丢失，非字段不存在）；时间进 id，无独立 time 列，
  * id_time() 从 id 解析（兼容 message_id 与 memory_id）。
@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS memories (
     source         TEXT,
     core_file      TEXT,              -- JSON 数组（活引擎核心产物）
     supersedes     TEXT,              -- 活引擎纠错链：指向被修正旧条目
-    deprecated_by  TEXT               -- 活引擎纠错链：被新条目废弃的标注
+    deprecated_by  TEXT,              -- 活引擎纠错链：被新条目废弃的标注
+    block_vectors  BLOB               -- Float32 块级向量（块序拼接，n_blocks×dim），无→NULL
 );
 CREATE TABLE IF NOT EXISTS precog (
     record_id   TEXT PRIMARY KEY,  -- PC{prefix}_{YYYY-MM-DD-HH:MM:SS}[_seq]
@@ -113,13 +114,37 @@ CREATE TABLE IF NOT EXISTS precog (
 );
 `
 
-/** 打开库并确保 schema（目录自动创建；busy_timeout 防跨进程写碰撞） */
+/** 打开库并确保 schema（目录自动创建；busy_timeout 防跨进程写碰撞）。
+ *  老库（无 block_vectors 列）就地补列——ADD COLUMN 只加 NULL 列不改既有行，
+ *  向量由 scripts/rebuild-neuron-index.ts 事后重编码填充。 */
 export function openDb(path: string): Database {
   mkdirSync(dirname(path), { recursive: true })
   const db = new Database(path)
   db.run('PRAGMA busy_timeout = 5000')
   db.exec(SCHEMA)
+  const cols = db.query('PRAGMA table_info(memories)').all() as Array<{ name: string }>
+  if (cols.length && !cols.some(c => c.name === 'block_vectors')) {
+    db.run('ALTER TABLE memories ADD COLUMN block_vectors BLOB')
+  }
   return db
+}
+
+// ── 块级向量（mem.db BLOB 列；Float32，块序拼接 n_blocks×dim） ──
+
+/** BLOB → Float32Array（拷贝，与 sqlite 返回缓冲解耦） */
+function blobToF32(b: unknown): Float32Array | null {
+  if (!b) return null
+  const u = b as Uint8Array
+  if (!u.byteLength) return null
+  const out = new Float32Array(u.byteLength >> 2)
+  new Uint8Array(out.buffer).set(u)
+  return out
+}
+
+/** Float32Array → BLOB（零长视为无 → NULL） */
+function f32ToBlob(v: Float32Array | null | undefined): Buffer | null {
+  if (!v || !v.length) return null
+  return Buffer.from(v.buffer, v.byteOffset, v.byteLength)
 }
 
 // ── 时间规则 ──
@@ -159,7 +184,7 @@ function rowToMemEntry(row: Record<string, unknown>): MemEntry {
   }
 }
 
-function memEntryRow(e: MemEntry): unknown[] {
+function memEntryRow(e: MemEntry, vectors?: Float32Array | null): unknown[] {
   return [
     e.memory_id,
     jsonCol(e.revelant ?? []),
@@ -168,11 +193,12 @@ function memEntryRow(e: MemEntry): unknown[] {
     jsonCol(e.core_file),
     e.supersedes,
     e.deprecated_by,
+    f32ToBlob(vectors),
   ]
 }
 
 const MEM_COLS =
-  '(memory_id, revelant, blocks, source, core_file, supersedes, deprecated_by)'
+  '(memory_id, revelant, blocks, source, core_file, supersedes, deprecated_by, block_vectors)'
 
 export function readMemories(dbPath: string): MemEntry[] {
   if (!existsSync(dbPath)) return []
@@ -197,10 +223,10 @@ export function countMemories(dbPath: string): number {
   }
 }
 
-export function insertMemory(dbPath: string, entry: MemEntry): void {
+export function insertMemory(dbPath: string, entry: MemEntry, vectors?: Float32Array | null): void {
   const db = openDb(dbPath)
   try {
-    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?)`, memEntryRow(entry))
+    db.run(`INSERT INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?)`, memEntryRow(entry, vectors))
   } finally {
     db.close()
   }
@@ -221,6 +247,57 @@ export function markDeprecated(dbPath: string, memoryId: string, byId: string | 
   const db = openDb(dbPath)
   try {
     db.run('UPDATE memories SET deprecated_by = ? WHERE memory_id = ?', [byId, memoryId])
+  } finally {
+    db.close()
+  }
+}
+
+/** 替换一条记忆的 blocks **及其块级向量**（块内容维护主入口：重写/合并/拆分/删除块都是它的特例）。
+ *  两者同 UPDATE 原子落地——向量按块序拼接存 BLOB，与 blocks 同行，结构上不可能漂移。
+ *  传 vectors=null 表示该条无块（清空向量）。 */
+export function setMemoryBlocks(
+  dbPath: string,
+  memoryId: string,
+  blocks: string[],
+  vectors?: Float32Array | null,
+): void {
+  const db = openDb(dbPath)
+  try {
+    db.run('UPDATE memories SET blocks = ?, block_vectors = ? WHERE memory_id = ?', [
+      jsonCol(blocks),
+      f32ToBlob(vectors),
+      memoryId,
+    ])
+  } finally {
+    db.close()
+  }
+}
+
+/** 单条向量原地更新（backfill / 重编码该条；不改 blocks） */
+export function setMemoryVectors(dbPath: string, memoryId: string, vectors: Float32Array | null): void {
+  const db = openDb(dbPath)
+  try {
+    db.run('UPDATE memories SET block_vectors = ? WHERE memory_id = ?', [f32ToBlob(vectors), memoryId])
+  } finally {
+    db.close()
+  }
+}
+
+/** 读全部块级向量：memory_id → Float32Array（块序，长度 = n_blocks×dim）。 */
+export function readMemoryVectors(dbPath: string): Map<string, Float32Array> {
+  const byId = new Map<string, Float32Array>()
+  if (!existsSync(dbPath)) return byId
+  const db = openDb(dbPath)
+  try {
+    const rows = db.query('SELECT memory_id, block_vectors FROM memories').all() as Array<{
+      memory_id: string
+      block_vectors: unknown
+    }>
+    for (const r of rows) {
+      const v = blobToF32(r.block_vectors)
+      if (v) byId.set(String(r.memory_id), v)
+    }
+    return byId
   } finally {
     db.close()
   }
@@ -373,7 +450,7 @@ export function migrateMemJsonToDb(
   try {
     // OR REPLACE：源 mem.json 历史遗留重复 memory_id last-wins 折叠
     // （真身 LJJ 6 条重复 → 4397-6=4391 行，对照 SubPj7 实迁移行为）
-    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?)`)
+    const stmt = db.query(`INSERT OR REPLACE INTO memories ${MEM_COLS} VALUES (?,?,?,?,?,?,?,?)`)
     for (const e of entries) {
       const men = (e.men ?? {}) as Record<string, unknown>
       const sem = (e.sem ?? {}) as Record<string, unknown>

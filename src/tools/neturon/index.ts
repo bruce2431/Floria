@@ -7,6 +7,7 @@
 
 import { RecallTool } from './recall.js'
 import { RememberTool } from './remember.js'
+import { NeuronMaintainTool } from './maintain.js'
 import {
   NeuronListTool,
   NeuronSourceTool,
@@ -17,6 +18,7 @@ import {
 export const neturonTools = [
   RecallTool,
   RememberTool,
+  NeuronMaintainTool,
   NeuronListTool,
   NeuronSourceTool,
   NeuronFillPrecogTool,

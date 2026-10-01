@@ -1,26 +1,27 @@
 /**
- * 记忆写入器 — remember 工具后端（add=追加 / update=supersede 修正）
+ * 记忆写入器 — remember / neuron_maintain 工具后端
  *
- * 对照 Python 基线 engine/core/memwriter.py 1:1 移植；2026-09-04 存储层 DB 化
- * （SubPj7 定案同步）：mem.json → mem.db（db.ts memories 表）。
- * 一次调用三件事：INSERT mem.db + 增量补码 embeddings 索引 + 刷检索缓存。
- * 编码恒增量：只算 npy 尚缺的尾部行（含本次新增），npy 行数落后于 mem.db 时按尾部补齐——
- * 漂移的成因是绕过本写入器直写 mem.db，而 INSERT 只追加，故缺失行恒在尾部。
- * 只有 npy 缺失（建库）或行数多于 db（删行/行重排）才走全量重编码。
- * 先算后写（慢的模型编码发生在落盘前，中断零副作用）；embeddings 写失败回滚 DB。
+ * 存储定案（2026-09-30，取代 2026-09-04 的 npy 方案）：块级向量与 blocks **同存 mem.db 一行**
+ * （memories.block_vectors BLOB，Float32 块序拼接 n_blocks×dim）。据此刻意不引入
+ * embeddings.npy / index_config.json / block_offsets / blocks_digest —— 向量与其来源块
+ * 同行同事务落地，「索引第 r 行 = 第 r 块」这类位置映射问题整体不存在，漂移无由发生。
+ * 一次写入 = 编码该条 blocks → INSERT/UPDATE（含向量）→ 刷检索缓存。
+ * 先算后写（慢的模型编码发生在落盘前，中断零副作用）。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ConfigError, cfgGet, cfgRequired, getGlobalRoot, resolveNeuronPath } from './config.js'
 import { encode } from './embedder.js'
-import { readNpyF32, writeNpyF32 } from './npyio.js'
 import {
-  countMemories,
   deleteMemory,
+  deriveEntryText,
   insertMemory,
   markDeprecated,
   readMemories,
+  readPrecogRecords,
+  setMemoryBlocks,
+  setMemoryVectors,
   type MemEntry,
 } from './db.js'
 import { clearRetrieverCache } from './retriever.js'
@@ -39,120 +40,14 @@ function generateMemoryId(personId: string, existingIds: Set<string>, now: Date)
   return `${base}_${String(seq).padStart(2, '0')}`
 }
 
-/** 一条记忆的池化向量：blocks 逐块 encode → 逐维 max-pool → L2 归一（与 p2-mem_build.py 一致）。
- *  blocks 为空返回 null——调用方按「行留零」处理，位置照样占位。 */
-async function poolEntry(entry: MemEntry, modelCacheDir: string): Promise<Float32Array | null> {
-  const blocks = entry.blocks ?? []
-  if (!blocks.length) return null
-  const blockEmbs = await encode(blocks, modelCacheDir)
-  const dim = blockEmbs[0]!.length
-  const pooled = new Array<number>(dim).fill(-Infinity)
-  for (const emb of blockEmbs) {
-    for (let j = 0; j < dim; j++) pooled[j] = Math.max(pooled[j]!, emb[j]!)
-  }
-  const norm = Math.sqrt(pooled.reduce((a, b) => a + b * b, 0)) + 1e-9
-  const row = new Float32Array(dim)
-  for (let j = 0; j < dim; j++) row[j] = pooled[j]! / norm
-  return row
-}
-
-/** 计算 entries 的 embedding 矩阵。纯计算无落盘。
- *
- *  增量优先：existing 行数 ≤ entries.length 时，只编码尾部缺的行再 vstack，代价 O(缺失条数)——
- *  常规「追加 1 条」是 existing 行数 === entries.length - 1 的特例，直写 mem.db 造成的漂移
- *  （缺失 K 行）在同一条分支按 K 条补齐，不重算已有行。
- *  前提不变量——npy 是 mem.db 行序（readMemories ORDER BY rowid）的位置镜像，写入只追加在尾部；
- *  existing 行数 > entries.length（删行/行重排）时位置语义已破，尾部补齐无从谈起，落到全量重编码。 */
-async function computeEmbeddings(
-  entries: MemEntry[],
-  modelCacheDir: string,
-  existing: Float32Array | null,
-  existingDim: number,
-): Promise<{ data: Float32Array; shape: [number, number] }> {
-  const existingRows = existing && existingDim > 0 ? existing.length / existingDim : 0
-  if (existing && existingDim > 0 && existingRows <= entries.length) {
-    // ── 增量补齐 ──
-    const data = new Float32Array(entries.length * existingDim)
-    data.set(existing, 0)
-    for (let i = existingRows; i < entries.length; i++) {
-      const row = await poolEntry(entries[i]!, modelCacheDir)
-      if (row) data.set(row, i * existingDim) // 空 blocks 行保持全零
-    }
-    return { data, shape: [entries.length, existingDim] }
-  }
-
-  // ── 全量（npy 缺失或行序已不可对齐）──
-  const allBlocks: string[] = []
-  const entryMap: Array<[number, number]> = []
-  for (const e of entries) {
-    const start = allBlocks.length
-    allBlocks.push(...(e.blocks ?? []))
-    entryMap.push([start, allBlocks.length])
-  }
-
-  if (allBlocks.length) {
-    const blockEmbs = await encode(allBlocks, modelCacheDir)
-    const dim = blockEmbs[0]!.length
-    // 每行先填 -Infinity 再 max-pool（0 初值会吃掉负分量）
-    const embeddings = new Float32Array(entries.length * dim).fill(-Infinity)
-    entryMap.forEach(([s, en], i) => {
-      if (s < en) {
-        for (let j = s; j < en; j++) {
-          for (let d = 0; d < dim; d++) {
-            const v = blockEmbs[j]![d]!
-            if (v > embeddings[i * dim + d]!) embeddings[i * dim + d] = v
-          }
-        }
-      } else {
-        embeddings.fill(0, i * dim, (i + 1) * dim) // 空条目行归零
-      }
-    })
-    // L2 归一化（行）
-    for (let i = 0; i < entries.length; i++) {
-      let norm = 0
-      for (let d = 0; d < dim; d++) norm += embeddings[i * dim + d]! ** 2
-      norm = Math.sqrt(norm) + 1e-9
-      for (let d = 0; d < dim; d++) embeddings[i * dim + d] = embeddings[i * dim + d]! / norm
-    }
-    return { data: embeddings, shape: [entries.length, dim] }
-  }
-  return { data: new Float32Array(entries.length * 512), shape: [entries.length, 512] }
-}
-
-/** 全量重建 embeddings 索引（迁移脚本用：mem 行折叠后 rowid 重排，npy 必须重编码对位） */
-export async function rebuildEmbeddings(
-  neuronPath: string,
-  entries: MemEntry[],
-  modelCacheDir: string,
-  forceFull = false,
-): Promise<{ data: Float32Array; shape: [number, number] }> {
-  const memDir = join(neuronPath, 'l2.mem')
-  const embPath = join(memDir, 'embeddings.npy')
-  const confPath = join(memDir, 'index_config.json')
-
-  let existing: Float32Array | null = null
-  let existingDim = 0
-  if (!forceFull && existsSync(embPath)) {
-    const { data, shape } = readNpyF32(embPath)
-    existing = data
-    existingDim = shape[1] ?? 0
-  }
-
-  const result = await computeEmbeddings(entries, modelCacheDir, existing, existingDim)
-  writeNpyF32(embPath, result.data, result.shape)
-  writeIndexConfig(confPath, result.shape)
-  return result
-}
-
-function writeIndexConfig(confPath: string, shape: [number, number]): void {
-  const config = {
-    model_name: 'BAAI/bge-small-zh-v1.5',
-    total_entries: shape[0],
-    embedding_dim: shape[1],
-  }
-  const tmp = `${confPath}.tmp`
-  writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf-8')
-  renameSync(tmp, confPath)
+/** 一批 block 文本编码成连续行（encode 已 L2 归一，此处仅按块序平铺）。 */
+async function encodeBlocks(blocks: string[], modelCacheDir: string): Promise<Float32Array> {
+  if (!blocks.length) return new Float32Array(0)
+  const embs = await encode(blocks, modelCacheDir)
+  const dim = embs[0]!.length
+  const data = new Float32Array(blocks.length * dim)
+  for (let r = 0; r < embs.length; r++) data.set(embs[r]!, r * dim)
+  return data
 }
 
 export interface RememberInput {
@@ -174,7 +69,7 @@ export type RememberResult =
       entry: MemEntry
       superseded_entry?: MemEntry
       mem_count: number
-      embeddings_shape: [number, number]
+      embeddings_shape: [number, number] // [块数, dim]
     }
   | { status: 'error'; message: string }
 
@@ -184,7 +79,10 @@ function validateCommon(input: RememberInput): string | null {
   return null
 }
 
-function loadNeuron(neuronId: string, cwd?: string): { neuronPath: string; cfg: Record<string, unknown>; modelCacheDir: string } | { error: string } {
+function loadNeuron(
+  neuronId: string,
+  cwd?: string,
+): { neuronPath: string; cfg: Record<string, unknown>; modelCacheDir: string } | { error: string } {
   let neuronPath: string
   try {
     neuronPath = resolveNeuronPath(neuronId, cwd)
@@ -249,16 +147,7 @@ function buildEntry(input: RememberInput, mid: string, maxChars: number): MemEnt
   }
 }
 
-/** 读现有索引（只读，不重建）。行数是否落后于 mem.db 由 computeEmbeddings 处理——
- *  落后即按尾部补齐，不在此触发全量重编码（全量只留给建库与行序破坏两种情形）。 */
-function readIndex(neuronPath: string): { existing: Float32Array | null; existingDim: number } {
-  const embPath = join(neuronPath, 'l2.mem', 'embeddings.npy')
-  if (!existsSync(embPath)) return { existing: null, existingDim: 0 }
-  const { data, shape } = readNpyF32(embPath)
-  return { existing: data, existingDim: shape[1] ?? 0 }
-}
-
-/** 追加一条记忆到 Neuron 记忆层，并增量补码索引（含漂移尾部补齐） */
+/** 追加一条记忆到 Neuron 记忆层（blocks 与其向量同事务落 mem.db） */
 export async function addMemory(input: RememberInput, cwd?: string): Promise<RememberResult> {
   const invalid = validateCommon(input)
   if (invalid) return { status: 'error', message: invalid }
@@ -285,20 +174,10 @@ export async function addMemory(input: RememberInput, cwd?: string): Promise<Rem
 
   const entry = buildEntry(input, mid, blockMaxChars(cfg))
 
-  // ── 追加 + 编码（先算后写；npy 落后于 mem.db 时按尾部补齐，不重算已有行） ──
-  const list = [...entries, entry]
-  const idx = readIndex(neuronPath)
-  const embeddings = await computeEmbeddings(list, modelCacheDir, idx.existing, idx.existingDim)
-
-  // ── 落盘（DB + 索引；索引写失败回滚 DB 行） ──
-  insertMemory(dbPath, entry)
-  try {
-    writeNpyF32(join(memDir, 'embeddings.npy'), embeddings.data, embeddings.shape)
-    writeIndexConfig(join(memDir, 'index_config.json'), embeddings.shape)
-  } catch (e) {
-    deleteMemory(dbPath, mid)
-    throw e
-  }
+  // ── 先算后写：编码该条 blocks（中断零副作用） ──
+  const vectors = await encodeBlocks(entry.blocks, modelCacheDir)
+  const dim = entry.blocks.length ? vectors.length / entry.blocks.length : 0
+  insertMemory(dbPath, entry, vectors)
 
   clearRetrieverCache(input.neuron)
   return {
@@ -306,8 +185,8 @@ export async function addMemory(input: RememberInput, cwd?: string): Promise<Rem
     action: 'add',
     memory_id: mid,
     entry,
-    mem_count: list.length,
-    embeddings_shape: embeddings.shape,
+    mem_count: entries.length + 1,
+    embeddings_shape: [entry.blocks.length, dim],
   }
 }
 
@@ -349,23 +228,11 @@ export async function updateMemory(
     supersedes: input.memory_id, // 纠错链：指向被修正的旧条目
   }
 
-  // ── 追加 + 旧条目标废弃 + 编码（尾部补齐同上） ──
-  const list = [...entries, entry]
-  const idx = readIndex(neuronPath)
-  const embeddings = await computeEmbeddings(list, modelCacheDir, idx.existing, idx.existingDim)
+  const vectors = await encodeBlocks(entry.blocks, modelCacheDir)
+  const dim = entry.blocks.length ? vectors.length / entry.blocks.length : 0
 
-  // ── 落盘 ──
-  insertMemory(dbPath, entry)
+  insertMemory(dbPath, entry, vectors)
   markDeprecated(dbPath, input.memory_id, mid)
-  try {
-    writeNpyF32(join(memDir, 'embeddings.npy'), embeddings.data, embeddings.shape)
-    writeIndexConfig(join(memDir, 'index_config.json'), embeddings.shape)
-  } catch (e) {
-    // 回滚（撤新增 + 撤废弃标注）
-    deleteMemory(dbPath, mid)
-    markDeprecated(dbPath, input.memory_id, null)
-    throw e
-  }
 
   clearRetrieverCache(input.neuron)
   return {
@@ -375,7 +242,189 @@ export async function updateMemory(
     superseded: input.memory_id,
     entry,
     superseded_entry: { ...old, deprecated_by: mid },
-    mem_count: list.length,
-    embeddings_shape: embeddings.shape,
+    mem_count: entries.length + 1,
+    embeddings_shape: [entry.blocks.length, dim],
   }
+}
+
+// ── 块级向量维护（backfill 用：重编码该条 / 全库） ──
+
+/** 全库向量重编码（一次性 backfill；模型更换 / 老库补列）。逐条先算后写，中断可重入。 */
+export async function rebuildVectors(
+  neuronPath: string,
+  entries: MemEntry[],
+  modelCacheDir: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ entries: number; blocks: number; dim: number }> {
+  const dbPath = join(neuronPath, 'l2.mem', 'mem.db')
+  let blocks = 0
+  let dim = 0
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]!
+    const vectors = await encodeBlocks(e.blocks ?? [], modelCacheDir)
+    setMemoryVectors(dbPath, e.memory_id, vectors)
+    const n = e.blocks?.length ?? 0
+    blocks += n
+    if (n) dim = vectors.length / n
+    onProgress?.(i + 1, entries.length)
+  }
+  clearRetrieverCache()
+  return { entries: entries.length, blocks, dim }
+}
+
+// ── neuron_maintain 后端 ──
+
+export interface MaintainResult {
+  status: 'ok' | 'error'
+  action?: string
+  message?: string
+  memory_id?: string
+  affected?: number
+  [k: string]: unknown
+}
+
+function openNeuron(neuronId: string, cwd?: string) {
+  const loaded = loadNeuron(neuronId, cwd)
+  if ('error' in loaded) return { error: loaded.error } as const
+  const dbPath = join(loaded.neuronPath, 'l2.mem', 'mem.db')
+  return { ...loaded, dbPath } as const
+}
+
+/** set_blocks：直接替换某条 blocks（重写/合并/拆分/删除块都是特例），重编码该条向量后同事务写回。 */
+export async function setBlocks(
+  neuronId: string,
+  memoryId: string,
+  blocks: string[],
+  cwd?: string,
+): Promise<MaintainResult> {
+  const n = openNeuron(neuronId, cwd)
+  if ('error' in n) return { status: 'error', message: n.error }
+  const entries = readMemories(n.dbPath)
+  const entry = entries.find(e => e.memory_id === memoryId)
+  if (!entry) return { status: 'error', message: `memory_id 不存在: ${memoryId}` }
+  const maxChars = blockMaxChars(n.cfg)
+  const finalBlocks = blocks.flatMap(b => splitBlock(String(b), maxChars)).filter(Boolean)
+  const vectors = await encodeBlocks(finalBlocks, n.modelCacheDir)
+  setMemoryBlocks(n.dbPath, memoryId, finalBlocks, vectors)
+  clearRetrieverCache(neuronId)
+  return {
+    status: 'ok',
+    action: 'set_blocks',
+    memory_id: memoryId,
+    affected: finalBlocks.length,
+    blocks: finalBlocks,
+  }
+}
+
+/** recut：把条目现有 blocks 拼回整文按 max_chars 重切（原始分块边界不可逆，原文在 l3.raw）。 */
+export async function recut(
+  neuronId: string,
+  memoryId: string | undefined,
+  cwd?: string,
+): Promise<MaintainResult> {
+  const n = openNeuron(neuronId, cwd)
+  if ('error' in n) return { status: 'error', message: n.error }
+  const entries = readMemories(n.dbPath)
+  const targets = memoryId ? entries.filter(e => e.memory_id === memoryId) : entries
+  if (memoryId && !targets.length) return { status: 'error', message: `memory_id 不存在: ${memoryId}` }
+  const maxChars = blockMaxChars(n.cfg)
+  const changed: string[] = []
+  for (const e of targets) {
+    const text = deriveEntryText(e)
+    if (!text) continue
+    const blocks = splitBlock(text, maxChars).filter(Boolean)
+    const vectors = await encodeBlocks(blocks, n.modelCacheDir)
+    setMemoryBlocks(n.dbPath, e.memory_id, blocks, vectors)
+    changed.push(e.memory_id)
+  }
+  clearRetrieverCache(neuronId)
+  return { status: 'ok', action: 'recut', affected: changed.length, memory_ids: changed }
+}
+
+/** forget：soft=标废弃（保留可溯源，默认）；hard=物理删除该行（含向量）。 */
+export function forget(
+  neuronId: string,
+  memoryId: string,
+  mode: 'soft' | 'hard' = 'soft',
+  cwd?: string,
+): MaintainResult {
+  const n = openNeuron(neuronId, cwd)
+  if ('error' in n) return { status: 'error', message: n.error }
+  const entry = readMemories(n.dbPath).find(e => e.memory_id === memoryId)
+  if (!entry) return { status: 'error', message: `memory_id 不存在: ${memoryId}` }
+  if (mode === 'hard') {
+    deleteMemory(n.dbPath, memoryId)
+  } else {
+    // soft：自指废弃（deprecated_by = 自身）——rankMem 以 deprecated_by 非空跳过
+    markDeprecated(n.dbPath, memoryId, memoryId)
+  }
+  clearRetrieverCache(neuronId)
+  return { status: 'ok', action: 'forget', memory_id: memoryId, mode }
+}
+
+/** merge：多条合为一条新记忆（append-only），旧条废弃指向新 id。 */
+export async function mergeMemories(
+  neuronId: string,
+  memoryIds: string[],
+  content: string,
+  opts: { blocks?: string[]; source?: string; cwd?: string },
+): Promise<MaintainResult> {
+  const n = openNeuron(neuronId, opts.cwd)
+  if ('error' in n) return { status: 'error', message: n.error }
+  const entries = readMemories(n.dbPath)
+  const olds = memoryIds.map(id => entries.find(e => e.memory_id === id)).filter(Boolean) as MemEntry[]
+  if (olds.length !== memoryIds.length) {
+    const found = new Set(olds.map(e => e.memory_id))
+    return { status: 'error', message: `部分 memory_id 不存在: ${memoryIds.filter(i => !found.has(i)).join(', ')}` }
+  }
+  const mid = generateMemoryId(
+    String(cfgRequired(n.cfg, 'person.id', '')),
+    new Set(entries.map(e => e.memory_id)),
+    new Date(),
+  )
+  const maxChars = blockMaxChars(n.cfg)
+  const raw = opts.blocks?.length ? opts.blocks : [content]
+  const blocks = raw.flatMap(b => splitBlock(String(b), maxChars)).filter(Boolean)
+  const entry: MemEntry = {
+    memory_id: mid,
+    revelant: [],
+    blocks,
+    source: opts.source ?? 'merge',
+    core_file: null,
+    supersedes: memoryIds.join(','),
+    deprecated_by: null,
+  }
+  const vectors = await encodeBlocks(blocks, n.modelCacheDir)
+  insertMemory(n.dbPath, entry, vectors)
+  for (const id of memoryIds) markDeprecated(n.dbPath, id, mid)
+  clearRetrieverCache(neuronId)
+  return { status: 'ok', action: 'merge', memory_id: mid, affected: memoryIds.length, merged: memoryIds }
+}
+
+/** usage：只读——某条 / 全库的检索使用概览（供判断哪些块该改）。数据源 l1.cog/precog.db。 */
+export function usage(neuronId: string, memoryId?: string, cwd?: string): MaintainResult {
+  const n = openNeuron(neuronId, cwd)
+  if ('error' in n) return { status: 'error', message: n.error }
+  const records = readPrecogRecords(join(n.neuronPath, 'l1.cog', 'precog.db'))
+  const stats = new Map<string, { hits: number; true: number; revelant: number; false: number }>()
+  for (const r of records) {
+    for (const it of r.results ?? []) {
+      const id = it.id
+      if (!id) continue
+      const s = stats.get(id) ?? { hits: 0, true: 0, revelant: 0, false: 0 }
+      s.hits++
+      const acc = String(it.accuracy ?? '').toLowerCase()
+      if (acc === 'true') s.true++
+      else if (acc === 'revelant') s.revelant++
+      else if (acc === 'false') s.false++
+      stats.set(id, s)
+    }
+  }
+  if (memoryId) {
+    return { status: 'ok', action: 'usage', memory_id: memoryId, stat: stats.get(memoryId) ?? { hits: 0, true: 0, revelant: 0, false: 0 } }
+  }
+  const rows = [...stats.entries()]
+    .map(([id, s]) => ({ memory_id: id, ...s }))
+    .sort((a, b) => b.hits - a.hits)
+  return { status: 'ok', action: 'usage', precog_records: records.length, memory_stats: rows }
 }

@@ -13,11 +13,12 @@ import { renderProjSeat, closeProjPop } from '../inputbar/commands.js'
 import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
-import { renderMgr, openProjectPreview } from '../sidebar/mgr.js'
+import { renderMgr } from '../sidebar/mgr.js'
 import { clearRailExt } from '../sidebar/rail-ext.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, workScopeOk } from '../sidebar/work.js'
-import { showView } from '../views/registry.js'
+import { openProjectPreview } from '../views/cards/preview-card.js'
+import { openCard } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
   // /preview/* 静态页路径）；hash 路由保留为旧链接/旧缓存页兜底（parseRoute 先 pathname 后 hash）。
@@ -198,7 +199,7 @@ import { showView } from '../views/registry.js'
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
-    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }
 
@@ -231,7 +232,7 @@ import { showView } from '../views/registry.js'
     clearTakeover() // 切换会话：清掉残留的提问/审批 takeover（输入栏恢复）
     closeProjPop() // 切换会话：项目选择器弹层一并收起（初始界面专属件）
     renderProjSeat() // 会话态：工作文件夹标识按当前会话项目重渲（锁定只读）
-    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(false) // 输入栏移回会话卡沉底（FLIP 像素级补间）
     const s = findSession(hash)
     state.currentHash = hash

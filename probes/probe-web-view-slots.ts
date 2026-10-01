@@ -54,19 +54,24 @@ const homeBody = body(routeJs, 'function renderHome()')
 ok('A2 renderHome 调 clearSessionSlots', homeBody.includes('clearSessionSlots()'))
 const mgrBody = body(mgrJs, 'function renderMgr()')
 ok('A3 renderMgr 调 clearSessionSlots', mgrBody.includes('clearSessionSlots()'))
-// 2026-09-23 视图卡化：槽上的 mgr-on 类退役，切视图统一走 views/registry.js 的 showView(id)——
-// 不变量形态不变（进入非会话视图前先卸会话态），只是「切换动作」换成整卡替换。
+// 2026-10-01 卡片化二期：切视图统一走 views/registry.js 的 openCard(id)——不变量形态不变
+// （进入非会话视图前先卸会话态），只是「切换动作」换成单通道整卡替换。
 ok(
-  'A3 renderMgr 清槽早于切卡 showView（视图切换前先卸会话态）',
-  lineOf(mgrBody, 'clearSessionSlots()') >= 0 && lineOf(mgrBody, 'clearSessionSlots()') < lineOf(mgrBody, 'showView(state.mgr)'),
-  '顺序错：清槽必须早于 showView(state.mgr)',
+  'A3 renderMgr 清槽早于切卡 openCard（视图切换前先卸会话态）',
+  lineOf(mgrBody, 'clearSessionSlots()') >= 0 && lineOf(mgrBody, 'clearSessionSlots()') < lineOf(mgrBody, 'openCard(state.mgr)'),
+  '顺序错：清槽必须早于 openCard(state.mgr)',
 )
-const prevBody = body(mgrJs, 'function openProjectPreview(')
-const hardBranch = prevBody.slice(prevBody.indexOf('if (!soft) {'))
-ok('A4 openProjectPreview 硬挂载分支调 clearSessionSlots', hardBranch.slice(0, hardBranch.indexOf('state.preview = label')).includes('clearSessionSlots()'))
+// 2026-10-01 卡片化二期：openProjectPreview 迁 views/cards/preview-card.js；硬挂载分支=异 label/帧不在场
+// 时清全局槽，清槽必早于 state.preview = label（同款「先卸会话态再进预览」不变量）。
+const previewCardJs = await Bun.file(`${SRC}/views/cards/preview-card.js`).text()
+const prevBody = body(previewCardJs, 'function openProjectPreview(')
+ok(
+  'A4 openProjectPreview 硬挂载分支清槽早于 state.preview = label',
+  lineOf(prevBody, 'clearSessionSlots()') >= 0 && lineOf(prevBody, 'clearSessionSlots()') < lineOf(prevBody, 'state.preview = label'),
+)
 
 // ---------- ③ 无第二份内联清单（防再次分叉） ----------
-for (const f of ['chat/route.js', 'sidebar/mgr.js', 'sidebar/neurons.js', 'core/live.js']) {
+for (const f of ['chat/route.js', 'sidebar/mgr.js', 'views/cards/neurons-card.js', 'core/live.js']) {
   const t = await Bun.file(`${SRC}/${f}`).text()
   const hits = [...t.matchAll(/live\.(curUuid|deltaSeq|localMessages) = null/g)].length
   const allowed = f === 'chat/route.js' ? 6 : 0 // route.js：clearSessionSlots 3 处 + renderSession 切会话 3 处

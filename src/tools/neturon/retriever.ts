@@ -13,11 +13,11 @@
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { cfgRequired, type ConfigError, getGlobalRoot, resolveNeuronPath } from './config.js'
-import { readNpyF32 } from './npyio.js'
 import {
   appendPrecog,
   deriveEntryText,
   readMemories,
+  readMemoryVectors,
   readPrecogRecords,
   type MemEntry,
   type PrecogRecord,
@@ -30,7 +30,7 @@ import { parse as parseYaml } from 'yaml'
 export type { MemEntry, PrecogRecord, PrecogResultItem }
 
 export const SUPPORTED_MODEL = 'Xenova/bge-small-zh-v1.5'
-// Python 侧模型名（config/index_config 里记的是这个名字）
+// Python 侧模型名（与 config.yaml memory.model_name 同名）
 export const PY_MODEL_EQUIVALENT = 'BAAI/bge-small-zh-v1.5'
 
 // ── 引擎级默认（原 engine/config.yaml 融合段；Neuron config 优先覆盖） ──
@@ -91,18 +91,15 @@ const REQUIRED_KEYS = [
   'ranking.fact.w_cos',
   'ranking.fact.w_kw',
   'precog.default_top_k',
-  'precog.expand_threshold',
-  'precog.expand_factor',
 ] as const
 
 export class NeuronRetriever {
   path: string
   neuronId: string
   entries: MemEntry[] = []
-  embeddings: Float32Array | null = null
-  embeddingShape: [number, number] = [0, 0]
-  encodedIds: string[] = []
-  indexModelName = ''
+  /** memory_id → 块级向量（Float32，块序拼接，长度 = n_blocks×dim） */
+  vectors = new Map<string, Float32Array>()
+  dim = 0
   private cfg: Record<string, unknown>
   private modelCacheDir: string
 
@@ -136,12 +133,6 @@ export class NeuronRetriever {
   get wKw(): number {
     return this.num('ranking.fact.w_kw')
   }
-  get expandThreshold(): number {
-    return this.num('precog.expand_threshold')
-  }
-  get expandFactor(): number {
-    return this.num('precog.expand_factor')
-  }
   get defaultTopK(): number {
     return this.num('precog.default_top_k')
   }
@@ -154,67 +145,32 @@ export class NeuronRetriever {
 
   private checkModel(): void {
     const name = String(cfgRequired(this.cfg, 'memory.model_name', this.cfgContext))
-    const effective = this.indexModelName || name
-    if (effective !== PY_MODEL_EQUIVALENT) {
+    if (name !== PY_MODEL_EQUIVALENT) {
       throw new Error(
-        `Neuron '${this.neuronId}' 嵌入模型为 ${effective}，TS 引擎仅支持 ${PY_MODEL_EQUIVALENT}`,
+        `Neuron '${this.neuronId}' 嵌入模型为 ${name}，TS 引擎仅支持 ${PY_MODEL_EQUIVALENT}`,
       )
     }
   }
 
+  /** 载入 mem.db 条目 + 块级向量。向量与 blocks 同行存储，无需行序对齐/重建。 */
   private loadData(): void {
     const memDbPath = join(this.path, 'l2.mem', 'mem.db')
-    const embPath = join(this.path, 'l2.mem', 'embeddings.npy')
-    const confPath = join(this.path, 'l2.mem', 'index_config.json')
-
     const raw = readMemories(memDbPath)
     if (!raw.length && !existsSync(memDbPath)) {
-      throw new Error(`mem.db 不存在（未迁移 DB 化）: ${memDbPath}`)
+      throw new Error(`mem.db 不存在: ${memDbPath}`)
     }
     this.entries = raw
-
-    if (existsSync(embPath)) {
-      const { data, shape } = readNpyF32(embPath)
-      this.embeddings = data
-      this.embeddingShape = [shape[0] ?? 0, shape[1] ?? 0]
-    }
-
-    if (existsSync(confPath)) {
-      const idxCfg = JSON.parse(readFileSync(confPath, 'utf-8')) as {
-        encoded_ids?: string[]
-        model_name?: string
+    this.vectors = readMemoryVectors(memDbPath)
+    // dim 由首条非空向量 / 其块数推得（库内 dim 恒定）
+    for (const e of raw) {
+      const nb = e.blocks?.length ?? 0
+      const v = this.vectors.get(e.memory_id)
+      if (nb && v) {
+        this.dim = v.length / nb
+        break
       }
-      this.encodedIds = idxCfg?.encoded_ids ?? []
-      this.indexModelName = idxCfg?.model_name ?? ''
     }
     this.checkModel()
-
-    // 一致性检查：mem/emb 行数不齐 → encoded_ids 重建对齐
-    if (this.embeddings && this.entries.length > 0 && this.embeddingShape[0] !== this.entries.length) {
-      this.reindexByIds()
-    }
-  }
-
-  private reindexByIds(): void {
-    if (!this.encodedIds.length || !this.embeddings) return
-    const dim = this.embeddingShape[1]
-    const idToRow = new Map<string, number>()
-    this.encodedIds.forEach((mid, i) => {
-      if (i < this.embeddingShape[0]) idToRow.set(mid, i)
-    })
-    const newEntries: MemEntry[] = []
-    const newEmbs: number[] = []
-    for (const e of this.entries) {
-      const row = idToRow.get(e.memory_id ?? '')
-      if (row === undefined) continue
-      newEntries.push(e)
-      newEmbs.push(...Array.from(this.embeddings.slice(row * dim, (row + 1) * dim)))
-    }
-    if (newEmbs.length) {
-      this.entries = newEntries
-      this.embeddings = new Float32Array(newEmbs)
-      this.embeddingShape = [newEntries.length, dim]
-    }
   }
 
   // ── precog 记录（l1.cog/precog.db，纯追加） ──
@@ -295,7 +251,10 @@ export class NeuronRetriever {
     }))
   }
 
-  /** cos + kw 加权检索（不写 precog） */
+  /** 块级 cos + kw 加权检索（不写 precog）。
+   *  条目 cos = max_{块} cos(块向量, 查询)——块各自独立向量，最匹配的块决定命中。
+   *  max 有界 [0,1] 且随块数 n 不变；Σcos÷√n 会随 √n 增长（本库 n∈[1,453] ⇒ √n 跨 1→21，
+   *  而相关/不相关块 cos 仅差 ~0.1）⇒ 排序被条目长度支配、与 query 无关，已弃。 */
   private async rankMem(
     queryText: string,
     topK?: number,
@@ -304,32 +263,40 @@ export class NeuronRetriever {
     if (!this.entries.length) return { ranked: [], formatted: [] }
     const keywords = splitQuery(queryText)
 
-    if (!this.embeddings || this.embeddingShape[0] !== this.entries.length) {
+    if (!this.dim) {
       throw new Error(
-        `Neuron '${this.neuronId}' embeddings 索引缺失或与 mem.db 行数不一致（${this.embeddingShape[0]} ≠ ${this.entries.length}），先经 remember 写入重建索引`,
+        `Neuron '${this.neuronId}' 块向量缺失（mem.db 无 block_vectors），先跑 scripts/rebuild-neuron-index.ts`,
       )
     }
 
     const [qEmb] = await encode([queryText], this.modelCacheDir)
-    const dim = this.embeddingShape[1]
+    const dim = this.dim
 
     const ranked: RankedItem[] = []
-    for (let i = 0; i < this.entries.length; i++) {
-      const cosScore = dot(this.embeddings, i * dim, qEmb!)
+    for (const entry of this.entries) {
+      if (entry.deprecated_by) continue // supersede/forget 废弃条目不参与检索
+      const n = entry.blocks?.length ?? 0
+      if (!n) continue
+      const vec = this.vectors.get(entry.memory_id)
+      if (!vec || vec.length !== n * dim) {
+        throw new Error(
+          `Neuron '${this.neuronId}' 条目 ${entry.memory_id} 块向量缺失/长度不符（${vec?.length ?? 0} ≠ ${n * dim}），先跑 scripts/rebuild-neuron-index.ts`,
+        )
+      }
+      let cosScore = -1
+      for (let r = 0; r < n; r++) {
+        const c = dot(vec, r * dim, qEmb!)
+        if (c > cosScore) cosScore = c
+      }
       if (cosScore < 0.1) continue
-      const entry = this.entries[i]!
-      if (entry.deprecated_by) continue // supersede 废弃条目不参与检索
       const kwScore = this.keywordScore(queryText, entry, keywords)
       ranked.push({ rank: this.wCos * cosScore + this.wKw * kwScore, cos: cosScore, kw: kwScore, entry })
     }
     ranked.sort((a, b) => b.rank - a.rank)
 
-    // 自动扩大 k：底部结果仍高于阈值 → 增大 top_k
-    const expanded =
-      ranked.length >= k && (ranked[k - 1]?.rank ?? 0) >= this.expandThreshold
-        ? Math.floor(k * this.expandFactor)
-        : k
-    const results = ranked.slice(0, expanded)
+    // 返回条数完全由调用方 top_k 决定（未传取库配置 default_top_k）。
+    // 旧「底部仍高于阈值即 ×expand_factor 扩 k」已删——返回量应由检索方按需给，不由打分器自行放大。
+    const results = ranked.slice(0, k)
     return { ranked: results, formatted: this.formatResults(results) }
   }
 
@@ -543,100 +510,85 @@ export class NeuronRetriever {
     return { precog: written, cognition, formatted }
   }
 
-  /** 认知层强制全查：概念 + 社群 + 节点 + 记忆全部返回，不做降级（不写 precog） */
-  async getCogContext(
-    query: string,
-    topK?: number,
-  ): Promise<{ cog2_concepts: unknown[]; communities: unknown[]; nodes: unknown[]; mem: ReturnType<NeuronRetriever['formatResults']> }> {
-    const result = {
-      cog2_concepts: [] as unknown[],
-      communities: [] as unknown[],
-      nodes: [] as unknown[],
-      mem: [] as ReturnType<NeuronRetriever['formatResults']>,
-    }
-    const k = topK ?? this.defaultTopK
+  /** 查询关键词（认知层用）——剔除通用领域词后为空则退回全量 */
+  private layerKeywords(query: string): { domainKw: string[]; kwForLayers: string[] } {
     const keywords = splitQuery(query)
-    if (!keywords.length) return result
-
-    // 认知层（概念/社群）只统计非通用领域词
     const domainKw = keywords.filter(kw => !GENERIC_TOKENS.has(kw))
-    const kwForLayers = domainKw.length ? domainKw : keywords
+    return { domainKw, kwForLayers: domainKw.length ? domainKw : keywords }
+  }
 
-    // 1) 概念层 — cog2.json（非通用词按 name 2× / desc 1× 打分，总分 ≥1 命中）
+  /** cog 层单查：概念（cog2.json）+ 聚合节点（cog_graph.json）。不写 precog、不动 emb。 */
+  getCogOnly(query: string): { cog2_concepts: unknown[]; nodes: unknown[] } {
+    const out: { cog2_concepts: unknown[]; nodes: unknown[] } = { cog2_concepts: [], nodes: [] }
+    const { domainKw, kwForLayers } = this.layerKeywords(query)
+    if (!kwForLayers.length) return out
+
     const cog2 = this.readL1Cog('cog2.json') as
       | { cog2_records?: Array<Record<string, unknown>> }
       | null
-    if (cog2) {
-      for (const rec of cog2.cog2_records ?? []) {
-        const name = String(rec.name ?? '')
-        const desc = String(rec.description ?? '')
-        let score = 0
-        score += 2.0 * domainKw.filter(kw => name.toLowerCase().includes(kw)).length
-        score += 1.0 * domainKw.filter(kw => desc.toLowerCase().includes(kw)).length
-        if (score >= 1.0) {
-          result.cog2_concepts.push({
-            name,
-            confidence: Number(rec.confidence ?? 0),
-            description: desc,
-            members: rec.members ?? [],
-            member_names: rec.member_names ?? [],
-          })
-        }
+    for (const rec of cog2?.cog2_records ?? []) {
+      const name = String(rec.name ?? '')
+      const desc = String(rec.description ?? '')
+      let score = 0
+      score += 2.0 * domainKw.filter(kw => name.toLowerCase().includes(kw)).length
+      score += 1.0 * domainKw.filter(kw => desc.toLowerCase().includes(kw)).length
+      if (score >= 1.0) {
+        out.cog2_concepts.push({
+          name,
+          confidence: Number(rec.confidence ?? 0),
+          description: desc,
+          members: rec.members ?? [],
+          member_names: rec.member_names ?? [],
+        })
       }
     }
 
-    // 2) 社群层 — community.json（默认分辨率；严格多数命中）
+    const graph = this.readL1Cog('cog_graph.json') as { nodes?: GraphNode[] } | null
+    for (const node of graph?.nodes ?? []) {
+      const tl = `${node.query ?? ''} ${(node.keywords ?? []).join(' ')}`.toLowerCase()
+      if (kwForLayers.some(kw => tl.includes(kw))) {
+        out.nodes.push({ id: node.id, query: node.query ?? '', keywords: node.keywords ?? [] })
+      }
+    }
+    return out
+  }
+
+  /** community 层单查：community.json 默认分辨率，成员严格多数命中。不写 precog、不动 emb。 */
+  getCommunityOnly(query: string): { communities: unknown[] } {
+    const out: { communities: unknown[] } = { communities: [] }
+    const { domainKw } = this.layerKeywords(query)
+    if (!domainKw.length) return out
+
     const defaultRes = this.defaultResolution
     const comm = this.readL1Cog('community.json') as
       | Record<string, { communities?: Array<Record<string, unknown>> }>
       | null
-    if (comm && defaultRes in comm) {
-      for (const c of comm[defaultRes]?.communities ?? []) {
-        const members = (c.members as Array<Record<string, unknown>>) ?? []
-        const size = Math.max(members.length, 1)
-        const needCov = Math.floor(size / 2) + 1
-        const kwCov = new Map<string, number>()
-        for (const m of members) {
-          const tl = String(m.query ?? '').toLowerCase()
-          for (const kw of domainKw) {
-            if (tl.includes(kw)) kwCov.set(kw, (kwCov.get(kw) ?? 0) + 1)
-          }
-        }
-        const hit = [...kwCov.values()].some(cnt => cnt >= needCov)
-        if (hit) {
-          result.communities.push({
-            size,
-            density: Number(c.density ?? 0),
-            members: members.map(m => ({
-              id: m.id ?? '',
-              query: m.query ?? '',
-              core_score: Number(m.core_score ?? 0),
-              role: m.role ?? '',
-            })),
-          })
+    if (!comm || !(defaultRes in comm)) return out
+    for (const c of comm[defaultRes]?.communities ?? []) {
+      const members = (c.members as Array<Record<string, unknown>>) ?? []
+      const size = Math.max(members.length, 1)
+      const needCov = Math.floor(size / 2) + 1
+      const kwCov = new Map<string, number>()
+      for (const m of members) {
+        const tl = String(m.query ?? '').toLowerCase()
+        for (const kw of domainKw) {
+          if (tl.includes(kw)) kwCov.set(kw, (kwCov.get(kw) ?? 0) + 1)
         }
       }
-    }
-
-    // 3) 聚合节点层 — cog_graph.json（query + keywords 命中）
-    const graph = this.readL1Cog('cog_graph.json') as { nodes?: GraphNode[] } | null
-    if (graph) {
-      for (const node of graph.nodes ?? []) {
-        const tl = `${node.query ?? ''} ${(node.keywords ?? []).join(' ')}`.toLowerCase()
-        if (kwForLayers.some(kw => tl.includes(kw))) {
-          result.nodes.push({
-            id: node.id,
-            query: node.query ?? '',
-            keywords: node.keywords ?? [],
-          })
-        }
+      if ([...kwCov.values()].some(cnt => cnt >= needCov)) {
+        out.communities.push({
+          size,
+          density: Number(c.density ?? 0),
+          members: members.map(m => ({
+            id: m.id ?? '',
+            query: m.query ?? '',
+            core_score: Number(m.core_score ?? 0),
+            role: m.role ?? '',
+          })),
+        })
       }
     }
-
-    // 4) 记忆层 — 强制全查（不写 precog；embeddings 不可用回退关键词）
-    const { formatted } = await this.rankMem(query, k)
-    result.mem = formatted
-    return result
+    return out
   }
 
   /** 按 memory_id 精确查找完整 mem.db 条目 */

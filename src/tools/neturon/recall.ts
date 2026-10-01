@@ -23,10 +23,12 @@ const inputSchema = lazySchema(() =>
       .optional()
       .describe('Neuron id（见系统提示名册；仅一个库可省略；其它项目位置先经 neuron_list 发现）'),
     mode: z
-      .enum(['mem', 'cog'])
+      .enum(['mem', 'cog', 'community'])
       .optional()
-      .describe('mem=记忆检索（默认，写 precog）；cog=认知层全查（概念+社群+节点+记忆，不写 precog）'),
-    top_k: z.number().int().optional().describe('返回条数（默认取库配置）'),
+      .describe(
+        'mem=记忆检索（默认，块级 max-sim + kw，写 precog）；cog=概念+聚合节点（不写 precog）；community=社群（默认分辨率，不写 precog）',
+      ),
+    top_k: z.number().int().optional().describe('返回条数（由调用方定，不自动扩；未传取库配置 precog.default_top_k）'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -131,18 +133,29 @@ export const RecallTool = buildTool({
     const topK = input.top_k
 
     if (input.mode === 'cog') {
-      const cog = await retriever.getCogContext(input.query, topK)
+      const cog = retriever.getCogOnly(input.query)
       return {
         data: {
           query: input.query,
           neuron: neuronId,
-          results: cog.mem as unknown as Array<Record<string, unknown>>,
           cognition: {
             concepts: cog.cog2_concepts as never[],
             nodes: cog.nodes as never[],
-            communities: cog.communities as never[],
+            communities: [],
           },
-          usage: `认知层全查（不写 precog）：cog2_concepts=${cog.cog2_concepts.length} communities=${cog.communities.length} nodes=${cog.nodes.length} mem=${cog.mem.length}`,
+          usage: `cog 层单查（不写 precog）：concepts=${cog.cog2_concepts.length} nodes=${cog.nodes.length}`,
+        },
+      }
+    }
+
+    if (input.mode === 'community') {
+      const comm = retriever.getCommunityOnly(input.query)
+      return {
+        data: {
+          query: input.query,
+          neuron: neuronId,
+          cognition: { concepts: [], nodes: [], communities: comm.communities as never[] },
+          usage: `community 层单查（不写 precog）：communities=${comm.communities.length}`,
         },
       }
     }

@@ -57,16 +57,24 @@ ok('A2 启动序列调 initViewport（紧随 initLive）', (() => {
   const j = appSrc.indexOf('initViewport()')
   return i >= 0 && j > i && j - i < 120
 })())
-ok('A3 syncKeyboard 消费 visualViewport', /window\.visualViewport/.test(body(viewportJs, 'function syncKeyboard()')))
-ok('A3 键盘高只由布局视口与可视视口差得出', /root\.clientHeight,\s*vv\.height,\s*vv\.offsetTop,\s*vv\.scale/.test(viewportJs))
+ok('A3 applyGeometry 消费 visualViewport（同步段与延迟段的唯一出口）', /window\.visualViewport/.test(body(viewportJs, 'function applyGeometry()')))
+ok('A3 键盘高由布局视口、可视视口与布局滚动（iPad 通道）共同得出',
+  /root\.clientHeight,\s*vv\.height,\s*vv\.offsetTop,\s*window\.scrollY,\s*vv\.scale/.test(viewportJs))
 // pan 不再抵消（2026-09-19 四轮）：--vv-pan 整个退役，应用随浏览器上顶一起走。
 ok('A3 上顶量 pan 不再反向抵消（--vv-pan 写入已删除）', !/setProperty\('--vv-pan'/.test(viewportJs))
-ok('A3 kb 扣掉浏览器上顶已吃掉的部分（L − pan − vvH）',
-  /const kb = Math\.max\(0, L - pan - vvH\)/.test(viewportJs) && /const pan = Math\.max\(0, vvTop\)/.test(viewportJs))
+// 浏览器位移落在两条互斥通道之一（iOS=offsetTop 上顶、iPad=scrollY 滚布局视口）：取较大者即实际
+// 屏幕位移；取和会在同源平台（两值相等）上重复计一份 ⇒ 过冲。见 kbGeometry 注释与 D2 真值表。
+ok('A3 kb 扣掉浏览器已吃掉的部分（L − pan − vvH），pan 取两条通道的较大者',
+  /const kb = Math\.max\(0, L - pan - vvH\)/.test(viewportJs) && /const pan = Math\.max\(0, vvTop, scrollY\)/.test(viewportJs))
+ok('A3 同步段与延迟段共用应用段（applyGeometry 由 syncKeyboard 与 settle 各调一次）',
+  /function syncKeyboard\(\) \{\s*applyGeometry\(\)/.test(body(viewportJs, 'function syncKeyboard()')) &&
+    /applyGeometry\(\)/.test(body(viewportJs, 'function settle()')))
+ok('A3 位移落在布局滚动通道的平台（iPad）也要重算（window scroll 监听已挂）',
+  /window\.addEventListener\('scroll', syncKeyboard\)/.test(viewportJs))
 // 整页平移（五轮）：我们那份 kb + 浏览器那份 pan = 屏幕上的完整键盘高，谁分摊多少都不影响画面。
 ok('A3 完整键盘高 = kb + pan（与浏览器怎么分配位移无关）', /return \{ kb, total: kb \+ pan \}/.test(viewportJs))
 ok('A3 --kb-total 与 --kb 同帧写入（app 内可视窗顶偏移）',
-  /setProperty\('--kb-total', total \+ 'px'\)/.test(body(viewportJs, 'function syncKeyboard()')))
+  /setProperty\('--kb-total', total \+ 'px'\)/.test(body(viewportJs, 'function applyGeometry()')))
 ok('A3 不再有「浏览器位移归零」迎战代码（scrollTo 已删——位移由 total 恒等式吸收）',
   !/scrollTo\(/.test(viewportJs))
 ok('A3 键盘在场重算消息流占位几何（stageSync）', /stageSync\(\)/.test(viewportJs) && /import \{ stageSync \}/.test(viewportJs))
@@ -76,7 +84,8 @@ ok('A4 监听器直挂同步段（resize/scroll 同帧写补偿）',
   /vv\.addEventListener\('resize', syncKeyboard\)/.test(viewportJs) && /vv\.addEventListener\('scroll', syncKeyboard\)/.test(viewportJs))
 ok('A4 无 rAF 转手的补偿路径（旧 scheduleKeyboard 应已删除）',
   !/scheduleKeyboard/.test(viewportJs) && !/requestAnimationFrame\(syncKeyboard/.test(viewportJs))
-const syncBody = body(viewportJs, 'function syncKeyboard()')
+// 同步段本体＝applyGeometry（syncKeyboard 只是它 + 排 settle）：约束的是真正读视口的那段
+const syncBody = body(viewportJs, 'function applyGeometry()')
 // 读 visualViewport 的 offsetTop 是取值不是量算；只有读 DOM 元素的布局位才强制布局
 const layoutReads = [...syncBody.matchAll(/([\w.$]+)\.offsetTop/g)].map((m) => m[1]).filter((s) => s !== 'vv')
 ok('A4 同步段内不读元素布局（getBoundingClientRect/offset* 会强制布局，拖累上顶过程）',
@@ -177,26 +186,33 @@ ok('C2 index.html 引用 styles.css 且带 cache-bust', /\/styles\.css\?v=\d+/.t
 const geoBody = body(viewportJs, 'function kbGeometry(')
 ok('D1 kbGeometry 可从源码提取', geoBody.length > 0, 'viewport.js 函数签名被改写？')
 if (geoBody) {
-  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scale: number, editing: boolean) => { kb: number; total: number }
-  // [名称, L, vvH, vvTop, scale, editing, 期望 kb, 期望 total]
-  // kb = 浏览器上顶之后**仍需我们自行补**的位移；total = 屏幕上的完整键盘高 = kb + pan = L − vvH
-  const T: [string, number, number, number, number, boolean, number, number][] = [
-    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 1, false, 0, 0],
-    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 1, true, 0, 0],
-    ['iPad 键盘 300 无上顶：全由我们补 300', 834, 534, 0, 1, true, 300, 300],
-    ['iPad 键盘 300 + 浏览器上顶 100：我们补 200，合计仍需 300', 834, 534, 100, 1, true, 200, 300],
-    ['上顶已吃掉全部空缺（pan=键盘高）：我们补 0，合计仍 562', 834, 272, 562, 1, true, 0, 562],
-    ['上顶超过键盘高 → kb 不为负（total 仍为 app 被推出去的条带高）', 834, 272, 700, 1, true, 0, 700],
-    ['安卓（布局视口同步缩）：不重复补', 534, 534, 0, 1, true, 0, 0],
-    ['捏合缩放（非编辑）：不补', 834, 500, 0, 1, false, 0, 0],
-    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 2, true, 0, 0],
-    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 1.005, true, 300, 300],
-    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 1, true, 0, 0],
-    ['异常：offsetTop 为负 → 上顶量夹到 0', 834, 534, -5, 1, true, 300, 300],
+  const kbGeometry = new Function(`return ${geoBody}`)() as (L: number, vvH: number, vvTop: number, scrollY: number, scale: number, editing: boolean) => { kb: number; total: number }
+  // [名称, L, vvH, vvTop, scrollY, scale, editing, 期望 kb, 期望 total]
+  // kb = 浏览器位移之后**仍需我们自行补**的位移；total = 屏幕上的完整键盘高 = kb + pan = L − vvH
+  // pan = max(offsetTop, scrollY)：两条互斥通道取大者，见 kbGeometry 注释。
+  const T: [string, number, number, number, number, number, boolean, number, number][] = [
+    ['桌面/未聚焦：全高可视视口 → 零位移', 834, 834, 0, 0, 1, false, 0, 0],
+    ['聚焦瞬间键盘未起：仍零位移', 834, 834, 0, 0, 1, true, 0, 0],
+    ['iPad 键盘 300 无位移上报：全由我们补 300', 834, 534, 0, 0, 1, true, 300, 300],
+    ['iOS 键盘 300 + 上顶 100：我们补 200，合计仍需 300', 834, 534, 100, 0, 1, true, 200, 300],
+    ['上顶已吃掉全部空缺（pan=键盘高）：我们补 0，合计仍 562', 834, 272, 562, 0, 1, true, 0, 562],
+    ['上顶超过键盘高 → kb 不为负（total 仍为 app 被推出去的条带高）', 834, 272, 700, 0, 1, true, 0, 700],
+    ['安卓（布局视口同步缩）：不重复补', 534, 534, 0, 0, 1, true, 0, 0],
+    ['捏合缩放（非编辑）：不补', 834, 500, 0, 0, 1, false, 0, 0],
+    ['捏合缩放（编辑中，scale=2）：不误判为键盘', 834, 417, 120, 0, 2, true, 0, 0],
+    ['scale 轻微数值噪声（1.005）仍按键盘处理', 834, 534, 0, 0, 1.005, true, 300, 300],
+    ['异常：可视视口高于布局视口 → kb 不为负', 834, 900, 0, 0, 1, true, 0, 0],
+    ['异常：offsetTop 为负 → 上顶量夹到 0', 834, 534, -5, 0, 1, true, 300, 300],
+    // iPad 通道：位移落在布局滚动（scrollY），offsetTop 恒 0 —— 旧式只用 offsetTop 时 pan=0 → 我们
+    // 补满 300，叠加浏览器的 300 ⇒ 600 过冲（本 bug）。取 max 后 pan=300 ⇒ kb=0，正确。
+    ['iPad 布局滚动 300（offsetTop=0）：pan=scrollY，不重复补', 834, 534, 0, 300, 1, true, 0, 300],
+    ['iPad 布局滚动 150（键盘 300 未滚满）：仍补 150', 834, 534, 0, 150, 1, true, 150, 300],
+    ['两通道同源等值（iOS：offsetTop=scrollY）：取大不取和，不重复计', 834, 534, 300, 300, 1, true, 0, 300],
+    ['scrollY 为负（回弹）：夹到 0', 834, 534, 0, -5, 1, true, 300, 300],
   ]
   let wrong = 0
-  for (const [name, L, vvH, vvTop, scale, editing, kb, total] of T) {
-    const got = kbGeometry(L, vvH, vvTop, scale, editing)
+  for (const [name, L, vvH, vvTop, scrollY, scale, editing, kb, total] of T) {
+    const got = kbGeometry(L, vvH, vvTop, scrollY, scale, editing)
     if (got.kb !== kb || got.total !== total) wrong++
     ok(`D2 ${name}`, got.kb === kb && got.total === total, `期望 kb=${kb}/total=${total} 实得 kb=${got.kb}/total=${got.total}`)
   }

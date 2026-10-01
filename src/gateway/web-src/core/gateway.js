@@ -92,8 +92,11 @@ import { syncGwSend } from '../inputbar/send.js'
          qa-card 走中性边框（不继承审批卡黄色警示边），配色守 floria 浅色主题。 */
       .appr-card.qa-card{border-color:var(--border)}
       .qa-top{display:flex;align-items:center;gap:10px;padding:12px 16px 0}
+      /* 折叠钮最左 / 标题（眉标+问题）居中 / × 最右：中段 .qa-head 吃满 flex 并居中，
+         两端 22px 图标等宽 ⇒ 标题真正居中。 */
+      .qa-head{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px}
       .qa-eyebrow{flex:none;color:var(--text-3);font-size:12px;line-height:16px;font-weight:500}
-      .qa-title-sm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
+      .qa-title-sm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
       .qa-fold{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
       .qa-fold:hover{background:#f3f4f6;color:var(--text)}
       .qa-fold svg{width:14px;height:14px;transform:rotate(180deg)}

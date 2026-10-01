@@ -7,7 +7,7 @@ import { inputEl, state, esc, toast, isTouch } from '../core/state.js'
 import { EFFORT_LEVELS, cmd, msel, modelPop, modelSeatEl, closeCmdPop } from './commands.js'
 import { closeMentionPop } from './mention.js'
 import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData } from '../sidebar/mgr-data.js'
-import { modelProviderOf } from '../sidebar/mgr.js'
+import { modelProviderOf } from '../views/cards/models-card.js'
   function modelDir() {
     const pool = ((MODELS && Array.isArray(MODELS.items) ? MODELS.items : []) || [])
       .filter(it => it && typeof it.src === 'string' && it.src.startsWith('凭据池') && it.v)

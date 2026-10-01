@@ -5,7 +5,12 @@ import { stageSync } from '../chat/stage.js'
   // 不变量（五轮定案，用户「整个界面连侧栏一起上下」，要「整页平移」）：应用是一块**刚性板**，
   // 键盘弹出时整体上移一个键盘高 —— 侧栏/背景/底栏连成一体走，内部零重排，只有消息流窗口收窄。
   // 几何：L = html clientHeight（=100dvh，移动端键盘不改布局视口，只压可视视口）；浏览器为露出
-  // 焦点元素会把可视视口整体上顶 pan = vv.offsetTop（等价地滚文档，对我们两种形态都成立）。
+  // 焦点元素会让整个画面向上位移 pan —— 同一份位移落在两条**互斥**通道之一，随平台变：
+  //   iOS  ：上顶可视视口（vv.offsetTop > 0，页面不滚 ⇒ window.scrollY = 0）；
+  //   iPad ：滚布局视口（window.scrollY > 0，而 offsetTop 恒 0 不报）。
+  // 故 pan = max(offsetTop, scrollY)：取二者较大即浏览器实际施加的屏幕位移；**不可取和**——同源的
+  // 平台上两值会相等（iOS offsetTop 即滚动量），相加就把一份位移算两遍（over-lift）。max 对
+  // 「谁在报」不设赌注，两种平台都恰好取到那一份。
   // 屏幕上的完整键盘高 total = L − vv.height（= kb + pan，**与浏览器怎么分配这份位移无关**）：
   // 我们只写自己那份 kb = max(0, L − pan − vv.height)，剩下的 pan 由浏览器自己施加 ⇒ 两者之和
   // 恒为 total，pan 再怎么变（含瞬时的「上顶→回落」）画面总位移都不变 ⇒ 不抖。**不抵消 pan**
@@ -24,12 +29,14 @@ import { stageSync } from '../chat/stage.js'
   // 键盘起落、底栏多行长高、空态↔会话态迁移全由这一条量算吸收，弹层不再各自复刻视口公式。
   // 以**底栏上沿**量 = 对所有子件都是安全上界（栏内 chip 系锚点更低、实际可用更多；取本值只会
   // 让内容多滚一点，绝不越出可视区）。
-  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → { kb 我们补的位移,
+  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scrollY/scale/editing → { kb 我们补的位移,
   // total 屏幕上完整键盘高 = app 顶部被推出屏外的条带高 = 可视窗顶在 app 内的偏移 }。
-  function kbGeometry(L, vvH, vvTop, scale, editing) {
+  function kbGeometry(L, vvH, vvTop, scrollY, scale, editing) {
     // 捏合缩放不是键盘：scale≠1 时 vv 同样变矮，必须排除（否则缩放会误当键盘抬底栏）
     if (!editing || scale > 1.01) return { kb: 0, total: 0 }
-    const pan = Math.max(0, vvTop) // 上顶量非负（本页无滚动不产生负值；夹取守住「kb 只由真实空缺得出」）
+    // 浏览器位移的通道二选一（见文件头几何段）：offsetTop（上顶可视视口）或 scrollY（滚布局视口）。
+    // 取较大者为实际屏幕位移；两者均夹非负（本页无正常滚动，负值只可能来自回弹）。
+    const pan = Math.max(0, vvTop, scrollY)
     const kb = Math.max(0, L - pan - vvH)
     return { kb, total: kb + pan }
   }
@@ -62,16 +69,22 @@ import { stageSync } from '../chat/stage.js'
   let lastTotal = 0   // 同步段算得的「屏幕上的完整键盘高」，供延迟段量算复用（避免回读 CSS 变量）
   let settleRaf = 0
 
-  // 同步段：与视觉变化同帧的几何（事件回调内直调，接合视觉视口上顶/键盘起落）
-  function syncKeyboard() {
+  // 应用段（同步段与延迟段共用）：读可视视口/滚动 → 写 --kb / --kb-total / kb-open。纯写样式属性，
+  // 不读元素布局（不触发布局）。
+  function applyGeometry() {
     const vv = window.visualViewport
     if (!vv) return
     const root = document.documentElement
-    const { kb, total } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, vv.scale, isEditing())
+    const { kb, total } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, window.scrollY, vv.scale, isEditing())
     lastTotal = total
     root.style.setProperty('--kb', kb + 'px')
     root.style.setProperty('--kb-total', total + 'px')
     document.body.classList.toggle('kb-open', kb > 0) // 同时是「#app 位移」规则的开关（见 styles.css 键盘节）
+  }
+
+  // 同步段：与视觉变化同帧（事件回调内直调，接合视觉视口上顶/键盘起落）
+  function syncKeyboard() {
+    applyGeometry()
     scheduleSettle()
   }
 
@@ -80,6 +93,9 @@ import { stageSync } from '../chat/stage.js'
     if (settleRaf) { cancelAnimationFrame(settleRaf); settleRaf = 0 } // 直接调用时撤销在途帧，保幂等
     const vv = window.visualViewport
     if (!vv) return
+    // 二次应用：事件后一帧可视视口分量（尤其 iPad 那条 scrollY 通道）可能才落定，同步段拿到的是
+    // 中间态；此帧以最终值重算一次，把 --kb/--kb-total 收敛到位（applyGeometry 幂等，值未变即零写）。
+    applyGeometry()
     const wrap = document.getElementById('input-wrap')
     const app = document.getElementById('app')
     // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：两个 rect 相减 = 底栏上沿在 app 内的布局 y，
@@ -101,6 +117,9 @@ import { stageSync } from '../chat/stage.js'
     if (!vv) return
     vv.addEventListener('resize', syncKeyboard)
     vv.addEventListener('scroll', syncKeyboard) // 缩放/上顶改变 offsetTop，同样要同帧重算
+    // 位移落在**布局滚动**通道的平台（iPad）：window 滚动改的是 window.scrollY，vv 不派发事件，
+    // 必须另行监听，否则那条通道的键盘位移无人重算（symptom = 整页上移过冲）。
+    window.addEventListener('scroll', syncKeyboard)
     window.addEventListener('orientationchange', syncKeyboard)
     // 底栏自身「尺寸」类变化（多行长高 / 接管卡换高 / 窗口缩放的回流）同样要重量：--bar-room 取自
     // 底栏在 app 内的位置，只挂 vv 事件会漏掉这些帧。写入的只是上限变量，不回改底栏盒模型

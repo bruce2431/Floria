@@ -183,10 +183,10 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **模块布局**：
 - `app.js` 入口=import 群 + 事件绑定 + 启动序列
 - `core/`：icons（SVG 图标）、state（元素引用/共享可变态/toast/媒体工具）、char（角色形象）、markdown、sessions（会话映射）、live（SSE 会话事件）、gateway（WS 连接/审批中继）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）
-- `sidebar/`：mgr-data、recent(最近会话/拖宽)、mgr（插件/项目/模型三界面 mgr-tabs）、bubble-search、neurons（神经 tab）、rail-ext（预览页注册的快捷按钮，见 §39）
+- `sidebar/`：mgr-data、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）
 - `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、send（gwSend/syncGwSend）
 - `chat/`：route（路由渲染）、messages（消息渲染）、stage（钉顶占位/stage 机制）
-- `views/`：registry（**视图注册表 + 槽位整卡切换**——tab 的 id/标题/图标/渲染函数单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处查同一张表，见 §41）
+- `views/`：registry（**视图注册表 + 槽位单通道整卡切换**——一模块一卡组件在 `views/cards/`，tab 的 id/标题/图标/`mount` 单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处走同一张 `CARDS` 表 + 唯一入口 `openCard`，见 §41）；`views/cards/`：`plugins/projects/models/neurons/preview-card.js`（五张第一方卡，各自 `mount`）+ `ext-card.js`（外部卡 iframe 壳 + 声明过滤器，见 §42）
 
 **跨模块可变状态 = SETTERS 机制**：14 个跨模块写入的 let（`ALL`/`connUp`/`gateAwait`/`gateVerified`/`sessionCwd`/`takeover`/`turnLive`/`btnMode`/`MODEL_CUR`/`modelUserPicked`/`pendingUserMsgs`/`firstSendHash`/`lastNavHash`/`approvalPending`）在定义模块尾生成 `export function setX(v){X=v}`，写入方一律调 setter（import 绑定不可赋值=ESM 硬约束）；读跨模块符号走 import（函数级循环 import 安全：hoisting + live binding）。
 
@@ -323,7 +323,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 26. 「神经」tab：神经元选择卡片 + 三级节点图
 
-侧栏第 4 个管理 tab（`data-mgr="neurons"`），与插件/项目/模型并列。前端模块 `web-src/sidebar/neurons.js`，`mgr.js renderMgr` 的 neurons 分支分发，`state.mgrView.neuronSel` 区分层级并持久化。
+侧栏第 4 个管理 tab（`data-mgr="neurons"`），与插件/项目/模型并列。前端模块 `web-src/views/cards/neurons-card.js`（`neuronsCardDef`，卡内整卡重渲走 `ctx.rerender()`），`state.mgrView.neuronSel` 区分层级并持久化。
 
 **层级1 选择卡片页**：`renderNeuPicker` → `#neu-grid` 卡片（脑图标 + mem/cog/社群/更新四枚 `neu-stats` chips），数据源 `GET /gateway/neurons`（[gateway.md](gateway.md) §14）；`loadNeuronsData` 带 NEU/NEU_LOADING/NEU_ERR 三态与重试钮。
 
@@ -379,28 +379,28 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 ## 34. 切视图即清全局槽收敛为共享出口：管理视图（神经 tab）不再被实时流洗成 chat
 
 - **不变量**：`live.curUuid` 非空 ⇔ 当前视图正展示该会话（七条 SSE 守卫——session-delta / queue-state / task-state / compact-state / turn-state / stream-text / model——全押在它上面）。
-- **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
+- **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支（`views/cards/preview-card.js`）。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
 - **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口调它，勿就地补行）。**探针**：`probes/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 提取后喂 `(curUuid, ev.session)` 四组合）。
 
 ## 35. 键盘弹出适配：整页平移一个键盘高，内部零重排
 
-**原理**：`html` 高 = `100dvh`，键盘**不改变布局视口**（只压可视视口），浏览器为露出焦点底栏把**可视视口整体上顶**（`visualViewport.offsetTop = pan > 0`）——移动的是视口而非布局。
+**原理**：`html` 高 = `100dvh`，键盘**不改变布局视口**（只压可视视口）。浏览器为露出焦点底栏让整个画面向上位移 `pan`——同一份位移落在**两条互斥通道之一，随平台变**：iOS 上顶**可视视口**（`visualViewport.offsetTop > 0`，页面不滚 ⇒ `window.scrollY = 0`）；iPad 滚**布局视口**（`window.scrollY > 0`，而 `offsetTop` 恒 0 不报）。故取 `pan = max(offsetTop, scrollY)`；**不可取和**——同源平台上两值相等（iOS 的 `offsetTop` 即滚动量），相加会把一份位移算两遍（over-lift = 键盘过冲）。
 
 **整页平移（定案）**：应用是一块刚性板——键盘在场时 `#app` 整体 `translateY(−--kb)`，侧栏/背景/底栏连成一体走、**内部零重排**（只有消息流窗口收窄）；浏览器那份 `pan` 由它自己叠加，两者之和恒等于屏幕上**完整键盘高** `total = L − vv.height`，**与浏览器怎么分配这份位移无关** ⇒ `pan` 的瞬时抖动（含「上顶→回落」）被恒等式吸收，画面不动。**不抵消 pan**：用主线程写样式去抵消合成器线程的位移天生晚一帧，一帧错位就是可见的往复——位移由恒等式吸收，**源码内不得再有 `scrollTo(0,0)` 之类的迎战代码**（探针钉住）。
 
 **唯一真源 = `visualViewport`（前端 `core/viewport.js`）**：
-- **`kbGeometry(L, vvH, vvTop, scale, editing) → { kb, total }`**：`kb = max(0, L − pan − vv.height)`（我们补的那份；`pan = max(0, vvTop)`），`total = kb + pan`。`--kb` 是 `#app` 的位移，**`--kb-total` = app 顶部被推出屏外的条带高 = app 内可视窗顶偏移**（消息流窗口与覆盖层的统一收口口径）；`pan` 谁分摊多少都不改这两个量的语义。
+- **`kbGeometry(L, vvH, vvTop, scrollY, scale, editing) → { kb, total }`**：`kb = max(0, L − pan − vv.height)`（我们补的那份；`pan = max(0, vvTop, scrollY)`），`total = kb + pan`。`--kb` 是 `#app` 的位移，**`--kb-total` = app 顶部被推出屏外的条带高 = app 内可视窗顶偏移**（消息流窗口与覆盖层的统一收口口径）；`pan` 谁分摊多少都不改这两个量的语义。
 - **消费点**：`#chat-scroll { margin-top: var(--kb-total) }`（窗口 = `[kb-total, L]`：顶=屏顶、底=键盘上沿，滚动视窗 = 可视视窗，`stageSync` 读 `clientHeight` 的贴顶/占位几何口径不变）；`#input-wrap.docked { top: calc(100% - 22px) }`（平移已把 app 底边送到键盘上沿，底栏不再自补位移）；空态底栏随 `.g-stage` 台面比例（76.75%）一并被顶起；三个覆盖层 `top: var(--kb-total); bottom: 0`（遮罩恒 = 可视窗）。`body.kb-open` 既是 `#app` 位移规则的开关（无键盘时 `#app` 无 `transform` ⇒ 不改 `#img-lightbox`/`#drop-overlay`/`.toast` 等 fixed 后代的包含块基准），也是「键盘在场底栏不做缓动」的条件（`body.kb-open #input-wrap { transition: none }`）。
-- **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA`/**`IFRAME`** 且 `vv.scale ≤ 1.01`（捏合缩放同样压低 `vv.height`，必须排除）；安卓布局视口随键盘同步缩 → 自然不重复补。**`IFRAME` 分支不可省**：项目预览的站点页面跑在 `.preview-frame` 里，焦点进入 iframe 文档时父文档 `activeElement` 就是该 `<iframe>` 元素本身（浏览器标准行为）——不认它则预览内打字恒非编辑态，`kbGeometry` 直接返回 `{kb:0, total:0}`，键盘每次上顶可视视口都无人让位 = 每敲一个字整页上下跳。放宽判定不引入空位移：位移量全由可视视口实测量算，无键盘时 `kb` 天然为 0。事件：`vv.resize`/`vv.scroll`/`orientationchange`。
-- **相位**：拆两段——**同步段 `syncKeyboard`**（`--kb`/`--kb-total`/`body.kb-open` 直接在事件回调里写，只写样式属性、不读元素布局，与视觉变化同帧）＋**延迟段 `settle`**（rAF 合帧：`--bar-room` 实测 + `stageSync()`，连续量晚一帧不可见，且逐事件 `getBoundingClientRect` 会强制布局）；完整键盘高经模块内 `lastTotal` 交接（不回读 CSS 变量）。
+- **判定**：`editing = document.activeElement` 是 `contenteditable`/`INPUT`/`TEXTAREA`/**`IFRAME`** 且 `vv.scale ≤ 1.01`（捏合缩放同样压低 `vv.height`，必须排除）；安卓布局视口随键盘同步缩 → 自然不重复补。**`IFRAME` 分支不可省**：项目预览的站点页面跑在 `.preview-frame` 里，焦点进入 iframe 文档时父文档 `activeElement` 就是该 `<iframe>` 元素本身（浏览器标准行为）——不认它则预览内打字恒非编辑态，`kbGeometry` 直接返回 `{kb:0, total:0}`，键盘每次上顶可视视口都无人让位 = 每敲一个字整页上下跳。放宽判定不引入空位移：位移量全由可视视口实测量算，无键盘时 `kb` 天然为 0。事件：`vv.resize`/`vv.scroll`/`window.scroll`（布局滚动通道那条，iPad）/`orientationchange`。
+- **相位**：`--kb`/`--kb-total`/`body.kb-open` 的写入收敛进**应用段 `applyGeometry`**（只写样式属性、不读元素布局）——**同步段 `syncKeyboard`** 在事件回调里直调它（与视觉变化同帧），**延迟段 `settle`** 在 rAF 里再调一次（事件后一帧 `offsetTop`/`scrollY` 可能才落定，此帧以终值收敛；`applyGeometry` 幂等）。`settle` 另做 `--bar-room` 实测 + `stageSync()`（连续量晚一帧不可见，且逐事件 `getBoundingClientRect` 会强制布局）；完整键盘高经模块内 `lastTotal` 交接（不回读 CSS 变量）。
 - **覆盖层同源锚定**：`#search-overlay` / `#risk-modal` / `#rename-modal` 在 `#app` 内，`position: absolute; top: var(--kb-total, 0px); right:0; bottom:0; left:0`：定位源与 app 壳体同一，遮罩恒等于可视窗、对话框在可视窗内居中，不再各自复刻视口公式；对话框高度上限用容器百分比（`74vh → 74%`、`calc(100vh - 48px) → calc(100% - 48px)`），**不得改回 `position:fixed`**（挂 body 会与 app 的视口锚定脱钩，随键盘下移）。
 - **底栏子件同源收口**：底栏上**向上弹出**的子件共六个（七处上限声明）——`#mention-pop`、`#cmd-pop`、`#task-dock .td-panel`、`#proj-pop`、`#model-pop`、`#ctx-panel`——高度上限一律 `max-height: min(<设计上限>, var(--bar-room, <设计上限>))`。`--bar-room` 由纯几何函数 `popRoom(barTop, lift, margin)` 在 `settle` 内量得：`barTop` = 底栏上沿在 **app 内**的布局 y（`wrap.getBoundingClientRect().top − #app.getBoundingClientRect().top`——app 自身的位移在差里自动抵消，量到的与「位移落在上顶还是文档滚动」这个口径无关），`lift` = `--kb-total`，`margin` = 20。**取底栏上沿量是刻意的**：栏内 chip 系锚点更低、真实可用更多 ⇒ 本值对它们是**安全上界**，一个变量覆盖全部七处。**不变量：`--bar-room` 恒对应底栏「到位后」的位置**——触发侧除 `vv` 事件外另两处：`ResizeObserver` 观察 `#input-wrap`（**尺寸类**变化：多行长高/接管卡换高）＋ `transitionend`（`e.target === wrap`，**位移类**变化：键盘收起 `--kb` 归零、空态↔会话态迁移都让 `top`/`transform` 走 0.55s 过渡，而 `settle` 在事件后一帧读 `rect` 只能拿到动画中间值 ⇒ 量出的余量被钉在「收起前」的小值且再无事件重量，弹层上限随之永久卡小、内容被 `overflow` 截断；过渡结束即底栏到位，此刻重量才拿到终值）。超上限时滚动下沉到弹层自身（`overflow-y: auto` 或内部 flex 子项 `min-height:0`）。
-- **边界**：无 `visualViewport` 时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前）。**探针**：`probes/probe-keyboard-viewport.ts`（只读，81/0）——结构断言（拼接表接线/启动序列调用/同步段无 rAF 转手且不读元素布局/只量算段走 rAF/**整页平移恒等式 `total = kb + pan` 与 `--kb-total` 写入**/源码无 `scrollTo`、无 `setProperty('--vv-pan')`/`#app` 位移只在 `body.kb-open` 下且本体无 `transform`/消息流窗口收 `margin-top: var(--kb-total)` 且不再收 `--kb`/docked 底栏与空态底栏均不自补位移且 `--kb-lift` 零残留/三件覆盖层在 `#app` 内、遮罩 = 可视窗、无 `position:fixed` 残留/对话框不用 `vh`/六个子件的七处上限声明均收 `--bar-room`/`--bar-room` 的尺寸类与位移类触发齐备/`#empty-hint` 自身不含 `--kb`/产物 `app.js` 含 `IFRAME` 判定）+ 行为真值表（`kbGeometry` 喂 12 组，逐行断言 `kb` 与 `total` 两列；`popRoom` 喂 5 组；`isEditing` 经 `new Function('document', …)` 注入打桩喂 6 组：`IFRAME`/`INPUT`/`TEXTAREA`/`contenteditable`→true，`BUTTON`/`null`→false）。
+- **边界**：无 `visualViewport` 时 `initViewport` 直接返回，行为与改前一致；模块挂进拼接表（`scripts/bundle-web-modules.ts`，区间号仅作执行序，排在启动序列之前）。**探针**：`probes/probe-keyboard-viewport.ts`（只读，87/0）——结构断言（拼接表接线/启动序列调用/`applyGeometry` 为唯一应用出口且同步段不读元素布局/只量算段走 rAF/`pan = max(offsetTop, scrollY)` 两通道取大/`window.scroll` 监听已挂/**整页平移恒等式 `total = kb + pan` 与 `--kb-total` 写入**/源码无 `scrollTo`、无 `setProperty('--vv-pan')`/`#app` 位移只在 `body.kb-open` 下且本体无 `transform`/消息流窗口收 `margin-top: var(--kb-total)` 且不再收 `--kb`/docked 底栏与空态底栏均不自补位移且 `--kb-lift` 零残留/三件覆盖层在 `#app` 内、遮罩 = 可视窗、无 `position:fixed` 残留/对话框不用 `vh`/六个子件的七处上限声明均收 `--bar-room`/`--bar-room` 的尺寸类与位移类触发齐备/`#empty-hint` 自身不含 `--kb`/产物 `app.js` 含 `IFRAME` 判定）+ 行为真值表（`kbGeometry` 喂 16 组——含 iPad 布局滚动通道与两通道等值取大的行，逐行断言 `kb` 与 `total` 两列；`popRoom` 喂 5 组；`isEditing` 经 `new Function('document', …)` 注入打桩喂 6 组：`IFRAME`/`INPUT`/`TEXTAREA`/`contenteditable`→true，`BUTTON`/`null`→false）。
 
 ## 36. 无当前会话态统一为空串：乐观气泡不再「先闪现后消失」
 
 - **不变量**：`state.currentHash` 的无会话态恒为 `''`（与 `firstSendHash`、乐观项 `pendingUserMsgs.hash` 同一约定），**不得再引入 `null``**——乐观项归属守卫、事务收口、主张计时起点 `claimStartTs`、撤回链 `inCur` 命中都押在这一个表示上。`falsy` 用法（`!state.currentHash`）不受影响。
-- **五处赋值点**：`core/state.js` 初值、`chat/route.js` 的 `route()`（非 session 路由分支）与 `renderHome`、`sidebar/mgr.js` 的 `renderMgr` 与 `openProjectPreview`（硬挂载分支）。判定侧一行未动即全部有效。
+- **五处赋值点**：`core/state.js` 初值、`chat/route.js` 的 `route()`（非 session 路由分支）与 `renderHome`、`sidebar/mgr.js` 的 `renderMgr` 与 `views/cards/preview-card.js` 的 `openProjectPreview`（硬挂载分支）。判定侧一行未动即全部有效。
 - **探针**：`probes/probe-optimistic-hash.ts`（只读）——源码层断言五处赋值点均为 `''` 且全 `web-src` 无 `currentHash = null` 残留、`addUser` 写入即 `state.currentHash`、生成物 `app.js` 同步。
 
 ## 37. 用户图片渲染 id 双来源：模型识图能力不影响图片显示
@@ -443,7 +443,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **侧栏 = 底板本身**：`#sidebar` / `#panel` 背景一律透明，图标与面板内容直接落在底板上（原 `#sidebar` 白底是「一条白柱子」读法的来源）。**例外**：手机（≤720px）抽屉是盖在卡**之上**的浮层，透明会透出 `#scrim`（z25）而发黑 ⇒ 该 media 内显式给 `background: var(--plane)`。
 - **槽 = `#chat-area`（无形状）**：通高、无圆角/无背景/无边距，只作定位与「卡」的 flex 容器；`#gate-screen`（token 门全屏浮层）与 `#menu-btn`（侧栏唤出汉堡）留槽级，与「当前哪张卡」无关。
 - **卡 = `.view-card`**：`border-radius: var(--radius)` + `margin: 2px`（缝宽用户实测 1~2px 定案）+ `background: var(--chat-bg)` + `position: relative`，四周缝隙露出底板——**与侧栏之间那条缝就是分隔**（替代已删的 `#panel` 右缘 `border-right`，见 §38）。卡不画线、不加阴影，分隔只靠底色差（`--plane` ↔ `--chat-bg`）。**`overflow: hidden` = 卡矩形（含圆角）是内容的硬边界**——卡的形状由自身背景圆角给出，任何**不透明填充物**（预览卡/外部卡的白底 iframe、神经元画布）都必须被它裁掉；否则方角盖住四角、卡与槽缘之间的底板缝断在角上，与「内容透明」的会话卡读法不一致。**不变量：槽里同一时刻恰好一张卡**——`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形，`#empty-hint`/`#input-wrap.docked`/`#char` 这些绝对定位后代几何逐像素不变；`position: relative` 是它们百分比基准的包含块，不可省。
-- **整卡切换（`views/registry.js`）**：视图定义单一真源 = `VIEWS` 表（`{id,title,tip,icon,tab,render|card}`），消费三处——侧栏 tab 生成（`renderMgrTabs()` 启动时注入 `#mgr-tabs`，`index.html` 不再有死按钮/内联 SVG）、`#mgr/<id>` 路由（`parseRoute` 的 `r.mgr` 即 id）、卡体渲染。**切卡唯一入口 `showView(id)`**：查表 → 换卡 → 渲染，未知 id 返回 null（不回落任何视图）。会话卡以 `tab:false` 入表（侧栏条目构成不动）走同一条路径，无默认内容旁路。
+- **一模块一卡组件（`views/cards/`）**：每个第一方卡自持一份描述符 `{id,title,tip,icon,tab,mount}`（`plugins/projects/models/neurons/preview-card.js` + 外部壳 `ext-card.js`），`mount(host, ctx)` 只把内容写进交给它的卡体（`host` = `.view-body`；`ctx = { id, payload, rerender }`）。卡内触发的整卡重渲（如插件卡切 kind/cat）走 `ctx.rerender()` 由通道出，卡不反向依赖注册表。
+- **整卡切换（`views/registry.js`）**：视图定义单一真源 = `CARDS` 表（会话描述符 + 五张卡描述符，`registry.js` 聚合导入本表；**卡描述符必须排在 `registry.js` 之前**——`registry` 顶层 `const CARDS` 引用各卡 `*CardDef`），消费三处——侧栏 tab 生成（`renderMgrTabs()` 启动时注入 `#mgr-tabs`，`index.html` 不再有死按钮/内联 SVG）、`#mgr/<id>` 路由（`parseRoute` 的 `r.mgr` 即 id）、卡体渲染。**切卡唯一入口 `openCard(id, payload)`**：查卡 → 换卡 → 调卡自己的 `mount`，未知 id 返回 null（不回落任何视图）。会话卡以 `tab:false` 入表（其 DOM 是常驻单例，描述符用 `card:()=>sessionCard`）走同一条路径，无默认内容旁路。`currentCardId()` 交出槽内当前卡 id（`'session'`/其它/`null`），供 work 模式切入时判定是否需先退卡。
 - **卡的生灭**：会话卡常驻 `index.html`（`#session-card`，承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM）→ 离开只切 `hidden`（`.view-card[hidden]{display:none}` 必需，否则被 `display:flex` 压过）；管理卡/预览卡按需创建、离开即 `.remove()`（神经元图的 rAF 以 `canvas.isConnected` 自毁，`display:none` 不释放）。同 id 卡在场即复用 ⇒ 卡体整换而滚动层不动，**滚动位置天然保持**（管理视图手写 `scrollTop` 存取块退役）。
 - **卡内滚动层**：`.view-scroll`（padding `24px 20px 8px`）+ `.view-body`（`max-width: 920px` 居中）= 镜像 `.mgr-on` 时代 `#chat-scroll` + `#messages{max-width:920px}` 的几何；会话卡仍用 `#chat-scroll`（stage 链读它的 `scrollTop`/`scrollHeight`）。全高视图（项目预览 / 神经元图）的判据从槽上的 `.mgr-on:has(...)` 改为卡内结构：`.view-card:has(.preview-shell|.ext-shell|.neu-graph) > .view-scroll`（`padding:0` + `overflow:hidden` + 纵向 flex）。**该状态下 `.view-body` 的 `max-width` 与 `margin` 必须一并撤销**（二者是同一个「920px 居中帽」的两个半条）——`.view-scroll` 此时是纵向 flex 容器，交叉轴上的 auto margin 会让 flex item 退出 stretch、宽度塌成 `fit-content`（内容为 `width:100%` 的 iframe 时回落到默认 300px）。**不变量：全高卡内 `.view-body` 的宽度恒由卡宽决定。**
 - **异步回程守卫**：回程渲染一律经 `viewBody(id)`——本视图的卡仍在槽里才交出卡体，否则返回 null（旧实现 `loadNeuronGraph` 的 `finally` 无条件重渲，图数据慢过用户切 tab 时会把别的视图洗掉）。
@@ -464,12 +465,12 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
   `id` 必填 `/^[a-zA-Z0-9_-]{1,32}$/` 且项目内唯一；`title` 必填非空；`path` 必填、**preview 目录内相对路径**（可带 `#片段`）；`icon` 可选，须是 `core/icons.js` `I` 表自有键，缺省 `plug`；`host` 必填 = **渲染位置由 preview 自己要求**，本版只定义 `"view"`（主区一张独立视图卡）；`tab` 缺省 true（上侧栏 tab）。整个 `cards` 缺失 = 空集（正常，非错误）。
 - **声明二：页面 postMessage 实时注册**（沿用 §39 的桥范式）：`parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')`，字段与校验同上，**同 id 覆盖静态清单项**（页面最了解自己有什么卡）。用途 = 无 `preview.json` 的纯静态 preview、或卡片集随页面状态变化。
 - **端点**：`GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`；label 未命中 / 无 preview → 404，有 preview 无卡片 → 空数组。卡片资源**不需要新路由**——`/preview/<label>/<path>` 已托管 preview 目录内任意文件（含 `resolve` + `startsWith` 越界防护与鉴权）。解析侧见 gateway.md §6.5。
-- **表与命名空间**：运行时表 `EXT` 与第一方 `VIEWS` **分开存**（`views/registry.js`），只在 `viewOf` / `renderMgrTabs` 两个查询点合流；外部卡 id 为 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车），tip 带项目 label。`#mgr-tabs` 的点击因此必须是容器**委托**（见 §41 末条）。
+- **表与命名空间**：运行时表 `EXT` 与第一方 `CARDS` **分开存**（`views/registry.js`），只在 `cardOf` / `renderMgrTabs` 两个查询点合流；外部卡 id 为 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车），tip 带项目 label。`#mgr-tabs` 的点击因此必须是容器**委托**（见 §41 末条）。
 - **不变量**
-  1. **外部卡集恒属于「最近一次挂载的那份 preview 文档所属项目」**——异 label 硬挂载 / iframe 换 src / 文档重挂即清（清点 = `sidebar/mgr.js` 的 `syncExtCards(label)`，与 `clearRailExt()` 同点）；**离开预览路由不清**，否则用户点外部卡 tab 的瞬间卡就没了。
+  1. **外部卡集恒属于「最近一次挂载的那份 preview 文档所属项目」**——异 label 硬挂载 / iframe 换 src / 文档重挂即清（清点 = `views/cards/preview-card.js` 的 `syncExtCards(label)`，与 `clearRailExt()` 同点）；**离开预览路由不清**，否则用户点外部卡 tab 的瞬间卡就没了。
   2. **只为「当前帧」作证**——`floria-cards-register` 与 `floria-rail-register` 共用同一道门：`e.source === 当前 .preview-frame.contentWindow`；label 取帧上锚定的 `dataset.label`，**不由消息自称**。
-  3. **外部永不进第一方注册表**——外部卡**没有 `render` 代码**，其 `render` 由宿主生成（`views/ext-card.js` 的 `mountExtCard` 写 iframe 壳）⇒ 外部代码不获得在宿主 DOM 执行的能力。
-  4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
+  3. **外部永不进第一方注册表**——外部卡**没有 `mount` 代码**，其 `mount` 由宿主生成（`views/cards/ext-card.js` 的 `mountExtCard` 写 iframe 壳）⇒ 外部代码不获得在宿主 DOM 执行的能力。
+  4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/cards/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
 - **样式**：`.ext-shell`（`relative` + 纵向 flex + `height:100%`）> `.ext-frame`（`flex:1; width:100%; border:0`）。与 `.preview-shell`/`.preview-frame` **同构但不复用类名**——宿主侧所有「当前预览帧」的查询（rail-ext 的 `.preview-frame`、`openProjectPreview` 三级链）都按 `.preview-frame` 定位，外部卡若同用会顶替真预览帧。全高卡特例判据须并入 `.ext-shell`（与 `:has(.preview-shell|.neu-graph)` 同一块，见 §41 卡内滚动层）。
 - **探针锚点**：`probes/probe-web-ext-cards.ts`（结构 + 行为真值表；网关侧解析从 `localGateway.ts` 提取、经 `Bun.Transpiler` 剥类型后直接跑，不另起网关）。
 

@@ -593,7 +593,7 @@ import { firstSendHash } from '../sidebar/recent.js'
       const qq = qs[qi]
       const question = String(qq.question || '').trim()
       const header = String(qq.header || '提问')
-      showTakeover(`<div class="appr-card qa-card qa-collapsed"><div class="qa-top"><span class="qa-eyebrow">${esc(header)}</span><span class="qa-title-sm">${esc(question)}</span><span class="qa-fold" role="button" title="展开">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div></div>`, 'approval')
+      showTakeover(`<div class="appr-card qa-card qa-collapsed"><div class="qa-top"><span class="qa-fold" role="button" title="展开">${I.dshChevDown}</span><span class="qa-head"><span class="qa-eyebrow">${esc(header)}</span><span class="qa-title-sm">${esc(question)}</span></span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div></div>`, 'approval')
       bindChrome(takeoverEl())
     }
     function renderOne() {
@@ -617,7 +617,7 @@ import { firstSendHash } from '../sidebar/recent.js'
         rows += `<button type="button" class="qa-opt${sel ? ' sel' : ''}" data-v="${esc(label)}"><span class="qa-num">${oi + 1}</span><span class="qa-copy"><span class="qa-label">${esc(label)}</span>${desc ? `<span class="qa-desc">${esc(desc)}</span>` : ''}</span></button>`
       })
       let html = '<div class="appr-card qa-card">'
-      html += `<div class="qa-top"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
+      html += `<div class="qa-top"><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-head"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span></span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
       html += `<div class="qa-main"><div class="qa-title">${esc(question)}</div>`
       html += `<div class="qa-opts">${rows}</div>`
       html += `<div class="qa-inputrow${(multi ? hasText : isText) ? ' sel' : ''}"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="${multi ? '输入你的答案（与勾选项一并提交）' : '输入你的答案'}" value="${esc(String(customText[question] || ''))}"></div>`

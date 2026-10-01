@@ -1,6 +1,6 @@
-// 外部预览卡片（卡片化二期）（唯一手改处，web/app.js 为生成物）
+// 外部预览卡片（卡片化二期）（2026-10-01 卡片化：views/ → views/cards/；唯一手改处，web/app.js 为生成物）
 
-import { esc } from '../core/state.js'
+import { esc } from '../../core/state.js'
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
   // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
@@ -11,7 +11,7 @@ import { esc } from '../core/state.js'
   //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
   //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
   // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
-  //        （清空点收在 sidebar/mgr.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
+  //        （清空点收在 views/cards/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
 
   // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
   // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
@@ -66,7 +66,7 @@ import { esc } from '../core/state.js'
     const q = gToken ? '?token=' + encodeURIComponent(gToken) : ''
     return `/preview/${encodeURIComponent(label)}/${file}${q}${frag}`
   }
-  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 showView 的 render(卡体)）
+  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 openCard 的 mount(卡体)）
   function mountExtCard(body, label, card) {
     body.innerHTML =
       '<div class="ext-shell">' +

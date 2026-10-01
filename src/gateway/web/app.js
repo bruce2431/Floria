@@ -1509,7 +1509,7 @@ function setSessionCwd(v) { sessionCwd = v }
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
-    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }
 
@@ -1542,7 +1542,7 @@ function setSessionCwd(v) { sessionCwd = v }
     clearTakeover() // 切换会话：清掉残留的提问/审批 takeover（输入栏恢复）
     closeProjPop() // 切换会话：项目选择器弹层一并收起（初始界面专属件）
     renderProjSeat() // 会话态：工作文件夹标识按当前会话项目重渲（锁定只读）
-    showView('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
+    openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(false) // 输入栏移回会话卡沉底（FLIP 像素级补间）
     const s = findSession(hash)
     state.currentHash = hash
@@ -3181,7 +3181,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
       // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
-      // views/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      // views/cards/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
       if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       railExtItems = (Array.isArray(d.items) ? d.items : [])
@@ -3205,286 +3205,189 @@ function setFirstSendHash(v) { firstSendHash = v }
     // #messages 把管理视图（如神经元图）洗成会话消息流。清槽清单与不变量见 route.js clearSessionSlots。
     clearSessionSlots()
     // 切卡：同 id 卡复用（卡体整换、滚动层不动 ⇒ 滚动位置天然保持），异 id 卡新建并 .remove() 旧卡
-    showView(state.mgr)
+    openCard(state.mgr)
   }
 
-  // 「项目」视图：每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
-  function renderMgrProjects(body) {
-    const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
-      '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
-      `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
-      `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
-      '<div class="mgr-list" id="mgr-list"></div>' +
-      '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
-      '</div>'
-    renderMgrProj()
-    const pq = $('mgr-pq')
-    if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
+  function renderList() {
+    const box = document.createElement('div')
+    // 2026-08-25「在一个列表中」堆叠视图：项目会话显示所属项目短编号气泡（Pj16），根会话无气泡
+    box.innerHTML = sorted().map((s) => itemHtml(s, true)).join('')
+    bindSessClicks(box)
+    bodyEl.appendChild(box)
   }
 
-  // 「模型」视图：便携根 settings.json 的模型配置（只读；数据源 = 网关 /gateway/models）
-  function renderMgrModels(body) {
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
-      '<div class="mgr-model-list" id="mgr-model-list"></div>' +
-      '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
-      '</div>'
-    renderMgrModelList()
-    loadModelsData(false)
-  }
-
-  // 「插件/技能」视图（id='plugins' 的默认形态，即侧栏第一 tab）
-  function renderMgrPlugins(body) {
-    const v = state.mgrView
-    const kindName = v.kind === 'skills' ? '技能' : '插件'
-    const sub =
-      v.kind === 'skills'
-        ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
-        : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-top">' +
-      '<div class="mgr-kind">' +
-      `<button class="mgr-kind-btn${v.kind === 'plugins' ? ' on' : ''}" data-kind="plugins">插件</button>` +
-      `<button class="mgr-kind-btn${v.kind === 'skills' ? ' on' : ''}" data-kind="skills">技能</button>` +
-      '</div>' +
-      '</div>' +
-      `<div class="mgr-head"><h2 class="mgr-title">${kindName}</h2><div class="mgr-sub">${sub}</div></div>` +
-      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
-      '<div class="mgr-cats">' +
-      `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
-      `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
-      '</div>' +
-      '<div class="mgr-grid" id="mgr-grid"></div>' +
-      '<div class="mgr-foot">数据源：网关 /gateway/plugins 实时扫描</div>' +
-      '</div>'
-    renderMgrGrid()
-    loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉
-    const pane = body.querySelector('.mgr-pane')
-    pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
-      b.addEventListener('click', () => {
-        v.kind = b.dataset.kind
-        saveMgrView()
-        renderMgr()
-      }),
-    )
-    pane.querySelectorAll('.mgr-cat').forEach((b) =>
-      b.addEventListener('click', () => {
-        v.cat = b.dataset.cat
-        saveMgrView()
-        renderMgr()
-      }),
-    )
-    const q = $('mgr-q')
-    if (q) q.addEventListener('input', () => { v.q = q.value; saveMgrView(); renderMgrGrid() })
-  }
-
-  // 管理视图：插件/技能卡片网格（按 kind + cat + 搜索词过滤；数据源 = 后端 /gateway/plugins）
-  function renderMgrGrid() {
-    const v = state.mgrView
-    const grid = $('mgr-grid')
-    if (!grid) return
-    const label = v.kind === 'skills' ? '技能' : '插件'
-    if (MGR_LOADING) {
-      grid.innerHTML = '<div class="mgr-empty">加载真实清单中…</div>'
-      return
+  function renderProject() {
+    bodyEl.innerHTML = ''
+    if (state.pt === 'projects') {
+      const byProject = {}
+      for (const s of ALL) if (s.projectScope === 'project') (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+      const labels = Object.keys(byProject).sort((a, b) => {
+        const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
+        const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
+        return lb - la
+      })
+      if (labels.length === 0) {
+        bodyEl.innerHTML = '<div class="no-hit" style="padding:10px">暂无项目会话</div>'
+        return
+      }
+      const box = document.createElement('div')
+      box.innerHTML = labels
+        .map((label) => {
+          const chats = [...byProject[label]].sort(sessCmp)
+          // 2026-08-24 项目新建会话：项目文件夹行 + 按钮 → 在指定项目下新建 web 会话
+          // （与「笔」新建会话并存，两者指向不同 exe——见 newWebSession 注释）
+          return `<div class="folder" data-f="${esc(label)}"><button class="folder-head">
+            <span class="chev">▶</span><span class="ficon">${I.folder}</span><span class="fname">${esc(label)}</span>
+            <span class="fcount">${chats.length}</span>
+            <span class="folder-add" role="button" tabindex="-1" title="在 ${esc(label)} 新建会话">${I.dshPlus}</span></button><div class="folder-body">${chats.map(itemHtml).join('')}</div></div>`
+        })
+        .join('')
+      box.querySelectorAll('.folder-head').forEach((h) => h.addEventListener('click', () => h.parentElement.classList.toggle('open')))
+      // 2026-08-24 项目新建会话入口：点击 → 在指定项目新建 web 会话
+      // 2026-08-25 改造：与「笔」一致，先到初始化界面（#/ 空态 + 目标项目 chip），
+      // 首条消息发送时才真正建会话（gwSend 空态分支带 project 调 newWebSession）。不再直接弹 CLI。
+      box.querySelectorAll('.folder-add').forEach((a) =>
+        a.addEventListener('click', (e) => {
+          e.stopPropagation()
+          const f = a.closest('.folder')
+          if (f && f.dataset.f) {
+            state.newProject = f.dataset.f
+            navigate('#/')
+            if (isMobile()) setPanel(false)
+          }
+        }),
+      )
+      bindSessClicks(box)
+      bodyEl.appendChild(box)
+    } else {
+      const root = ALL.filter((s) => s.projectScope !== 'project')
+      const box = document.createElement('div')
+      box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
+      bindSessClicks(box)
+      bodyEl.appendChild(box)
     }
-    if (MGR_ERR) {
-      grid.innerHTML =
-        '<div class="mgr-empty">清单加载失败：' + esc(MGR_ERR) +
-        '<br><button class="mgr-retry" id="mgr-retry">重试</button></div>'
-      const retry = $('mgr-retry')
-      if (retry) retry.addEventListener('click', () => loadMgrData(true))
-      return
-    }
-    const src = (MGR && MGR[v.kind] && MGR[v.kind][v.cat]) || []
-    const q = (v.q || '').trim().toLowerCase()
-    const rows = q ? src.filter((x) => x.n.toLowerCase().includes(q) || x.d.toLowerCase().includes(q)) : src
-    grid.innerHTML = rows.length
-      ? rows.map(mgrCardHtml).join('')
-      : `<div class="mgr-empty">没有匹配的${label}</div>`
-  }
-  function mgrCardHtml(x) {
-    const badge = x.inst ? '<span class="inst-badge">已安装</span>' : ''
-    return (
-      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(x.n)}">${esc((x.n[0] || '?').toUpperCase())}</div>` +
-      `<div class="mgr-meta"><div class="mgr-name">${esc(x.n)}${badge}</div><div class="mgr-desc">${esc(x.d)}</div></div>` +
-      '<button class="mgr-more" title="更多">…</button></div>'
-    )
   }
 
-  // 管理视图：项目列表（仿照插件布设，每个项目胶囊占据一整行）
-  // 数据源 = 已加载会话 ALL 按 projectLabel 分组（projectScope==='project'），不另起后端接口。
-  function renderMgrProj() {
-    const list = $('mgr-list')
-    if (!list) return
-    const q = (state.mgrView.q || '').trim().toLowerCase()
-    const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
-    const labels = Object.keys(byProject).filter((l) => !q || l.toLowerCase().includes(q))
-    // 按项目最近活跃时间降序（同 renderProject 排序）
-    labels.sort((a, b) => {
-      const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
-      const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
-      return lb - la
-    })
-    // 该项目是否带 .claude/preview/（会话 preview 标志由后端 findProjects.hasPreview 透传）
-    const hasPreview = (l) => ALL.some((s) => s.projectScope === 'project' && s.projectLabel === l && s.preview)
-    list.innerHTML = labels.length
-      ? labels.map((l) => mgrProjHtml(l, byProject[l], hasPreview(l))).join('')
-      : '<div class="mgr-empty">' + (q ? '没有匹配的项目' : '暂无项目会话') + '</div>'
-    list.querySelectorAll('.mgr-proj').forEach((b) =>
+  // ---------- 气泡弹层 ----------
+  function renderBubble() {
+    bubblePop.innerHTML = '<div class="b-head">最近会话</div>' + sorted().slice(0, 5).map(itemHtml).join('')
+    bubblePop.querySelectorAll('.sess-item').forEach((b) =>
       b.addEventListener('click', () => {
-        // 点项目胶囊一律进预览：带 .claude/preview 加载真预览页；不带 → 默认项目主页
-        // （GitHub 仓库风格，web/default-preview/，由网关 /gateway/project 拉数据）。
-        if (b.dataset.label) {
-          // 进预览走 hash 路由（#preview/<label>），刷新后可恢复当前预览页
-          navigate('#preview/' + encodeURIComponent(b.dataset.label))
-          if (isMobile()) setPanel(false)
-          return
-        }
-        const hash = b.dataset.hash
-        if (!hash) return
-        navigate('#/' + encodeURIComponent(hash))
+        navigate('#/' + encodeURIComponent(b.dataset.hash))
+        bubblePop.classList.remove('show')
         if (isMobile()) setPanel(false)
       }),
     )
   }
-  function mgrProjHtml(label, chats, hasPreview) {
-    const latest = [...chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-    const n = chats.length
-    return (
-      `<button class="mgr-proj" data-hash="${latest ? esc(hashOf(latest)) : ''}" data-label="${esc(label)}" data-preview="${hasPreview ? '1' : '0'}" title="${esc(label)} · ${n} 个会话（点击进入项目主页）">` +
-      `<span class="mgr-ic" style="background:${mgrColor(label)}">${I.folder}</span>` +
-      `<span class="mgr-meta"><span class="mgr-name">${esc(label)}${hasPreview ? '<span class="pv-badge">预览</span>' : ''}<span class="inst-badge">${n} 个会话</span></span>` +
-      `<span class="mgr-desc">${hasPreview ? '点击打开项目预览页（.claude/preview）' : '点击打开默认项目主页（无预览页）'}</span></span>` +
-      '<span class="mgr-more" title="打开">›</span></button>'
+
+  // ---------- 搜索覆盖层 ----------
+  function openSearch() {
+    overlay.classList.add('show')
+    sInput.value = ''
+    renderSearch()
+    setTimeout(() => sInput.focus(), 30)
+  }
+  function renderSearch() {
+    const q = sInput.value.trim().toLowerCase()
+    const rows = sorted().filter(
+      (s) => !q || s.title.toLowerCase().includes(q) || (s.projectLabel || '').toLowerCase().includes(q),
+    )
+    $('search-results').innerHTML = rows.length
+      ? rows.map((s) => {
+          const prj = s.projectScope === 'project' ? `<span class="s-prj">${esc(s.projectLabel)}</span>` : ''
+          return `<div class="s-row" data-hash="${esc(hashOf(s))}"><span class="s-ico">${I.msg}</span><span class="st">${esc(s.title)}</span>${prj}</div>`
+        }).join('')
+      : '<div class="no-hit">没有匹配的会话</div>'
+    $('search-results').querySelectorAll('.s-row').forEach((b) =>
+      b.addEventListener('click', () => {
+        navigate('#/' + encodeURIComponent(b.dataset.hash))
+        overlay.classList.remove('show')
+        if (isMobile()) setPanel(false)
+      }),
     )
   }
 
-  // 管理视图：模型列表（按供应商分组；数据源 = 网关 /gateway/models，只读展示）
-  const MODEL_PROVIDER_KEYS = [
-    [/^ANTHROPIC_/, 'Claude · Anthropic'],
-    [/^OPENAI_/, 'OpenAI'],
-    [/^GEMINI_/, 'Google Gemini'],
-    [/^DEEPSEEK_/, 'DeepSeek'],
-    [/^QWEN_/, 'Qwen · 通义千问'],
-    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
-    [/^GLM_/, '智谱 GLM'],
-    [/^MOONSHOT_/, 'Moonshot Kimi'],
-    [/^OPENROUTER_/, 'OpenRouter'],
-  ]
-  // 供应商判定：key 优先（模型类环境变量名带供应商前缀），通用 model 键或未命中则按模型串前缀。
-  function modelProviderOf(it) {
-    const k = String(it.k || '')
-    const v = String(it.v || '')
-    if (k !== 'model') {
-      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
-    }
-    const vl = v.toLowerCase()
-    if (vl.startsWith('claude')) return 'Claude · Anthropic'
-    if (vl.startsWith('deepseek')) return 'DeepSeek'
-    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
-    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
-    if (vl.startsWith('gemini')) return 'Google Gemini'
-    if (vl.startsWith('glm')) return '智谱 GLM'
-    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
-    if (vl.includes('doubao')) return '字节豆包'
-    return '自定义 / 其他'
+  // ---------- 外部卡片（卡片化二期）----------
+  // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
+  // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
+  // **不解释卡片内容**（内容永远跑在它自己的文档里）。声明文件与 backend 段同一份申报表。
+  // 渲染 = 一卡一 iframe（`/preview/<label>/<path>`，同源）：preview 保持自包含（自带 css/js/
+  // 相对路径），与宿主 DOM/CSS/JS 零互相污染——一期 SPEC-视图卡化 §7「外部插件 = iframe」边界的延续。
+  // 契约：preview.json cards（网关 GET /gateway/preview-cards 读出，见 docs/gateway.md §6）
+  //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
+  //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
+  // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
+  //        （清空点收在 views/cards/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
+
+  // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
+  // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
+  function normExtCards(raw) {
+    return (Array.isArray(raw) ? raw : [])
+      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      .map((c) => ({
+        id: typeof c.id === 'string' ? c.id.trim() : '',
+        title: typeof c.title === 'string' ? c.title.trim() : '',
+        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+        path: typeof c.path === 'string' ? c.path.trim() : '',
+        host: typeof c.host === 'string' ? c.host : '',
+        tab: c.tab !== false,
+      }))
+      .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
   }
-  // 模型列表的卡体渲染（写进 .mgr-model-list；2026-09-23 卡化改名：renderMgrModels 一名已归「模型视图」）
-  function renderMgrModelList() {
-    const list = $('mgr-model-list')
-    if (!list) return
-    if (MODELS_LOADING) {
-      list.innerHTML = '<div class="mgr-empty">加载模型列表…</div>'
-      return
-    }
-    if (MODELS_ERR) {
-      list.innerHTML =
-        '<div class="mgr-empty">模型列表加载失败：' + esc(MODELS_ERR) +
-        '<br><button class="mgr-retry" id="mgr-models-retry">重试</button></div>'
-      const retry = $('mgr-models-retry')
-      if (retry) retry.addEventListener('click', () => loadModelsData(true))
-      return
-    }
-    const d = MODELS
-    if (!d) {
-      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
-      return
-    }
-    const items = Array.isArray(d.items) ? d.items : []
-    if (!items.length) {
-      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
-      return
-    }
-    // 按供应商分组（保持配置出现顺序，组内保持原序）；2026-08-29 优先网关下发的真实归属（items[].provider）
-    const groups = []
-    for (const it of items) {
-      const p = it.provider || modelProviderOf(it)
-      let g = groups.find((x) => x.provider === p)
-      if (!g) {
-        g = { provider: p, items: [] }
-        groups.push(g)
-      }
-      g.items.push(it)
-    }
-    list.innerHTML = groups
-      .map(
-        (g) =>
-          '<div class="mgr-model-group">' +
-          `<div class="mgr-model-ghead"><span class="mgr-model-gname">${esc(g.provider)}</span></div>` +
-          g.items.map(modelCapHtml).join('') +
-          '</div>',
-      )
-      .join('')
-    list.querySelectorAll('.mgr-model-item.settable').forEach((row) => {
-      row.addEventListener('click', () => setDefaultModel(row.dataset.model))
-    })
+  // 浮窗动作字段校验（2026-09-28，与 normExtCards 同款风格）：preview.json 的 quoteActions 段。
+  // 动作是**纯数据**（无 path / host，不指向文件）——宿主只渲染动作行，点击把 id 回发预览页。
+  // id 非法 / 重名、title 空 → 丢（不猜不兜底）；icon 缺省 plug。整个 quoteActions 缺失 = 空集。
+  function normQuoteActions(raw) {
+    const seen = new Set()
+    return (Array.isArray(raw) ? raw : [])
+      .filter((a) => a && typeof a === 'object' && !Array.isArray(a))
+      .map((a) => ({
+        id: typeof a.id === 'string' ? a.id.trim() : '',
+        title: typeof a.title === 'string' ? a.title.trim() : '',
+        icon: typeof a.icon === 'string' && a.icon ? a.icon : 'plug',
+      }))
+      .filter((a) => {
+        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(a.id) || !a.title || seen.has(a.id)) return false
+        seen.add(a.id)
+        return true
+      })
   }
-  // 模型胶囊：完全复用项目胶囊 .mgr-proj 的风格与尺寸（40px 彩块 icon + 名称行 + 描述行）。
-  // 2026-08-23 设为默认：凭据池内模型 → 整行可点「设为默认」；2026-08-29 直接切模型自动切供应商 →
-  // 放开为全池（src 以「凭据池」开头的行，跨商由网关 switchModelAuto 自动切供应商）；
-  // 当前默认模型（MODELS.activeModel）标「默认」徽标；其余配置项保持只读。
-  function modelCapHtml(it) {
-    const name = String(it.v || '')
-    // 备注小字 = 是否为视觉模型（凭据池 modelVision 配置；未标记按非视觉）
-    const desc = it.vision === true ? '支持视觉' : '不支持视觉'
-    // DeepSeek 供应商 → 白底 + 蓝色鲸鱼；其它供应商保留彩块 + 芯片线条
-    const isDs = (it.provider || modelProviderOf(it)) === 'DeepSeek'
-    const icStyle = isDs ? 'background:#fff;color:#4d6bfe;border:1px solid #d9e2f8' : 'background:' + mgrColor(name)
-    const icSvg = isDs ? I.whale : I.chip
-    // 凭据池内模型 → 整行可点「设为默认」；默认模型整行绿色高亮（无文字徽标）。
-    // 不渲染右侧装饰箭头：模型胶囊右侧无任何按钮。
-    const settable = !!(typeof it.src === 'string' && it.src.startsWith('凭据池'))
-    const isDefault = settable && MODELS.activeModel === name
-    const cls = 'mgr-proj mgr-model-item' + (settable ? ' settable' : '') + (isDefault ? ' is-default' : '')
-    return (
-      `<div class="${cls}"${settable ? ' title="点击设为默认模型"' : ''} data-model="${esc(name)}">` +
-      `<span class="mgr-ic" style="${icStyle}">${icSvg}</span>` +
-      `<span class="mgr-meta"><span class="mgr-name">${esc(name)}</span>` +
-      `<span class="mgr-desc">${esc(desc)}</span></span>` +
+  // 资源路径必须是 preview 目录内的相对文件路径（绝对路径 / 反斜杠 / query / 空段 / `.` `..` 段
+  // 一律拒；允许尾随 #片段）。与网关 isPreviewRelPath 同款规则——网关侧挡 preview.json 来源，
+  // 这里挡 postMessage 来源，两条外部输入各自守门。
+  function isExtPath(p) {
+    if (!p || p.startsWith('/') || p.includes('\\') || p.includes('?')) return false
+    const i = p.indexOf('#')
+    const file = i >= 0 ? p.slice(0, i) : p
+    let rel
+    try { rel = decodeURIComponent(file) } catch { return false } // 非法 % 序列
+    if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes('?')) return false
+    return rel.split('/').every((s) => s && s !== '.' && s !== '..')
+  }
+  // 卡页 URL：/preview/<label>/<path>（+token 供未授权设备首链；#片段原样带上，由卡页自我定位）
+  function extCardSrc(label, card) {
+    const i = card.path.indexOf('#')
+    const file = i >= 0 ? card.path.slice(0, i) : card.path
+    const frag = i >= 0 ? card.path.slice(i) : ''
+    const q = gToken ? '?token=' + encodeURIComponent(gToken) : ''
+    return `/preview/${encodeURIComponent(label)}/${file}${q}${frag}`
+  }
+  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 openCard 的 mount(卡体)）
+  function mountExtCard(body, label, card) {
+    body.innerHTML =
+      '<div class="ext-shell">' +
+      `<iframe class="ext-frame" title="${esc(card.title)}" data-ext-card="${esc(card.id)}" src="${esc(extCardSrc(label, card))}"></iframe>` +
       '</div>'
-    )
   }
-  // 2026-08-23 设为默认：POST /gateway/model { defaultModel } → 写 credentials.json activeModel（仅全局默认，
-  // 不影响当前会话）。成功后本地更新 MODELS.activeModel 重渲染，默认徽标移到新模型。
-  async function setDefaultModel(id) {
-    if (needToken()) { toast('未连接网关，无法设置'); return } // 2026-08-29 !gToken → needToken()（cookie 设备误报修复）
-    if (MODELS && MODELS.activeModel === id) { toast('已是默认模型'); return }
-    const ok = await apiSetModel({ defaultModel: id })
-    if (ok) {
-      if (MODELS) MODELS.activeModel = id
-      renderMgrModelList()
-      toast(`默认模型已设为 ${id}`)
-    } else {
-      toast('设置失败 · 模型不在凭据池或网关未连接')
-    }
+
+  // ---------- 预览卡 ----------
+  // 槽位预览卡（openProjectPreview，独占主区）；预览渲染器 mountPreview 另被 work 个性化工作区第三栏
+  // 复用（sidebar/work.js），到 iframe 这一层没有第二套代码。
+  const previewCardDef = {
+    id: 'preview', title: '预览', tip: '项目预览', icon: 'folder', tab: false,
+    mount(body, ctx) { mountPreview(body, ctx.payload.label, ctx.payload.hasPreview) },
   }
+
   // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
   // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
   // preview.json，registerExtCards / registerQuoteActions 再校一遍（postMessage 那条不过网关，
@@ -3512,19 +3415,17 @@ function setFirstSendHash(v) { firstSendHash = v }
   //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
   //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
   function openProjectPreview(label, hasPreview) {
-    showPreviewCard()
-    const body = viewBody('preview')
-    if (!body) return
     // 离开会话视图必须清全局槽（清槽清单与不变量见 route.js clearSessionSlots）。软重入（同 label
     // 且帧在场）不清、不重建 shell——异 label / 帧不在场才动，见 mountPreview 的两级重入说明。
-    if (state.preview !== label || !body.querySelector('.preview-frame')) {
+    const body0 = viewBody('preview')
+    if (state.preview !== label || !body0 || !body0.querySelector('.preview-frame')) {
       state.currentHash = ''
       stopLiveFoldTimer()
       stageRelease()
       clearSessionSlots()
       state.preview = label
     }
-    mountPreview(body, label, hasPreview)
+    openCard('preview', { label, hasPreview })
   }
 
   // 预览渲染器（三级链的唯一一份实现：后端容器 → 静态 preview → 默认主页）。两个消费方——
@@ -3633,69 +3534,315 @@ function setFirstSendHash(v) { firstSendHash = v }
       })
   }
 
-  function renderList() {
-    const box = document.createElement('div')
-    // 2026-08-25「在一个列表中」堆叠视图：项目会话显示所属项目短编号气泡（Pj16），根会话无气泡
-    box.innerHTML = sorted().map((s) => itemHtml(s, true)).join('')
-    bindSessClicks(box)
-    bodyEl.appendChild(box)
+  // ---------- 插件卡（插件 / 技能）----------
+  // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
+  // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 registry / mgr.js。
+  const pluginsCardDef = {
+    id: 'plugins', title: '插件', tip: '插件 / 技能预览', icon: 'plug', tab: true,
+    mount(body, ctx) { renderMgrPlugins(body, ctx) },
   }
 
-  function renderProject() {
-    bodyEl.innerHTML = ''
-    if (state.pt === 'projects') {
-      const byProject = {}
-      for (const s of ALL) if (s.projectScope === 'project') (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
-      const labels = Object.keys(byProject).sort((a, b) => {
-        const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
-        const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
-        return lb - la
-      })
-      if (labels.length === 0) {
-        bodyEl.innerHTML = '<div class="no-hit" style="padding:10px">暂无项目会话</div>'
-        return
+  // 「插件/技能」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
+  function renderMgrPlugins(body, ctx) {
+    const v = state.mgrView
+    const kindName = v.kind === 'skills' ? '技能' : '插件'
+    const sub =
+      v.kind === 'skills'
+        ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
+        : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-top">' +
+      '<div class="mgr-kind">' +
+      `<button class="mgr-kind-btn${v.kind === 'plugins' ? ' on' : ''}" data-kind="plugins">插件</button>` +
+      `<button class="mgr-kind-btn${v.kind === 'skills' ? ' on' : ''}" data-kind="skills">技能</button>` +
+      '</div>' +
+      '</div>' +
+      `<div class="mgr-head"><h2 class="mgr-title">${kindName}</h2><div class="mgr-sub">${sub}</div></div>` +
+      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
+      '<div class="mgr-cats">' +
+      `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
+      `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
+      '</div>' +
+      '<div class="mgr-grid" id="mgr-grid"></div>' +
+      '<div class="mgr-foot">数据源：网关 /gateway/plugins 实时扫描</div>' +
+      '</div>'
+    renderMgrGrid()
+    loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉
+    const pane = body.querySelector('.mgr-pane')
+    pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
+      b.addEventListener('click', () => {
+        v.kind = b.dataset.kind
+        saveMgrView()
+        ctx.rerender()
+      }),
+    )
+    pane.querySelectorAll('.mgr-cat').forEach((b) =>
+      b.addEventListener('click', () => {
+        v.cat = b.dataset.cat
+        saveMgrView()
+        ctx.rerender()
+      }),
+    )
+    const q = $('mgr-q')
+    if (q) q.addEventListener('input', () => { v.q = q.value; saveMgrView(); renderMgrGrid() })
+  }
+
+  // 插件/技能卡片网格（按 kind + cat + 搜索词过滤；数据源 = 后端 /gateway/plugins）
+  function renderMgrGrid() {
+    const v = state.mgrView
+    const grid = $('mgr-grid')
+    if (!grid) return
+    const label = v.kind === 'skills' ? '技能' : '插件'
+    if (MGR_LOADING) {
+      grid.innerHTML = '<div class="mgr-empty">加载真实清单中…</div>'
+      return
+    }
+    if (MGR_ERR) {
+      grid.innerHTML =
+        '<div class="mgr-empty">清单加载失败：' + esc(MGR_ERR) +
+        '<br><button class="mgr-retry" id="mgr-retry">重试</button></div>'
+      const retry = $('mgr-retry')
+      if (retry) retry.addEventListener('click', () => loadMgrData(true))
+      return
+    }
+    const src = (MGR && MGR[v.kind] && MGR[v.kind][v.cat]) || []
+    const q = (v.q || '').trim().toLowerCase()
+    const rows = q ? src.filter((x) => x.n.toLowerCase().includes(q) || x.d.toLowerCase().includes(q)) : src
+    grid.innerHTML = rows.length
+      ? rows.map(mgrCardHtml).join('')
+      : `<div class="mgr-empty">没有匹配的${label}</div>`
+  }
+  function mgrCardHtml(x) {
+    const badge = x.inst ? '<span class="inst-badge">已安装</span>' : ''
+    return (
+      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(x.n)}">${esc((x.n[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-meta"><div class="mgr-name">${esc(x.n)}${badge}</div><div class="mgr-desc">${esc(x.d)}</div></div>` +
+      '<button class="mgr-more" title="更多">…</button></div>'
+    )
+  }
+
+  // ---------- 项目卡 ----------
+  // 数据源 = 已加载会话 ALL 按 projectLabel 分组（projectScope==='project'），不另起后端接口。
+  // 点项目胶囊一律进预览（hash 路由 #preview/<label>），无 rerender 需求。
+  const projectsCardDef = {
+    id: 'projects', title: '项目', tip: '项目管理', icon: 'folder', tab: true,
+    mount(body) { renderMgrProjects(body) },
+  }
+
+  // 每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
+  function renderMgrProjects(body) {
+    const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
+      '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
+      `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
+      `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
+      '<div class="mgr-list" id="mgr-list"></div>' +
+      '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
+      '</div>'
+    renderMgrProj()
+    const pq = $('mgr-pq')
+    if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
+  }
+
+  // 项目列表（仿照插件布设，每个项目胶囊占据一整行）
+  function renderMgrProj() {
+    const list = $('mgr-list')
+    if (!list) return
+    const q = (state.mgrView.q || '').trim().toLowerCase()
+    const byProject = {}
+    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
+    const labels = Object.keys(byProject).filter((l) => !q || l.toLowerCase().includes(q))
+    // 按项目最近活跃时间降序（同 renderProject 排序）
+    labels.sort((a, b) => {
+      const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
+      const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
+      return lb - la
+    })
+    // 该项目是否带 .claude/preview/（会话 preview 标志由后端 findProjects.hasPreview 透传）
+    const hasPreview = (l) => ALL.some((s) => s.projectScope === 'project' && s.projectLabel === l && s.preview)
+    list.innerHTML = labels.length
+      ? labels.map((l) => mgrProjHtml(l, byProject[l], hasPreview(l))).join('')
+      : '<div class="mgr-empty">' + (q ? '没有匹配的项目' : '暂无项目会话') + '</div>'
+    list.querySelectorAll('.mgr-proj').forEach((b) =>
+      b.addEventListener('click', () => {
+        // 点项目胶囊一律进预览：带 .claude/preview 加载真预览页；不带 → 默认项目主页
+        // （GitHub 仓库风格，web/default-preview/，由网关 /gateway/project 拉数据）。
+        if (b.dataset.label) {
+          // 进预览走 hash 路由（#preview/<label>），刷新后可恢复当前预览页
+          navigate('#preview/' + encodeURIComponent(b.dataset.label))
+          if (isMobile()) setPanel(false)
+          return
+        }
+        const hash = b.dataset.hash
+        if (!hash) return
+        navigate('#/' + encodeURIComponent(hash))
+        if (isMobile()) setPanel(false)
+      }),
+    )
+  }
+  function mgrProjHtml(label, chats, hasPreview) {
+    const latest = [...chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    const n = chats.length
+    return (
+      `<button class="mgr-proj" data-hash="${latest ? esc(hashOf(latest)) : ''}" data-label="${esc(label)}" data-preview="${hasPreview ? '1' : '0'}" title="${esc(label)} · ${n} 个会话（点击进入项目主页）">` +
+      `<span class="mgr-ic" style="background:${mgrColor(label)}">${I.folder}</span>` +
+      `<span class="mgr-meta"><span class="mgr-name">${esc(label)}${hasPreview ? '<span class="pv-badge">预览</span>' : ''}<span class="inst-badge">${n} 个会话</span></span>` +
+      `<span class="mgr-desc">${hasPreview ? '点击打开项目预览页（.claude/preview）' : '点击打开默认项目主页（无预览页）'}</span></span>` +
+      '<span class="mgr-more" title="打开">›</span></button>'
+    )
+  }
+
+  // ---------- 模型卡 ----------
+  // 数据源 = 网关 /gateway/models（只读展示 + 设为默认）。modelProviderOf 同被输入栏模型菜单复用（唯一一份）。
+  const modelsCardDef = {
+    id: 'models', title: '模型', tip: '模型配置', icon: 'chip', tab: true,
+    mount(body) { renderMgrModels(body) },
+  }
+
+  // 「模型」卡体：便携根 settings.json 的模型配置（只读；数据源 = 网关 /gateway/models）
+  function renderMgrModels(body) {
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
+      '<div class="mgr-model-list" id="mgr-model-list"></div>' +
+      '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
+      '</div>'
+    renderMgrModelList()
+    loadModelsData(false)
+  }
+
+  // 模型列表（按供应商分组；数据源 = 网关 /gateway/models，只读展示）
+  const MODEL_PROVIDER_KEYS = [
+    [/^ANTHROPIC_/, 'Claude · Anthropic'],
+    [/^OPENAI_/, 'OpenAI'],
+    [/^GEMINI_/, 'Google Gemini'],
+    [/^DEEPSEEK_/, 'DeepSeek'],
+    [/^QWEN_/, 'Qwen · 通义千问'],
+    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
+    [/^GLM_/, '智谱 GLM'],
+    [/^MOONSHOT_/, 'Moonshot Kimi'],
+    [/^OPENROUTER_/, 'OpenRouter'],
+  ]
+  // 供应商判定：key 优先（模型类环境变量名带供应商前缀），通用 model 键或未命中则按模型串前缀。
+  function modelProviderOf(it) {
+    const k = String(it.k || '')
+    const v = String(it.v || '')
+    if (k !== 'model') {
+      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
+    }
+    const vl = v.toLowerCase()
+    if (vl.startsWith('claude')) return 'Claude · Anthropic'
+    if (vl.startsWith('deepseek')) return 'DeepSeek'
+    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
+    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
+    if (vl.startsWith('gemini')) return 'Google Gemini'
+    if (vl.startsWith('glm')) return '智谱 GLM'
+    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
+    if (vl.includes('doubao')) return '字节豆包'
+    return '自定义 / 其他'
+  }
+  // 模型列表的卡体渲染（写进 .mgr-model-list）
+  function renderMgrModelList() {
+    const list = $('mgr-model-list')
+    if (!list) return
+    if (MODELS_LOADING) {
+      list.innerHTML = '<div class="mgr-empty">加载模型列表…</div>'
+      return
+    }
+    if (MODELS_ERR) {
+      list.innerHTML =
+        '<div class="mgr-empty">模型列表加载失败：' + esc(MODELS_ERR) +
+        '<br><button class="mgr-retry" id="mgr-models-retry">重试</button></div>'
+      const retry = $('mgr-models-retry')
+      if (retry) retry.addEventListener('click', () => loadModelsData(true))
+      return
+    }
+    const d = MODELS
+    if (!d) {
+      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
+      return
+    }
+    const items = Array.isArray(d.items) ? d.items : []
+    if (!items.length) {
+      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
+      return
+    }
+    // 按供应商分组（保持配置出现顺序，组内保持原序）；2026-08-29 优先网关下发的真实归属（items[].provider）
+    const groups = []
+    for (const it of items) {
+      const p = it.provider || modelProviderOf(it)
+      let g = groups.find((x) => x.provider === p)
+      if (!g) {
+        g = { provider: p, items: [] }
+        groups.push(g)
       }
-      const box = document.createElement('div')
-      box.innerHTML = labels
-        .map((label) => {
-          const chats = [...byProject[label]].sort(sessCmp)
-          // 2026-08-24 项目新建会话：项目文件夹行 + 按钮 → 在指定项目下新建 web 会话
-          // （与「笔」新建会话并存，两者指向不同 exe——见 newWebSession 注释）
-          return `<div class="folder" data-f="${esc(label)}"><button class="folder-head">
-            <span class="chev">▶</span><span class="ficon">${I.folder}</span><span class="fname">${esc(label)}</span>
-            <span class="fcount">${chats.length}</span>
-            <span class="folder-add" role="button" tabindex="-1" title="在 ${esc(label)} 新建会话">${I.dshPlus}</span></button><div class="folder-body">${chats.map(itemHtml).join('')}</div></div>`
-        })
-        .join('')
-      box.querySelectorAll('.folder-head').forEach((h) => h.addEventListener('click', () => h.parentElement.classList.toggle('open')))
-      // 2026-08-24 项目新建会话入口：点击 → 在指定项目新建 web 会话
-      // 2026-08-25 改造：与「笔」一致，先到初始化界面（#/ 空态 + 目标项目 chip），
-      // 首条消息发送时才真正建会话（gwSend 空态分支带 project 调 newWebSession）。不再直接弹 CLI。
-      box.querySelectorAll('.folder-add').forEach((a) =>
-        a.addEventListener('click', (e) => {
-          e.stopPropagation()
-          const f = a.closest('.folder')
-          if (f && f.dataset.f) {
-            state.newProject = f.dataset.f
-            navigate('#/')
-            if (isMobile()) setPanel(false)
-          }
-        }),
+      g.items.push(it)
+    }
+    list.innerHTML = groups
+      .map(
+        (g) =>
+          '<div class="mgr-model-group">' +
+          `<div class="mgr-model-ghead"><span class="mgr-model-gname">${esc(g.provider)}</span></div>` +
+          g.items.map(modelCapHtml).join('') +
+          '</div>',
       )
-      bindSessClicks(box)
-      bodyEl.appendChild(box)
+      .join('')
+    list.querySelectorAll('.mgr-model-item.settable').forEach((row) => {
+      row.addEventListener('click', () => setDefaultModel(row.dataset.model))
+    })
+  }
+  // 模型胶囊：完全复用项目胶囊 .mgr-proj 的风格与尺寸（40px 彩块 icon + 名称行 + 描述行）。
+  // 2026-08-23 设为默认：凭据池内模型 → 整行可点「设为默认」；2026-08-29 直接切模型自动切供应商 →
+  // 放开为全池（src 以「凭据池」开头的行，跨商由网关 switchModelAuto 自动切供应商）；
+  // 当前默认模型（MODELS.activeModel）标「默认」徽标；其余配置项保持只读。
+  function modelCapHtml(it) {
+    const name = String(it.v || '')
+    // 备注小字 = 是否为视觉模型（凭据池 modelVision 配置；未标记按非视觉）
+    const desc = it.vision === true ? '支持视觉' : '不支持视觉'
+    // DeepSeek 供应商 → 白底 + 蓝色鲸鱼；其它供应商保留彩块 + 芯片线条
+    const isDs = (it.provider || modelProviderOf(it)) === 'DeepSeek'
+    const icStyle = isDs ? 'background:#fff;color:#4d6bfe;border:1px solid #d9e2f8' : 'background:' + mgrColor(name)
+    const icSvg = isDs ? I.whale : I.chip
+    // 凭据池内模型 → 整行可点「设为默认」；默认模型整行绿色高亮（无文字徽标）。
+    // 不渲染右侧装饰箭头：模型胶囊右侧无任何按钮。
+    const settable = !!(typeof it.src === 'string' && it.src.startsWith('凭据池'))
+    const isDefault = settable && MODELS.activeModel === name
+    const cls = 'mgr-proj mgr-model-item' + (settable ? ' settable' : '') + (isDefault ? ' is-default' : '')
+    return (
+      `<div class="${cls}"${settable ? ' title="点击设为默认模型"' : ''} data-model="${esc(name)}">` +
+      `<span class="mgr-ic" style="${icStyle}">${icSvg}</span>` +
+      `<span class="mgr-meta"><span class="mgr-name">${esc(name)}</span>` +
+      `<span class="mgr-desc">${esc(desc)}</span></span>` +
+      '</div>'
+    )
+  }
+  // 2026-08-23 设为默认：POST /gateway/model { defaultModel } → 写 credentials.json activeModel（仅全局默认，
+  // 不影响当前会话）。成功后本地更新 MODELS.activeModel 重渲染，默认徽标移到新模型。
+  async function setDefaultModel(id) {
+    if (needToken()) { toast('未连接网关，无法设置'); return } // 2026-08-29 !gToken → needToken()（cookie 设备误报修复）
+    if (MODELS && MODELS.activeModel === id) { toast('已是默认模型'); return }
+    const ok = await apiSetModel({ defaultModel: id })
+    if (ok) {
+      if (MODELS) MODELS.activeModel = id
+      renderMgrModelList()
+      toast(`默认模型已设为 ${id}`)
     } else {
-      const root = ALL.filter((s) => s.projectScope !== 'project')
-      const box = document.createElement('div')
-      box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
-      bindSessClicks(box)
-      bodyEl.appendChild(box)
+      toast('设置失败 · 模型不在凭据池或网关未连接')
     }
   }
 
-  // ---------- 神经元视图（web「神经」tab）----------
+  // ---------- 神经元卡（web「神经」tab）----------
   // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
   // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
+  // 2026-10-01 卡片化：卡内「整卡重渲」不再直接调 mgr.js 的 renderMgr()，改走 ctx.rerender()（唯一通道出口）。
+  const neuronsCardDef = {
+    id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true,
+    mount(body, ctx) { NEU_RERENDER = ctx.rerender; renderMgrNeurons(body) },
+  }
+  let NEU_RERENDER = () => {}
 
   // ---------- 数据源：神经元清单（层级1） ----------
   let NEU = null
@@ -3790,7 +3937,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       c.addEventListener('click', () => {
         state.mgrView.neuronSel = c.dataset.id
         saveMgrView()
-        renderMgr()
+        NEU_RERENDER()
         if (isMobile()) setPanel(false)
       }),
     )
@@ -3831,7 +3978,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       back.addEventListener('click', () => {
         state.mgrView.neuronSel = null
         saveMgrView()
-        renderMgr()
+        NEU_RERENDER()
       })
     if (NEU_GRAPH_LOADING) {
       const box = $('neu-graph')
@@ -4299,140 +4446,23 @@ function setFirstSendHash(v) { firstSendHash = v }
     return n >= 1000 ? (n / 1000).toFixed(1) + 'k 字' : n + ' 字'
   }
 
-  // ---------- 气泡弹层 ----------
-  function renderBubble() {
-    bubblePop.innerHTML = '<div class="b-head">最近会话</div>' + sorted().slice(0, 5).map(itemHtml).join('')
-    bubblePop.querySelectorAll('.sess-item').forEach((b) =>
-      b.addEventListener('click', () => {
-        navigate('#/' + encodeURIComponent(b.dataset.hash))
-        bubblePop.classList.remove('show')
-        if (isMobile()) setPanel(false)
-      }),
-    )
-  }
 
-  // ---------- 搜索覆盖层 ----------
-  function openSearch() {
-    overlay.classList.add('show')
-    sInput.value = ''
-    renderSearch()
-    setTimeout(() => sInput.focus(), 30)
-  }
-  function renderSearch() {
-    const q = sInput.value.trim().toLowerCase()
-    const rows = sorted().filter(
-      (s) => !q || s.title.toLowerCase().includes(q) || (s.projectLabel || '').toLowerCase().includes(q),
-    )
-    $('search-results').innerHTML = rows.length
-      ? rows.map((s) => {
-          const prj = s.projectScope === 'project' ? `<span class="s-prj">${esc(s.projectLabel)}</span>` : ''
-          return `<div class="s-row" data-hash="${esc(hashOf(s))}"><span class="s-ico">${I.msg}</span><span class="st">${esc(s.title)}</span>${prj}</div>`
-        }).join('')
-      : '<div class="no-hit">没有匹配的会话</div>'
-    $('search-results').querySelectorAll('.s-row').forEach((b) =>
-      b.addEventListener('click', () => {
-        navigate('#/' + encodeURIComponent(b.dataset.hash))
-        overlay.classList.remove('show')
-        if (isMobile()) setPanel(false)
-      }),
-    )
-  }
-
-  // ---------- 外部卡片（卡片化二期）----------
-  // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
-  // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
-  // **不解释卡片内容**（内容永远跑在它自己的文档里）。声明文件与 backend 段同一份申报表。
-  // 渲染 = 一卡一 iframe（`/preview/<label>/<path>`，同源）：preview 保持自包含（自带 css/js/
-  // 相对路径），与宿主 DOM/CSS/JS 零互相污染——一期 SPEC-视图卡化 §7「外部插件 = iframe」边界的延续。
-  // 契约：preview.json cards（网关 GET /gateway/preview-cards 读出，见 docs/gateway.md §6）
-  //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
-  //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
-  // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
-  //        （清空点收在 sidebar/mgr.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
-
-  // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
-  // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
-  function normExtCards(raw) {
-    return (Array.isArray(raw) ? raw : [])
-      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
-      .map((c) => ({
-        id: typeof c.id === 'string' ? c.id.trim() : '',
-        title: typeof c.title === 'string' ? c.title.trim() : '',
-        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
-        path: typeof c.path === 'string' ? c.path.trim() : '',
-        host: typeof c.host === 'string' ? c.host : '',
-        tab: c.tab !== false,
-      }))
-      .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
-  }
-  // 浮窗动作字段校验（2026-09-28，与 normExtCards 同款风格）：preview.json 的 quoteActions 段。
-  // 动作是**纯数据**（无 path / host，不指向文件）——宿主只渲染动作行，点击把 id 回发预览页。
-  // id 非法 / 重名、title 空 → 丢（不猜不兜底）；icon 缺省 plug。整个 quoteActions 缺失 = 空集。
-  function normQuoteActions(raw) {
-    const seen = new Set()
-    return (Array.isArray(raw) ? raw : [])
-      .filter((a) => a && typeof a === 'object' && !Array.isArray(a))
-      .map((a) => ({
-        id: typeof a.id === 'string' ? a.id.trim() : '',
-        title: typeof a.title === 'string' ? a.title.trim() : '',
-        icon: typeof a.icon === 'string' && a.icon ? a.icon : 'plug',
-      }))
-      .filter((a) => {
-        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(a.id) || !a.title || seen.has(a.id)) return false
-        seen.add(a.id)
-        return true
-      })
-  }
-  // 资源路径必须是 preview 目录内的相对文件路径（绝对路径 / 反斜杠 / query / 空段 / `.` `..` 段
-  // 一律拒；允许尾随 #片段）。与网关 isPreviewRelPath 同款规则——网关侧挡 preview.json 来源，
-  // 这里挡 postMessage 来源，两条外部输入各自守门。
-  function isExtPath(p) {
-    if (!p || p.startsWith('/') || p.includes('\\') || p.includes('?')) return false
-    const i = p.indexOf('#')
-    const file = i >= 0 ? p.slice(0, i) : p
-    let rel
-    try { rel = decodeURIComponent(file) } catch { return false } // 非法 % 序列
-    if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes('?')) return false
-    return rel.split('/').every((s) => s && s !== '.' && s !== '..')
-  }
-  // 卡页 URL：/preview/<label>/<path>（+token 供未授权设备首链；#片段原样带上，由卡页自我定位）
-  function extCardSrc(label, card) {
-    const i = card.path.indexOf('#')
-    const file = i >= 0 ? card.path.slice(0, i) : card.path
-    const frag = i >= 0 ? card.path.slice(i) : ''
-    const q = gToken ? '?token=' + encodeURIComponent(gToken) : ''
-    return `/preview/${encodeURIComponent(label)}/${file}${q}${frag}`
-  }
-  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 showView 的 render(卡体)）
-  function mountExtCard(body, label, card) {
-    body.innerHTML =
-      '<div class="ext-shell">' +
-      `<iframe class="ext-frame" title="${esc(card.title)}" data-ext-card="${esc(card.id)}" src="${esc(extCardSrc(label, card))}"></iframe>` +
-      '</div>'
-  }
-
-
-  // ---------- 视图注册表 ----------
-  const VIEWS = [
-    // 会话卡常驻 index.html（承载 #messages/#input-wrap/#char 等模块级 const 引用的单例 DOM，
-    // 不能销毁重建）→ card() 直接返回既存元素
-    { id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false, card: () => sessionCard },
-    { id: 'plugins', title: '插件', tip: '插件 / 技能预览', icon: 'plug', tab: true, render: renderMgrPlugins },
-    { id: 'projects', title: '项目', tip: '项目管理', icon: 'folder', tab: true, render: renderMgrProjects },
-    { id: 'models', title: '模型', tip: '模型配置', icon: 'chip', tab: true, render: renderMgrModels },
-    { id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true, render: renderMgrNeurons },
-  ]
-  const viewOf = (id) => VIEWS.find((v) => v.id === id) || EXT.find((v) => v.id === id)
+  // ---------- 卡片注册表 ----------
+  // 会话卡常驻 index.html（承载 #messages/#input-wrap/#char 等模块级 const 引用的单例 DOM，不能销毁
+  // 重建）→ card() 直接返回既存元素；其余卡由 openCard 按需创建/复用。
+  const sessionCardDef = { id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false, card: () => sessionCard }
+  const CARDS = [sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef]
+  const cardOf = (id) => CARDS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
 
   // ---------- 运行时外部卡表（卡片化二期）----------
-  // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 VIEWS 分表存放：外部卡没有 render
-  // 代码，只有宿主生成的 iframe 壳（views/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
+  // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
+  // 代码，只有宿主生成的 iframe 壳（views/cards/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
   // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
   // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
   // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
   // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
-  // 清（清点收在 sidebar/mgr.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由不清**，
-  // 否则用户点外部卡 tab 的瞬间卡就被清没了。
+  // 清（清点收在 views/cards/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
+  // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
   let EXT = []
   let EXT_LABEL = ''
   function registerExtCards(label, cards, replace) {
@@ -4447,7 +4477,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         tip: `${c.title} · ${label}`,
         icon: I[c.icon] ? c.icon : 'plug',
         tab: c.tab,
-        render: (body) => mountExtCard(body, label, c),
+        mount: (body) => mountExtCard(body, label, c),
       })
     }
     renderMgrTabs()
@@ -4461,9 +4491,9 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   // ---------- 项目申报的浮窗动作表（2026-09-28）----------
   // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
-  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（sidebar/mgr.js syncExtCards /
+  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（preview-card.js syncExtCards /
   // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
-  // 动作是纯数据、无 render 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
+  // 动作是纯数据、无 mount 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
   // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
   let QACTIONS = []
   let QACTIONS_LABEL = ''
@@ -4486,7 +4516,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = VIEWS.concat(EXT).filter((v) => v.tab)
+    box.innerHTML = CARDS.concat(EXT).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
@@ -4516,17 +4546,20 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
     return makeCard(id)
   }
-  // 切卡唯一入口：查表 → 换卡 → 渲染。未知 id 返回 null（不回落任何视图）
-  function showView(id) {
-    const v = viewOf(id)
-    if (!v) return null
-    const el = showCard(v.card ? v.card() : reuseOrMake(v.id))
-    if (v.render) v.render(el.querySelector('.view-body'))
+  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
+  // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
+  function openCard(id, payload) {
+    const c = cardOf(id)
+    if (!c) return null
+    const el = showCard(c.card ? c.card() : reuseOrMake(c.id))
+    if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
     return el
   }
-  // 预览卡：非注册表条目（项目预览走 iframe 通道，与内部视图注册表不合并，见 SPEC-视图卡化 §7）
-  function showPreviewCard() {
-    return showCard(reuseOrMake('preview'))
+  // 当前槽内卡的 id（'session' 表示会话卡在场；无卡返回 null）。work 模式切入时据此判定是否需先退卡。
+  function currentCardId() {
+    if (curCardEl === sessionCard) return 'session'
+    return curCardEl ? curCardEl.dataset.view : null
   }
   // 异步回程渲染守卫：本视图的卡仍在槽里才交出卡体（否则返回 null，调用方不渲染）
   function viewBody(id) {
@@ -4581,6 +4614,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
   function applySbMode() {
     const on = state.sbMode === 'work'
+    // 进 work：槽里若停着非会话卡（管理/预览），先退卡回会话视图——work 助手栏就是 #session-card，
+    // 残留的 .view-card 会把助手栏顶成旧卡（「在预览页切到 work，助手栏还是预览页」的根因）。
+    // 退卡走 route('#/') 统一收口（顺带清管理/预览路由态、预览页注册件与后端保活心跳），不在此另起清点。
+    if (on && currentCardId() && currentCardId() !== 'session') navigate('#/')
     document.querySelectorAll('.ms-btn').forEach((b) => b.classList.toggle('on', b.dataset.sbmode === state.sbMode))
     // #panel.work：work 模式下隐藏顶栏 #panel-search（会话搜索的 chat 模式入口）——work 的 🔍 已覆盖
     // 当前 tab 的过滤，两者同为放大镜同屏并存即「两个搜索」的重复观感（样式见 styles.css 该段）
@@ -5980,8 +6017,11 @@ function setFirstSendHash(v) { firstSendHash = v }
          qa-card 走中性边框（不继承审批卡黄色警示边），配色守 floria 浅色主题。 */
       .appr-card.qa-card{border-color:var(--border)}
       .qa-top{display:flex;align-items:center;gap:10px;padding:12px 16px 0}
+      /* 折叠钮最左 / 标题（眉标+问题）居中 / × 最右：中段 .qa-head 吃满 flex 并居中，
+         两端 22px 图标等宽 ⇒ 标题真正居中。 */
+      .qa-head{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:8px}
       .qa-eyebrow{flex:none;color:var(--text-3);font-size:12px;line-height:16px;font-weight:500}
-      .qa-title-sm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
+      .qa-title-sm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
       .qa-fold{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
       .qa-fold:hover{background:#f3f4f6;color:var(--text)}
       .qa-fold svg{width:14px;height:14px;transform:rotate(180deg)}
@@ -7947,7 +7987,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
       const qq = qs[qi]
       const question = String(qq.question || '').trim()
       const header = String(qq.header || '提问')
-      showTakeover(`<div class="appr-card qa-card qa-collapsed"><div class="qa-top"><span class="qa-eyebrow">${esc(header)}</span><span class="qa-title-sm">${esc(question)}</span><span class="qa-fold" role="button" title="展开">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div></div>`, 'approval')
+      showTakeover(`<div class="appr-card qa-card qa-collapsed"><div class="qa-top"><span class="qa-fold" role="button" title="展开">${I.dshChevDown}</span><span class="qa-head"><span class="qa-eyebrow">${esc(header)}</span><span class="qa-title-sm">${esc(question)}</span></span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div></div>`, 'approval')
       bindChrome(takeoverEl())
     }
     function renderOne() {
@@ -7971,7 +8011,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         rows += `<button type="button" class="qa-opt${sel ? ' sel' : ''}" data-v="${esc(label)}"><span class="qa-num">${oi + 1}</span><span class="qa-copy"><span class="qa-label">${esc(label)}</span>${desc ? `<span class="qa-desc">${esc(desc)}</span>` : ''}</span></button>`
       })
       let html = '<div class="appr-card qa-card">'
-      html += `<div class="qa-top"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
+      html += `<div class="qa-top"><span class="qa-fold" role="button" title="收起">${I.dshChevDown}</span><span class="qa-head"><span class="qa-eyebrow">${esc(header)}${multi ? '<span class="qa-multi-hint">（可多选）</span>' : ''}</span></span><span class="qa-x" role="button" title="取消回答">${I.dshClose}</span></div>`
       html += `<div class="qa-main"><div class="qa-title">${esc(question)}</div>`
       html += `<div class="qa-opts">${rows}</div>`
       html += `<div class="qa-inputrow${(multi ? hasText : isText) ? ' sel' : ''}"><span class="qa-input-ico">${I.dshEdit}</span><input type="text" class="qa-input" placeholder="${multi ? '输入你的答案（与勾选项一并提交）' : '输入你的答案'}" value="${esc(String(customText[question] || ''))}"></div>`
@@ -8657,7 +8697,12 @@ function setApprovalPending(v) { approvalPending = v }
   // 不变量（五轮定案，用户「整个界面连侧栏一起上下」，要「整页平移」）：应用是一块**刚性板**，
   // 键盘弹出时整体上移一个键盘高 —— 侧栏/背景/底栏连成一体走，内部零重排，只有消息流窗口收窄。
   // 几何：L = html clientHeight（=100dvh，移动端键盘不改布局视口，只压可视视口）；浏览器为露出
-  // 焦点元素会把可视视口整体上顶 pan = vv.offsetTop（等价地滚文档，对我们两种形态都成立）。
+  // 焦点元素会让整个画面向上位移 pan —— 同一份位移落在两条**互斥**通道之一，随平台变：
+  //   iOS  ：上顶可视视口（vv.offsetTop > 0，页面不滚 ⇒ window.scrollY = 0）；
+  //   iPad ：滚布局视口（window.scrollY > 0，而 offsetTop 恒 0 不报）。
+  // 故 pan = max(offsetTop, scrollY)：取二者较大即浏览器实际施加的屏幕位移；**不可取和**——同源的
+  // 平台上两值会相等（iOS offsetTop 即滚动量），相加就把一份位移算两遍（over-lift）。max 对
+  // 「谁在报」不设赌注，两种平台都恰好取到那一份。
   // 屏幕上的完整键盘高 total = L − vv.height（= kb + pan，**与浏览器怎么分配这份位移无关**）：
   // 我们只写自己那份 kb = max(0, L − pan − vv.height)，剩下的 pan 由浏览器自己施加 ⇒ 两者之和
   // 恒为 total，pan 再怎么变（含瞬时的「上顶→回落」）画面总位移都不变 ⇒ 不抖。**不抵消 pan**
@@ -8676,12 +8721,14 @@ function setApprovalPending(v) { approvalPending = v }
   // 键盘起落、底栏多行长高、空态↔会话态迁移全由这一条量算吸收，弹层不再各自复刻视口公式。
   // 以**底栏上沿**量 = 对所有子件都是安全上界（栏内 chip 系锚点更低、实际可用更多；取本值只会
   // 让内容多滚一点，绝不越出可视区）。
-  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scale/editing → { kb 我们补的位移,
+  // 纯几何（探针直测本函数，勿复制公式）：L/vvH/vvTop/scrollY/scale/editing → { kb 我们补的位移,
   // total 屏幕上完整键盘高 = app 顶部被推出屏外的条带高 = 可视窗顶在 app 内的偏移 }。
-  function kbGeometry(L, vvH, vvTop, scale, editing) {
+  function kbGeometry(L, vvH, vvTop, scrollY, scale, editing) {
     // 捏合缩放不是键盘：scale≠1 时 vv 同样变矮，必须排除（否则缩放会误当键盘抬底栏）
     if (!editing || scale > 1.01) return { kb: 0, total: 0 }
-    const pan = Math.max(0, vvTop) // 上顶量非负（本页无滚动不产生负值；夹取守住「kb 只由真实空缺得出」）
+    // 浏览器位移的通道二选一（见文件头几何段）：offsetTop（上顶可视视口）或 scrollY（滚布局视口）。
+    // 取较大者为实际屏幕位移；两者均夹非负（本页无正常滚动，负值只可能来自回弹）。
+    const pan = Math.max(0, vvTop, scrollY)
     const kb = Math.max(0, L - pan - vvH)
     return { kb, total: kb + pan }
   }
@@ -8714,16 +8761,22 @@ function setApprovalPending(v) { approvalPending = v }
   let lastTotal = 0   // 同步段算得的「屏幕上的完整键盘高」，供延迟段量算复用（避免回读 CSS 变量）
   let settleRaf = 0
 
-  // 同步段：与视觉变化同帧的几何（事件回调内直调，接合视觉视口上顶/键盘起落）
-  function syncKeyboard() {
+  // 应用段（同步段与延迟段共用）：读可视视口/滚动 → 写 --kb / --kb-total / kb-open。纯写样式属性，
+  // 不读元素布局（不触发布局）。
+  function applyGeometry() {
     const vv = window.visualViewport
     if (!vv) return
     const root = document.documentElement
-    const { kb, total } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, vv.scale, isEditing())
+    const { kb, total } = kbGeometry(root.clientHeight, vv.height, vv.offsetTop, window.scrollY, vv.scale, isEditing())
     lastTotal = total
     root.style.setProperty('--kb', kb + 'px')
     root.style.setProperty('--kb-total', total + 'px')
     document.body.classList.toggle('kb-open', kb > 0) // 同时是「#app 位移」规则的开关（见 styles.css 键盘节）
+  }
+
+  // 同步段：与视觉变化同帧（事件回调内直调，接合视觉视口上顶/键盘起落）
+  function syncKeyboard() {
+    applyGeometry()
     scheduleSettle()
   }
 
@@ -8732,6 +8785,9 @@ function setApprovalPending(v) { approvalPending = v }
     if (settleRaf) { cancelAnimationFrame(settleRaf); settleRaf = 0 } // 直接调用时撤销在途帧，保幂等
     const vv = window.visualViewport
     if (!vv) return
+    // 二次应用：事件后一帧可视视口分量（尤其 iPad 那条 scrollY 通道）可能才落定，同步段拿到的是
+    // 中间态；此帧以最终值重算一次，把 --kb/--kb-total 收敛到位（applyGeometry 幂等，值未变即零写）。
+    applyGeometry()
     const wrap = document.getElementById('input-wrap')
     const app = document.getElementById('app')
     // 底栏上方可视余量（底栏子件的弹层收口唯一出口）：两个 rect 相减 = 底栏上沿在 app 内的布局 y，
@@ -8753,6 +8809,9 @@ function setApprovalPending(v) { approvalPending = v }
     if (!vv) return
     vv.addEventListener('resize', syncKeyboard)
     vv.addEventListener('scroll', syncKeyboard) // 缩放/上顶改变 offsetTop，同样要同帧重算
+    // 位移落在**布局滚动**通道的平台（iPad）：window 滚动改的是 window.scrollY，vv 不派发事件，
+    // 必须另行监听，否则那条通道的键盘位移无人重算（symptom = 整页上移过冲）。
+    window.addEventListener('scroll', syncKeyboard)
     window.addEventListener('orientationchange', syncKeyboard)
     // 底栏自身「尺寸」类变化（多行长高 / 接管卡换高 / 窗口缩放的回流）同样要重量：--bar-room 取自
     // 底栏在 app 内的位置，只挂 vv 事件会漏掉这些帧。写入的只是上限变量，不回改底栏盒模型

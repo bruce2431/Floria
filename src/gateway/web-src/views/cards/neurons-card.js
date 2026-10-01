@@ -1,15 +1,22 @@
-// 神经元视图（web「神经」tab）：层级1 = 神经元选择卡片，层级2 = Canvas 力导向三级节点图
+// 神经元卡（web「神经」tab）：层级1 = 神经元选择卡片，层级2 = Canvas 力导向三级节点图
 // （mem→cog→社群；2026-09-16 新增，数据源 = 网关 /gateway/neurons[/graph]，见 src/gateway/neuronViz.ts）
+// 2026-10-01 卡片化：sidebar/neurons.js → views/cards/neurons-card.js（唯一手改处，web/app.js 为生成物）。
 
-import { apiUrl, needToken } from '../core/gateway.js'
-import { I } from '../core/icons.js'
-import { esc, isMobile, saveMgrView, state } from '../core/state.js'
-import { viewBody } from '../views/registry.js'
-import { mgrColor, MGR_PALETTE } from './mgr-data.js'
-import { setPanel } from './recent.js'
-  // ---------- 神经元视图（web「神经」tab）----------
+import { apiUrl, needToken } from '../../core/gateway.js'
+import { I } from '../../core/icons.js'
+import { esc, isMobile, saveMgrView, state } from '../../core/state.js'
+import { viewBody } from '../registry.js'
+import { mgrColor, MGR_PALETTE } from '../../sidebar/mgr-data.js'
+import { setPanel } from '../../sidebar/recent.js'
+  // ---------- 神经元卡（web「神经」tab）----------
   // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
   // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
+  // 2026-10-01 卡片化：卡内「整卡重渲」不再直接调 mgr.js 的 renderMgr()，改走 ctx.rerender()（唯一通道出口）。
+  const neuronsCardDef = {
+    id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true,
+    mount(body, ctx) { NEU_RERENDER = ctx.rerender; renderMgrNeurons(body) },
+  }
+  let NEU_RERENDER = () => {}
 
   // ---------- 数据源：神经元清单（层级1） ----------
   let NEU = null
@@ -104,7 +111,7 @@ import { setPanel } from './recent.js'
       c.addEventListener('click', () => {
         state.mgrView.neuronSel = c.dataset.id
         saveMgrView()
-        renderMgr()
+        NEU_RERENDER()
         if (isMobile()) setPanel(false)
       }),
     )
@@ -145,7 +152,7 @@ import { setPanel } from './recent.js'
       back.addEventListener('click', () => {
         state.mgrView.neuronSel = null
         saveMgrView()
-        renderMgr()
+        NEU_RERENDER()
       })
     if (NEU_GRAPH_LOADING) {
       const box = $('neu-graph')

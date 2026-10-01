@@ -1,8 +1,8 @@
 /**
  * 记忆写入链探针（2026-09-15）——memories 表移除 confidence/half_life 后的回归验证
  *
- * 守护的不变量：**写入链在 7 列结构下完整闭环**——insert 列数对齐、新条目字段可读、
- * embeddings 增量重建后与 mem.db 行数一致、supersede 纠错链双向置位、写后可被真实检索命中。
+ * 守护的不变量：**写入链在 8 列结构下完整闭环**——insert 列数对齐、新条目字段可读、
+ * 块级向量长度 ≡ n_blocks×dim、supersede 纠错链双向置位、写后可被真实检索命中。
  * 破坏它的路径：db.ts 的 MEM_COLS / memEntryRow / insertMemory 占位符任一处漏改（列数错配 →
  * SQLite 报 "N values for M columns" 或静默错位）、memwriter 漏改导致 buildEntry 输出多字段。
  *
@@ -15,8 +15,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { readMemories } from '../src/tools/neturon/db.ts'
-import { readNpyF32 } from '../src/tools/neturon/npyio.ts'
+import { readMemories, readMemoryVectors } from '../src/tools/neturon/db.ts'
 import { addMemory, updateMemory } from '../src/tools/neturon/memwriter.ts'
 import { NeuronRetriever } from '../src/tools/neturon/retriever.ts'
 
@@ -36,7 +35,6 @@ const here = dirname(fileURLToPath(import.meta.url))
 const tmpRoot = resolve(process.argv[2] ?? join(here, '..', '..', '20260915182909-神经元字段移除写入验证', 'tmp-root'))
 const neuronPath = join(tmpRoot, '.claude', 'neturon', 'neurons', 'Neuron-Pj16')
 const memDbPath = join(neuronPath, 'l2.mem', 'mem.db')
-const embPath = join(neuronPath, 'l2.mem', 'embeddings.npy')
 
 const EXPECTED_COLS = [
   'memory_id',
@@ -46,7 +44,19 @@ const EXPECTED_COLS = [
   'core_file',
   'supersedes',
   'deprecated_by',
+  'block_vectors',
 ]
+
+/** 库内 dim（由首条非空向量/块数推得） */
+function dimOf(): number {
+  const vecs = readMemoryVectors(memDbPath)
+  for (const e of readMemories(memDbPath)) {
+    const nb = e.blocks?.length ?? 0
+    const v = vecs.get(e.memory_id)
+    if (nb && v) return v.length / nb
+  }
+  return 0
+}
 
 /** 待写入内容：带独特关键词，供检索命中断言 */
 const CONTENT = '探针验证条目：字段移除回归测试（probe-mem-write），关键词 索引对齐校验。'
@@ -62,12 +72,12 @@ async function main(): Promise<void> {
     const db = new Database(memDbPath, { readonly: true })
     const cols = (db.query('PRAGMA table_info(memories)').all() as Array<{ name: string }>).map(r => r.name)
     db.close()
-    check('A1 列清单 = 7 列且无 confidence/half_life', JSON.stringify(cols) === JSON.stringify(EXPECTED_COLS), cols.join(','))
+    check('A1 列清单 = 8 列（含 block_vectors）且无 confidence/half_life', JSON.stringify(cols) === JSON.stringify(EXPECTED_COLS), cols.join(','))
   }
 
   const n0 = readMemories(memDbPath).length
-  const emb0 = readNpyF32(embPath)
-  check('A2 起始行数 mem/npy 一致', n0 === emb0.shape[0], `mem=${n0} npy=${emb0.shape[0]}`)
+  const dim0 = dimOf()
+  check('A2 库内 dim > 0', dim0 > 0, `dim=${dim0}`)
 
   // ── B add ──
   const added = await addMemory(
@@ -88,10 +98,15 @@ async function main(): Promise<void> {
   const mid1 = added.memory_id
 
   const entries1 = readMemories(memDbPath)
-  const emb1 = readNpyF32(embPath)
+  const vecs1 = readMemoryVectors(memDbPath)
   const row1 = entries1.find(e => e.memory_id === mid1)
+  const vec1 = row1 ? vecs1.get(mid1) : undefined
   check('B2 mem 行数 +1', entries1.length === n0 + 1, `${entries1.length}`)
-  check('B3 npy 行数 = mem 行数（增量重建对齐）', emb1.shape[0] === entries1.length, `npy=${emb1.shape[0]} mem=${entries1.length}`)
+  check(
+    'B3 新条目向量长度 ≡ n_blocks×dim',
+    !!row1 && !!vec1 && vec1.length === row1.blocks.length * dim0,
+    `vec=${vec1?.length ?? 0} blocks=${row1?.blocks.length ?? 0} dim=${dim0}`,
+  )
   check('B4 新条目读回字段完整', !!row1 && row1.blocks[0] === CONTENT && row1.revelant[0] === 'probe-ref-1' && !!row1.core_file?.length && row1.supersedes === null && row1.deprecated_by === null)
   check('B5 条目结构无 confidence/half_life 键', !!row1 && !('confidence' in row1) && !('half_life' in row1))
 

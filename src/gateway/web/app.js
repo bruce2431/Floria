@@ -1052,7 +1052,8 @@ function setSessionCwd(v) { sessionCwd = v }
         const k = foldKey(d)
         if (!openState.has(k)) return // 新增折叠（键不在旧集）保留 HTML 默认：处理中展开、已处理收起
         const finishedNow = doneLivePrev.has(k) && !d.classList.contains('done-live')
-        d.open = finishedNow ? false : openState.get(k)
+        // 无正文回合（data-nobody）收口时不自动折叠——保留过程证据（对齐 dsh 轮次过程折叠）
+        d.open = finishedNow ? !!d.dataset.nobody : openState.get(k)
       })
       // 2026-08-30 乐观改排队区（清单#4③）→ 2026-09-07 暂态区收编：整页重建洗掉 #live-zone
       // → renderTransient 从状态整体重建（气泡/折叠/排队区恒定顺序挂回 pin-stage 之前）
@@ -2415,15 +2416,30 @@ function setLastNavHash(v) { lastNavHash = v }
         const t1 = (s.user && s.user.timestamp) || s.startTs || (isFinal ? lastUserTs : 0)
         const endTs = s.replyTs || s.lastTs
         const dur = !processing && t1 && endTs ? fmtDur(Math.round((endTs - t1) / 1000)) : ''
-        // 处理状态行（2026-09-09 用户定案「折叠顶只应有两字样」）：summary 恒「正在处理 + 总时长」
-        // （处理中）/「已处理 + 总时长」（完成），真空期（思考/生成/压缩）状态显示行由 liveFoldBody 并入
-        // 尾部工具折叠行 summary 同行（无工具组时段尾独立行），无响应/连接中断红标挂暂态层——折叠顶
-        // 不再出现任何其它字样（v267 的 summary 单行轮转方案废弃）。
+        // 处理状态行：summary「正在处理 + 总时长」（处理中）/ 终态词 + 摘要计数 + 时长（完成）。
+        // 借鉴 dsh 轮次过程折叠（TurnProcessNodeView）三处：
+        //  ①终态词区分「已处理 / 已停止」（dsh aborted 用 message.stopped；「处理失败」需后端 end reason，暂缺）；
+        //  ②摘要计数（工具调用/提问，0 值省略；dsh 三段式 messageCount/toolCallCount/subagentCount）；
+        //  ③无面向用户正文的回合默认展开、收口不自动折叠（dsh「关闭时没有最终正文的轮次保留全部过程证据」）。
+        // 真空期（思考/生成/压缩）状态显示行仍由 liveFoldBody 并入尾组 summary，无响应红标挂暂态层。
         const totalSec = processing && t1 ? Math.max(0, Math.round((Date.now() - t1) / 1000)) : 0
+        const hasBody = flowParts.length > 0 // 折叠体外是否有面向用户的最终正文（reply 项）
+        // 无正文且非正常终止（end_turn/stop_sequence）= 被打断/被新消息取代 → 「已停止」（dsh aborted 语义）
+        const stopped = !processing && !hasBody && s.finished !== 1
+        const nTool = foldItems.reduce((n, it) => n + (it.kind === 'tool' ? 1 : 0), 0)
+        const nAsk = foldItems.reduce((n, it) => n + (it.kind === 'ask' ? 1 : 0), 0)
+        const cntParts = []
+        if (nTool) cntParts.push(nTool + ' 次工具调用')
+        if (nAsk) cntParts.push(nAsk + ' 次提问')
+        const cnt = !processing && !stopped && cntParts.length ? `<span class="d-count">${cntParts.join(' · ')}</span>` : ''
         const stateHtml = processing
           ? `正在处理<span class="d-dur"> ${fmtDur(totalSec)}</span>`
-          : `已处理${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
-        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing ? ' open' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${stateHtml}</summary><div class="done-body">${bodyHtml}</div></details>`
+          : stopped
+            ? '已停止'
+            : `已处理${cnt}${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
+        // 无正文回合默认展开（data-nobody 供 live.js 增量重建时抑制收口自动折叠）
+        const openWhenIdle = !hasBody
+        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing || openWhenIdle ? ' open' : ''}${!processing && openWhenIdle ? ' data-nobody="1"' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${stateHtml}</summary><div class="done-body">${bodyHtml}</div></details>`
         lastNode = { key: s.key, type: 'f' }
       }
       // 流内项（按落盘序）：引导气泡 + 回复气泡（data-t 精确值供下段 prev 锚点查询命中）
@@ -9005,7 +9021,7 @@ function setGateVerified(v) { gateVerified = v }
     const cur = state.currentHash ? findSession(state.currentHash) : null
     return { kind: 'reply', text, rect, title: (cur && cur.title) || '本会话', idx }
   }
-  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏路径不走这里，见 inputbar/quote-touch.js）
+  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏设备不唤本浮窗，见下方 mouseup 的 IS_TOUCH_DEVICE 早退）
   function quoteSnapOf() {
     const sel = window.getSelection()
     if (!sel || !sel.rangeCount || sel.isCollapsed) return null
@@ -9151,9 +9167,10 @@ function setGateVerified(v) { gateVerified = v }
   // 按下并不会清掉选区，不挡就会「关掉又立刻重开」。
   document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return
-    // 触屏接管中（触屏选区引擎在 hold 窗口内）⇒ 鼠标链让位：iOS 抬手会补发合成 mouseup，而收编后的
-    // 程序化选区正是「非空且在引用区内」，不挡就会在选中栏之外再开一份浮窗（见 inputbar/quote-touch.js）。
-    if (quoteTouchOwnsSelection()) return
+    // 触屏设备一律回归 iOS 原生选中菜单（2026-10-02 定案）：宿主自绘的触屏选中栏与系统菜单并存 = 双框，
+    // 且程序化选区压不住 iOS 原生选择手势（pointerdown 是 passive，抢跑拦不住）⇒ 撤掉自绘接管。消息流/
+    // 编辑区在触屏上不再弹本浮窗；PDF 预览页走 postMessage 桥（另一条来源，见 §5），不受此门影响。
+    if (IS_TOUCH_DEVICE) return
     if (quoteSkipNextUp) { quoteSkipNextUp = false; return }
     if (quotePop && quotePop.contains(e.target)) return
     const snap = quoteSnapOf()
@@ -9217,328 +9234,20 @@ function setGateVerified(v) { gateVerified = v }
   }
   window.addEventListener('message', quoteBridgeOnMessage)
 
-  // ---------- 触屏程序化选中（quote-touch）----------
-  // 宿主自己的「选中引用」（inputbar/quote.js）是**纯鼠标实现**（document mouseup + getSelection）：触屏上
-  // iOS 的原生长按选择 + 系统 callout 先接管手势，那条 mouseup 拿不到非空选区 ⇒ 长按消息文字弹出的是系统
-  // 「拷贝/查询/翻译」条。本模块 = 触屏专用接管：长按起选、拖动扩选、松手弹**我们自己的选中栏**，取代系统
-  // 菜单。**桌面鼠标路径一字不改** —— 本文件全部监听都先过 `IS_TOUCH_DEVICE` 与 `e.pointerType === 'touch'`
-  // 两道门（后者是事件级真门，前者挡住 iPadOS 桌面模式那种「设备是触屏但媒体查询撒谎」的场面）。
-  //
-  // 机制三条（取自 Pj13 项目 PDF 精读页 PdfViewer.tsx 的实机测量，非推测）：
-  //  ① **不引入 user-select:none**：user-select:none 的内容 `caretRangeFromPoint` 返回 null；宿主消息流是
-  //     任意 HTML、没有 Pj13 那种 canvas 几何兜底 ⇒ 命中测试唯一可用的 API 必须保住。
-  //  ② 「**清原生 + 设程序化**」就是替代系统菜单的机理：`removeAllRanges()` 收掉原生 callout，紧接着
-  //     `addRange()` 把蓝底画回来；**程序化选区不再唤起 callout**（且原生手势清不掉它）。
-  //  ③ 蓝底按住期即有、选中栏**留到松手才弹**（栏出现在指下会被抬手误触），touchend 还要
-  //     `preventDefault()` 吞掉长按抬手补发的合成 click。
-  // 抢时点：iOS 建原生词选区约 500ms，此处沿用行浮窗（sidebar/recent.js）的 480ms 长按参数，通常能抢在
-  // callout 出现前收编；抢不到也没关系 —— 原生词选区已建好时直接收编（第 ① 路），用户手感一致。
-
-  const QUOTE_LP_MS = 480 // 长按判定（与 sidebar/recent.js 行浮窗同参）
-  const QUOTE_LP_SLOP = 8 // 悬停期内漂移容忍像素（超出即作废，同参）
-  const QUOTE_MOUSE_HOLD = 800 // 抬手后压住鼠标链的窗口（覆盖 iOS 补发的合成 mouseup）
-  const QUOTE_BAR_GAP = 10 // 选中栏与选区的间距
-  const QUOTE_MORE_W = 62 // 折「更多 ›」时为它预留的宽度
-
-  let qtSt = 'idle' // idle | pressed | selecting | bar
-  let qtTimer = 0
-  let qtPress = null // 长按起点（宿主视口坐标）
-  let qtRange = null // 程序化选区（本模块唯一真源，不读 window.getSelection）
-  let qtAnchor = null // 同手势扩选的固定端点（词首）
-  let qtFixed = null // 柄拖拽期的固定端点
-  let qtBar = null
-  let qtKnobs = []
-  let qtMouseUntil = 0 // Date.now() < 此值 ⇒ 鼠标链让位
-
-  // 触屏接管期间为真（抬手后 QUOTE_MOUSE_HOLD 内亦真）：**同一次选择只允许一条开窗路径**。
-  // inputbar/quote.js 的 document mouseup 据此让位 —— iOS 抬手会补发合成鼠标事件，而收编后的程序化选区
-  // 正是「非空且落在引用区内」，不挡就会在选中栏之外再开一份竖排浮窗（同一次选择两份浮窗）。
-  function quoteTouchOwnsSelection() { return Date.now() < qtMouseUntil }
-
-  // ---------- 1. 命中测试 ----------
-  const QT_WORD_CH = /[\p{L}\p{N}]/u
-  function qtWordCh(ch) { return QT_WORD_CH.test(ch) || ch === '_' || ch === '-' || ch === "'" }
-  // 取插入点（Safari/Chrome = caretRangeFromPoint；Firefox = caretPositionFromPoint）
-  function qtCaretAt(x, y) {
-    if (document.caretRangeFromPoint) {
-      const r = document.caretRangeFromPoint(x, y)
-      if (r) return r
-    }
-    if (document.caretPositionFromPoint) {
-      const p = document.caretPositionFromPoint(x, y)
-      if (p) {
-        const r = document.createRange()
-        r.setStart(p.offsetNode, p.offset)
-        r.collapse(true)
-        return r
-      }
-    }
-    return null
-  }
-  // 由插入点向两侧扩到词边界（ASCII 词 / CJK 连串；标点与空白为界）。落点不在文本节点上（元素边界）
-  // ⇒ 放弃（宁可不弹，也不编造一段选区）。
-  function qtWordRange(cr) {
-    const n = cr && cr.startContainer
-    if (!n || n.nodeType !== 3) return null
-    const v = n.nodeValue || ''
-    let s = cr.startOffset
-    let e = s
-    while (s > 0 && qtWordCh(v[s - 1])) s--
-    while (e < v.length && qtWordCh(v[e])) e++
-    if (s === e) return null
-    const r = document.createRange()
-    r.setStart(n, s)
-    r.setEnd(n, e)
-    return r
-  }
-  function qtInZone(node) {
-    const el = node && (node.nodeType === 1 ? node : node.parentElement)
-    return !!(el && el.closest && el.closest(QUOTE_ZONE))
-  }
-  // 两端点排序成 Range（DOM 的 setStart/setEnd 在「起点晚于终点」时会自行塌缩，故先比位置再落）
-  function qtMakeRange(a, b) {
-    const ta = document.createRange()
-    ta.setStart(a.node, a.off)
-    ta.collapse(true)
-    const tb = document.createRange()
-    tb.setStart(b.node, b.off)
-    tb.collapse(true)
-    const r = document.createRange()
-    if (ta.compareBoundaryPoints(Range.START_TO_START, tb) <= 0) { r.setStart(a.node, a.off); r.setEnd(b.node, b.off) }
-    else { r.setStart(b.node, b.off); r.setEnd(a.node, a.off) }
-    return r
-  }
-  // 落选区 = 清原生 + 设程序化（收编机理，见文件头 ②）。塌缩即作废（不落空选区）。
-  function qtApply(r) {
-    if (!r || r.collapsed) return false
-    qtRange = r
-    const sel = window.getSelection()
-    if (sel) { sel.removeAllRanges(); sel.addRange(r) }
-    return true
-  }
-
-  // ---------- 2. 长按收编 ----------
-  // 两条来源：① iOS 已建好的**原生词选区**（最贴近 iPad 手感，零自算）② 我们抢在 iOS 前面 ⇒
-  // caretRangeFromPoint 自建。两路都拿不到 ⇒ 放弃，什么都不弹（不留半截状态）。
-  function qtHarvest() {
-    qtTimer = 0
-    if (qtSt !== 'pressed') return
-    const sel = window.getSelection()
-    let r = null
-    if (sel && !sel.isCollapsed && sel.rangeCount) {
-      const cur = sel.getRangeAt(0)
-      if (qtInZone(cur.startContainer)) r = cur.cloneRange() // 先克隆：随即 removeAllRanges 会作废活引用
-    }
-    if (!r && qtPress) {
-      const cr = qtCaretAt(qtPress[0], qtPress[1])
-      if (cr && qtInZone(cr.startContainer)) r = qtWordRange(cr)
-    }
-    if (!r || !qtApply(r)) { qtSt = 'idle'; return }
-    qtAnchor = { node: r.startContainer, off: r.startOffset }
-    qtSt = 'selecting'
-    document.addEventListener('touchmove', qtExtend, { passive: false })
-  }
-  // 同手势拖动扩选：锚点 = 词首，焦点端点跟着手指走。touchmove 非 passive + preventDefault 冻结滚动 ——
-  // 不冻结的话 iOS 会把手势判成滚动（补发 pointercancel），扩选随之中断。
-  function qtExtend(e) {
-    if (qtSt !== 'selecting' || !qtAnchor) return
-    const t = e.touches && e.touches[0]
-    if (!t) return
-    e.preventDefault()
-    const cr = qtCaretAt(t.clientX, t.clientY)
-    const n = cr && cr.startContainer
-    if (!n || n.nodeType !== 3) return
-    qtApply(qtMakeRange(qtAnchor, { node: n, off: cr.startOffset }))
-  }
-  // 抬手：吞掉补发的合成 click（touchend preventDefault，与 Pj13 同款），选中栏留到这一刻才弹。
-  function qtEndGesture(e) {
-    if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle'; return }
-    if (qtSt !== 'selecting') return
-    if (e && e.cancelable) e.preventDefault()
-    document.removeEventListener('touchmove', qtExtend)
-    qtMouseUntil = Date.now() + QUOTE_MOUSE_HOLD
-    qtSt = 'bar'
-    qtShowBar()
-  }
-
-  // ---------- 3. 选中栏 ----------
-  function qtClose() {
-    document.removeEventListener('touchmove', qtExtend)
-    if (qtBar) { qtBar.remove(); qtBar = null }
-    qtClearKnobs()
-    qtSt = 'idle'
-    qtRange = null
-    qtAnchor = null
-    qtFixed = null
-    const sel = window.getSelection()
-    if (sel) sel.removeAllRanges()
-  }
-  // 栏与柄都锚在**现役选区**上（柄拖拽期选区一直在变，故定位逻辑独立成函数而不是写死在开栏那一次）。
-  function qtPlaceBar() {
-    if (!qtBar || !qtRange) return
-    const r = qtRange.getBoundingClientRect()
-    const w = qtBar.offsetWidth
-    const h = qtBar.offsetHeight
-    let top = r.top - h - QUOTE_BAR_GAP
-    if (top < 8) top = r.bottom + QUOTE_BAR_GAP // 选区上方放不下 ⇒ 翻到下方（同 iOS）
-    qtBar.style.left = Math.round(Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8))) + 'px'
-    qtBar.style.top = Math.round(Math.max(8, Math.min(top, window.innerHeight - h - 8))) + 'px'
-  }
-  // 动作行 = 内置「拷贝」+ quote.js 的动作表（内置「使用 AI 编辑」+ 当前项目申报行）。放不下时末尾折成
-  // 「更多 ›」——点开**复用既有竖排 .quote-pop**（自带全部动作行 + 话术输入行 + 立即发送），不另造动作表。
-  function qtShowBar() {
-    if (!qtRange) { qtClose(); return }
-    const rows = [{ id: 'copy', title: '拷贝' }].concat(quoteActionRows())
-    const bar = document.createElement('div')
-    bar.className = 'quote-bar'
-    bar.style.visibility = 'hidden' // 先量后放，避免首帧闪在视口左上角
-    for (const a of rows) {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.className = 'qb-item'
-      b.dataset.qid = a.id
-      b.textContent = a.title
-      bar.appendChild(b)
-    }
-    document.body.appendChild(bar)
-    const maxW = window.innerWidth - 16
-    if (bar.offsetWidth > maxW) {
-      while (bar.children.length > 1 && bar.offsetWidth > maxW - QUOTE_MORE_W) bar.lastElementChild.remove()
-      const more = document.createElement('button')
-      more.type = 'button'
-      more.className = 'qb-item qb-more'
-      more.dataset.qid = '__more'
-      more.innerHTML = '<span class="qb-lb">更多</span><span class="qb-go">›</span>'
-      bar.appendChild(more)
-    }
-    qtBar = bar
-    qtPlaceBar()
-    bar.style.visibility = ''
-    // 栏内按下/抬手都不算「点栏外」（栏是 body 下的 fixed 卡片，与选区无 DOM 亲缘，故靠 contains 判）
-    bar.addEventListener('pointerdown', (e) => e.stopPropagation())
-    bar.addEventListener('click', (e) => {
-      const b = e.target.closest && e.target.closest('.qb-item')
-      if (!b) return
-      qtRun(b.dataset.qid, rows)
-    })
-    qtPlaceKnobs()
-  }
-  // 动作落地。三条都**先取快照再收口**（快照要的是收口前的选区；收口会清掉它）。
-  function qtRun(id, rows) {
-    if (id === 'copy') {
-      const text = qtRange ? qtRange.toString() : ''
-      qtClose()
-      writeClipboard(text).then((ok) => toast(ok ? '已复制' : '复制失败'))
-      return
-    }
-    const snap = quoteSnapOfRange(qtRange)
-    qtClose()
-    if (id === '__more') { if (snap) openQuotePop(snap); return }
-    if (!snap) return
-    const row = rows.find((a) => a.id === id)
-    if (row && row.builtin) quoteStash(snap) // 内置「使用 AI 编辑」：胶囊进输入栏 + 光标落胶囊后
-    else quoteRunAction(id, snap) // 项目申报动作：宿主不代执行，只把 id 回发预览帧
-  }
-
-  // ---------- 4. 选中柄（松手后扩选的唯一入口）----------
-  // 两个自绘圆柄落在选区首/末行下沿（iOS 同形）。拖拽期 touch-action:none + 指针捕获；固定端点取**起手时**
-  // 的那一端 ⇒ 拖过对端即自然换向（与 iOS 一致），不会因「谁在左谁在右」中途翻车。
-  // 柄节点**只在开栏时建一次**，此后只改 left/top —— 拖拽中重建会在 setPointerCapture 的节点上拔掉
-  // 元素，指针捕获随之释放、拖动当场断掉（扩选每移动一次都会重定位，故此处必须复用节点）。
-  function qtClearKnobs() { qtKnobs.forEach((k) => k.remove()); qtKnobs = [] }
-  function qtPlaceKnobs() {
-    if (!qtBar || !qtRange) { qtClearKnobs(); return }
-    const rects = qtRange.getClientRects()
-    if (!rects.length) { qtClearKnobs(); return }
-    if (qtKnobs.length !== 2) {
-      qtClearKnobs()
-      qtKnobs = [qtAddKnob('a'), qtAddKnob('b')]
-    }
-    const a = rects[0]
-    const b = rects[rects.length - 1]
-    qtKnobs[0].style.left = Math.round(a.left) + 'px'
-    qtKnobs[0].style.top = Math.round(a.bottom) + 'px'
-    qtKnobs[1].style.left = Math.round(b.right) + 'px'
-    qtKnobs[1].style.top = Math.round(b.bottom) + 'px'
-  }
-  function qtAddKnob(which) {
-    const k = document.createElement('div')
-    k.className = 'qh-knob'
-    k.dataset.which = which
-    k.addEventListener('pointerdown', qtKnobDown)
-    document.body.appendChild(k)
-    return k
-  }
-  function qtKnobDown(e) {
-    if (e.pointerType !== 'touch' || !qtRange) return
-    e.preventDefault()
-    e.stopPropagation()
-    const k = e.currentTarget
-    k.setPointerCapture(e.pointerId)
-    qtFixed = k.dataset.which === 'a'
-      ? { node: qtRange.endContainer, off: qtRange.endOffset }
-      : { node: qtRange.startContainer, off: qtRange.startOffset }
-    k.addEventListener('pointermove', qtKnobMove)
-    k.addEventListener('pointerup', qtKnobUp)
-    k.addEventListener('pointercancel', qtKnobUp)
-  }
-  function qtKnobMove(e) {
-    if (qtSt !== 'bar' || !qtRange || !qtFixed) return
-    e.preventDefault()
-    const cr = qtCaretAt(e.clientX, e.clientY)
-    const n = cr && cr.startContainer
-    if (!n || n.nodeType !== 3 || !qtInZone(n)) return
-    if (!qtApply(qtMakeRange({ node: n, off: cr.startOffset }, qtFixed))) return
-    qtPlaceKnobs()
-    qtPlaceBar()
-  }
-  function qtKnobUp(e) {
-    const k = e.currentTarget
-    if (k.hasPointerCapture && k.hasPointerCapture(e.pointerId)) k.releasePointerCapture(e.pointerId)
-    k.removeEventListener('pointermove', qtKnobMove)
-    k.removeEventListener('pointerup', qtKnobUp)
-    k.removeEventListener('pointercancel', qtKnobUp)
-    qtFixed = null
-    qtMouseUntil = Date.now() + QUOTE_MOUSE_HOLD
-  }
-
-  // ---------- 5. 手势 ----------
-  document.addEventListener('pointerdown', (e) => {
-    if (!IS_TOUCH_DEVICE || e.pointerType !== 'touch') return
-    if (qtBar && qtBar.contains(e.target)) return // 栏内按下交给栏自己（点动作行）
-    if (qtKnobs.some((k) => k.contains(e.target))) return
-    if (qtSt === 'bar') qtClose() // 点栏外 = 收口（清选区 + 收柄）
-    if (!(e.target.closest && e.target.closest(QUOTE_ZONE))) return
-    clearTimeout(qtTimer)
-    qtPress = [e.clientX, e.clientY]
-    qtSt = 'pressed'
-    qtTimer = setTimeout(qtHarvest, QUOTE_LP_MS)
-  }, { passive: true })
-  document.addEventListener('pointermove', (e) => {
-    if (qtSt !== 'pressed' || !qtPress) return
-    if (Math.abs(e.clientX - qtPress[0]) > QUOTE_LP_SLOP || Math.abs(e.clientY - qtPress[1]) > QUOTE_LP_SLOP) {
-      clearTimeout(qtTimer)
-      qtTimer = 0
-      qtSt = 'idle'
-    }
-  }, { passive: true })
-  document.addEventListener('pointerup', () => { if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle' } }, { passive: true })
-  document.addEventListener('pointercancel', () => { if (qtSt === 'pressed') { clearTimeout(qtTimer); qtTimer = 0; qtSt = 'idle' } }, { passive: true })
-  document.addEventListener('touchend', qtEndGesture, { passive: false })
-  document.addEventListener('touchcancel', qtEndGesture, { passive: false })
-  // 收口四路（与 .quote-pop 同口径）：Escape / 滚动（含 #chat-scroll 内滚）/ 窗口尺寸变化 / 点栏外（上行）。
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && qtSt === 'bar') qtClose() })
-  window.addEventListener('scroll', () => { if (qtSt === 'bar') qtClose() }, { passive: true, capture: true })
-  window.addEventListener('resize', () => { if (qtSt === 'bar') qtClose() })
-
   const RAIL_PROMPT_MAX = 50 // 预览提示词封顶（与 dsh 一致）
   const RAIL_RESP_MAX = 120 // 预览回复封顶
-  const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 内最后一个锚 = 当前轮
-  const RAIL_NARROW = 900 // 窄于此刻度宽隐藏（dsh 900px 断点同值）
+  const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 带内最后一个锚 = 当前轮
+  const RAIL_NARROW = 640 // 窄于此宽隐藏刻度（手机竖屏；平板竖屏 768–834 保留）
+  const RAIL_BUILD = 'rail-t2-2026.10.02' // 构建标记：dataset.build 可核验跑的是哪版
+  const RAIL_TOUCH_HOLD = 2500 // 触屏点刻度后预览卡停留时长（无 hover 时的唤起路径）
 
-  let railItems = []
+  let railItems = [] // [{ key, el, prompt, response }]（文档序）
+  let railKeys = '' // 结构指纹（各轮 key 拼接）：变化才重建刻度
   let railActiveIdx = -1
-  let railPreviewIdx = -1
+  let railPreviewKey = null // 预览锚定轮次 key（跨重建保稳）
+  let railTimer = null
+  let railLastTick = 0
+  let railHideTimer = null // 触屏预览卡自动收起计时器
 
   // 元素正文（优先 .body，滤掉 who/图片/文件标签文本）
   function railText(el) {
@@ -9549,19 +9258,21 @@ function setGateVerified(v) { gateVerified = v }
     return s.length > max ? s.slice(0, max) + '…' : s
   }
 
-  // 采集轮次：锚=开启用户气泡 [data-t="u"]（data-m=段键）。querySelectorAll('[data-t="u"],[data-t="a"]')
-  // 返回文档序——a 落在其所属轮与下一轮之间即归入当前轮，response 取该轮最后一个 a。轮次<2 由调用方隐藏。
+  // 采集已提交轮次：锚=[data-t="u"][data-m]（data-m 排除 #live-zone 乐观气泡）；回复=其后同轮
+  // 最后一个非空 [data-t="a"]。轮次<2 由调用方隐藏。
   function railCollect() {
     const out = []
     if (!messagesEl) return out
-    const seq = messagesEl.querySelectorAll('[data-t="u"], [data-t="a"]')
+    const seq = messagesEl.querySelectorAll('[data-t="u"][data-m], [data-t="a"][data-m]')
     let cur = null
     for (const el of seq) {
+      if (el.closest('#live-zone')) continue
       if (el.getAttribute('data-t') === 'u') {
-        cur = { el, prompt: railClip(railText(el), RAIL_PROMPT_MAX), response: '' }
+        cur = { key: el.getAttribute('data-m'), el, prompt: railClip(railText(el), RAIL_PROMPT_MAX), response: '' }
         out.push(cur)
       } else if (cur) {
-        cur.response = railClip(railText(el), RAIL_RESP_MAX)
+        const t = railClip(railText(el), RAIL_RESP_MAX)
+        if (t) cur.response = t
       }
     }
     return out
@@ -9576,6 +9287,7 @@ function setGateVerified(v) { gateVerified = v }
     nav = document.createElement('nav')
     nav.id = 'turn-rail'
     nav.className = 'turn-rail'
+    nav.dataset.build = RAIL_BUILD
     nav.setAttribute('aria-label', '轮次导航')
     nav.hidden = true
     nav.innerHTML = '<div class="tr-scroller"><div class="tr-marks"></div></div>'
@@ -9585,16 +9297,36 @@ function setGateVerified(v) { gateVerified = v }
     return nav
   }
 
+  function railHideSoon(nav) {
+    if (railHideTimer) clearTimeout(railHideTimer)
+    railHideTimer = setTimeout(() => { railHideTimer = null; railSetPreview(nav, null) }, RAIL_TOUCH_HOLD)
+  }
+
   function railBind(nav) {
-    nav.querySelector('.tr-scroller').addEventListener('pointermove', (e) => {
-      const m = e.target.closest('.tr-mark')
-      if (m) railPreview(nav, Number(m.dataset.idx))
-    })
-    nav.addEventListener('pointerleave', () => { railPreview(nav, -1) })
+    // 绑在 nav（含 scroller 与刻度，冒泡覆盖），pointermove + pointerover 双触发：
+    // 刻度重建/内容刷新后若光标静止其上，pointerover 仍能唤出预览卡（单靠 pointermove 会漏）。
+    const onHover = (e) => {
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (m) railSetPreview(nav, m.dataset.key)
+    }
+    nav.addEventListener('pointermove', onHover)
+    nav.addEventListener('pointerover', onHover)
+    // 触屏 tap 后浏览器会补发 pointerleave（pointerType=touch），此时不能收卡——卡由 railHideSoon 定时收。
+    nav.addEventListener('pointerleave', () => { if (railHideTimer) return; railSetPreview(nav, null) })
+    // 触屏：tap 刻度 = 亮出该轮预览卡（停留 RAIL_TOUCH_HOLD）并跳到该轮；触屏无 hover，靠此唤起。
     nav.addEventListener('click', (e) => {
-      const m = e.target.closest('.tr-mark')
-      if (m) railJump(Number(m.dataset.idx))
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (!m) return
+      railSetPreview(nav, m.dataset.key)
+      railHideSoon(nav)
+      railJump(m.dataset.key)
     })
+    // 点轨外任意处收回预览卡（触屏无 pointerleave，须显式收）。
+    document.addEventListener('pointerdown', (e) => {
+      if (nav.contains(e.target)) return
+      if (railHideTimer) { clearTimeout(railHideTimer); railHideTimer = null }
+      railSetPreview(nav, null)
+    }, true)
   }
 
   // 当前轮：视口上 RAIL_ACTIVE_BAND 带内最后一个锚
@@ -9610,12 +9342,17 @@ function setGateVerified(v) { gateVerified = v }
     return idx
   }
 
-  // 只标态（不整重建）——滚动/预览走此路
+  function railPreviewIndex() {
+    return railPreviewKey == null ? -1 : railItems.findIndex((it) => it.key === railPreviewKey)
+  }
+
+  // 只标态（不整重建）——滚动/预览/内容刷新都走此路
   function railPaint(nav) {
     const marks = nav.querySelectorAll('.tr-mark')
+    const pIdx = railPreviewIndex()
     marks.forEach((m, i) => {
       m.classList.toggle('tr-active', i === railActiveIdx)
-      m.classList.toggle('tr-preview', i === railPreviewIdx)
+      m.classList.toggle('tr-hot', i === pIdx) // 注意：类名不可用 tr-preview——那是预览卡自己的类，撞名会让刻度按钮命中卡片样式
     })
     // active 刻度留在轨内可视（手动算，禁 scrollIntoView——会外溢滚动祖先链）
     const scroller = nav.querySelector('.tr-scroller')
@@ -9628,6 +9365,7 @@ function setGateVerified(v) { gateVerified = v }
     }
   }
 
+  // 刻度 DOM 仅在轮次集合变化时重建；建完不 paint（由 railRefresh 统一 paint）
   function railRender(nav, items) {
     const marks = nav.querySelector('.tr-marks')
     marks.textContent = ''
@@ -9635,35 +9373,40 @@ function setGateVerified(v) { gateVerified = v }
       const b = document.createElement('button')
       b.type = 'button'
       b.className = 'tr-mark'
-      b.dataset.idx = String(i)
+      b.dataset.key = it.key
       b.setAttribute('aria-label', `跳到第 ${i + 1} 轮`)
       marks.appendChild(b)
     })
-    railPaint(nav)
   }
 
-  function railPreview(nav, idx) {
-    if (idx === railPreviewIdx) return
-    railPreviewIdx = idx
-    railPaint(nav)
+  // 预览卡：内容 + 垂直居中于该刻度（钳在轨内）
+  function railShowPreview(nav, key) {
     const pv = nav.querySelector('.tr-preview')
-    const item = railItems[idx]
+    const idx = key == null ? -1 : railItems.findIndex((it) => it.key === key)
     const marks = nav.querySelectorAll('.tr-mark')
-    if (!item || !marks[idx]) { pv.hidden = true; return }
+    if (idx < 0 || !marks[idx]) { pv.hidden = true; return }
+    const item = railItems[idx]
     pv.hidden = false
     pv.querySelector('.tr-prompt').textContent = item.prompt || `第 ${idx + 1} 轮`
     const resp = pv.querySelector('.tr-resp')
     resp.textContent = item.response || ''
     resp.hidden = !item.response
-    // 垂直居中于该刻度，钳在 nav 内
     const scroller = nav.querySelector('.tr-scroller')
     const center = marks[idx].offsetTop + marks[idx].offsetHeight / 2 - scroller.scrollTop
     const ph = pv.offsetHeight
-    const maxTop = Math.max(0, nav.clientHeight - ph)
+    const maxTop = Math.max(0, scroller.clientHeight - ph)
     pv.style.top = Math.max(0, Math.min(maxTop, center - ph / 2)) + 'px'
   }
 
-  function railJump(idx) {
+  function railSetPreview(nav, key) {
+    if (key === railPreviewKey) { railShowPreview(nav, railPreviewKey); return }
+    railPreviewKey = key
+    railPaint(nav)
+    railShowPreview(nav, key)
+  }
+
+  function railJump(key) {
+    const idx = railItems.findIndex((it) => it.key === key)
     const item = railItems[idx]
     if (!item) return
     const sc = document.getElementById('chat-scroll')
@@ -9671,7 +9414,6 @@ function setGateVerified(v) { gateVerified = v }
     stage.yielded = true // 用户导航=接管视口，停止 stage 跟随（同滚动输入）
     sc.scrollTo({ top: topInScroll(item.el), behavior: 'smooth' })
     railActiveIdx = idx
-    railPreviewIdx = -1
     const nav = document.getElementById('turn-rail')
     if (nav) railPaint(nav)
   }
@@ -9684,21 +9426,37 @@ function setGateVerified(v) { gateVerified = v }
     railItems = railCollect()
     if (!inSession || railItems.length < 2 || window.innerWidth <= RAIL_NARROW) {
       nav.hidden = true
-      railPreviewIdx = -1
+      railKeys = ''
+      railActiveIdx = -1
+      railPreviewKey = null
+      railShowPreview(nav, null)
       return
     }
     nav.hidden = false
+    const keys = railItems.map((it) => it.key).join('\u0001')
+    if (keys !== railKeys) {
+      railKeys = keys
+      railRender(nav, railItems) // 只有轮次集合变了才销毁重建刻度
+    }
     railActiveIdx = railActiveFromScroll()
-    railPreviewIdx = -1
-    railRender(nav, railItems)
+    railPaint(nav)
+    railShowPreview(nav, railPreviewKey) // 内容刷新时同步预览文本（刻度未动，光标不移也不丢卡）
   }
 
-  // 变更驱动：#messages 整页重建/增量 append/流式文本 → debounce 重算
-  let railTimer = null
-  const railObs = new MutationObserver(() => {
-    clearTimeout(railTimer)
-    railTimer = setTimeout(railRefresh, 150)
-  })
+  // 变更驱动：#messages 整页重建/增量 append/流式文本 → 节流重算。
+  // 用节流而非 debounce：连续流式下 mutation 间隔 < 阈值，debounce 会一直重置、轨道定型不动；
+  // 节流保证每 ~150ms 至少刷一次，且因「结构未变不重建」，刷新本身零刻度抖动。
+  function railSchedule() {
+    if (railTimer != null) return
+    const wait = Math.max(0, 150 - (Date.now() - railLastTick))
+    railTimer = setTimeout(() => {
+      railTimer = null
+      railLastTick = Date.now()
+      railRefresh()
+    }, wait)
+  }
+
+  const railObs = new MutationObserver(railSchedule)
 
   function railInit() {
     const nav = railNav()

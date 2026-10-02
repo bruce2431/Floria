@@ -499,7 +499,8 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         const k = foldKey(d)
         if (!openState.has(k)) return // 新增折叠（键不在旧集）保留 HTML 默认：处理中展开、已处理收起
         const finishedNow = doneLivePrev.has(k) && !d.classList.contains('done-live')
-        d.open = finishedNow ? false : openState.get(k)
+        // 无正文回合（data-nobody）收口时不自动折叠——保留过程证据（对齐 dsh 轮次过程折叠）
+        d.open = finishedNow ? !!d.dataset.nobody : openState.get(k)
       })
       // 2026-08-30 乐观改排队区（清单#4③）→ 2026-09-07 暂态区收编：整页重建洗掉 #live-zone
       // → renderTransient 从状态整体重建（气泡/折叠/排队区恒定顺序挂回 pin-stage 之前）

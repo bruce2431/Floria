@@ -316,47 +316,22 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
   else bad('快照的 frame 未留存 —— 申报动作无处回发')
 }
 
-// ---- 4g. 触屏程序化选中（inputbar/quote-touch.js，2026-09-28）：仅触屏，桌面鼠标路径零变化 ----
+// ---- 4g. 触屏 = iOS 原生选中菜单（2026-10-02：撤掉自绘选中引擎，消除双框）----
+// 根因：宿主自绘选中栏与 iOS 系统菜单并存（双框）；且程序化选区压不住 iOS 原生选择手势（pointerdown 是
+// passive，480ms 抢跑拦不住）⇒ 触屏一律回归原生。quote.js 的 mouseup 由 IS_TOUCH_DEVICE 直接早退，触屏
+// 不再弹宿主浮窗（PDF 预览页的 postMessage 桥是另一条来源，不受此门影响）。
 {
-  const QT = resolve(SRC, 'inputbar/quote-touch.js')
-  const qt = existsSync(QT) ? read(QT) : ''
-  if (!qt) bad('缺少 src/gateway/web-src/inputbar/quote-touch.js')
-  else {
-    ok('inputbar/quote-touch.js 在盘')
-    // 门 = 设备级（IS_TOUCH_DEVICE，含 iPadOS 桌面模式那条 MacIntel 判据）+ 事件级（pointerType）。缺一即改写桌面路径。
-    if (/IS_TOUCH_DEVICE/.test(qt) && /e\.pointerType !== 'touch'/.test(qt)) ok("触屏双门：IS_TOUCH_DEVICE + pointerType === 'touch'（桌面鼠标路径零变化）")
-    else bad('触屏门缺失 —— 桌面鼠标路径会被改写')
-    // 命中测试必须可用 ⇒ 引用区不得 user-select:none（Pj13 实机测量：该类内容 caretRangeFromPoint 返回 null）。
-    // 只扫**代码**（注释行里正当地在讨论这条禁令，混进来会自我误伤）。
-    const qtCode = qt.replace(/^\s*\/\/.*$/gm, '')
-    if (!/user-select/.test(qtCode)) ok('模块不引入 user-select:none（caretRangeFromPoint 命中测试必须可用）')
-    else bad('模块出现 user-select —— 命中测试 API 会失效')
-    // 收编序列：清原生紧接设程序化 —— 这一对就是替代系统 callout 的机理
-    if (/sel\.removeAllRanges\(\); sel\.addRange\(r\)/.test(qt)) ok('收编 = removeAllRanges() 紧接 addRange()（收掉原生 callout，蓝底保留）')
-    else bad('收编序列断裂 —— 系统菜单不会被收掉')
-    if (/function qtCaretAt\(/.test(qt) && /function qtWordRange\(/.test(qt)) ok('命中测试：caretRangeFromPoint + 词边界扩张自建')
-    else bad('缺自建词选区（抢在 iOS 建词选区之前的路径）')
-    if (/addEventListener\('touchmove', qtExtend, \{ passive: false \}\)/.test(qt)) ok('同手势扩选：touchmove 非 passive（preventDefault 冻结滚动）')
-    else bad('扩选未冻结滚动 —— iOS 判成滚动即补发 pointercancel')
-    if (/addEventListener\('touchend', qtEndGesture, \{ passive: false \}\)/.test(qt)) ok('touchend 非 passive（吞抬手合成 click 的前提）')
-    else bad('touchend 注册成 passive —— preventDefault 无效')
-    if (/function quoteTouchOwnsSelection\(/.test(qt) && /quoteTouchOwnsSelection\(\)\) return/.test(q)) ok('接管期鼠标链让位（同一次选择只出一条开窗路径）')
-    else bad('缺鼠标链让位守卫 —— iOS 补发的合成 mouseup 会在选中栏之外再开一份浮窗')
-    // 复用而非复刻：拷贝走既有 writeClipboard，动作走既有动作表/分发
-    if (/writeClipboard\(/.test(qt) && /quoteActionRows\(\)/.test(qt) && /quoteStash\(snap\)/.test(qt) && /quoteRunAction\(id, snap\)/.test(qt)) ok('复用既有链路：writeClipboard / quoteActionRows / quoteStash / quoteRunAction')
-    else bad('触屏链自建了并行实现（未复用既有接口）')
-    if (/openQuotePop\(snap\)/.test(qt)) ok('「更多 ›」复用竖排 .quote-pop（不另造第二套动作表）')
-    else bad('未复用 .quote-pop')
-  }
-  // 拼接器登记：排在 quote.js 之后（依赖其导出）、启动序列之前（顶层事件委托先于启动注册）
-  const touchEntry = bundler.match(/\{\s*file:\s*'inputbar\/quote-touch\.js',\s*ranges:\s*\[\[(\d+)/)
-  if (touchEntry && bundler.indexOf("file: 'inputbar/quote-touch.js'") > bundler.indexOf("file: 'inputbar/quote.js'")) ok('拼接器已登记 quote-touch.js 且排在 quote.js 之后')
-  else bad('拼接器未登记 inputbar/quote-touch.js，或排在了 quote.js 之前（跨模块引用会取到 undefined）')
-  const appRanges2 = [...bundler.matchAll(/\{\s*file:\s*'__app__',\s*ranges:\s*\[\[(\d+),\s*\d+\],\s*\[(\d+)/g)]
-  const boot2 = appRanges2.length ? Math.max(...appRanges2.map((m) => Number(m[2]))) : Infinity
-  if (touchEntry && Number(touchEntry[1]) < boot2) ok(`quote-touch.js 排在启动序列（${boot2}）之前`)
-  else bad('quote-touch.js 区间号晚于启动序列')
-  // 快照单一构造入口：桌面路径与触屏路径同源（refToken 三族令牌与胶囊渲染因此零分叉）
+  if (!existsSync(resolve(SRC, 'inputbar/quote-touch.js'))) ok('触屏自绘引擎 quote-touch.js 已删（不再程序化接管选区）')
+  else bad('inputbar/quote-touch.js 仍在盘 —— 触屏自绘选中栏会与系统菜单双框')
+  if (/import \{ IS_TOUCH_DEVICE \} from '\.\.\/sidebar\/recent\.js'/.test(q)) ok('quote.js 引入 IS_TOUCH_DEVICE（触屏门）')
+  else bad('quote.js 未引入 IS_TOUCH_DEVICE —— 触屏守卫无处落')
+  if (/if \(IS_TOUCH_DEVICE\) return/.test(q)) ok('quote.js mouseup 触屏早退（触屏不再弹宿主浮窗，回归 iOS 原生）')
+  else bad('quote.js 缺触屏早退守卫 —— 触屏抬手合成 mouseup 会弹出浮窗，与系统菜单双框')
+  if (!/quoteTouchOwnsSelection/.test(q)) ok('旧触屏让位守卫已清（无残留引用）')
+  else bad('quote.js 仍引用 quoteTouchOwnsSelection —— 该函数已随 quote-touch.js 删除')
+  if (!bundler.includes("inputbar/quote-touch.js")) ok('拼接器已移除 quote-touch.js 登记')
+  else bad('拼接器仍登记 quote-touch.js')
+  // 快照单一构造入口（与触屏无关，随原 4g 块保留）
   if (/function quoteSnapOfRange\(/.test(q) && /function quoteSnapOf\(\)/.test(q) && !/let quoteSnap\b/.test(q)) ok('快照单一入口 quoteSnapOfRange(range)；模块级 quoteSnap 状态源已删')
   else bad('快照链仍双源（quoteSnapOfRange 缺失 / 或模块级 quoteSnap 状态残留）')
 }
@@ -408,10 +383,13 @@ else bad('quote.js 仍在用 indexOf 回查原文（跨格式符必失败）')
 
 // ---- 6. 样式 ----
 const css = read(resolve(WEB, 'styles.css'))
-for (const sel of ['.quote-pop', '.qp-row', '.qp-bar', '.qp-send', '.mention.ref', '.mention-chip.m-ref', '.qp-row .qp-ic', '.quote-bar', '.qb-item', '.qh-knob']) {
+for (const sel of ['.quote-pop', '.qp-row', '.qp-bar', '.qp-send', '.mention.ref', '.mention-chip.m-ref', '.qp-row .qp-ic']) {
   if (css.includes(sel)) ok(`styles.css 含 ${sel}`)
   else bad(`styles.css 缺 ${sel}`)
 }
+// 触屏自绘选中栏样式已随引擎撤除（2026-10-02）
+if (!/\.quote-bar|\.qb-item|\.qh-knob/.test(css)) ok('触屏选中栏/柄样式已清（.quote-bar/.qb-item/.qh-knob 无残留）')
+else bad('styles.css 仍留触屏选中栏/柄样式 —— 自绘引擎已撤但样式残留')
 // 浅色是定案（用户点名「对应换成浅色」）：此块不跟主题变量
 if (/\.quote-pop \{[\s\S]*?background: #fff;/.test(css)) ok('.quote-pop 浅色硬编码（不跟 --bg/--text 主题变量）')
 else bad('.quote-pop 仍跟随主题变量 —— 与「换成浅色」定案不符')
@@ -440,8 +418,8 @@ if (existsSync(APP)) {
   const app = read(APP)
   if (app.includes('---------- 选中引用（quote）----------')) ok('产物 app.js 已内嵌 quote 段')
   else bad('产物 app.js 未内嵌 quote 段（未重新构建？）')
-  if (app.includes('---------- 触屏程序化选中（quote-touch）----------')) ok('产物 app.js 已内嵌 quote-touch 段')
-  else bad('产物 app.js 未内嵌 quote-touch 段（未重新构建？）')
+  if (!app.includes('触屏程序化选中（quote-touch）')) ok('产物 app.js 已无 quote-touch 段（自绘引擎已撤）')
+  else bad('产物 app.js 仍内嵌 quote-touch 段（未重新构建？）')
 } else {
   bad('缺少产物 src/gateway/web/app.js')
 }

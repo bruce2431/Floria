@@ -4,6 +4,7 @@ import { I } from '../core/icons.js'
 import { esc, inputEl, messagesEl, state } from '../core/state.js'
 import { findSession } from '../core/sessions.js'
 import { quoteActions } from '../views/registry.js'
+import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'
 import { gwSend, syncGwSend } from './send.js'
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
@@ -89,7 +90,7 @@ import { gwSend, syncGwSend } from './send.js'
     const cur = state.currentHash ? findSession(state.currentHash) : null
     return { kind: 'reply', text, rect, title: (cur && cur.title) || '本会话', idx }
   }
-  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏路径不走这里，见 inputbar/quote-touch.js）
+  // 桌面路径：现场取 window.getSelection 的那一条 Range（触屏设备不唤本浮窗，见下方 mouseup 的 IS_TOUCH_DEVICE 早退）
   function quoteSnapOf() {
     const sel = window.getSelection()
     if (!sel || !sel.rangeCount || sel.isCollapsed) return null
@@ -235,9 +236,10 @@ import { gwSend, syncGwSend } from './send.js'
   // 按下并不会清掉选区，不挡就会「关掉又立刻重开」。
   document.addEventListener('mouseup', (e) => {
     if (e.button !== 0) return
-    // 触屏接管中（触屏选区引擎在 hold 窗口内）⇒ 鼠标链让位：iOS 抬手会补发合成 mouseup，而收编后的
-    // 程序化选区正是「非空且在引用区内」，不挡就会在选中栏之外再开一份浮窗（见 inputbar/quote-touch.js）。
-    if (quoteTouchOwnsSelection()) return
+    // 触屏设备一律回归 iOS 原生选中菜单（2026-10-02 定案）：宿主自绘的触屏选中栏与系统菜单并存 = 双框，
+    // 且程序化选区压不住 iOS 原生选择手势（pointerdown 是 passive，抢跑拦不住）⇒ 撤掉自绘接管。消息流/
+    // 编辑区在触屏上不再弹本浮窗；PDF 预览页走 postMessage 桥（另一条来源，见 §5），不受此门影响。
+    if (IS_TOUCH_DEVICE) return
     if (quoteSkipNextUp) { quoteSkipNextUp = false; return }
     if (quotePop && quotePop.contains(e.target)) return
     const snap = quoteSnapOf()

@@ -748,15 +748,30 @@ import { firstSendHash } from '../sidebar/recent.js'
         const t1 = (s.user && s.user.timestamp) || s.startTs || (isFinal ? lastUserTs : 0)
         const endTs = s.replyTs || s.lastTs
         const dur = !processing && t1 && endTs ? fmtDur(Math.round((endTs - t1) / 1000)) : ''
-        // 处理状态行（2026-09-09 用户定案「折叠顶只应有两字样」）：summary 恒「正在处理 + 总时长」
-        // （处理中）/「已处理 + 总时长」（完成），真空期（思考/生成/压缩）状态显示行由 liveFoldBody 并入
-        // 尾部工具折叠行 summary 同行（无工具组时段尾独立行），无响应/连接中断红标挂暂态层——折叠顶
-        // 不再出现任何其它字样（v267 的 summary 单行轮转方案废弃）。
+        // 处理状态行：summary「正在处理 + 总时长」（处理中）/ 终态词 + 摘要计数 + 时长（完成）。
+        // 借鉴 dsh 轮次过程折叠（TurnProcessNodeView）三处：
+        //  ①终态词区分「已处理 / 已停止」（dsh aborted 用 message.stopped；「处理失败」需后端 end reason，暂缺）；
+        //  ②摘要计数（工具调用/提问，0 值省略；dsh 三段式 messageCount/toolCallCount/subagentCount）；
+        //  ③无面向用户正文的回合默认展开、收口不自动折叠（dsh「关闭时没有最终正文的轮次保留全部过程证据」）。
+        // 真空期（思考/生成/压缩）状态显示行仍由 liveFoldBody 并入尾组 summary，无响应红标挂暂态层。
         const totalSec = processing && t1 ? Math.max(0, Math.round((Date.now() - t1) / 1000)) : 0
+        const hasBody = flowParts.length > 0 // 折叠体外是否有面向用户的最终正文（reply 项）
+        // 无正文且非正常终止（end_turn/stop_sequence）= 被打断/被新消息取代 → 「已停止」（dsh aborted 语义）
+        const stopped = !processing && !hasBody && s.finished !== 1
+        const nTool = foldItems.reduce((n, it) => n + (it.kind === 'tool' ? 1 : 0), 0)
+        const nAsk = foldItems.reduce((n, it) => n + (it.kind === 'ask' ? 1 : 0), 0)
+        const cntParts = []
+        if (nTool) cntParts.push(nTool + ' 次工具调用')
+        if (nAsk) cntParts.push(nAsk + ' 次提问')
+        const cnt = !processing && !stopped && cntParts.length ? `<span class="d-count">${cntParts.join(' · ')}</span>` : ''
         const stateHtml = processing
           ? `正在处理<span class="d-dur"> ${fmtDur(totalSec)}</span>`
-          : `已处理${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
-        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing ? ' open' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${stateHtml}</summary><div class="done-body">${bodyHtml}</div></details>`
+          : stopped
+            ? '已停止'
+            : `已处理${cnt}${dur ? `<span class="d-dur"> ${dur}</span>` : ''}`
+        // 无正文回合默认展开（data-nobody 供 live.js 增量重建时抑制收口自动折叠）
+        const openWhenIdle = !hasBody
+        segHtml += `<details class="done-fold${processing ? ' done-live' : ''}" data-m="${s.key}" data-t="f"${processing || openWhenIdle ? ' open' : ''}${!processing && openWhenIdle ? ' data-nobody="1"' : ''}><summary><span class="d-chev">${CHEV}</span>${processing ? '<span class="df-dot"></span>' : ''}${stateHtml}</summary><div class="done-body">${bodyHtml}</div></details>`
         lastNode = { key: s.key, type: 'f' }
       }
       // 流内项（按落盘序）：引导气泡 + 回复气泡（data-t 精确值供下段 prev 锚点查询命中）

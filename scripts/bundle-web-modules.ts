@@ -57,10 +57,6 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   // 选中文本引用浮窗（2026-09-28）：区间号仅作执行序排序 —— 顶层立即注册 contextmenu / mousedown
   // 委托，依赖 core/state.js 的 $/inputEl/state 与 core/icons.js 的 I，故排在启动序列（5379）之前。
   { file: 'inputbar/quote.js', ranges: [[5352, 5352]], first: ['  // ---------- 选中引用（quote）----------'] },
-  // 触屏程序化选中 + 选中栏（2026-09-28）：区间号同 5352 只作执行序排序 —— 必须排在 inputbar/quote.js
-  // **之后**（引用其导出的 QUOTE_ZONE / quoteSnapOfRange / quoteStash / quoteActionRows / quoteRunAction /
-  // openQuotePop；同区间号走稳定排序按本表顺序），且仍在启动序列（5379）之前。
-  { file: 'inputbar/quote-touch.js', ranges: [[5352, 5352]], first: ['  // ---------- 触屏程序化选中（quote-touch）----------'] },
   // 轮次导航轨（2026-10-02 dsh TurnNavigator 移植）：区间号同 5352 只作执行序排序 —— 顶层立即
   // railInit()，依赖 core/state.js 的 messagesEl 与 chat/stage.js 的 stage/topInScroll（均已排在
   // 其前），仍须在启动序列（5379）之前。

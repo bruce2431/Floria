@@ -251,12 +251,18 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 }
 .done-fold summary {
   cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px;
-  color: #9ca3af; font-size: 14px; font-weight: 600; padding: 3px 0 7px;
-  /* 2026-10-02 对齐 dsh 轮次过程控件（TurnProcessNodeView）：摘要下方通栏分隔线，
-     折起/展开都在，作为「本段已处理」的沉稳标记（dsh 为 border-bottom 0.5px + padding-bottom 8px） */
-  border-bottom: 1px solid var(--border);
+  color: #9ca3af; font-size: 14px; font-weight: 600; padding: 3px 0;
   user-select: none;
 }
+/* 2026-10-02 对齐 dsh 轮次过程控件（TurnProcessNodeView）：分隔线画在**整个折叠体下缘**（dsh 的
+   border-bottom 在 .root = 整块），不是 summary 下缘——折起时即「已处理」行下方一条，展开时落到
+   折叠体内容之后，**不会横在「已处理」头与工具状态行之间**（用户实报「工具状态行那个横线为什么还在」）。
+   仅收口后（已处理/已停止）加线；运行态（「正在处理 Xs」）不加线也不留额外底垫（dsh 运行中不折叠、无此线） */
+.done-fold:not(.done-live) { padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+/* AI 最终答复紧贴过程折叠体（用户：间距较大，缩减）——#messages 段距 18px 压到 ~10px。
+   折叠体下缘已有分隔线，回复再离一整段距显得松；负 margin 只作用「折叠体紧跟的回复气泡」，
+   不影响折叠体与下一回合开启消息（.msg.user）以及回复后的变更卡 */
+#messages > .done-fold + .msg.assistant { margin-top: -8px; }
 .done-fold summary::-webkit-details-marker { display: none; }
 .done-fold summary .d-chev {
   display: inline-flex; align-items: center; justify-content: center;
@@ -266,6 +272,8 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 }
 .done-fold[open] summary .d-chev { transform: rotate(90deg); }
 .done-fold summary .d-dur { color: var(--text-3); font-size: 12px; font-weight: 500; margin-left: 1px; }
+/* 摘要计数（工具调用/提问；借鉴 dsh TurnProcessNodeView 三段式计数）——比时长更淡，靠 gap 分隔 */
+.done-fold summary .d-count { color: var(--text-3); font-size: 12px; font-weight: 500; }
 /* 2026-09-07 僵死/断连感知：运行态的「无响应 Ns」「连接中断」红标（bindLiveFoldTimer/claimTick 对账）；
  * 2026-09-09 定案起红标落段体（.fold-state/.done-body）不再上 summary——折叠顶只留「正在处理/已处理」 */
 .done-fold .d-stale { color: #e5484d; font-size: 12px; font-weight: 600; margin-left: 4px; }
@@ -1951,43 +1959,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .qp-send:hover { background: #679efe; }
 .qp-send svg { width: 15px; height: 15px; display: block; }
 
-/* ===== 触屏选中栏 .quote-bar + 选中柄 .qh-knob（2026-09-28，仅触屏）=====
-   触屏长按选中（inputbar/quote-touch.js）**松手后**弹出，取代 iOS 系统「拷贝/查询/翻译」条（长按举手
-   势被程序化接管，详见该模块文件头）。深色半透明 + 圆角 + 项间 1px 细分隔线 + 末尾 ›（用户实拍 iPad
-   系统条形态照此复刻）。项 = 拷贝 / 使用 AI 编辑 / 当前项目申报动作；放不下时末尾折成「更多 ›」（点开
-   复用竖排 .quote-pop，不另造动作表）。定位与 .quote-pop 同口径：body 下 fixed、选区上方（放不下翻
-   下方）、越界 clamp 回视口。色值硬编码不跟主题（同 .quote-pop 定案）。 */
-.quote-bar {
-  position: fixed; z-index: 81;
-  display: flex; align-items: stretch;
-  padding: 0 4px; border-radius: 12px;
-  background: rgba(28, 30, 34, 0.92);
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-  animation: rowMenuIn 0.12s ease-out;
-}
-.quote-bar .qb-item {
-  display: inline-flex; align-items: center;
-  height: 44px; padding: 0 14px;
-  border: none; background: transparent;
-  font: inherit; font-size: 14px; line-height: 1; color: #fff; white-space: nowrap; cursor: pointer;
-}
-.quote-bar .qb-item + .qb-item { border-left: 1px solid rgba(255, 255, 255, 0.18); }
-.quote-bar .qb-item:active { background: rgba(255, 255, 255, 0.12); }
-.quote-bar .qb-more { padding-right: 10px; }
-.quote-bar .qb-go { margin-left: 4px; color: rgba(255, 255, 255, 0.7); font-size: 15px; }
-/* 选中柄：松手后拖拽扩选（iOS 同形圆柄）。touch-action:none 是它唯一的职责 —— 拖柄不得被判成滚动，
-   故不接受浏览器的默认触摸行为；落点由 JS 给 left/top（选区首/末行下沿），margin 把圆心对到端点。 */
-.qh-knob {
-  position: fixed; z-index: 82;
-  width: 26px; height: 26px; margin: -13px 0 0 -13px;
-  border-radius: 999px;
-  background: #4176e6;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
-  touch-action: none;
-}
-
 /* ===== 会话重命名弹窗 #rename-modal（2026-08-24 对齐 DSH Modal.module.css + WorkspaceBrowser.renameInput）=====
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·
    body mt20 px24 · footer px24 右对齐 gap8 · Button outline/primary r18 h36 */
@@ -2369,7 +2340,7 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 
 /* 轮次导航轨（2026-10-02 dsh TurnNavigator 移植）：会话区右侧一列短线刻度，每格=一个轮次。
    刻度宽 20px 右对齐，scaleX 表达态（默认 .6 / 悬停·预览 .9 / 当前轮 1）；hover 出右侧预览卡。
-   nav 挂在 #chat-area（position:relative）内 absolute 定位，不参与 flex 流。窄屏（≤900px）隐藏。 */
+   nav 挂在 #chat-area（position:relative）内 absolute 定位，不参与 flex 流。手机竖屏（≤640px）隐藏（平板竖屏 768–834 保留）。 */
 .turn-rail { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 28px; z-index: 7; cursor: pointer; }
 .turn-rail[hidden] { display: none; }
 .tr-scroller { max-height: min(420px, 62vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
@@ -2381,7 +2352,8 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   background: var(--border); transform: translateY(-50%) scaleX(0.6); transform-origin: right center;
   transition: transform 0.14s ease, background-color 0.14s ease;
 }
-.tr-mark.tr-preview::before { transform: translateY(-50%) scaleX(0.9); background: var(--text-3); }
+.tr-mark:hover::before,
+.tr-mark.tr-hot::before { transform: translateY(-50%) scaleX(0.9); background: var(--text-3); }
 .tr-mark.tr-active::before { transform: translateY(-50%) scaleX(1); background: var(--text); }
 .tr-mark:focus-visible { outline: none; }
 .tr-mark:focus-visible::before { transform: translateY(-50%) scaleX(1); background: var(--blue); }
@@ -2395,4 +2367,4 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .tr-resp { overflow: hidden; margin-top: 4px; color: var(--text-2); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .tr-resp[hidden] { display: none; }
 @keyframes tr-preview-in { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: translateX(0); } }
-@media (max-width: 900px) { .turn-rail { display: none; } }
+@media (max-width: 640px) { .turn-rail { display: none; } }

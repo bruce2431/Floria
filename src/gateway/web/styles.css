@@ -251,7 +251,11 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 }
 .done-fold summary {
   cursor: pointer; list-style: none; display: flex; align-items: center; gap: 7px;
-  color: #9ca3af; font-size: 14px; font-weight: 600; padding: 3px 0; user-select: none;
+  color: #9ca3af; font-size: 14px; font-weight: 600; padding: 3px 0 7px;
+  /* 2026-10-02 对齐 dsh 轮次过程控件（TurnProcessNodeView）：摘要下方通栏分隔线，
+     折起/展开都在，作为「本段已处理」的沉稳标记（dsh 为 border-bottom 0.5px + padding-bottom 8px） */
+  border-bottom: 1px solid var(--border);
+  user-select: none;
 }
 .done-fold summary::-webkit-details-marker { display: none; }
 .done-fold summary .d-chev {
@@ -2362,3 +2366,33 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   #chat-area.work.wk-preview > #work-preview { display: none; }
   .wk-ed-back { display: inline-flex; }
 }
+
+/* 轮次导航轨（2026-10-02 dsh TurnNavigator 移植）：会话区右侧一列短线刻度，每格=一个轮次。
+   刻度宽 20px 右对齐，scaleX 表达态（默认 .6 / 悬停·预览 .9 / 当前轮 1）；hover 出右侧预览卡。
+   nav 挂在 #chat-area（position:relative）内 absolute 定位，不参与 flex 流。窄屏（≤900px）隐藏。 */
+.turn-rail { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 28px; z-index: 7; cursor: pointer; }
+.turn-rail[hidden] { display: none; }
+.tr-scroller { max-height: min(420px, 62vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.tr-scroller::-webkit-scrollbar { display: none; }
+.tr-marks { position: relative; padding: 6px 0; }
+.tr-mark { position: relative; display: block; width: 100%; height: 10px; padding: 0; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+.tr-mark::before {
+  content: ''; position: absolute; top: 50%; right: 0; width: 20px; height: 2px; border-radius: 2px;
+  background: var(--border); transform: translateY(-50%) scaleX(0.6); transform-origin: right center;
+  transition: transform 0.14s ease, background-color 0.14s ease;
+}
+.tr-mark.tr-preview::before { transform: translateY(-50%) scaleX(0.9); background: var(--text-3); }
+.tr-mark.tr-active::before { transform: translateY(-50%) scaleX(1); background: var(--text); }
+.tr-mark:focus-visible { outline: none; }
+.tr-mark:focus-visible::before { transform: translateY(-50%) scaleX(1); background: var(--blue); }
+.tr-preview {
+  position: absolute; right: calc(100% + 10px); box-sizing: border-box; width: min(300px, 42vw); max-height: 100px;
+  overflow: hidden; padding: 10px 12px; border-radius: 12px; color: var(--text); background: var(--bg);
+  box-shadow: var(--shadow); pointer-events: none; animation: tr-preview-in 0.12s ease-out;
+}
+.tr-preview[hidden] { display: none; }
+.tr-prompt { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.tr-resp { overflow: hidden; margin-top: 4px; color: var(--text-2); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.tr-resp[hidden] { display: none; }
+@keyframes tr-preview-in { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: translateX(0); } }
+@media (max-width: 900px) { .turn-rail { display: none; } }

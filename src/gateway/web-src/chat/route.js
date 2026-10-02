@@ -18,7 +18,7 @@ import { clearRailExt } from '../sidebar/rail-ext.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, workScopeOk } from '../sidebar/work.js'
 import { openProjectPreview } from '../views/cards/preview-card.js'
-import { openCard } from '../views/registry.js'
+import { hydrateExtCardId, openCard } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
   // /preview/* 静态页路径）；hash 路由保留为旧链接/旧缓存页兜底（parseRoute 先 pathname 后 hash）。
@@ -72,7 +72,9 @@ import { openCard } from '../views/registry.js'
     state.currentHash = r.name === 'session' ? r.hash : ''
     renderRecent()
     if (r.name === 'home') renderHome()
-    else if (r.name === 'mgr') { state.mgr = r.mgr; loadMgrView(); renderMgr() }
+    // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进
+    // /manage/ext:… 时表是空的，不先回填则 openCard 查无此卡、主区空白（缓存真源与刷新恢复链见 registry.js）。
+    else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
   }

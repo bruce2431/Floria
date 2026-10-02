@@ -2855,27 +2855,25 @@ function approvalTrailPush(ev: string, sessionId?: string, requestId?: string, d
 
 // 2026-08-30 审批/提问 pending 重放（DSH 同款「待答=会话持久状态」语义）：approval-request 是
 // 瞬态广播，前端按 currentHash 过滤丢弃后即永久丢失（提问时页面开着别的会话或没开 → 切回只剩
-// 只读兜底卡「请在 CLI 窗口作答」）。改为网关按 requestId 暂存未决 approval（TTL 30 分钟仅兜底
-// 泄漏；正常路径由 解答回执/取消/本地已解决 显式清除），前端 renderSession/WS 重连发 subscribe
-// 时回放该会话未决项 → 打开会话总能补弹交互卡。
-const pendingApprovals = new Map<string, { sessionId: string; payload: unknown; ts: number }>()
-const PENDING_APPROVAL_TTL_MS = 30 * 60 * 1000
+// 只读兜底卡「请在 CLI 窗口作答」）。改为网关按 requestId 暂存未决 approval，前端 renderSession/WS
+// 重连发 subscribe 时回放该会话未决项 → 打开会话总能补弹交互卡。
+// 2026-10-02 生命周期根治：清理只绑两个真实释放源——①会话进程失联确认（detach 3s 复核窗，
+// pendingApprovalsDropSession 与其它 per-session 态一起清）②显式回执（resolved/cancel/processed）。
+// 原 30 分钟墙钟 TTL 兜底已删：它把「CLI 仍活着、进程仍阻塞在等作答」的有效待决项按时间误杀
+// （实测 8h58m 后重放不发卡，只剩转录紧凑行「提问·等待回答」+无响应红标）。
+const pendingApprovals = new Map<string, { sessionId: string; payload: unknown }>()
 function pendingApprovalsSet(sessionId: string, requestId: string, payload: unknown): void {
-  const now = Date.now()
-  for (const [k, v] of pendingApprovals) if (now - v.ts > PENDING_APPROVAL_TTL_MS) pendingApprovals.delete(k)
-  pendingApprovals.set(requestId, { sessionId, payload, ts: now })
+  pendingApprovals.set(requestId, { sessionId, payload })
 }
 function pendingApprovalsDrop(requestId: unknown): void {
   if (typeof requestId === 'string' && requestId) pendingApprovals.delete(requestId)
 }
+function pendingApprovalsDropSession(sessionId: string): void {
+  for (const [requestId, e] of pendingApprovals) if (e.sessionId === sessionId) pendingApprovals.delete(requestId)
+}
 function pendingApprovalsReplay(ws: WebSocket, sessionId: string): void {
-  const now = Date.now()
-  for (const [requestId, e] of pendingApprovals) {
+  for (const [, e] of pendingApprovals) {
     if (e.sessionId !== sessionId) continue
-    if (now - e.ts > PENDING_APPROVAL_TTL_MS) {
-      pendingApprovals.delete(requestId)
-      continue
-    }
     try {
       ws.send(JSON.stringify(e.payload))
     } catch {
@@ -4335,6 +4333,9 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
               if (cliClients.has(sid)) return // 复核窗内重连：状态由重连重报恢复，静默
               turnBeatAt.delete(sid)
               sessionActivity.delete(sid)
+              // 2026-10-02：进程失联确认 → 该会话未决审批/提问一并清（其唯一寿命来源=会话存活，
+              // 非墙钟）。仍在线会话的待决项跨重连窗保留，见 pendingApprovals 注释。
+              pendingApprovalsDropSession(sid)
               const down = `data: ${JSON.stringify({ type: 'activity', session: sid, state: null })}\n\n`
               sendAll(sseClients, (c) => { c.res.write(down) })
               // 2026-08-24 web 会话：CLI 窗口被用户关闭 → 进程死亡 → 从运行表移除

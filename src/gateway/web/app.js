@@ -226,6 +226,13 @@
       localStorage.setItem(UI_KEY, JSON.stringify({ ...cur, ...patch }))
     } catch { /* 存储不可用忽略 */ }
   }
+  // 只读整份（不自带段语义）：分表存同一 key 的调用方（外部卡申报缓存）自己取段。写口恒为 patchUI。
+  function readUI() {
+    try {
+      const raw = localStorage.getItem(UI_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  }
   function saveMgrView() { patchUI({ mgrView: state.mgrView }) }
   function loadMgrView() {
     try {
@@ -1382,7 +1389,9 @@ function setSessionCwd(v) { sessionCwd = v }
     state.currentHash = r.name === 'session' ? r.hash : ''
     renderRecent()
     if (r.name === 'home') renderHome()
-    else if (r.name === 'mgr') { state.mgr = r.mgr; loadMgrView(); renderMgr() }
+    // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进
+    // /manage/ext:… 时表是空的，不先回填则 openCard 查无此卡、主区空白（缓存真源与刷新恢复链见 registry.js）。
+    else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
   }
@@ -4468,7 +4477,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   function registerExtCards(label, cards, replace) {
     if (!label) return
     if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
-    for (const c of normExtCards(cards)) {
+    const list = normExtCards(cards)
+    // 网关权威快照（replace=true）落盘：EXT 只活在内存里，刷新即空 ⇒ 不落盘则刷新后
+    // 外部卡 tab 缺失、/manage/ext:<label>:<id> 直进无卡可解析（见下方 hydrateExtCards）。
+    // postMessage 增量注册不落盘——那是预览页的实时补充，混进快照会让缓存随文档生命周期漂移。
+    if (replace) persistExtDecls(label, { cards: list })
+    for (const c of list) {
       const id = `ext:${label}:${c.id}`
       EXT = EXT.filter((v) => v.id !== id) // 同 id 覆盖，不改位置语义（后注册者在列表尾）
       EXT.push({
@@ -4489,6 +4503,37 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderMgrTabs()
   }
 
+  // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
+  // 真源仍是网关（preview.json）：缓存只是「上次所见」的快照，启动/切项目时先 hydrate 回来让
+  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（preview-card.js）。无缓存（首次访问）
+  // = 空表，照旧等网络清单——不猜不兜底。
+  function persistExtDecls(label, patch) {
+    if (!label) return
+    const d = readUI() || {}
+    const all = d.extDecls && typeof d.extDecls === 'object' ? { ...d.extDecls } : {}
+    all[label] = { ...(all[label] || {}), ...patch }
+    patchUI({ extDecls: all })
+  }
+  // 缓存 → 运行时表（同步、无网络）。放表而不清表：hydrate 只认「当前该项目」这一份，
+  // 异 label 清理仍归 syncExtCards / clearExtCards（不新增第二个清点）。
+  function hydrateExtCards(label) {
+    if (!label) return
+    const d = readUI()
+    const e = d && d.extDecls ? d.extDecls[label] : null
+    if (!e || typeof e !== 'object') return
+    if (Array.isArray(e.cards)) registerExtCards(label, e.cards, true)
+    if (Array.isArray(e.quoteActions)) registerQuoteActions(label, e.quoteActions)
+  }
+  // `ext:<label>:<cardId>` → 缓存恢复。卡 id 不含冒号（normExtCards 正则 [a-zA-Z0-9_-]{1,32}），
+  // 故 label = 最后一个冒号之前那段。路由恢复用（刷新直进 /manage/ext:…）。
+  function hydrateExtCardId(id) {
+    if (typeof id !== 'string' || !id.startsWith('ext:')) return false
+    const i = id.lastIndexOf(':')
+    if (i < 4) return false
+    hydrateExtCards(id.slice(4, i))
+    return true
+  }
+
   // ---------- 项目申报的浮窗动作表（2026-09-28）----------
   // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
   // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（preview-card.js syncExtCards /
@@ -4501,6 +4546,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!label) return
     QACTIONS = normQuoteActions(actions)
     QACTIONS_LABEL = label
+    persistExtDecls(label, { quoteActions: QACTIONS }) // 与 EXT 同一份申报、同一份缓存（同清同存）
   }
   function clearQuoteActions() {
     if (!QACTIONS.length && !QACTIONS_LABEL) return
@@ -4966,6 +5012,12 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
     mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
+  // 外部卡申报的补拉口（与 ensureWork 的树/编辑区补拉同源）：预览栏开着时由 renderWorkPreview →
+  // mountPreview → syncExtCards 拉；关着时在此补齐——否则刷新后外部卡 tab 缺失、/manage/ext:…
+  // 直进无卡可解析（EXT 是内存表，只落缓存不落盘的话两者都靠「先开一次预览」）。
+  function syncWorkExtCards() {
+    if (state.workProj && !state.wkPreview) syncExtCards(state.workProj)
+  }
 
   function hideWkPops() {
     for (const id of ['wk-proj-pop', 'wk-view-pop', 'wk-new-pop']) {
@@ -5164,7 +5216,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
+    hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
+    syncWorkExtCards()
     await loadProjectTree(label)
   }
 
@@ -5225,6 +5279,11 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
+    syncWorkExtCards() // 外部卡申报同上：与树/编辑区/预览同一条补拉链
+    // 布局落地（栏显隐 + 栏宽内联 flex）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
+    // （启动 + token 门解锁后各一次），而栏宽要靠元素实测宽算（applyWorkFlex 的 paneVisible）——
+    // 门/首帧里量不到宽时，这里给第二次落地机会，用户的栏宽不必靠「再动一下开关」才回来。
+    applyPanes()
   }
 
   // ---------- 编辑区（主区左栏，只读） ----------
@@ -5548,6 +5607,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
     loadWork()
+    // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
+    // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
+    hydrateExtCards(state.workProj)
     mountWork()
     applySbMode()
   }
@@ -9468,6 +9530,201 @@ function setGateVerified(v) { gateVerified = v }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && qtSt === 'bar') qtClose() })
   window.addEventListener('scroll', () => { if (qtSt === 'bar') qtClose() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { if (qtSt === 'bar') qtClose() })
+
+  const RAIL_PROMPT_MAX = 50 // 预览提示词封顶（与 dsh 一致）
+  const RAIL_RESP_MAX = 120 // 预览回复封顶
+  const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 内最后一个锚 = 当前轮
+  const RAIL_NARROW = 900 // 窄于此刻度宽隐藏（dsh 900px 断点同值）
+
+  let railItems = []
+  let railActiveIdx = -1
+  let railPreviewIdx = -1
+
+  // 元素正文（优先 .body，滤掉 who/图片/文件标签文本）
+  function railText(el) {
+    const body = el.querySelector('.body') || el
+    return String(body.textContent || '').replace(/\s+/g, ' ').trim()
+  }
+  function railClip(s, max) {
+    return s.length > max ? s.slice(0, max) + '…' : s
+  }
+
+  // 采集轮次：锚=开启用户气泡 [data-t="u"]（data-m=段键）。querySelectorAll('[data-t="u"],[data-t="a"]')
+  // 返回文档序——a 落在其所属轮与下一轮之间即归入当前轮，response 取该轮最后一个 a。轮次<2 由调用方隐藏。
+  function railCollect() {
+    const out = []
+    if (!messagesEl) return out
+    const seq = messagesEl.querySelectorAll('[data-t="u"], [data-t="a"]')
+    let cur = null
+    for (const el of seq) {
+      if (el.getAttribute('data-t') === 'u') {
+        cur = { el, prompt: railClip(railText(el), RAIL_PROMPT_MAX), response: '' }
+        out.push(cur)
+      } else if (cur) {
+        cur.response = railClip(railText(el), RAIL_RESP_MAX)
+      }
+    }
+    return out
+  }
+
+  // nav 单例：动态创建（index.html 不用改），追加到 #chat-area
+  function railNav() {
+    let nav = document.getElementById('turn-rail')
+    if (nav && nav.isConnected) return nav
+    const host = document.getElementById('chat-area')
+    if (!host) return null
+    nav = document.createElement('nav')
+    nav.id = 'turn-rail'
+    nav.className = 'turn-rail'
+    nav.setAttribute('aria-label', '轮次导航')
+    nav.hidden = true
+    nav.innerHTML = '<div class="tr-scroller"><div class="tr-marks"></div></div>'
+      + '<div class="tr-preview" hidden><div class="tr-prompt"></div><div class="tr-resp" hidden></div></div>'
+    host.appendChild(nav)
+    railBind(nav)
+    return nav
+  }
+
+  function railBind(nav) {
+    nav.querySelector('.tr-scroller').addEventListener('pointermove', (e) => {
+      const m = e.target.closest('.tr-mark')
+      if (m) railPreview(nav, Number(m.dataset.idx))
+    })
+    nav.addEventListener('pointerleave', () => { railPreview(nav, -1) })
+    nav.addEventListener('click', (e) => {
+      const m = e.target.closest('.tr-mark')
+      if (m) railJump(Number(m.dataset.idx))
+    })
+  }
+
+  // 当前轮：视口上 RAIL_ACTIVE_BAND 带内最后一个锚
+  function railActiveFromScroll() {
+    const sc = document.getElementById('chat-scroll')
+    if (!sc || !railItems.length) return -1
+    const band = sc.scrollTop + sc.clientHeight * RAIL_ACTIVE_BAND
+    let idx = 0
+    for (let i = 0; i < railItems.length; i++) {
+      if (topInScroll(railItems[i].el) <= band) idx = i
+      else break
+    }
+    return idx
+  }
+
+  // 只标态（不整重建）——滚动/预览走此路
+  function railPaint(nav) {
+    const marks = nav.querySelectorAll('.tr-mark')
+    marks.forEach((m, i) => {
+      m.classList.toggle('tr-active', i === railActiveIdx)
+      m.classList.toggle('tr-preview', i === railPreviewIdx)
+    })
+    // active 刻度留在轨内可视（手动算，禁 scrollIntoView——会外溢滚动祖先链）
+    const scroller = nav.querySelector('.tr-scroller')
+    const act = marks[railActiveIdx]
+    if (act) {
+      const top = act.offsetTop
+      const h = scroller.clientHeight
+      if (top < scroller.scrollTop) scroller.scrollTop = top
+      else if (top + act.offsetHeight > scroller.scrollTop + h) scroller.scrollTop = top + act.offsetHeight - h
+    }
+  }
+
+  function railRender(nav, items) {
+    const marks = nav.querySelector('.tr-marks')
+    marks.textContent = ''
+    items.forEach((it, i) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'tr-mark'
+      b.dataset.idx = String(i)
+      b.setAttribute('aria-label', `跳到第 ${i + 1} 轮`)
+      marks.appendChild(b)
+    })
+    railPaint(nav)
+  }
+
+  function railPreview(nav, idx) {
+    if (idx === railPreviewIdx) return
+    railPreviewIdx = idx
+    railPaint(nav)
+    const pv = nav.querySelector('.tr-preview')
+    const item = railItems[idx]
+    const marks = nav.querySelectorAll('.tr-mark')
+    if (!item || !marks[idx]) { pv.hidden = true; return }
+    pv.hidden = false
+    pv.querySelector('.tr-prompt').textContent = item.prompt || `第 ${idx + 1} 轮`
+    const resp = pv.querySelector('.tr-resp')
+    resp.textContent = item.response || ''
+    resp.hidden = !item.response
+    // 垂直居中于该刻度，钳在 nav 内
+    const scroller = nav.querySelector('.tr-scroller')
+    const center = marks[idx].offsetTop + marks[idx].offsetHeight / 2 - scroller.scrollTop
+    const ph = pv.offsetHeight
+    const maxTop = Math.max(0, nav.clientHeight - ph)
+    pv.style.top = Math.max(0, Math.min(maxTop, center - ph / 2)) + 'px'
+  }
+
+  function railJump(idx) {
+    const item = railItems[idx]
+    if (!item) return
+    const sc = document.getElementById('chat-scroll')
+    if (!sc) return
+    stage.yielded = true // 用户导航=接管视口，停止 stage 跟随（同滚动输入）
+    sc.scrollTo({ top: topInScroll(item.el), behavior: 'smooth' })
+    railActiveIdx = idx
+    railPreviewIdx = -1
+    const nav = document.getElementById('turn-rail')
+    if (nav) railPaint(nav)
+  }
+
+  function railRefresh() {
+    const nav = railNav()
+    if (!nav) return
+    const area = document.getElementById('chat-area')
+    const inSession = !!area && area.classList.contains('in-session') && !area.classList.contains('work')
+    railItems = railCollect()
+    if (!inSession || railItems.length < 2 || window.innerWidth <= RAIL_NARROW) {
+      nav.hidden = true
+      railPreviewIdx = -1
+      return
+    }
+    nav.hidden = false
+    railActiveIdx = railActiveFromScroll()
+    railPreviewIdx = -1
+    railRender(nav, railItems)
+  }
+
+  // 变更驱动：#messages 整页重建/增量 append/流式文本 → debounce 重算
+  let railTimer = null
+  const railObs = new MutationObserver(() => {
+    clearTimeout(railTimer)
+    railTimer = setTimeout(railRefresh, 150)
+  })
+
+  function railInit() {
+    const nav = railNav()
+    if (!nav) return
+    if (messagesEl) railObs.observe(messagesEl, { childList: true, subtree: true, characterData: true })
+    const sc = document.getElementById('chat-scroll')
+    if (sc) {
+      let ticking = false
+      sc.addEventListener('scroll', () => {
+        if (ticking) return
+        ticking = true
+        requestAnimationFrame(() => {
+          ticking = false
+          const n = document.getElementById('turn-rail')
+          if (!n || n.hidden || !railItems.length) return
+          const idx = railActiveFromScroll()
+          if (idx === railActiveIdx) return
+          railActiveIdx = idx
+          railPaint(n)
+        })
+      }, { passive: true })
+    }
+    window.addEventListener('resize', railRefresh)
+    railRefresh()
+  }
+  railInit()
 
   // ---------- 启动 ----------
   ;(async () => {

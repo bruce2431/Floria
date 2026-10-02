@@ -64,6 +64,13 @@ import { ctx } from '../inputbar/ctx-meter.js'
       localStorage.setItem(UI_KEY, JSON.stringify({ ...cur, ...patch }))
     } catch { /* 存储不可用忽略 */ }
   }
+  // 只读整份（不自带段语义）：分表存同一 key 的调用方（外部卡申报缓存）自己取段。写口恒为 patchUI。
+  function readUI() {
+    try {
+      const raw = localStorage.getItem(UI_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch { return null }
+  }
   function saveMgrView() { patchUI({ mgrView: state.mgrView }) }
   function loadMgrView() {
     try {
@@ -174,6 +181,8 @@ export {
   modeTabsEl,
   newSessionProject,
   overlay,
+  patchUI,
+  readUI,
   recentLabel,
   sInput,
   saveMgrView,

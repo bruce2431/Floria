@@ -171,6 +171,8 @@ CLI 交互权限弹窗接网关中继——`src/bridge/gatewayPermissionRelay.ts
 
 **pending 跨网关重启补发**：①模块级 `pendingApprovalRequests` 补发表——`sendRequest` 记入，`sendResponse`/`cancelRequest`/`approval-response` 消费（含 handler miss 死请求）/`onResponse` 退订（abort 清理路径）逐点移除；②WS `open`（含重连）`resendPendingApprovalRequests` 逐条重发 → 走网关现有暂存+broadcast 链路（网关零改动），web 先订阅收 broadcast、后订阅收重放，两序均补弹可交互卡；③`pendingResponses` 应答表提升模块级跨重连保留 + close 处 `clear()`（原断开即清会杀掉重启前挂起弹窗的 handler），作答经新连接仍命中 handler 唤醒重启前弹窗。
 
+**网关待决审批/提问暂存与回放**：`localGateway.ts` `pendingApprovals`（按 `requestId` 存 `{sessionId, payload}`）——approval-request 到达即 `pendingApprovalsSet`，web `subscribe`（开会话/WS 重连）时 `pendingApprovalsReplay` 重发该会话未决 payload → 补弹交互卡。**寿命只绑两个真实释放源，无墙钟 TTL**：①显式回执 `pendingApprovalsDrop`（`approval-processed`/`approval-cancel`/`approval-local-resolved`）②会话进程失联确认（`detach` 3s 复核窗内 `pendingApprovalsDropSession`，与 turnBeat/sessionActivity 同点清）。**不变量**：待决项寿命 = 会话存活期，进程仍活着并阻塞在等作答的提问不因时间被清（旧 30 分钟墙钟 TTL 会误杀，重放静默不发卡 → 转录只剩紧凑行「提问·等待回答」）。仍在线会话的待决项跨 CLI 重连 ~1s 窗保留（清理在 3s 复核窗后）。
+
 **调试**：`GET /gateway/diagnostics`（token 保护）返回审批轨迹 + cliClients/sockets/webSessions 概览。`cliClients` 有会话但 trail 无 `cli-approval-request` 有两类含义：①该 CLI 是**旧 exe**（常驻化之前，回调只在连接建立期存在）；②CLI 为新 exe 但弹窗仍在网关断连窗口内出现（常驻化后可自愈）。判据：查 trail 是否只有 `cli-register`/`cli-hello` 而无后续审批事件，并比对该进程 exe 时间戳（`Get-CimInstance Win32_Process` 看 CommandLine）。
 
 ## 9. web 重命名 → CLI 实时同步

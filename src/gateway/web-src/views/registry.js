@@ -10,7 +10,7 @@
 // 外部永不获得在宿主 DOM 执行的能力（SPEC-视图卡化 §7 边界）。
 
 import { I } from '../core/icons.js'
-import { chatArea, esc, sessionCard } from '../core/state.js'
+import { chatArea, esc, patchUI, readUI, sessionCard } from '../core/state.js'
 import { neuronsCardDef } from './cards/neurons-card.js'
 import { pluginsCardDef } from './cards/plugins-card.js'
 import { projectsCardDef } from './cards/projects-card.js'
@@ -39,7 +39,12 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext-card.j
   function registerExtCards(label, cards, replace) {
     if (!label) return
     if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
-    for (const c of normExtCards(cards)) {
+    const list = normExtCards(cards)
+    // 网关权威快照（replace=true）落盘：EXT 只活在内存里，刷新即空 ⇒ 不落盘则刷新后
+    // 外部卡 tab 缺失、/manage/ext:<label>:<id> 直进无卡可解析（见下方 hydrateExtCards）。
+    // postMessage 增量注册不落盘——那是预览页的实时补充，混进快照会让缓存随文档生命周期漂移。
+    if (replace) persistExtDecls(label, { cards: list })
+    for (const c of list) {
       const id = `ext:${label}:${c.id}`
       EXT = EXT.filter((v) => v.id !== id) // 同 id 覆盖，不改位置语义（后注册者在列表尾）
       EXT.push({
@@ -60,6 +65,37 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext-card.j
     renderMgrTabs()
   }
 
+  // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
+  // 真源仍是网关（preview.json）：缓存只是「上次所见」的快照，启动/切项目时先 hydrate 回来让
+  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（preview-card.js）。无缓存（首次访问）
+  // = 空表，照旧等网络清单——不猜不兜底。
+  function persistExtDecls(label, patch) {
+    if (!label) return
+    const d = readUI() || {}
+    const all = d.extDecls && typeof d.extDecls === 'object' ? { ...d.extDecls } : {}
+    all[label] = { ...(all[label] || {}), ...patch }
+    patchUI({ extDecls: all })
+  }
+  // 缓存 → 运行时表（同步、无网络）。放表而不清表：hydrate 只认「当前该项目」这一份，
+  // 异 label 清理仍归 syncExtCards / clearExtCards（不新增第二个清点）。
+  function hydrateExtCards(label) {
+    if (!label) return
+    const d = readUI()
+    const e = d && d.extDecls ? d.extDecls[label] : null
+    if (!e || typeof e !== 'object') return
+    if (Array.isArray(e.cards)) registerExtCards(label, e.cards, true)
+    if (Array.isArray(e.quoteActions)) registerQuoteActions(label, e.quoteActions)
+  }
+  // `ext:<label>:<cardId>` → 缓存恢复。卡 id 不含冒号（normExtCards 正则 [a-zA-Z0-9_-]{1,32}），
+  // 故 label = 最后一个冒号之前那段。路由恢复用（刷新直进 /manage/ext:…）。
+  function hydrateExtCardId(id) {
+    if (typeof id !== 'string' || !id.startsWith('ext:')) return false
+    const i = id.lastIndexOf(':')
+    if (i < 4) return false
+    hydrateExtCards(id.slice(4, i))
+    return true
+  }
+
   // ---------- 项目申报的浮窗动作表（2026-09-28）----------
   // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
   // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（preview-card.js syncExtCards /
@@ -72,6 +108,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext-card.j
     if (!label) return
     QACTIONS = normQuoteActions(actions)
     QACTIONS_LABEL = label
+    persistExtDecls(label, { quoteActions: QACTIONS }) // 与 EXT 同一份申报、同一份缓存（同清同存）
   }
   function clearQuoteActions() {
     if (!QACTIONS.length && !QACTIONS_LABEL) return
@@ -145,6 +182,8 @@ export {
   clearExtCards,
   clearQuoteActions,
   currentCardId,
+  hydrateExtCardId,
+  hydrateExtCards,
   openCard,
   quoteActions,
   registerExtCards,

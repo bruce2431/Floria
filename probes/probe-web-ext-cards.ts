@@ -40,6 +40,7 @@ const extCardJs = await Bun.file(`${SRC}/views/cards/ext-card.js`).text()
 const previewCardJs = await Bun.file(`${SRC}/views/cards/preview-card.js`).text()
 const railExtJs = await Bun.file(`${SRC}/sidebar/rail-ext.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
+const workJs = await Bun.file(`${SRC}/sidebar/work.js`).text()
 const srcAppJs = await Bun.file(`${SRC}/app.js`).text()
 const bundleTs = await Bun.file(`${ROOT}/scripts/bundle-web-modules.ts`).text()
 const localGatewayTs = await Bun.file(`${CLI}/localGateway.ts`).text()
@@ -58,7 +59,7 @@ const regBody = body(registryJs, 'function registerExtCards(')
 ok('I3 EXT 注册只写 EXT、不碰静态卡表 CARDS', regBody.includes('EXT.push({') && !regBody.includes('CARDS'))
 ok('I3 外部卡 mount 一律由宿主生成（mountExtCard），无外部代码注入点', regBody.includes('mount: (body) => mountExtCard(body, label, c)'))
 ok('I3 外部卡 id 命名空间 ext:<label>:<id>（与第一方裸词 id 零撞车）', regBody.includes('`ext:${label}:${c.id}`'))
-ok('I3 外部卡字段校验委托给 ext-card.js 的同一份过滤器', regBody.includes('for (const c of normExtCards(cards))'))
+ok('I3 外部卡字段校验委托给 ext-card.js 的同一份过滤器', regBody.includes('normExtCards(cards)'))
 
 // ---------- I1 生命周期：清点受控（异 label / 文档重挂清；离开预览路由不清） ----------
 ok('I1 registry.js 定义 clearExtCards', /function clearExtCards\(\)/.test(registryJs))
@@ -75,6 +76,20 @@ const paired = clearIdx.filter((i) => syncIdx.some((j) => j > i && j - i < 200))
 ok('I1 syncExtCards 与 clearRailExt 同点（2 处）', clearIdx.length === 2 && syncIdx.length === 2 && paired === 2, `clearRailExt ${clearIdx.length} / syncExtCards ${syncIdx.length} / 配对 ${paired}`)
 ok('I1 离开预览路由**不清**外部卡（route.js 无 clearExtCards）', !routeJs.includes('clearExtCards'))
 ok('I1 clearExtCards 调用点只此一处（preview-card.js syncExtCards）', count(previewCardJs, /clearExtCards\(\)/g) === 1, `preview-card.js 内 ${count(previewCardJs, /clearExtCards\(\)/g)} 次`)
+
+// ---------- I5 刷新可恢复：EXT 是内存表，须落一份缓存并在启动/路由/切项目三处回填 ----------
+// 守护的不变量：刷新（或网关重启后重载页面）后外部卡 tab 与 /manage/ext:<label>:<id> 直进
+// 都仍成立——不靠「先开一次预览」副作用。
+const declBody = body(registryJs, 'function persistExtDecls(')
+ok('I5 申报快照落 floria-ui-v1（分表 extDecls，与 work/管理态同一条存储链）', declBody.includes('readUI()') && declBody.includes('patchUI({ extDecls: all })'))
+ok('I5 只缓存网关权威快照（replace=true），postMessage 增量不落盘', regBody.includes('if (replace) persistExtDecls(label, { cards: list })'))
+ok('I5 浮窗动作与 EXT 同存（同一份申报、同一份缓存）', body(registryJs, 'function registerQuoteActions(').includes('persistExtDecls(label, { quoteActions: QACTIONS })'))
+const hydBody = body(registryJs, 'function hydrateExtCards(')
+ok('I5 回填走同一注册口（不另写第二套建表逻辑）', hydBody.includes('registerExtCards(label, e.cards, true)') && hydBody.includes('registerQuoteActions(label, e.quoteActions)'))
+ok('I5 启动恢复接线（work.js initWork 在 loadWork 之后回填）', /loadWork\(\)[\s\S]{0,400}?hydrateExtCards\(state\.workProj\)/.test(workJs))
+ok('I5 切项目回填（selectProject 换槽即换卡）', /state\.workProj = label[\s\S]{0,900}?hydrateExtCards\(label\)/.test(workJs))
+ok('I5 路由直进回填（route.js mgr 分支按 id 里的 label 回填，先于 renderMgr）', /hydrateExtCardId\(r\.mgr\)[\s\S]{0,80}?renderMgr\(\)/.test(routeJs))
+ok('I5 网络权威刷新不落给预览栏独占（ensureWork 补拉链含 syncWorkExtCards）', body(workJs, 'function syncWorkExtCards(').includes("!state.wkPreview) syncExtCards(state.workProj)") && /renderWorkPreview\(\)[\s\S]{0,200}?syncWorkExtCards\(\)/.test(workJs))
 
 // ---------- I2 只为当前帧作证：两条申报共用同一道门 ----------
 const bridgeBody = body(railExtJs, 'function bindRailExtBridge()')

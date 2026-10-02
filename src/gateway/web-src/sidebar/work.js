@@ -6,10 +6,10 @@ import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, esc, isMobile, loadWork, loadWorkPanes, saveWork, sessionCard, stashWorkPanes, state, toast } from '../core/state.js'
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
-import { currentCardId } from '../views/registry.js'
+import { currentCardId, hydrateExtCards } from '../views/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
-import { mountPreview } from '../views/cards/preview-card.js'
+import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
   // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
@@ -407,6 +407,12 @@ import { mountPreview } from '../views/cards/preview-card.js'
     if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
     mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
+  // 外部卡申报的补拉口（与 ensureWork 的树/编辑区补拉同源）：预览栏开着时由 renderWorkPreview →
+  // mountPreview → syncExtCards 拉；关着时在此补齐——否则刷新后外部卡 tab 缺失、/manage/ext:…
+  // 直进无卡可解析（EXT 是内存表，只落缓存不落盘的话两者都靠「先开一次预览」）。
+  function syncWorkExtCards() {
+    if (state.workProj && !state.wkPreview) syncExtCards(state.workProj)
+  }
 
   function hideWkPops() {
     for (const id of ['wk-proj-pop', 'wk-view-pop', 'wk-new-pop']) {
@@ -605,7 +611,9 @@ import { mountPreview } from '../views/cards/preview-card.js'
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
+    hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
+    syncWorkExtCards()
     await loadProjectTree(label)
   }
 
@@ -666,6 +674,11 @@ import { mountPreview } from '../views/cards/preview-card.js'
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
+    syncWorkExtCards() // 外部卡申报同上：与树/编辑区/预览同一条补拉链
+    // 布局落地（栏显隐 + 栏宽内联 flex）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
+    // （启动 + token 门解锁后各一次），而栏宽要靠元素实测宽算（applyWorkFlex 的 paneVisible）——
+    // 门/首帧里量不到宽时，这里给第二次落地机会，用户的栏宽不必靠「再动一下开关」才回来。
+    applyPanes()
   }
 
   // ---------- 编辑区（主区左栏，只读） ----------
@@ -989,6 +1002,9 @@ import { mountPreview } from '../views/cards/preview-card.js'
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
     loadWork()
+    // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
+    // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
+    hydrateExtCards(state.workProj)
     mountWork()
     applySbMode()
   }

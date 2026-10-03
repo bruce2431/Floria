@@ -459,7 +459,8 @@ function isDangerousFilePathToAutoEdit(path: string): boolean {
       // 'worktrees' (where Claude stores git worktrees), 'preview' (project
       // preview deliverables — static pages served by the built-in gateway) or
       // 'neturon' (per-project neuron library — memories, logs and durable
-      // deliverables, i.e. content data rather than harness config).
+      // deliverables, i.e. content data rather than harness config) or 'images'
+      // (AI-generated images served by the built-in gateway).
       // Any nested .claude directories beneath them (not followed by a skipped
       // child) are still blocked.
       if (dir === '.claude') {
@@ -470,7 +471,8 @@ function isDangerousFilePathToAutoEdit(path: string): boolean {
         if (
           normalizedNext === 'worktrees' ||
           normalizedNext === 'preview' ||
-          normalizedNext === 'neturon'
+          normalizedNext === 'neturon' ||
+          normalizedNext === 'images'
         ) {
           break // Skip this .claude, continue checking other segments
         }

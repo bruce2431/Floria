@@ -2,14 +2,17 @@
  * Credential pool types for multi-provider, multi-key, multi-model support.
  *
  * Each provider config (Anthropic, DeepSeek, Kimi, GLM, etc.) stores its own:
- * - base URL (Anthropic-compatible endpoint)
+ * - base URL (endpoint root; see `protocol`)
+ * - Wire protocol (default 'anthropic'; 'openai-chat' = Chat Completions adapter)
  * - Pool of API keys with exhaustion tracking
  * - List of available models
  * - Active selections (which key, which model)
  *
  * All providers in this pool share the Anthropic SDK client path
- * (new Anthropic({apiKey, baseURL, ...})). Bedrock/Vertex/Foundry
- * use separate SDKs and are excluded from this pool.
+ * (new Anthropic({apiKey, baseURL, ...})); a provider whose `protocol` is not
+ * 'anthropic' has the SDK's fetch overridden with a translating adapter
+ * (services/api/protocol-fetch.ts). Bedrock/Vertex/Foundry use separate SDKs
+ * and are excluded from this pool.
  */
 
 export interface ApiKeyEntry {
@@ -22,8 +25,25 @@ export interface ApiKeyEntry {
 }
 
 export interface ProviderConfig {
-  /** Anthropic-compatible base URL (e.g., https://api.deepseek.com/anthropic) */
+  /**
+   * Endpoint root for this provider. For the default `'anthropic'` protocol this
+   * is an Anthropic-compatible base URL (e.g. https://api.deepseek.com/anthropic);
+   * for `'openai-chat'` it is the OpenAI Chat Completions base
+   * (e.g. https://generativelanguage.googleapis.com/v1beta/openai).
+   */
   baseUrl: string
+  /**
+   * Wire protocol this provider's endpoint speaks (2026-10-03). `undefined`
+   * defaults to `'anthropic'` (Anthropic Messages API via the SDK, the
+   * historical single-protocol exit). `'openai-chat'` routes requests through
+   * the OpenAI Chat Completions fetch adapter
+   * (services/api/openai-chat-fetch-adapter.ts) instead. Declaring the protocol
+   * takes over completely: there is NO runtime auto-detection — the judgment is
+   * written here once and read-only at runtime. Mirrors the capabilities/
+   * effortLevels per-provider declaration convention. Takes effect on session
+   * restart.
+   */
+  protocol?: string
   /** Pool of API keys for this provider */
   keys: ApiKeyEntry[]
   /** Index into keys[] of the currently active key */

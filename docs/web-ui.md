@@ -72,7 +72,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **网关 `POST /gateway/model`**：**model → 每会话**：校验放宽到凭据池全部供应商（`findModelProvider`），随 `{type:'model', value, provider}` 按 sessionId 精确路由到目标 CLI 进程（进程内绑定 provider 的 baseUrl/key）；**本分支不写全局凭据池**；无 sessionId/未命中返回 400 不广播。**defaultModel → `switchModelAuto` 全局默认**（只对之后新建的会话生效）。**effortLevel → `updateSettingsForSource('userSettings', { effortLevel })`** 写便携根 settings.json（校验/合并/删除/缓存失效/失败暴露全在官方设置服务）+ broadcast `{type:'effort'}`。**写盘守卫**：写盘前过 `parseEffortValue` + `toPersistableEffort`——读侧 schema 非 ant 只接受 low/medium/high 且整文件 safeParse，`'max'` 原样落盘会使整个 userSettings 校验失败作废；守卫后 `'max'` 为 session-scoped 不落盘，运行时仍经广播生效。
 
-**能力声明通道**：凭据池 provider 段新增 `capabilities`（`ProviderConfig.capabilities`），`get3PModelCapabilityOverride` 经 `getPoolModelCapability` → `findModelProvider` 优先消费——**声明即完全接管**（未列能力=显式不支持），未声明段维持 env/name 启发式。**`effortLevels` 声明**（值域 off/low/medium/high/max；glm=[low,high,max]、deepseek=[off,low,high,max]）+ 两段 capabilities 含 `max_effort`（官方 max 档直发，不降级）。**底栏 Off 穿透**：广播 null 必须**透传**（AppState.effortValue 扩 `| null`），`resolveAppliedEffort` 对显式 null 不发 effort 也不落默认链，`'auto'`=清除跟随默认。**Off 真关分叉**（`claude.ts` `paramsFromContext`）：显式 Off 且模型声明含 off → `thinking:{type:'disabled'}`（`getPoolModelEffortLevels` 读取，优先于 ultrathink/thinkingConfig）。**web 菜单按声明动态渲染**：`/gateway/models` 每条目随带 `effortLevels`（`listModels` poolRows），`model-select.js` `modelEffortLevels()` 取当前模型清单生成菜单行；未声明回退固定 Off + Low/High/Max；无 off 档模型（GLM）未设置等级时显示「默认」。
+**能力声明通道**：凭据池 provider 段声明式字段族（`protocol` 走 wire 协议翻译，见 core.md「逐家 wire protocol 与 openai-chat 适配器」；下同）。provider 段新增 `capabilities`（`ProviderConfig.capabilities`），`get3PModelCapabilityOverride` 经 `getPoolModelCapability` → `findModelProvider` 优先消费——**声明即完全接管**（未列能力=显式不支持），未声明段维持 env/name 启发式。**`effortLevels` 声明**（值域 off/low/medium/high/max；glm=[low,high,max]、deepseek=[off,low,high,max]）+ 两段 capabilities 含 `max_effort`（官方 max 档直发，不降级）。**底栏 Off 穿透**：广播 null 必须**透传**（AppState.effortValue 扩 `| null`），`resolveAppliedEffort` 对显式 null 不发 effort 也不落默认链，`'auto'`=清除跟随默认。**Off 真关分叉**（`claude.ts` `paramsFromContext`）：显式 Off 且模型声明含 off → `thinking:{type:'disabled'}`（`getPoolModelEffortLevels` 读取，优先于 ultrathink/thinkingConfig）。**web 菜单按声明动态渲染**：`/gateway/models` 每条目随带 `effortLevels`（`listModels` poolRows），`model-select.js` `modelEffortLevels()` 取当前模型清单生成菜单行；未声明回退固定 Off + Low/High/Max；无 off 档模型（GLM）未设置等级时显示「默认」。
 
 **直接切模型自动切供应商**：**`/model <name>` 直选全池模型，归属其它供应商时本进程绑定该供应商（`setSessionProviderOverride`，baseUrl/key 进程内立即生效，不写全局池）**（CLI `model.tsx`：池内模型跳过 API 试呼验证；补全聚合全部供应商模型、当前供应商排最前）。**`/provider`、`/key` 命令均已移除**——模型/密钥配置只能直接编辑便携根 `.claude/credentials.json`。池级 API：`pool.ts` `findModelProvider` / `setSessionProviderOverride` + `getSessionProviderName` / `switchModelAuto`。
 
@@ -600,3 +600,16 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **构建不变量**：登记进 `scripts/bundle-web-modules.ts` MODULES，区间号须排在 `core/state.js`（messagesEl）与 `chat/stage.js`（stage/topInScroll）之后、`__app__` 启动序列（5379）之前；顶层立即 `railInit()`。
 - **cache-bust**：`web/sw.js` 的 `CACHE` 与 `web/index.html` 的 `/styles.css?v=` `/app.js?v=` 三处同值（本次 v427）。
 - **探针锚点**：暂无（纯前端 DOM 组件，待补 `probes/probe-turn-rail.ts`）。
+
+## 50. AI 生成图展示（markdown 代号，2026-10-03）
+
+**能力**：AI 生成的图落 `<项目根>/.claude/images/`（命名 `{厂商/模型}-{YYYYMMDDHHMMSS}.{ext}`），模型在回复文本里输出 markdown 图片语法、src 仅写**文件名代号**（如 `![](gemini-20261003123000.png)`），web 渲成 `<img>`、CLI 渲成可点击路径。**图片字节不进消息流/转录**——消息里只有代号。厂商 adapter（调各家生图 API + 归一化 bytes + 落盘）是独立阶段，展示链与厂商解耦。
+
+- **web 渲染**（`core/markdown.js` `mdInline`）：模块级 `mdImgResolver` + 导出 `setImageSrcResolver(fn)`；在链接替换**之前**插图片分支 `!\[([^\]]*)\]\(([^)\s]+)\)`，代号过白名单 `/^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/`（禁 `/` 与 `.` 路径段 → 防穿越；`mdHtml` 入口已整体 esc），命中且 resolver 返回 URL → `<img class="msg-img md-img" loading="lazy" ...>`；不命中或无 resolver → **保留原文**（不兜底）。
+- **resolver 注册**（`chat/messages.js`）：一次性 `setImageSrcResolver((code) => ...)`——从当前会话取 `projectScope==='project'` 的 `projectLabel`，拼 `/gateway/file?label=&path=.claude/images/<code>`（复用读端点，零网关改动，见 gateway.md §16）。
+- **CLI 渲染**（`utils/markdown.ts` `formatToken` `case 'image'`）：同一白名单命中 → `createHyperlink(pathToFileURL(join(getCwd(), '.claude', 'images', code)).href, '.claude/images/' + code)`（OSC 8 支持端可点），否则回退 `token.href`。
+- **样式**：`styles.css` `.msg .blocks .md-img`（`max-width: min(100%, 480px)` + 圆角 + `cursor: zoom-in`，lightbox 委托沿用 `.msg-img`）。
+- **权限豁免**：`utils/permissions/filesystem.ts` 的 `.claude/` 子目录豁免表加入 `images`（与 `worktrees`/`preview`/`neturon` 同列），否则 Write 落 `.claude/images/` 被拦。
+- **边界**：全局会话（无 `projectLabel`）resolver 返 null → 不渲染、留原文；单图受 `/gateway/file` 4 MB 上限约束。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v435）。
+- **探针锚点**：`probes/probe-md-image.ts`（纯函数：注入 resolver 断言合法代号出 `<img>`、非法/无 resolver 保留原文、XSS 类代号不注入）。

@@ -25,6 +25,7 @@ import { ConfigError, cfgGet, cfgRequired, resolveNeuronPath } from './config.js
 import { readMemories } from './db.js'
 import { nowStampCompact, readJson, readYaml, writeJsonAtomic } from './coggraph.js'
 import { loadCredentials } from '../../utils/credentials/pool.js'
+import { resolveProtocolFetch } from '../../services/api/protocol-fetch.js'
 
 /** 每成员证据片段上限（取 true_memories 对应条目的 blocks[0] 检索锚头部） */
 const EVIDENCE_HEAD = 60
@@ -153,10 +154,20 @@ function resolveLlm(neuronPath: string): { system: string; call: LlmCall } {
   const baseUrl = provider.baseUrl
   if (!baseUrl) throw new ConfigError(`provider '${providerName}' 无 baseUrl`)
 
+  // provider 声明的协议决定走哪条 fetch：anthropic（缺省）→ 原始 fetch 直发
+  // /v1/messages；openai-chat → 适配器翻译成 Chat Completions。判定单源 =
+  // services/api/protocol-fetch.ts。
+  const doFetch =
+    resolveProtocolFetch({
+      protocol: provider.protocol ?? 'anthropic',
+      baseUrl,
+      apiKey: key,
+    }) ?? fetch
+
   return {
     system: '你是一个概念抽象模块。直接输出 JSON，不要包含任何推理过程或其他文字。',
     call: async (system, user) => {
-      const resp = await fetch(`${baseUrl}/v1/messages`, {
+      const resp = await doFetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

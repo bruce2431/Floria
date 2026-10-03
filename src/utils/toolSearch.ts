@@ -338,6 +338,9 @@ async function runToolReferenceProbe(model: string): Promise<boolean> {
     const keyEntry =
       config?.keys?.[config.activeKeyIndex] ?? config?.keys?.[0]
     if (!config?.baseUrl || !keyEntry?.value) return true
+    // 非 Anthropic 协议的 provider（如 openai-chat 的 Gemini 兼容端点）没有
+    // /v1/messages 端点，这个 tool_reference 形状探针对其无意义 → fail open。
+    if ((config.protocol ?? 'anthropic') !== 'anthropic') return true
     endpoint = { baseUrl: config.baseUrl, apiKey: keyEntry.value }
   } catch {
     return true

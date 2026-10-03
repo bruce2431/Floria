@@ -168,6 +168,9 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    图未落盘（404）→ onerror 替换为 [Image #N] 裸文本节点（淡色小字），不出破图 */
 .msg .msg-imgs { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; gap: 6px; margin-top: 5px; font-size: 12px; color: var(--text-3); }
 .msg .msg-imgs .msg-img { display: block; max-width: min(160px, 100%); max-height: 160px; width: auto; height: auto; border-radius: 10px; margin: 0; cursor: zoom-in; }
+/* AI 生成图（2026-10-03）：模型输出 ![](文件名.png) 渲染在回复正文 .blocks 内（不在 .msg-imgs），
+   故单列样式；上限 480px 超出收缩，复用 .msg-img 类接入既有 lightbox 委托（点图看大图）。 */
+.msg .blocks .md-img { display: block; max-width: min(100%, 480px); height: auto; border-radius: 10px; margin: 6px 0; cursor: zoom-in; }
 /* 用户消息文件卡片（2026-09-12 文件上传定案：像图片一样有 UI）——.msg-files 在 .body/.msg-imgs
    之后，气泡外下方右对齐；点击复制落盘路径（title=完整路径悬停可看） */
 .msg .msg-files { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 5px; }

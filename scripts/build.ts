@@ -202,6 +202,42 @@ const sharpStubPlugin: BunPlugin = {
   },
 }
 
+// 2026-10-03：自包含 exe 内嵌 ripgrep——Bun 1.4.2 编译产物不再提供 argv0='rg' 的
+// 内部分发（旧链 `command: process.execPath, argv0:'rg'` 会以 CLI 自身启动并把 --hidden
+// 当未知选项，exit 1 被 ripgrep.ts 当作「无匹配」→ Grep/Glob 全路径恒空），而系统 rg
+// 与 builtin 目录在本机均不可得。改为把本仓自带 rg 作为构建资产内嵌，运行时落地到
+// 真实路径再 spawn（内嵌虚拟路径只可读、不可执行）。宿主平台二进制缺失即硬失败，
+// 不静默降级（降级=回到「Grep 恒空」的坑）。
+const rgBinPath = resolve(
+  SCRIPT_DIR,
+  '..',
+  'src',
+  'vendor',
+  'ripgrep',
+  `${process.arch}-${process.platform}`,
+  process.platform === 'win32' ? 'rg.exe' : 'rg',
+)
+if (!existsSync(rgBinPath)) {
+  console.error(
+    `[build] 自带 ripgrep 缺失：${rgBinPath}（Grep/Glob 依赖它，拒绝产出不可用的 exe）`,
+  )
+  process.exit(1)
+}
+
+const ripgrepEmbedPlugin: BunPlugin = {
+  name: 'ripgrep-bin-embed',
+  setup(builder) {
+    builder.onResolve({ filter: /^virtual:ripgrep-bin$/ }, () => ({
+      path: rgBinPath,
+      namespace: 'ripgrep-bin',
+    }))
+    builder.onLoad({ filter: /.*/, namespace: 'ripgrep-bin' }, async () => ({
+      contents: new Uint8Array(await Bun.file(rgBinPath).arrayBuffer()),
+      loader: 'file',
+    }))
+  },
+}
+
 const defines = {
   'process.env.USER_TYPE': JSON.stringify('external'),
   'process.env.CLAUDE_CODE_FORCE_FULL_LOGO': JSON.stringify('true'),
@@ -274,7 +310,7 @@ const result = await Bun.build({
   external: externals,
   define: defines,
   features,
-  plugins: [sharpStubPlugin],
+  plugins: [sharpStubPlugin, ripgrepEmbedPlugin],
 })
 
 if (!result.success) {

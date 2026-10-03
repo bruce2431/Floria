@@ -298,3 +298,5 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 **共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` 命中 `scope==='project'` 后才动盘。
 
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 三件真实现：重命名 13 例 + 删除 12 例 + 端点转译/`SKIP_TREE_DIRS` 文本断言，31 项；临时树建在 `os.tmpdir()`，跑完自清）。
+
+**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按项目内相对路径读盘，`.claude/images/` 仅是普通项目内路径，无需网关改动。**边界**：全局会话（`projectScope:'global'`，无 `label`）不渲染此类图；单图受 `GET /gateway/file` 的 4 MB 上限约束。

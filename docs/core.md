@@ -12,6 +12,18 @@
 
 **裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机配置根由工作区根 `.claude-portable` 标记（walk-up 第 2 步）决定，本步不触发。
 
+## 逐家 wire protocol 与 openai-chat 适配器
+
+请求链焊死 Anthropic Messages（`getAnthropicClient()` 恒 `new Anthropic({baseURL})` → POST `${baseURL}/v1/messages`），接入无 Anthropic 兼容端点的厂商（如 Gemini 原生）需协议翻译。**协议声明进配置、适配器族进源码**（对齐 dsh/hermes：wire 适配器写在源码，只有选哪种协议进配置）：
+
+- **配置字段** `ProviderConfig.protocol?`（`utils/credentials/types.ts`，缺省 `'anthropic'`）。provider 级未知字段 load/save 整体透传，无需改读写器。例：`gemini` = `{baseUrl: .../v1beta/openai, protocol: 'openai-chat'}`。
+- **访问器** `getActiveProviderProtocol()`（`utils/credentials/pool.ts`）走会话绑定配置（与 baseUrl/apiKey 同一不变量）。
+- **单一分派点** `resolveProtocolFetch({protocol, baseUrl, apiKey})`（`services/api/protocol-fetch.ts`）：`'anthropic'`（或未知）→ `undefined`（沿用 SDK 直连）；`'openai-chat'` → `createOpenAIChatFetch(...)`。**协议判定只此一处**，主客户端 + 两处绕过 SDK 的裸 fetch 点共用它。
+- **适配器** `services/api/openai-chat-fetch-adapter.ts`（复用 Codex `fetch` 覆盖先例）：入口收 Anthropic 形态请求、出口吐 Anthropic 形态响应，内部翻译到 OpenAI Chat Completions。仅拦截路径恰为 `/v1/messages`（`count_tokens`/`models` 透传）。请求侧：system→system 消息 / text / tool_use→`tool_calls` / tool_result→`role:'tool'` / image→`image_url` data URL / tools→`functions` / tool_choice 映射（auto/any→required/none/tool）；**丢弃** cache_control/thinking/betas/output_config/metadata/stop_sequences；鉴权改 `Authorization: Bearer`（剥离 `x-api-key`/`anthropic-version`）；流式加 `stream_options:{include_usage:true}`。响应侧合成 Anthropic SSE（`message_start`→逐块 `content_block_start`/`delta`/`stop`，`index` 单调递增〔load-bearing〕→`message_delta`〔stop_reason 映射 tool_calls→tool_use / length→max_tokens / 余端 turn 语义〕→`message_stop`）；非流式吐 Anthropic message JSON。非 2xx → Anthropic 形错误体 + 上游状态码。
+- **接线点** 主客户端 `services/api/client.ts` pool 分支（`...(protocolFetch && {fetch})` 须排 `...ARGS` 之后才生效，同 Codex 分支）；`utils/toolSearch.ts` 的 tool_reference 能力探针（非 anthropic 协议 fail open 跳过——该端点在 OpenAI 兼容端不存在）；`tools/neturon/cogname.ts` 社群命名 LLM（经分派器发，仅当 neuron `llm.provider` 指向非 anthropic 商才触发）。
+
+复验锚点 `probes/probe-openai-chat-adapter.ts`（离线 28 断言：流式文本+tool_call / 非流式 / 透传；`--live` 加真 Gemini 往返 + 真 Anthropic SDK 走适配器端到端）。
+
 ## 会话/记忆项目级平铺
 
 会话 `<项目>/.claude/projects/*.jsonl`、自动记忆 `<项目>/.claude/projects/memory/`；subagent 转录按 `<sessionId>/subagents/` 子目录（正常设计）；项目身份用 `getProjectRoot()` 而非 `getOriginalCwd()`。布局规范 → [standards.md](standards.md) §2.1。

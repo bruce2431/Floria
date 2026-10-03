@@ -225,6 +225,17 @@ export function getActiveBaseUrl(): string | null {
 }
 
 /**
+ * Wire protocol this session's bound provider speaks. `'anthropic'` (default)
+ * = Anthropic Messages API straight through the SDK; `'openai-chat'` = route
+ * through the OpenAI Chat Completions fetch adapter. Session-bound like
+ * baseUrl/apiKey (same invariant, see _resolveSessionProvider above) — the
+ * protocol is a request-credential property and must not drift across sessions.
+ */
+export function getActiveProviderProtocol(): string {
+  return getActiveProviderConfig()?.protocol ?? 'anthropic'
+}
+
+/**
  * Get this session's default model name (used when nothing overrides the model
  * in-process). Bound to the session provider: without an explicit override it
  * answers the boot snapshot's model, so another session writing the pool's

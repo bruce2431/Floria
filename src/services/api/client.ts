@@ -14,7 +14,11 @@ import {
   refreshAndGetAwsCredentials,
   refreshGcpCredentialsIfNeeded,
 } from 'src/utils/auth.js'
-import { getActiveApiKey, getActiveBaseUrl } from 'src/utils/credentials/pool.js'
+import {
+  getActiveApiKey,
+  getActiveBaseUrl,
+  getActiveProviderProtocol,
+} from 'src/utils/credentials/pool.js'
 import { getUserAgent } from 'src/utils/http.js'
 import { getSmallFastModel } from 'src/utils/model/model.js'
 import {
@@ -33,6 +37,7 @@ import {
   isEnvTruthy,
 } from '../../utils/envUtils.js'
 import { createCodexFetch } from './codex-fetch-adapter.js'
+import { resolveProtocolFetch } from './protocol-fetch.js'
 
 /**
  * Environment variables for different client types:
@@ -323,11 +328,20 @@ export async function getAnthropicClient({
   // Anthropic OAuth（authToken / 订阅判定 / staging baseURL）已整体移除（2026-09-18）。
   const poolBaseUrl = getActiveBaseUrl()
   const poolApiKey = poolBaseUrl ? getActiveApiKey() : null
+  // 协议声明（2026-10-03）：provider.protocol 非 'anthropic' 时用翻译适配器覆盖
+  // SDK 的 fetch；'anthropic' 返回 undefined，走原路径（行为不变）。必须排在 ...ARGS
+  // 之后才生效（ARGS 里可能带 buildFetch 的包装，同 Codex 分支的写法）。
+  const protocolFetch = resolveProtocolFetch({
+    protocol: getActiveProviderProtocol(),
+    baseUrl: poolBaseUrl,
+    apiKey: poolApiKey,
+  })
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
     apiKey: apiKey || (poolBaseUrl ? poolApiKey : getAnthropicApiKey()),
     // Set baseURL from credential pool
     ...(poolBaseUrl ? { baseURL: poolBaseUrl } : {}),
     ...ARGS,
+    ...(protocolFetch && { fetch: protocolFetch }),
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
 

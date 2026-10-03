@@ -5,6 +5,11 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
   const MD_MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Courier New', monospace"
   const MD_LINK_OK = (u) => /^(https?:)?\/\//.test(u) || /^[a-z0-9][a-z0-9./_-]*$/i.test(u)
+  // AI 生成图代号（2026-10-03）：markdown ![](code) 里的 code 只允许「文件名.ext」白名单
+  // （无 / 无 . 段 → 防路径穿越），真实取图 URL 由注入的 resolver 拼（见 messages.js 注册）。
+  const MD_IMG_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/
+  let mdImgResolver = null
+  const setImageSrcResolver = (fn) => { mdImgResolver = fn }
   function mdInline(s) {
     // s 必须是已转义文本（来自 mdHtml 入口）
     const codes = []
@@ -12,6 +17,14 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
     s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    // 图片代号（AI 生成图）：![](文件名.png) → <img>，code 过白名单 + resolver 拼取图 URL；
+    // 不匹配或无 resolver 则保留原文（不兜底）。必须在下方链接替换之前，否则被拆成 ! + <a>。
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, code) => {
+      if (!mdImgResolver || !MD_IMG_CODE.test(code)) return `![${alt}](${code})`
+      const url = mdImgResolver(code)
+      if (!url) return `![${alt}](${code})`
+      return `<img class="msg-img md-img" loading="lazy" alt="${alt}" src="${esc(url)}">`
+    })
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => (MD_LINK_OK(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t))
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, p, u) => p + `<a href="${u}" target="_blank" rel="noopener">${u}</a>`)
     // @ 提及令牌 → chip（[插件:名称] / [会话:名称]，名称已转义）。
@@ -145,4 +158,5 @@ export {
   mdHtml,
   mdInline,
   relTime,
+  setImageSrcResolver,
 }

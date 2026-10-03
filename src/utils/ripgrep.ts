@@ -1,7 +1,15 @@
 import type { ChildProcess, ExecFileException } from 'child_process'
 import { execFile, spawn } from 'child_process'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'fs'
 import memoize from 'lodash-es/memoize.js'
-import { homedir } from 'os'
+import { homedir, tmpdir } from 'os'
 import * as path from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
 import { fileURLToPath } from 'url'
@@ -28,6 +36,30 @@ type RipgrepConfig = {
   argv0?: string
 }
 
+// In a compiled single-file exe the vendored rg travels embedded (build asset), but
+// embedded virtual paths are readable-only and cannot be spawned. Materialize it once
+// to a stable cache path under tmpdir and hand that real path to the spawners.
+// `virtual:ripgrep-bin` is resolved at build time by scripts/build.ts; this branch is
+// unreachable in dev (isInBundledMode() is false there), so the bare specifier is inert.
+function materializeEmbeddedRipgrep(): string {
+  // @ts-ignore - virtual specifier injected by the build plugin
+  const assetPath: string = String(require('virtual:ripgrep-bin'))
+  const targetDir = path.join(tmpdir(), 'floria-ripgrep')
+  const target = path.join(targetDir, path.basename(assetPath))
+  if (!existsSync(target)) {
+    mkdirSync(targetDir, { recursive: true })
+    // Write to a per-process temp then atomically rename, so a concurrent exe can
+    // never observe/spawn a half-written binary.
+    const staging = `${target}.${process.pid}.tmp`
+    writeFileSync(staging, readFileSync(assetPath))
+    if (process.platform !== 'win32') {
+      chmodSync(staging, 0o755)
+    }
+    renameSync(staging, target)
+  }
+  return target
+}
+
 const getRipgrepConfig = memoize((): RipgrepConfig => {
   const userWantsSystemRipgrep = isEnvDefinedFalsy(
     process.env.USE_BUILTIN_RIPGREP,
@@ -44,18 +76,18 @@ const getRipgrepConfig = memoize((): RipgrepConfig => {
     }
   }
 
-  // In bundled (native) mode, ripgrep is statically compiled into bun-internal
-  // and dispatches based on argv[0]. We spawn ourselves with argv0='rg'.
+  // Compiled (single-file exe) mode: our own vendored rg is embedded as a build
+  // asset (scripts/build.ts ripgrepEmbedPlugin) and materialized to a real path at
+  // runtime, because embedded virtual paths cannot be spawned directly.
   if (isInBundledMode()) {
     return {
       mode: 'embedded',
-      command: process.execPath,
-      args: ['--no-config'],
-      argv0: 'rg',
+      command: materializeEmbeddedRipgrep(),
+      args: [],
     }
   }
 
-  const rgRoot = path.resolve(__dirname, 'vendor', 'ripgrep')
+  const rgRoot = path.resolve(__dirname, '..', 'vendor', 'ripgrep')
   const command =
     process.platform === 'win32'
       ? path.resolve(rgRoot, `${process.arch}-win32`, 'rg.exe')

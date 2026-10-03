@@ -7,7 +7,10 @@ import { stringWidth } from '../ink/stringWidth.js'
 import { supportsHyperlinks } from '../ink/supports-hyperlinks.js'
 import type { CliHighlight } from './cliHighlight.js'
 import { logForDebugging } from './debug.js'
+import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { createHyperlink } from './hyperlink.js'
+import { getCwd } from './cwd.js'
 import { stripPromptXMLTags } from './messages.js'
 import type { ThemeName } from './theme.js'
 
@@ -136,8 +139,16 @@ export function formatToken(
       }
     case 'hr':
       return '---'
-    case 'image':
+    case 'image': {
+      // AI 生成图（2026-10-03）：模型输出 ![](文件名.png)（文件名 = <cwd>/.claude/images/ 下），
+      // 终端不渲染位图 → 输出 OSC8 可点击路径（不支持超链接的终端降级为 file:// 路径文本）。
+      // code 走白名单（无 / 无路径分段）→ 非该代号的图片保留原 href，不误伤普通 ![](url)。
+      const code = token.href
+      if (/^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/.test(code)) {
+        return createHyperlink(pathToFileURL(join(getCwd(), '.claude', 'images', code)).href, '.claude/images/' + code)
+      }
       return token.href
+    }
     case 'link': {
       // Prevent mailto links from being displayed as clickable links
       if (token.href.startsWith('mailto:')) {

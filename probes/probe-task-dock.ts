@@ -2,9 +2,9 @@
  * 探针：底栏任务浮窗（web-src/inputbar/approval.js renderTaskDock/toggleTaskDock）离线自测
  *
  * 为什么这样做：web 前端手改处是 ESM 模块（依赖 DOM/state.js 顶层初始化），不能直接在 bun 里 import。
- * 本探针从源码「按标记区间切片」取出浮窗区间（renderTaskDock/toggleTaskDock/taskById/TASK_ICON，
- * 依赖 $ / live / state / takeover / esc / CHEV 六个外部标识）后求值，DOM 用最小桩注入——
- * 测的是真源码，不是复制品。
+ * 本探针从源码「按标记区间切片」取出浮窗区间（renderTaskDock/toggleTaskDock/taskById，
+ * 依赖 $ / live / state / takeover / esc / I 五个外部标识）后求值，DOM 用最小桩注入——
+ * 测的是真源码，不是复制品。（dsh 任务栏形态：状态用圆点 .td-dot，图标走 I.dshPlan/I.dshChevDown。）
  *
  * 运行：cd Floria && bun probes/probe-task-dock.ts
  */
@@ -22,8 +22,8 @@ const body = src.slice(i, j)
 // 与 web-src/core/state.js:52 同款 esc（探针注入）
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
-// 与 web-src/chat/messages.js:408 同款 CHEV（探针只需可辨识的占位串）
-const CHEV = '<svg data-chev></svg>'
+// 与 web-src/core/icons.js 同族图标（探针只需可辨识的占位串）
+const I = { dshPlan: '<svg data-plan></svg>', dshChevDown: '<svg data-chevdown></svg>' }
 
 // ---- 最小 DOM 桩 ----
 class El {
@@ -62,16 +62,16 @@ const $ = (id: string) => (els[id] ??= new El(id))
 // takeover 在真源码里是模块级 let（由跨模块 setter 写）；探针按同一形态在被测作用域内声明同名变量，
 // 并让被测作用域自己导出写入口（← 必须在同一作用域内定义，外部回调写不到闭包变量）
 const factory = new Function(
-  '$', 'live', 'state', 'esc', 'CHEV',
+  '$', 'live', 'state', 'esc', 'I',
   `let takeover = null\n${body}\nreturn { renderTaskDock, toggleTaskDock, setTk: (v) => { takeover = v } }`,
-) as ($: unknown, live: unknown, state: unknown, esc: unknown, CHEV: unknown) => {
+) as ($: unknown, live: unknown, state: unknown, esc: unknown, I: unknown) => {
   renderTaskDock: () => void
   toggleTaskDock: () => void
   setTk: (v: string | null) => void
 }
 const t = (list: unknown[], hash = 'sess-1') => {
   const live: Record<string, unknown> = { tasks: list, taskOpen: false }
-  const inst = factory($, live, { currentHash: hash }, esc, CHEV)
+  const inst = factory($, live, { currentHash: hash }, esc, I)
   return { live, setTk: inst.setTk, renderTaskDock: inst.renderTaskDock, toggleTaskDock: inst.toggleTaskDock }
 }
 
@@ -108,15 +108,17 @@ const FULL = [
   ok('有清单: 边沿未禁用', $('task-lip').disabled === false)
 }
 
-// ---- ② 三态图标 + 数据属性（与 CLI TaskListV2 getTaskIcon 同构）----
+// ---- ② 三态圆点 + 头部条（dsh 任务栏形态：状态走 .td-dot 的 data-st，图标走 I.dshPlan/I.dshChevDown）----
 {
   const a = t(FULL); a.renderTaskDock()
   const html = $('task-panel').innerHTML
-  ok('图标: 完成 ✔', html.includes('data-st="completed"') && html.includes('✔'))
-  ok('图标: 进行中 ◼', html.includes('data-st="in_progress"') && html.includes('◼'))
-  ok('图标: 待办 ◻', html.includes('data-st="pending"') && html.includes('◻'))
-  ok('计数文案', html.includes('共 5 项 · 2 完成 · 1 进行中'), html.match(/td-counts">[^<]*/)?.[0] || '')
-  ok('头部把手存在', html.includes('class="td-head"'))
+  ok('圆点: 完成行 data-st=completed', html.includes('data-st="completed"'))
+  ok('圆点: 进行中行 data-st=in_progress', html.includes('data-st="in_progress"'))
+  ok('圆点: 待办行 data-st=pending', html.includes('data-st="pending"'))
+  ok('圆点: 每行都挂 .td-dot', (html.match(/class="td-dot"/g) || []).length === 5, String((html.match(/class="td-dot"/g) || []).length))
+  ok('计数文案', html.includes('2 已完成 · 1 进行中 · 2 待处理'), html.match(/td-counts">[^<]*/)?.[0] || '')
+  ok('头部条: 计划图标 + 标题 + 计数 + 折叠箭头', html.includes('class="td-head"') && html.includes('class="td-hico"') && html.includes('class="td-title"') && html.includes('class="td-chev"') && html.includes('data-plan') && html.includes('data-chevdown'))
+  ok('收敛把手即头部条（lip 与 panel 同款 header）', $('task-lip').innerHTML.includes('class="td-hico"') && $('task-lip').innerHTML.includes('class="td-counts"'))
 }
 
 // ---- ③ 排序：id 数字升序（与 CLI byIdAsc 同构，非字典序）----
@@ -132,20 +134,20 @@ const FULL = [
 {
   const a = t(FULL); a.renderTaskDock()
   const html = $('task-panel').innerHTML
-  const blocked = html.match(/<div class="td-item dim" data-st="pending" title="[^"]*">[^<]*(<span[^>]*>[^<]*<\/span>){1}<span class="td-sub">([^<]*)</)
+  const blocked = html.match(/<div class="td-item dim" data-st="pending" title="[^"]*"><span class="td-dot"><\/span><span class="td-sub">([^<]*)</)
   ok('阻塞行: dim + title 说明等待前序', !!blocked && html.includes('title="等待前序任务：5"'), String(blocked?.[0]).slice(0, 80))
   ok('阻塞行: 阻塞的是阶段3（阶段10 未被阻塞）',
-    !!html.match(/<div class="td-item dim" data-st="pending"[^>]*>\s*<span[^>]*>◻<\/span><span class="td-sub">阶段3 分镜<\/span>/))
-  ok('未阻塞行不 dim', !!html.match(/<div class="td-item" data-st="pending"[^>]*>\s*<span[^>]*>◻<\/span><span class="td-sub">阶段10 交付<\/span>/))
-  ok('完成任务行 dim（删除线由 CSS 承担）', !!html.match(/<div class="td-item dim" data-st="completed"/))
+    !!html.match(/<div class="td-item dim" data-st="pending"[^>]*><span class="td-dot"><\/span><span class="td-sub">阶段3 分镜<\/span>/))
+  ok('未阻塞行不 dim', !!html.match(/<div class="td-item" data-st="pending"[^>]*><span class="td-dot"><\/span><span class="td-sub">阶段10 交付<\/span>/))
+  ok('完成任务行不 dim（绿点区分，dsh 无删除线）', !!html.match(/<div class="td-item" data-st="completed"/) && !html.match(/<div class="td-item dim" data-st="completed"/))
 }
 {
-  // 阻塞项完成后（blockedBy 指向的 id 不再 unresolved）→ 阻塞解除：pending 行不 dim（dim 只属 completed 行）
+  // 阻塞项完成后（blockedBy 指向的 id 不再 unresolved）→ 阻塞解除：pending 行不 dim
   const a = t([item('3', '阶段3', 'pending', ['5']), item('5', '阶段5', 'completed')])
   a.renderTaskDock()
   const html = $('task-panel').innerHTML
   ok('前序完成 → 阻塞解除（pending 行无 dim、无 title）',
-    !!html.match(/<div class="td-item" data-st="pending"><span[^>]*>◻<\/span><span class="td-sub">阶段3<\/span>/) && !html.includes('等待前序任务'), html)
+    !!html.match(/<div class="td-item" data-st="pending"><span class="td-dot"><\/span><span class="td-sub">阶段3<\/span>/) && !html.includes('等待前序任务'), html)
 }
 
 // ---- ⑤ owner / activeForm ----

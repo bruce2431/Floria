@@ -68,6 +68,19 @@ export type DisplayMessage = {
    */
   stopReason?: string
   /**
+   * 该条 assistant 记录的 token 用量明细（2026-10-04 新增；web 回复操作条「用量 X tok」按钮 +
+   * 点击弹出的明细面板数据源）：input=未缓存输入(input_tokens)、cacheRead=缓存读取(cache_read_input_tokens)、
+   * cacheWrite=缓存写入(cache_creation_input_tokens)、output=输出(output_tokens)。
+   * 合计 = 四者之和（消费端相加；与主区上下文占用 extractContextUsage 同源口径，差别只在多算 output）。
+   * 仅 assistant 消息携带；无 usage 字段/全 0 → undefined（消费端不渲染）。
+   */
+  usage?: { input: number; cacheRead: number; cacheWrite: number; output: number }
+  /**
+   * 该条 assistant 记录的请求模型名（2026-10-04 新增；回复操作条弹出面板「提供方 / 模型」行数据源）。
+   * 仅 assistant 消息携带；无 model 字段 → undefined。
+   */
+  model?: string
+  /**
    * 引导注入标（2026-08-30 共同后端定案）：queued_command attachment 人发可见时输出
    * role:'user' + injected:true——web 渲染为折叠体内旁白位（区别于 dequeue 开启消息）。
    * 仅 user 消息携带。
@@ -89,6 +102,14 @@ export type DisplayMessage = {
 }
 
 export type DisplayMode = 'prompt' | 'transcript' | 'prompt-tail-think'
+
+/** 逐次 API 调用的 token 用量结构（assistant 记录 message.usage；→ DisplayMessage.usage 合计） */
+type TokenUsage = {
+  input_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+  output_tokens?: number
+}
 
 /** 宽松输入结构：与 NormalizedMessage / Message 运行时形状兼容（类型定义在缺失的 types/message.js） */
 type SourceMessage = {
@@ -122,6 +143,8 @@ type SourceMessage = {
     model?: string
     content?: Array<{ type?: string; text?: string; thinking?: string; name?: string; input?: unknown; content?: unknown }>
     stop_reason?: string
+    /** 该条 assistant 记录的 token 用量（逐次 API 调用；→ DisplayMessage.usage 合计） */
+    usage?: TokenUsage
   }
 }
 
@@ -328,6 +351,24 @@ function tsMs(ts: number | string | undefined): number | undefined {
     return Number.isFinite(n) ? n : undefined
   }
   return typeof ts === 'number' && Number.isFinite(ts) ? ts : undefined
+}
+
+/**
+ * 单条 assistant 记录的 token 用量明细（→ DisplayMessage.usage）：
+ * input=未缓存输入、cacheRead=缓存读取、cacheWrite=缓存写入、output=输出。
+ * 三项输入 token 缺省按 0（部分商只报 output）；四者合计全 0 / 无 usage 返回 undefined（消费端不渲染）。
+ */
+function usageDetail(u: TokenUsage | undefined): DisplayMessage['usage'] | undefined {
+  if (!u || typeof u !== 'object') return undefined
+  const x = u as Record<string, unknown>
+  const n = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0)
+  const detail = {
+    input: n(x.input_tokens),
+    cacheRead: n(x.cache_read_input_tokens),
+    cacheWrite: n(x.cache_creation_input_tokens),
+    output: n(x.output_tokens),
+  }
+  return detail.input + detail.cacheRead + detail.cacheWrite + detail.output > 0 ? detail : undefined
 }
 
 export function filterConversationForDisplay(
@@ -569,7 +610,11 @@ export function filterConversationForDisplay(
         pushSystemHint(noticeText, timestamp, msg.uuid)
         continue
       }
-      if (blocks.length) out.push({ role: 'assistant', blocks, timestamp, stopReason: msg.message?.stop_reason as string | undefined, uuid: msg.uuid })
+      if (blocks.length) {
+        const usage = usageDetail(msg.message?.usage)
+        const model = typeof msg.message?.model === 'string' && msg.message.model ? msg.message.model : undefined
+        out.push({ role: 'assistant', blocks, timestamp, stopReason: msg.message?.stop_reason as string | undefined, uuid: msg.uuid, ...(usage !== undefined ? { usage } : {}), ...(model !== undefined ? { model } : {}) })
+      }
       continue
     }
 

@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=435" />
+  <link rel="stylesheet" href="/styles.css?v=440" />
 </head>
 <body>
 <div id="app">
@@ -213,6 +213,12 @@
       </button>
       <img id="char" src="/char/1.jpg" alt="AI 形象" draggable="false" />
       <div id="chat-scroll"><div id="messages"></div></div>
+      <!-- composer 遮罩（2026-10-03 移植 dsh ConversationRoot .composerSeat 渐隐带）：会话态贴底栏
+           区域做全卡宽「透明→底色」渐隐——chat 消息流在底栏上方 36px 内淡出、其下实心遮住滚过的
+           消息（底栏两侧与下方）。高度 = 底栏高（--bar-h，core/viewport.js settle 实测）+ 22px 底距
+           + 36px 渐隐带，故多行/接管卡长高时渐隐带随底栏上沿同步上移。z-index 3：盖住消息流
+           （含 sticky 头 z1），低于 #input-wrap（z5）与 #char（z4）；pointer-events:none 不挡交互。 -->
+      <div id="composer-mask" aria-hidden="true"></div>
       <!-- 空态（token 门验证后）：与 SubPj3 阶段3 一致——居中正方形趴栏图铺满；
            输入栏（#input-wrap）在 stage 内真相对定位（SubPj3 同款：台面中心锚 76.75%），
            任意窗口大小都贴图走不偏移；app.js 按界面在 stage（空态）↔ 会话卡（会话 docked）间移动挂载 -->
@@ -272,10 +278,10 @@
                    审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
                    隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
               <div id="composer-takeover" hidden></div>
-              <!-- 底栏任务浮窗（2026-09-10；几何 09-11 二轮定案）：CLI TodoV2 清单（源码 useTasksV2 单源出口
-                   → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位（bottom:100%）：
-                   收敛态露出 12px 把手条（#task-lip，白表面+1px 0.10 描边，与输入栏/面板同族材质），
-                   点击上展 .td-panel（宽=输入栏宽−48px 居中、
+              <!-- 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）：CLI TodoV2 清单（源码 useTasksV2
+                   单源出口 → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位
+                   （bottom:100%）：收敛态 = 一条完整头部条（#task-lip，与面板同族白卡：列表图标 + 「任务」 +
+                   计数 + chevron），点击上展 .td-panel（同一头部顶置 + 圆点状态行列表；宽=输入栏宽−48px 居中、
                    底边与输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px,var(--bar-room,460px)) 内部滚动），
                    再点头部向下收敛。
                    无清单整窗 hidden；审批/提问接管卡在场 → .blocked 收敛且禁点（.bar-takeover 规则本就 display:none 让位）。 -->
@@ -334,6 +340,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=435"></script>
+<script src="/app.js?v=440"></script>
 </body>
 </html>

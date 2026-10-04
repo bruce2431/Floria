@@ -2043,6 +2043,31 @@ function setLastNavHash(v) { lastNavHash = v }
     })
   })
 
+  // 用量明细弹层（DSH 回复操作条「用量 X tok」按钮 → 点击弹出面板）：单开互斥（开本关它），点外区关闭。
+  // 面板 .usage-pop 在 .msg-actions 内、与 .msg-usage 同属 .msg；按钮 aria-expanded 同步。
+  function closeUsagePops(except) {
+    messagesEl.querySelectorAll('.usage-pop:not([hidden])').forEach((p) => {
+      if (p === except) return
+      p.hidden = true
+      const b = p.parentElement && p.parentElement.querySelector('.msg-usage')
+      if (b) b.setAttribute('aria-expanded', 'false')
+    })
+  }
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('.msg-usage') : null
+    if (btn && messagesEl.contains(btn)) {
+      const pop = btn.parentElement && btn.parentElement.querySelector('.usage-pop')
+      if (!pop) return
+      const open = pop.hidden
+      closeUsagePops(pop)
+      pop.hidden = !open
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false')
+      return
+    }
+    if (e.target && e.target.closest && e.target.closest('.usage-pop')) return
+    closeUsagePops(null)
+  })
+
   // ---- 嵌入式图表（```chart 围栏，渲染链见 core/markdown.js）----
   // 「源码」切换（事件委托，innerHTML 重建不受影响）：.chart-embed.as-src 切 iframe ↔ 原文
   document.addEventListener('click', (e) => {
@@ -2255,6 +2280,62 @@ function setLastNavHash(v) { lastNavHash = v }
   // ---- 消息复制按钮（2026-08-21 移植 DSH MessageIconActions：28px 圆形图标钮，copy → check 1s 反馈。
   // path 取自 ui-primitives/icons IconCopyOutline16；成功对勾复用 I.dshCheck）----
   const ICON_COPY = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6.14929 4.02032C7.11197 4.02032 7.87983 4.02016 8.49597 4.07598C9.12128 4.13269 9.65792 4.25188 10.1415 4.53106C10.7202 4.8653 11.2008 5.3459 11.535 5.92462C11.8142 6.40818 11.9334 6.94481 11.9901 7.57012C12.0459 8.18625 12.0458 8.95419 12.0458 9.9168C12.0458 10.8795 12.0459 11.6473 11.9901 12.2635C11.9334 12.8888 11.8142 13.4254 11.535 13.909C11.2008 14.4877 10.7202 14.9683 10.1415 15.3025C9.65792 15.5817 9.12128 15.7009 8.49597 15.7576C7.87984 15.8134 7.11196 15.8133 6.14929 15.8133C5.18667 15.8133 4.41874 15.8134 3.80261 15.7576C3.1773 15.7009 2.64067 15.5817 2.1571 15.3025C1.5784 14.9683 1.09778 14.4877 0.76355 13.909C0.484366 13.4254 0.365184 12.8888 0.308472 12.2635C0.252649 11.6473 0.252808 10.8795 0.252808 9.9168C0.252808 8.95418 0.252664 8.18625 0.308472 7.57012C0.365184 6.94481 0.484366 6.40818 0.76355 5.92462C1.09777 5.34589 1.57839 4.86529 2.1571 4.53106C2.64067 4.25188 3.1773 4.13269 3.80261 4.07598C4.41874 4.02017 5.18666 4.02032 6.14929 4.02032ZM6.14929 5.37774C5.16181 5.37774 4.46634 5.37761 3.92566 5.42657C3.39434 5.47472 3.07859 5.56574 2.83582 5.70587C2.4632 5.92106 2.15354 6.2307 1.93835 6.60333C1.79823 6.8461 1.70721 7.16185 1.65906 7.69317C1.6101 8.23385 1.61023 8.92933 1.61023 9.9168C1.61023 10.9043 1.61009 11.5998 1.65906 12.1404C1.70721 12.6717 1.79823 12.9875 1.93835 13.2303C2.15356 13.6029 2.46321 13.9126 2.83582 14.1277C3.07859 14.2679 3.39434 14.3589 3.92566 14.407C4.46634 14.456 5.16182 14.4559 6.14929 14.4559C7.13682 14.4559 7.83224 14.456 8.37292 14.407C8.90425 14.3589 9.21999 14.2679 9.46277 14.1277C9.83535 13.9126 10.145 13.6029 10.3602 13.2303C10.5004 12.9875 10.5914 12.6717 10.6395 12.1404C10.6885 11.5998 10.6884 10.9043 10.6884 9.9168C10.6884 8.92934 10.6885 8.23384 10.6395 7.69317C10.5914 7.16185 10.5004 6.8461 10.3602 6.60333C10.1451 6.23071 9.83536 5.92107 9.46277 5.70587C9.21999 5.56574 8.90424 5.47472 8.37292 5.42657C7.83224 5.3776 7.13682 5.37774 6.14929 5.37774ZM9.80164 0.367975C10.7638 0.367975 11.5314 0.36788 12.1473 0.423639C12.7726 0.480307 13.3093 0.598759 13.7928 0.877741C14.3717 1.21192 14.8521 1.69355 15.1864 2.27227C15.4655 2.75574 15.5857 3.29164 15.6425 3.9168C15.6983 4.53301 15.6971 5.3016 15.6971 6.26446V7.82989C15.6971 8.29264 15.6989 8.58993 15.6649 8.84844C15.4668 10.3525 14.401 11.5738 12.9833 11.9988V10.5467C13.6973 10.1903 14.2105 9.49662 14.3192 8.67169C14.3387 8.52347 14.3407 8.3358 14.3407 7.82989V6.26446C14.3407 5.27706 14.3398 4.58149 14.2909 4.04083C14.2428 3.50968 14.1526 3.19372 14.0126 2.95098C13.7974 2.57849 13.4876 2.26869 13.1151 2.05352C12.8724 1.91347 12.5564 1.82237 12.0253 1.77423C11.4847 1.72528 10.7888 1.7254 9.80164 1.7254H7.71472C6.7562 1.72558 5.92665 2.27697 5.52332 3.07891H4.07019C4.54221 1.51132 5.9932 0.368186 7.71472 0.367975H9.80164Z" fill="currentColor"/></svg>'
+  // 回复底部「用量」标签图标（2026-10-04 还原 dsh 回复操作条）：数据库圆柱（顶部椭圆 + 侧壁/中缝弧）。
+  const ICON_USAGE = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><ellipse cx="8" cy="3.6" rx="5.1" ry="1.9"/><path d="M2.9 3.6v8.8c0 1.05 2.28 1.9 5.1 1.9s5.1-.85 5.1-1.9V3.6"/><path d="M2.9 8c0 1.05 2.28 1.9 5.1 1.9s5.1-.85 5.1-1.9"/></svg>'
+  // token 用量格式化（dsh「用量 69.4K tok」同款）：≥1e6 → M、≥1e3 → K 一位小数，否则原值。
+  function fmtUsage(n) {
+    const v = Number(n)
+    if (!(v > 0)) return ''
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K'
+    return String(v)
+  }
+  // 回复时刻（本地 YYYY-MM-DD HH:MM，dsh 回复操作条尾部时间；2026-10-04 用户定「时间精确到年月日时分」）。
+  function fmtClock(ts) {
+    const n = Number(ts)
+    if (!(n > 0)) return ''
+    const d = new Date(n)
+    if (Number.isNaN(d.getTime())) return ''
+    const p = (v) => String(v).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  }
+  // 精确 token 计数（弹出面板用，dsh 同款千分位：69,353）。
+  function fmtTok(n) {
+    const v = Number(n)
+    return Number.isFinite(v) && v > 0 ? v.toLocaleString('en-US') : '0'
+  }
+  // 「用量」按钮 + 点击弹出的明细面板（2026-10-04 还原 dsh 回复底部：按钮点开显示本轮 token 明细）。
+  // 数据源 = DisplayMessage.usage 明细 + DisplayMessage.model；提供方由 modelProviderOf(模型名) 派生。
+  // 面板置于 .msg-actions 内 → messageCopyText 剔除 `.msg-actions` 时一并排除，不污染复制文本。
+  function usageButtonHtml(usage, model) {
+    const d = usage || {}
+    const input = Number(d.input) || 0
+    const cacheRead = Number(d.cacheRead) || 0
+    const cacheWrite = Number(d.cacheWrite) || 0
+    const output = Number(d.output) || 0
+    const total = input + cacheRead + cacheWrite + output
+    const denom = input + cacheRead + cacheWrite
+    const hit = denom > 0 ? (cacheRead / denom) * 100 : 0
+    const who = model ? `${modelProviderOf({ k: 'model', v: model })}/${model}` : ''
+    const rows = [
+      ['提供方 / 模型', who || '—'],
+      ['缓存命中', hit.toFixed(1) + '%'],
+      ['未缓存输入', fmtTok(input) + ' tok'],
+      ['缓存读取', fmtTok(cacheRead) + ' tok'],
+      ['缓存写入', fmtTok(cacheWrite) + ' tok'],
+      ['输出', fmtTok(output) + ' tok'],
+    ]
+      .map(([k, v]) => `<div class="up-row"><span class="up-k">${k}</span><span class="up-v">${esc(v)}</span></div>`)
+      .join('')
+    // 按钮与面板包进 .usage-wrap（position:relative）→ 面板左缘对齐「用量」按钮左缘（dsh 同款锚点，
+    // 2026-10-04；此前挂在 .msg-actions 上 left:0 是复制钮左缘＝偏左）。
+    return (
+      `<span class="usage-wrap">` +
+      `<button class="msg-usage" type="button" aria-expanded="false" title="本轮用量明细">${ICON_USAGE}<span class="mu-txt">用量 ${fmtUsage(total)} tok</span></button>` +
+      `<div class="usage-pop" hidden><div class="up-head"><span class="up-title">${ICON_USAGE}本轮用量</span><span class="up-total">${fmtTok(total)} tok</span></div><div class="up-rows">${rows}</div></div>` +
+      `</span>`
+    )
+  }
   // 剪贴板写入（DSH ui-primitives clipboard.ts 移植）：异步 Clipboard API 优先，
   // 非安全上下文（http 局域网 / 无 clipboard）回退 textarea + execCommand('copy')
   async function writeClipboard(text) {
@@ -2339,8 +2420,13 @@ function setLastNavHash(v) { lastNavHash = v }
       return out
     }
     // end_turn 正式回复气泡（流内 reply 项用，形态与原 reply 特判渲染一致）
-    function replyBubbleHtml(key, text) {
-      return `<div class="msg assistant" data-m="${key}" data-t="a"><div class="body"><div class="blocks">${mdHtml(text)}</div><div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button></div></div></div>`
+    // 2026-10-04 还原 dsh 回复操作条：复制按钮之后依次「用量 X tok」按钮（点击弹出本轮 token 明细面板）+ 时间（HH:MM）。
+    // 均置于 .msg-actions 内 → messageCopyText 剔除 `.msg-actions` 时一并排除，不污染复制文本。
+    function replyBubbleHtml(key, text, usage, ts, model) {
+      const clock = fmtClock(ts)
+      const useBtn = usage ? usageButtonHtml(usage, model) : ''
+      const meta = `${useBtn}${clock ? `<span class="msg-time">${clock}</span>` : ''}`
+      return `<div class="msg assistant" data-m="${key}" data-t="a"><div class="body"><div class="blocks">${mdHtml(text)}</div><div class="msg-actions"><button class="msg-copy" title="复制" aria-label="复制">${ICON_COPY}</button>${meta}</div></div></div>`
     }
     function closeSeg(isFinal) {
       if (!seg) return
@@ -2387,7 +2473,7 @@ function setLastNavHash(v) { lastNavHash = v }
           if (it.html) continue
           if (it.kind === 'think') it.html = thinkRowHtml(it.text, false)
           else if (it.kind === 'ask') it.html = askLineHtml(it.answer != null)
-          else if (it.kind === 'reply') it.html = replyBubbleHtml(s.key, it.text)
+          else if (it.kind === 'reply') it.html = replyBubbleHtml(s.key, it.text, it.usage, it.ts, it.model)
           else if (it.kind === 'tool') it.html = toolLine(it.block)
         }
       }
@@ -2539,7 +2625,7 @@ function setLastNavHash(v) { lastNavHash = v }
           // 不统一沉到段尾；纯文本消息（无 tool_use）仍在循环后整体追加（保持同消息多 text 块拼接为一条的语义）。
           // end_turn/stop_sequence 正式回复（理论不带 tool_use，防御分支）→ 流内 reply 气泡，不进 texts
           if (isEndStop(m.stopReason)) {
-            seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, b.text), text: b.text })
+            seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, b.text, m.usage, m.timestamp, m.model), text: b.text, usage: m.usage, model: m.model, ts: m.timestamp })
             seg.replyTs = m.timestamp
           } else {
             seg.items.push({ kind: 'text', html: '', text: b.text })
@@ -2581,7 +2667,7 @@ function setLastNavHash(v) { lastNavHash = v }
         // closeSeg 时原位填充。
         const text = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
         if (m.stopReason === undefined || isEndStop(m.stopReason)) {
-          seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, text), text })
+          seg.items.push({ kind: 'reply', html: lazy ? '' : replyBubbleHtml(seg.key, text, m.usage, m.timestamp, m.model), text, usage: m.usage, model: m.model, ts: m.timestamp })
           seg.replyTs = m.timestamp
         } else {
           seg.items.push({ kind: 'text', html: '', text })
@@ -8245,16 +8331,17 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
   // 设备自报类型（2026-09-05）：iPadOS Safari 桌面模式 UA 与 macOS 全同（无 iPad 字样），
   // 网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（MacIntel + 多点触控），
   // 随 activate 轮询与 WS 连接上报，网关记入 gateway-devices（hint 优先于 UA 判定）。
-  // ===== 底栏任务浮窗（2026-09-10）=====
+  // ===== 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）=====
   // 数据源 = CLI TodoV2 清单（源码 useTasksV2 单源出口 → /clients WS task-state → 网关 SSE /
-  // /gateway/session.tasks 首载）。web 只渲染不复刻判定（根本原则 1）：图标/排序/阻塞语义与 CLI
-  // TaskListV2 同构（✔ 完成 / ◼ 进行中 / ◻ 待办；blockedBy 命中未完成项 = 阻塞变暗；id 升序）。
-  // 形态（用户定案）：#input-bar 的子元素、贴其上沿（bottom:100%）——收敛露出 12px 把手条（.td-lip），
-  // 点击向上展开，再点头部向下收敛；宽度 = 输入栏宽 −48px 居中；展开底边与输入栏上沿留
-  // --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
+  // /gateway/session.tasks 首载）。web 只渲染不复刻判定（根本原则 1）：排序/阻塞语义与 CLI
+  // TaskListV2 同构（blockedBy 命中未完成项 = 阻塞变暗；id 升序）；状态显示改 dsh 任务栏的圆点
+  // （.td-dot：完成=绿实心 / 进行中=蓝环 / 待办=灰实心，无删除线）。
+  // 形态（2026-10-04 定案）：#input-bar 的子元素、贴其上沿（bottom:100%）——收敛态 = 一条完整
+  // 头部条（.td-lip，与面板同族白卡，即列表图标 + 「任务」 + 计数 + chevron），点击上展；展开态
+  // 面板顶（.td-head）渲同一份头部，下方圆点行列表；宽度 = 输入栏宽 −48px 居中；展开底边与
+  // 输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
   // 接管卡（审批/提问）在场 → 自动收敛 + 禁点：.bar-takeover 规则本就以 display:none 让位，
   // 此处再清 taskOpen，保证卡撤走后浮窗重现仍是收敛态。
-  const TASK_ICON = { completed: '✔', in_progress: '◼', pending: '◻' }
   function taskById(a, b) {
     const na = parseInt(a.id, 10)
     const nb = parseInt(b.id, 10)
@@ -8286,10 +8373,11 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     const unresolved = new Set(list.filter((t) => t.status !== 'completed').map((t) => t.id))
     const done = list.filter((t) => t.status === 'completed').length
     const running = list.filter((t) => t.status === 'in_progress').length
+    const pending = list.length - done - running
     const items = [...list].sort(taskById).map((t) => {
       const status = t.status // 形状收口在网关 normalizeGatewayTasks（id/subject/status/blockedBy 已净化）
       const blockers = t.blockedBy.filter((id) => unresolved.has(id))
-      const dim = status === 'completed' || blockers.length ? ' dim' : ''
+      const dim = blockers.length ? ' dim' : '' // 阻塞行变暗；完成行靠绿点区分（dsh 无删除线/不变暗）
       // 提示文案（不占版面）：阻塞行说明等哪条，进行中行给 CLI spinner 同源的 activeForm
       const tips = []
       if (blockers.length) tips.push('等待前序任务：' + blockers.join('、'))
@@ -8297,16 +8385,19 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
       const title = tips.length ? ` title="${esc(tips.join(' · '))}"` : ''
       const owner = t.owner ? `<span class="td-owner">@${esc(t.owner)}</span>` : ''
       return `<div class="td-item${dim}" data-st="${status}"${title}>`
-        + `<span class="td-ico">${TASK_ICON[status]}</span>`
+        + `<span class="td-dot"></span>`
         + `<span class="td-sub">${esc(t.subject)}</span>${owner}</div>`
     }).join('')
-    const counts = ['共 ' + list.length + ' 项', done + ' 完成']
-    if (running) counts.push(running + ' 进行中')
-    // 面板整体重建（清单事件低频）：头部=收起把手（点击向下收敛），下方列表
+    // dsh 任务栏形态（2026-10-04）：头部=列表图标 + 「任务」 + 计数（N 已完成 · M 进行中 · K 待处理）
+    // + chevron；同一份头部既渲进收起把手（.td-lip），也渲进面板顶（.td-head），两态视觉连续。
+    const header = '<span class="td-hico">' + I.dshPlan + '</span>'
+      + '<span class="td-title">任务</span>'
+      + `<span class="td-counts">${done} 已完成 · ${running} 进行中 · ${pending} 待处理</span>`
+      + '<span class="td-chev">' + I.dshChevDown + '</span>'
+    if (lip) lip.innerHTML = header
+    // 面板整体重建（清单事件低频）：头部（点击向下收敛）+ 圆点状态行列表
     panel.innerHTML = '<div class="td-head" role="button" tabindex="0" aria-label="收起任务清单">'
-      + '<span class="td-title">任务清单</span>'
-      + `<span class="td-counts">${counts.join(' · ')}</span>`
-      + `<span class="td-chev">${CHEV}</span>`
+      + header
       + '</div>'
       + `<div class="td-list">${items}</div>`
     dock.hidden = false
@@ -8316,7 +8407,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
       lip.onclick = blocked ? null : toggleTaskDock
       lip.disabled = blocked
       lip.setAttribute('aria-expanded', open ? 'true' : 'false')
-      lip.title = blocked ? '任务清单（审批中）' : open ? '收起任务清单' : '展开任务清单（' + list.length + ' 项）'
+      lip.title = blocked ? '任务（审批中）' : open ? '收起任务' : '展开任务（' + list.length + ' 项）'
     }
     const head = panel.querySelector('.td-head')
     if (head) {
@@ -8896,6 +8987,11 @@ function setApprovalPending(v) { approvalPending = v }
       const barTop = wrap.getBoundingClientRect().top - app.getBoundingClientRect().top
       const barRoom = popRoom(barTop, lastTotal, BAR_ROOM_MARGIN)
       document.documentElement.style.setProperty('--bar-room', barRoom + 'px')
+      // composer 遮罩（#composer-mask）高度基准：底栏自身布局高（offsetHeight，不含 FLIP 期间施加
+      // 在 #input-wrap 上的内联 scale 变换）。多行输入 / 接管卡长高时 ResizeObserver(wrap) → settle
+      // 即重量，渐隐带的上沿随之贴住底栏新上沿。隐藏态高度为 0，不写（保留上次真值，遮罩本就不可见）。
+      const barH = wrap.offsetHeight
+      if (barH > 0) document.documentElement.style.setProperty('--bar-h', barH + 'px')
     }
     stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }

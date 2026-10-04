@@ -105,6 +105,11 @@ import { stageSync } from '../chat/stage.js'
       const barTop = wrap.getBoundingClientRect().top - app.getBoundingClientRect().top
       const barRoom = popRoom(barTop, lastTotal, BAR_ROOM_MARGIN)
       document.documentElement.style.setProperty('--bar-room', barRoom + 'px')
+      // composer 遮罩（#composer-mask）高度基准：底栏自身布局高（offsetHeight，不含 FLIP 期间施加
+      // 在 #input-wrap 上的内联 scale 变换）。多行输入 / 接管卡长高时 ResizeObserver(wrap) → settle
+      // 即重量，渐隐带的上沿随之贴住底栏新上沿。隐藏态高度为 0，不写（保留上次真值，遮罩本就不可见）。
+      const barH = wrap.offsetHeight
+      if (barH > 0) document.documentElement.style.setProperty('--bar-h', barH + 'px')
     }
     stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }

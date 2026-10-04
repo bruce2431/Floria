@@ -752,16 +752,17 @@ import { firstSendHash } from '../sidebar/recent.js'
   // 设备自报类型（2026-09-05）：iPadOS Safari 桌面模式 UA 与 macOS 全同（无 iPad 字样），
   // 网关按 UA 判设备恒显示 Mac——iPad 判定只能前端做（MacIntel + 多点触控），
   // 随 activate 轮询与 WS 连接上报，网关记入 gateway-devices（hint 优先于 UA 判定）。
-  // ===== 底栏任务浮窗（2026-09-10）=====
+  // ===== 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）=====
   // 数据源 = CLI TodoV2 清单（源码 useTasksV2 单源出口 → /clients WS task-state → 网关 SSE /
-  // /gateway/session.tasks 首载）。web 只渲染不复刻判定（根本原则 1）：图标/排序/阻塞语义与 CLI
-  // TaskListV2 同构（✔ 完成 / ◼ 进行中 / ◻ 待办；blockedBy 命中未完成项 = 阻塞变暗；id 升序）。
-  // 形态（用户定案）：#input-bar 的子元素、贴其上沿（bottom:100%）——收敛露出 12px 把手条（.td-lip），
-  // 点击向上展开，再点头部向下收敛；宽度 = 输入栏宽 −48px 居中；展开底边与输入栏上沿留
-  // --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
+  // /gateway/session.tasks 首载）。web 只渲染不复刻判定（根本原则 1）：排序/阻塞语义与 CLI
+  // TaskListV2 同构（blockedBy 命中未完成项 = 阻塞变暗；id 升序）；状态显示改 dsh 任务栏的圆点
+  // （.td-dot：完成=绿实心 / 进行中=蓝环 / 待办=灰实心，无删除线）。
+  // 形态（2026-10-04 定案）：#input-bar 的子元素、贴其上沿（bottom:100%）——收敛态 = 一条完整
+  // 头部条（.td-lip，与面板同族白卡，即列表图标 + 「任务」 + 计数 + chevron），点击上展；展开态
+  // 面板顶（.td-head）渲同一份头部，下方圆点行列表；宽度 = 输入栏宽 −48px 居中；展开底边与
+  // 输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
   // 接管卡（审批/提问）在场 → 自动收敛 + 禁点：.bar-takeover 规则本就以 display:none 让位，
   // 此处再清 taskOpen，保证卡撤走后浮窗重现仍是收敛态。
-  const TASK_ICON = { completed: '✔', in_progress: '◼', pending: '◻' }
   function taskById(a, b) {
     const na = parseInt(a.id, 10)
     const nb = parseInt(b.id, 10)
@@ -793,10 +794,11 @@ import { firstSendHash } from '../sidebar/recent.js'
     const unresolved = new Set(list.filter((t) => t.status !== 'completed').map((t) => t.id))
     const done = list.filter((t) => t.status === 'completed').length
     const running = list.filter((t) => t.status === 'in_progress').length
+    const pending = list.length - done - running
     const items = [...list].sort(taskById).map((t) => {
       const status = t.status // 形状收口在网关 normalizeGatewayTasks（id/subject/status/blockedBy 已净化）
       const blockers = t.blockedBy.filter((id) => unresolved.has(id))
-      const dim = status === 'completed' || blockers.length ? ' dim' : ''
+      const dim = blockers.length ? ' dim' : '' // 阻塞行变暗；完成行靠绿点区分（dsh 无删除线/不变暗）
       // 提示文案（不占版面）：阻塞行说明等哪条，进行中行给 CLI spinner 同源的 activeForm
       const tips = []
       if (blockers.length) tips.push('等待前序任务：' + blockers.join('、'))
@@ -804,16 +806,19 @@ import { firstSendHash } from '../sidebar/recent.js'
       const title = tips.length ? ` title="${esc(tips.join(' · '))}"` : ''
       const owner = t.owner ? `<span class="td-owner">@${esc(t.owner)}</span>` : ''
       return `<div class="td-item${dim}" data-st="${status}"${title}>`
-        + `<span class="td-ico">${TASK_ICON[status]}</span>`
+        + `<span class="td-dot"></span>`
         + `<span class="td-sub">${esc(t.subject)}</span>${owner}</div>`
     }).join('')
-    const counts = ['共 ' + list.length + ' 项', done + ' 完成']
-    if (running) counts.push(running + ' 进行中')
-    // 面板整体重建（清单事件低频）：头部=收起把手（点击向下收敛），下方列表
+    // dsh 任务栏形态（2026-10-04）：头部=列表图标 + 「任务」 + 计数（N 已完成 · M 进行中 · K 待处理）
+    // + chevron；同一份头部既渲进收起把手（.td-lip），也渲进面板顶（.td-head），两态视觉连续。
+    const header = '<span class="td-hico">' + I.dshPlan + '</span>'
+      + '<span class="td-title">任务</span>'
+      + `<span class="td-counts">${done} 已完成 · ${running} 进行中 · ${pending} 待处理</span>`
+      + '<span class="td-chev">' + I.dshChevDown + '</span>'
+    if (lip) lip.innerHTML = header
+    // 面板整体重建（清单事件低频）：头部（点击向下收敛）+ 圆点状态行列表
     panel.innerHTML = '<div class="td-head" role="button" tabindex="0" aria-label="收起任务清单">'
-      + '<span class="td-title">任务清单</span>'
-      + `<span class="td-counts">${counts.join(' · ')}</span>`
-      + `<span class="td-chev">${CHEV}</span>`
+      + header
       + '</div>'
       + `<div class="td-list">${items}</div>`
     dock.hidden = false
@@ -823,7 +828,7 @@ import { firstSendHash } from '../sidebar/recent.js'
       lip.onclick = blocked ? null : toggleTaskDock
       lip.disabled = blocked
       lip.setAttribute('aria-expanded', open ? 'true' : 'false')
-      lip.title = blocked ? '任务清单（审批中）' : open ? '收起任务清单' : '展开任务清单（' + list.length + ' 项）'
+      lip.title = blocked ? '任务（审批中）' : open ? '收起任务' : '展开任务（' + list.length + ' 项）'
     }
     const head = panel.querySelector('.td-head')
     if (head) {

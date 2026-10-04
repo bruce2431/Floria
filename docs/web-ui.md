@@ -212,7 +212,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 15. 底栏任务浮窗（TodoV2 清单）
 
-**形态定案**：清单内容在 web 被渲染；任务栏作为底栏的一个子元素，从底栏生长出宽度小于底栏的浮窗，收敛态仅显示边沿，点击向上伸展、再点向下收敛。**数据源=新增 `task-state` 链**（不复刻：CLI 复刻即违反根本原则 1）；边沿位置=输入栏上沿之上；展开宽=输入栏宽−48px 居中、上到聊天区 40%；与接管栏=自动收敛并禁点。
+**形态定案**：清单内容在 web 被渲染；任务栏作为底栏的一个子元素，从底栏生长出宽度小于底栏的浮窗，收敛态显示**整条头部条**（列表图标 + 「任务」 + 计数 + chevron，2026-10-04 改 dsh 任务栏形态），点击向上伸展为「同头部 + 圆点状态行列表」、再点向下收敛。**数据源=新增 `task-state` 链**（不复刻：CLI 复刻即违反根本原则 1）；头部条位置=输入栏上沿之上；展开宽=输入栏宽−48px 居中、上到聊天区 40%；与接管栏=自动收敛并禁点。
 
 **链路（CLI 单源 → 网关镜像 → SSE/首载 → web 渲染）**：
 - CLI 出口：`useTasksV2.#notify()`（`#fetch` 与隐藏计时器两条路径唯一汇合点）→ `#report()` → `gatewayClient.notifyTaskState(this.getSnapshot() ?? [])`。**载荷去重**在 `notifyTaskState` 内做（`lastTaskStateJSON` 比较）；`sock.on('open')` 补发当前清单。
@@ -221,9 +221,9 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **单源不变量**：web 渲染的清单 = CLI `getSnapshot()` 同一份语义（hidden/空 → `[]` → 浮窗整体不出现），**web 无任何状态推导、无形状兜底分支**。
 
-**DOM 与几何**：`#task-dock` 是 `#input-bar` 的**子元素**（`position:relative` 为定位上下文），`bottom:100%` 贴输入栏上沿之上、`overflow:hidden` 作裁切盒，`pointer-events:none`（仅在 `.td-lip` 与展开态 `.td-panel` 恢复）。收敛态面板 `transform: translateY(100%)` 整块藏进输入栏后，露出件只剩 `.td-lip` **12px 把手条**（hover 14px）——露出的是 `.td-panel` 自身顶边（同材质，揭示/收合视觉连续）；`.blocked` 加 `opacity:.55`。展开态 `translateY(calc(-1 * var(--td-gap)))`，`--td-gap` = **10px**（面板底边与输入栏上沿间距）；盒 `padding:18px 10px 0`。点击边沿/`.td-head` 切换 `.open`（0.32s cubic-bezier，与接管栏同款缓动）；宽=输入栏宽−48px 居中，`max-height: min(40vh,460px)` 内部滚动，展开态重渲保留 `panel.scrollTop`。行渲染与 CLI `TaskListV2` 同构：图标 `✔/◼/◻`、id 数字升序、`completed` 与「被未完成前序阻塞」行 dim、阻塞行 tooltip「等待前序任务：<id>」、`in_progress` tooltip = `activeForm`、owner 渲染 `@name`。**接管让位**：审批/提问卡入场（`showTakeover`）→ 自动清 `taskOpen` 并加 `.blocked`（边沿 `disabled` + `onclick=null`），卡撤走恢复可点且**仍保持收敛**。
+**DOM 与几何**：`#task-dock` 是 `#input-bar` 的**子元素**（`position:relative` 为定位上下文），`bottom:100%` 贴输入栏上沿之上、`overflow:hidden` 作裁切盒，`pointer-events:none`（仅在 `.td-lip` 与展开态 `.td-panel` 恢复）。收敛态面板 `transform: translateY(100%)` 整块藏进输入栏后，露出件 = `.td-lip` **整条头部条**（与 `.td-panel` 同族白卡、同 padding）：计划图标 `.td-hico` + 「任务」`.td-title` + 计数 `.td-counts` + 折叠箭头 `.td-chev`；`.td-lip` 与展开态 `.td-head` 渲**同一份 header**（切态视觉连续，`.open` 后 `.td-lip` `opacity:0` 让位）。chevron 收敛朝上（`:not(.open)` `rotate(180deg)`，点它上展）、展开朝下。`.blocked` 加 `opacity:.55`。展开态 `translateY(calc(-1 * var(--td-gap)))`，`--td-gap` = **10px**（面板/头部条底边与输入栏上沿间距）；盒 `padding:18px 10px 0`。点击头部条/`.td-head` 切换 `.open`（0.32s cubic-bezier，与接管栏同款缓动）；宽=输入栏宽−48px 居中，`max-height: min(40vh,460px)` 内部滚动，展开态重渲保留 `panel.scrollTop`。行渲染：状态圆点 `.td-dot`（`completed` 绿实心 / `in_progress` 蓝描边环 / `pending` 灰实心，语义挂 `data-st`，与 CLI `TaskListV2` 三态同构）、id 数字升序、**仅「被未完成前序阻塞」行 dim**（`completed` 行不变暗，dsh 无删除线/不变暗）、阻塞行 tooltip「等待前序任务：<id>」、`in_progress` tooltip = `activeForm`、owner 渲染 `@name`。**接管让位**：审批/提问卡入场（`showTakeover`）→ 自动清 `taskOpen` 并加 `.blocked`（头部条 `disabled` + `onclick=null`），卡撤走恢复可点且**仍保持收敛**。
 
-**自取证**：`probes/probe-task-dock.ts`（源码切片求值：从 `inputbar/approval.js` 取浮窗区间 + 最小 DOM 桩；从 `localGateway.ts` 切 `normalizeGatewayTasks` 经 `Bun.Transpiler` 剥类型测形状边界）——39 断言全过。
+**自取证**：`probes/probe-task-dock.ts`（源码切片求值：从 `inputbar/approval.js` 取浮窗区间 + 最小 DOM 桩；从 `localGateway.ts` 切 `normalizeGatewayTasks` 经 `Bun.Transpiler` 剥类型测形状边界）——41 断言全过。
 
 **实测前提（勿漏）**：上报端在 CLI 进程内，故**产生清单的那个 CLI 会话本身必须跑含本链的新 exe**；换网关 exe 只更新 web 前端不足以显示。**旧 exe 会话的换新路径**：web 侧栏关闭该会话进程 → web 再发消息即由网关 `resumeAndDeliver` 拉起 `process.execPath`（=网关自身新 exe）。
 
@@ -611,5 +611,28 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **样式**：`styles.css` `.msg .blocks .md-img`（`max-width: min(100%, 480px)` + 圆角 + `cursor: zoom-in`，lightbox 委托沿用 `.msg-img`）。
 - **权限豁免**：`utils/permissions/filesystem.ts` 的 `.claude/` 子目录豁免表加入 `images`（与 `worktrees`/`preview`/`neturon` 同列），否则 Write 落 `.claude/images/` 被拦。
 - **边界**：全局会话（无 `projectLabel`）resolver 返 null → 不渲染、留原文；单图受 `/gateway/file` 4 MB 上限约束。
-- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v435）。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v436）。
 - **探针锚点**：`probes/probe-md-image.ts`（纯函数：注入 resolver 断言合法代号出 `<img>`、非法/无 resolver 保留原文、XSS 类代号不注入）。
+
+## 51. 底栏 composer 遮罩（dsh `.composerSeat` 渐隐带移植，2026-10-03）
+
+**能力**：会话态在底栏区域做全卡宽的「透明→卡底色」渐隐，chat 消息流滚到底栏上方 36px 内淡出、其下实心——遮住底栏两侧、下方及上缘滚过的消息（美化，等同 dsh `ConversationRoot.module.css` `.composerSeat` 的 input mask）。dsh 该座是粘底全列宽 flex 项；floria 底栏是浮在会话卡内的胶囊（`.docked`），故以**会话卡内的独立绝对定位层**实现。
+
+- **结构**：`#composer-mask` 常驻 `#session-card`（`index.html`，`#chat-scroll` 之后），`aria-hidden`。
+- **几何不变量**：`bottom:0; left:0; right:0` 全卡宽；`height = var(--bar-h, 116px) + 58px`（= 底栏高 + 22px 底距 + 36px 渐隐带）。`--bar-h` = `#input-wrap` 实测高度，由 `core/viewport.js` `settle()` 随 `--bar-room` 一并写 `documentElement`（`ResizeObserver(#input-wrap)` 触发；隐藏态高 0 不写，保上次真值）。多行输入 / 接管卡长高时渐隐带上沿随底栏新上沿同步上移。
+- **渐隐**：`linear-gradient(180deg, color-mix(in srgb, var(--chat-bg) 0%, transparent) 0, var(--chat-bg) 36px)`——36px 是**固定 px 停止**（不随底栏高度拉伸，等价 dsh「24% of resting composer 用 px 固定」），36px 以下实心；用 `--chat-bg` 而非硬编码白 ⇒ 两主题各自从自身底色渐隐；0 端用 `color-mix` 保色相（`transparent` 会退化为 transparent-black，白底渐隐带发灰）。
+- **显示门/层级**：`#chat-area.in-session` 下 `opacity 1`（0.25s），否则 0；`z-index:3`——盖住消息流（含 sticky 头 z1）、低于 `#input-wrap`（z5）与 `#char`（z4）；`pointer-events:none`；`#session-card.wk-assist-slim` 态 `display:none`。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v436）。
+- **探针锚点**：暂无（纯 CSS 视觉层）。
+
+## 52. 回复操作条：用量按钮（弹出明细）+ 时间（dsh 回复底部还原，2026-10-04）
+
+**能力**：assistant 正式回复气泡底部操作条在复制钮之后补「用量 X tok」按钮 + 时间（本地 `YYYY-MM-DD HH:MM`），还原 dsh 回复下的按钮/文字形态。**点用量按钮 → 弹出明细面板**（dsh 同款：头部「本轮用量」+ 合计，行 = 提供方 / 模型、缓存命中 %、未缓存输入、缓存读取、缓存写入、输出）。**仅回复气泡携带**（用户气泡仍只有复制钮）；赞/踩/分享**未做**（用户 2026-10-04 定案「不要这三个」）。
+
+- **数据源**：投影层 `DisplayMessage.usage`（`src/utils/conversationDisplay.ts` assistant 分支 `usageDetail`）＝明细对象 `{input,cacheRead,cacheWrite,output}`（分别取自 `input_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`/`output_tokens`；四者合计 0 / 无 usage → undefined）+ `DisplayMessage.model`（`message.model`，弹出面板「提供方 / 模型」行）+ 既有 `DisplayMessage.timestamp`。合计 = 四字段之和（消费端相加）；缓存命中 = `cacheRead/(input+cacheRead+cacheWrite)`。**CLI 与网关共用同一投影**（`/gateway/session` 与 `/gateway/conversation` 两个消费端自动带上），前端零额外请求。
+- **渲染**：`chat/messages.js` `replyBubbleHtml(key, text, usage, ts, model)` 产 `.msg-actions` = `.msg-copy` → `.usage-wrap`（`<span>`，含 `.msg-usage` 按钮 + `.usage-pop` 面板）→ `.msg-time`。`fmtUsage`：≥1e6 折 M、≥1e3 折 K（一位小数），否则原值；`fmtTok`：千分位整数；`fmtClock`：本地 `YYYY-MM-DD HH:MM`（无时间戳/非法 → 空不渲）。提供方标签 = `modelProviderOf({k:'model',v:model})`（`views/cards/models-card.js`，与输入栏模型菜单同源唯一一份）。
+- **弹层锚点（dsh 同款）**：按钮与面板同包进 `.usage-wrap`（`position:relative`），面板 `left:0` ⇒ **面板左缘对齐「用量」按钮左缘**（非复制钮左缘/气泡左缘），上弹 `bottom:calc(100%+8px)`。
+- **弹层交互**：`messages.js` 点击委托——点 `.msg-usage` 切 `.usage-pop[hidden]` 并同步 `aria-expanded`；**单开互斥**（开本关它，`closeUsagePops`）；点面板外区关闭。
+- **复制排除不变量**：用量按钮/时间/面板同置 `.msg-actions` 内，`messageCopyText` 剔 `.msg-actions` 时一并排除，复制纯文本不含它们。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v440）。
+- **探针锚点**：`Floria/probes/probe-reply-usage.ts`（读真实转录跑 `filterConversationForDisplay`，断言全部 assistant 条带 usage 明细 + model）。

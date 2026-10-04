@@ -120,6 +120,24 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 #chat-scroll::-webkit-scrollbar { width: 8px; }
 #chat-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
+/* composer 遮罩（2026-10-03 移植 dsh .composerSeat 渐隐带，几何见 index.html 注）：会话态贴底栏
+   区域全卡宽渐隐——顶部 36px 由透明过渡到卡底色（固定 px 停止、不随底栏长高拉伸，等价 dsh 的
+   「24% of resting composer 用 px 固定」），36px 以下实心，遮住底栏两侧与下方滚过的消息流。
+   底色用 --chat-bg 而非硬编码白（dsh 同款：导出图硬编码白，实现改底色变量）⇒ 两主题各自从自身
+   底色渐隐；0 端用 color-mix 保色相（透明端退化为 transparent-black 会让白底渐隐带发灰）。
+   高度 = 底栏高 --bar-h（核心 viewport.js settle 实测）+ 22px 底距 + 36px 渐隐带。z-index 3：
+   盖住消息流（含 sticky 头 z1），低于 #input-wrap（z5）与 #char（z4）；pointer-events:none。 */
+#composer-mask {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(var(--bar-h, 116px) + 58px);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--chat-bg) 0%, transparent) 0,
+    var(--chat-bg) 36px);
+  pointer-events: none; z-index: 3;
+  opacity: 0; transition: opacity 0.25s ease;
+}
+#chat-area.in-session #composer-mask { opacity: 1; }
+
 #messages { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; transition: padding-left 0.28s cubic-bezier(0.22, 0.61, 0.36, 1); }
 
 /* 2026-09-07 两区重构：#live-zone 暂态区容器（回合开启气泡/「正在处理」主张折叠/置底排队区
@@ -226,6 +244,35 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 .msg-copy:hover { background: var(--hover); color: var(--text-2); }
 .msg-copy svg { width: 16px; height: 16px; display: block; }
 .msg-copy.copied { color: var(--blue); }
+/* 回复操作条尾部：用量按钮（token 合计，图标+文字，点击弹出明细）+ 时间 HH:MM
+   （2026-10-04 还原 dsh 回复操作条；用量改按钮 + 明细面板） */
+.msg-usage, .msg-time { font-size: 12px; color: var(--text-3); line-height: 1; white-space: nowrap; }
+/* .usage-wrap = 用量按钮 + 明细面板的共同锚（position:relative）⇒ 面板左缘对齐按钮左缘（dsh 同款） */
+.usage-wrap { position: relative; display: inline-flex; align-items: center; margin-left: 6px; }
+.msg-usage {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px; border: none; border-radius: 7px; background: transparent;
+  font: inherit; color: var(--text-3); cursor: pointer;
+}
+.msg-usage:hover { background: var(--hover); color: var(--text-2); }
+.msg-usage[aria-expanded="true"] { background: var(--active); color: var(--text-2); }
+.msg-usage svg { width: 14px; height: 14px; display: block; }
+.msg-time { margin-left: 10px; font-variant-numeric: tabular-nums; }
+/* 用量明细弹层（点 .msg-usage 开；单开互斥，点外区关） */
+.usage-pop {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+  width: 280px; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.usage-pop[hidden] { display: none; }
+.usage-pop .up-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 9px; margin-bottom: 7px; border-bottom: 1px solid var(--border-soft); }
+.usage-pop .up-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text); }
+.usage-pop .up-title svg { width: 15px; height: 15px; display: block; color: var(--text-2); }
+.usage-pop .up-total { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.usage-pop .up-rows { display: flex; flex-direction: column; gap: 7px; }
+.usage-pop .up-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+.usage-pop .up-k { color: var(--text-2); }
+.usage-pop .up-v { color: var(--text); font-variant-numeric: tabular-nums; }
 .msg-assistant .p { white-space: pre-wrap; word-break: break-word; margin-bottom: 4px; }
 .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 11px; color: var(--text-3); }
 .msg-header .role { color: var(--text-2); font-weight: 600; }
@@ -513,17 +560,16 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* takeover 内的审批卡铺满输入栏宽度（去掉 chat 内的宽度上限），且剥掉自身卡面铬
    （独立边框/底色/阴影/圆角全去）——黄条头保留为状态带，卡面即输入栏卡面（2026-09-09 根修） */
 #composer-takeover .appr-card { width: 100%; max-width: none; margin: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; }
-/* ===== 底栏任务浮窗（2026-09-10，几何 2026-09-11 二轮定案）=====
-   输入栏子元素、贴其上沿定位（bottom:100%）的生长式浮窗——「从底栏长出来」的几何：
-   #task-dock = 裁剪盒（padding 上留 18px 给展开态上移后的浮出阴影，overflow:hidden 裁掉下沿以外部分，
-   down 边界 = 输入栏上沿）；.td-panel 常态下移 100%（整块藏进输入栏后）
-   → 点击 .open 上滑并抬升 --td-gap：面板底边与输入栏上沿留出间距（用户 2026-09-11 定案：
-   「和底栏主体应该保留适当间距」），无内容穿越输入栏（裁剪即「藏在栏后」）。
-   .td-lip = 收敛态露出的把手条（绝对定位于盒底、贴输入栏上沿，open 后隐藏让位给 .td-head）；
-   高度 12px、白表面 + 1px 0.10 描边（用户 2026-09-11 定案：旧 2px「露出部分有点太小了」→ 12px；
-   旧实心灰「这个颜色不是很对」→ 改与 #input-bar/.td-panel 同族材质，读作面板露出的顶边）。 */
+/* ===== 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）=====
+   dsh 任务栏形状（用户 2026-10-04 定案，参考 dsh 截图）：收敛态 = 一条完整头部条（列表图标 + 「任务」+
+   计数 + chevron）；展开态 = 同一头部顶置 + 圆点状态行列表——两态视觉连续，头部随展开上移。
+   几何仍是「输入栏子元素、贴其上沿的生长式浮窗（bottom:100%）」：#task-dock = 裁剪盒（padding 上留
+   18px 给展开态上移后的浮出阴影，overflow:hidden 裁掉下沿以外部分，down 边界 = 输入栏上沿）；
+   .td-panel 常态下移 100%（整块藏进输入栏后）→ .open 上滑并抬升 --td-gap：面板底边与输入栏上沿留间距
+   （2026-09-11 定案「和底栏主体应保留适当间距」）。.td-lip 现为收敛态头部条本身（与 .td-panel 同族
+   白卡材质），open 后隐藏让位给 .td-head（内容相同）。 */
 #task-dock {
-  --td-gap: 10px; /* 展开态：面板底边与输入栏上沿的间距（唯一几何出口） */
+  --td-gap: 10px; /* 展开态：面板底边 / 收敛态：头部条底边，与输入栏上沿的间距（唯一几何出口） */
   position: absolute; left: 14px; right: 14px; bottom: 100%;
   /* 上留 18px：展开态面板整体上移 --td-gap 后，顶部仍留出浮出阴影（blur 12 / y 4 → 上溢 8px）不被裁 */
   padding: 18px 10px 0; overflow: hidden;
@@ -533,20 +579,20 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 #task-dock[hidden] { display: none; }
 #task-dock.blocked { pointer-events: none; }
 @keyframes tdBorn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* 收敛态头部条：与 .td-panel 同族白卡（1px 0.10 描边 + 圆角 + 微阴影），底边离输入栏 --td-gap */
 #task-dock .td-lip {
-  position: absolute; left: 10px; right: 10px; bottom: 0; z-index: 2;
-  height: 12px; padding: 0;
-  /* 材质与 #input-bar / .td-panel 同族（白表面 + 1px 0.10 描边 + 圆角），**不是**独立色条——
-     收敛态露出的就是面板自身的顶边，「藏在栏后」的意象在视觉上连续（2026-09-11 用户定案：
-     实心灰 rgba(38,49,72,0.16) 与白输入栏体系不搭）。下沿无边框：紧贴输入栏上沿不画第二道线。 */
-  border: 1px solid rgba(0, 0, 0, 0.1); border-bottom: none;
-  border-radius: 10px 10px 0 0;
-  background: #fff; cursor: pointer; pointer-events: auto;
-  transition: height 0.14s ease, background-color 0.14s ease;
+  position: absolute; left: 10px; right: 10px; bottom: var(--td-gap); z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; height: auto; text-align: left; font-family: inherit;
+  border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 14px; background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  font-size: 13px; line-height: 20px; color: #0f1115;
+  cursor: pointer; pointer-events: auto;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
 }
-#task-dock .td-lip:hover:not(:disabled) { height: 14px; background: #f7f8fa; }
+#task-dock .td-lip:hover:not(:disabled) { background: #f7f8fa; }
 #task-dock .td-lip:disabled { cursor: default; }
-/* 接管卡在场（.blocked）：把手显式弱化——白卡形态下不禁用会仍像可点 */
+/* 接管卡在场（.blocked）：头部条显式弱化——白卡形态下不禁用会仍像可点 */
 #task-dock.blocked .td-lip { opacity: 0.55; }
 #task-dock.open .td-lip { opacity: 0; pointer-events: none; }
 #task-dock .td-panel {
@@ -561,29 +607,30 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
   pointer-events: none;
 }
 #task-dock.open .td-panel { transform: translateY(calc(-1 * var(--td-gap))); pointer-events: auto; }
-/* 头部=收起把手（点击向下收敛）：标题 + 计数 + 向下 chevron（CHEV 原形朝右，定角 90° 朝下） */
+/* 头部（面板顶，与 .td-lip 渲同一份内容）：列表图标 + 「任务」 + 计数 + chevron */
 #task-dock .td-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 9px 12px; border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   position: sticky; top: 0; background: #fff; border-radius: 14px 14px 0 0;
   cursor: pointer;
 }
 #task-dock .td-head:hover { background: #f7f8fa; }
+#task-dock .td-hico { flex: none; display: inline-flex; color: #6b7280; }
+#task-dock .td-hico svg { width: 15px; height: 15px; display: block; }
 #task-dock .td-title { font-weight: 500; }
-#task-dock .td-counts { color: #adb2b8; font-size: 12px; font-variant-numeric: tabular-nums; }
-#task-dock .td-chev { margin-left: auto; display: inline-flex; color: #adb2b8; transform: rotate(90deg); }
+#task-dock .td-counts { color: #adb2b8; font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#task-dock .td-chev { margin-left: auto; display: inline-flex; color: #adb2b8; }
 #task-dock .td-chev svg { width: 14px; height: 14px; display: block; }
+/* 收敛=chevron 朝上（点它上展），展开=朝下（点它下收） */
+#task-dock:not(.open) .td-chev { transform: rotate(180deg); }
 #task-dock .td-list { padding: 4px 0; }
-/* 清单行（CLI TaskListV2 同构语义：完成=删除线+变暗、进行中=加粗、阻塞=变暗） */
-#task-dock .td-item { display: flex; align-items: baseline; gap: 8px; padding: 4px 12px; }
-#task-dock .td-item .td-ico { flex: none; width: 14px; color: #adb2b8; font-size: 11px; line-height: 20px; }
-#task-dock .td-item[data-st="in_progress"] .td-ico { color: #4176e6; }
-#task-dock .td-item[data-st="completed"] .td-ico { color: #16a34a; }
+/* 清单行（dsh 任务栏同构：状态圆点 + 文本；完成=绿实心、进行中=蓝环、待办=灰实心；阻塞行变暗） */
+#task-dock .td-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 12px; }
+#task-dock .td-item .td-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 6.5px; background: #c7cbd1; box-sizing: border-box; }
+#task-dock .td-item[data-st="completed"] .td-dot { background: #16a34a; }
+#task-dock .td-item[data-st="in_progress"] .td-dot { background: transparent; border: 1.5px solid #4176e6; }
 #task-dock .td-item .td-sub { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-#task-dock .td-item[data-st="in_progress"] .td-sub { font-weight: 500; }
-#task-dock .td-item[data-st="completed"] .td-sub { text-decoration: line-through; }
-#task-dock .td-item.dim .td-sub,
-#task-dock .td-item.dim .td-ico { color: #adb2b8; }
+#task-dock .td-item.dim .td-sub { color: #adb2b8; }
 #task-dock .td-item .td-owner { flex: none; color: #81858c; font-size: 12px; }
 
 .tool-result {
@@ -2297,6 +2344,7 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 #session-card.wk-assist-slim > .wk-assist-grip,
 #session-card.wk-assist-slim > #char,
 #session-card.wk-assist-slim > #chat-scroll,
+#session-card.wk-assist-slim > #composer-mask,
 #session-card.wk-assist-slim > #empty-hint,
 #session-card.wk-assist-slim > #input-wrap { display: none; }
 .wk-assist-pill {

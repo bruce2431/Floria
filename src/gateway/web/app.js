@@ -5947,7 +5947,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     document.execCommand('insertText', false, text)
   })
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
-  // 4 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
+  // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
   // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
   const dropOverlay = $('drop-overlay')
   let dragDepth = 0
@@ -6915,7 +6915,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function cmdEntries() {
     const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
-    const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/4 · 自动压缩` : '一次最多 4 张，自动压缩' }]
+    const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩' }]
     // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
     items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 exe 目录 uploads/' })
     if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
@@ -8721,7 +8721,7 @@ function setApprovalPending(v) { approvalPending = v }
   async function addImageFiles(files) {
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
-      if (pendingImages.length >= 4) { toast('一次最多 4 张图片'); break }
+      if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
       try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败') }
     }
     renderImgPills()

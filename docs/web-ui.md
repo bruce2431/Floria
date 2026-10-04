@@ -292,7 +292,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **发送态**：`gwSend` 把待发文件拼 `[文件:<会话 cwd 相对路径>]` 占位进消息文本（与 `[Image #N]` 同位追加；CLI/模型端即普通文本）→ 发送成功清 `pendingFiles`；`syncGwSend` 的 hasContent 计入文件。**相对化**：占位路径由 `send.js` `relUploadPath(abs)` 按**目标会话 cwd** 相对化（`relPath` 纯函数：大小写不敏感逐段比对、`\ /` 通用、跨盘符/无 cwd 退绝对路径）；新会话 jsonl 未落盘无 cwd 源 → wsession 响应附 `cwd` + 网关 `readSession` 记录缺失分支从 id 编码路径派生 cwd。乐观气泡文本不含文件占位。
 - **渲染态**（乐观与落盘同构）：`userBodyHtml` 剥 `[文件:...]` 占位 → `userFilesHtml`/`fileCardsHtml` 渲染**文件卡片**（`.msg-files` 在 `.body`/`.msg-imgs` 之后气泡外下方右对齐，卡片=dshFile 图标 + basename，title=完整路径，**点击复制路径**）；乐观气泡渲 `p.files` 卡片同构；排队区剥占位不渲染卡片。占位文本原样进 `pendingUserMsgs`/转录，剥占位只在渲染层。
 
-**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、4 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；共用 + 浮窗「上传」组与 `#img-pills` 附件行。
+**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、9 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；共用 + 浮窗「上传」组与 `#img-pills` 附件行。
 
 ## 24. 会话间通信来源行：提及 chip 带 sid + 气泡/排队区灰字
 

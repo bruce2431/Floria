@@ -151,7 +151,7 @@ import { setPanel } from '../sidebar/recent.js'
     document.execCommand('insertText', false, text)
   })
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
-  // 4 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
+  // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
   // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
   const dropOverlay = $('drop-overlay')
   let dragDepth = 0

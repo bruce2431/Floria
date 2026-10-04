@@ -71,7 +71,7 @@ import { syncGwSend } from './send.js'
   async function addImageFiles(files) {
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
-      if (pendingImages.length >= 4) { toast('一次最多 4 张图片'); break }
+      if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
       try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败') }
     }
     renderImgPills()

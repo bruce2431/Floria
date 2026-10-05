@@ -13,11 +13,13 @@ import { firstSendHash } from '../sidebar/recent.js'
 import { modelProviderOf } from '../sidebar/mgr-data.js'
   // ---------- 消息渲染 ----------
   // AI 生成图取图 URL 解析（2026-10-03）：模型输出 ![](code)（code = 该项目根 .claude/images/ 下的文件名），
-  // 把代号拼成网关取图 URL——复用 GET /gateway/file?label=<项目>&path=<相对路径>（网关零改动）。
-  // 全局会话无 label → 返回 null，渲染层保留原文（不兜底）。label 取法同 inputbar/mention.js。
+  // 把代号拼成网关取图 URL——复用 GET /gateway/file?label=<会话 label>&path=<相对路径>。
+  // label 直接取会话自带 projectLabel：项目会话=<项目名>、全局根会话=「全局根 · 散装对话」；
+  // 网关按 label 把全局项解析到工作区根，故全局会话同样能取图（不再按 scope 筛）。
+  // 无 label（会话未找到）→ 返回 null，渲染层保留原文（不兜底）。label 取法同 inputbar/mention.js。
   setImageSrcResolver((code) => {
     const s = findSession(live.curUuid)
-    const label = s && s.projectScope === 'project' ? s.projectLabel : ''
+    const label = s ? (s.projectLabel || '') : ''
     return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent('.claude/images/' + code)}` : null
   })
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）

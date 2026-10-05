@@ -608,12 +608,12 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **能力**：AI 生成的图落 `<项目根>/.claude/images/`（命名 `{厂商/模型}-{YYYYMMDDHHMMSS}.{ext}`），模型在回复文本里输出 markdown 图片语法、src 仅写**文件名代号**（如 `![](gemini-20261003123000.png)`），web 渲成 `<img>`、CLI 渲成可点击路径。**图片字节不进消息流/转录**——消息里只有代号。厂商 adapter（调各家生图 API + 归一化 bytes + 落盘）是独立阶段，展示链与厂商解耦。
 
 - **web 渲染**（`core/markdown.js` `mdInline`）：模块级 `mdImgResolver` + 导出 `setImageSrcResolver(fn)`；在链接替换**之前**插图片分支 `!\[([^\]]*)\]\(([^)\s]+)\)`，代号过白名单 `/^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/`（禁 `/` 与 `.` 路径段 → 防穿越；`mdHtml` 入口已整体 esc），命中且 resolver 返回 URL → `<img class="msg-img md-img" loading="lazy" ...>`；不命中或无 resolver → **保留原文**（不兜底）。
-- **resolver 注册**（`chat/messages.js`）：一次性 `setImageSrcResolver((code) => ...)`——从当前会话取 `projectScope==='project'` 的 `projectLabel`，拼 `/gateway/file?label=&path=.claude/images/<code>`（复用读端点，零网关改动，见 gateway.md §16）。
+- **resolver 注册**（`chat/messages.js`）：一次性 `setImageSrcResolver((code) => ...)`——取当前会话自带 `projectLabel`（项目会话=项目名，全局根会话=`全局根 · 散装对话`；不按 `projectScope` 筛），拼 `/gateway/file?label=&path=.claude/images/<code>`（复用读端点，见 gateway.md §16）。
 - **CLI 渲染**（`utils/markdown.ts` `formatToken` `case 'image'`）：同一白名单命中 → `createHyperlink(pathToFileURL(join(getCwd(), '.claude', 'images', code)).href, '.claude/images/' + code)`（OSC 8 支持端可点），否则回退 `token.href`。
 - **样式**：`styles.css` `.msg .blocks .md-img`（`max-width: min(100%, 480px)` + 圆角 + `cursor: zoom-in`，lightbox 委托沿用 `.msg-img`）。
 - **权限豁免**：`utils/permissions/filesystem.ts` 的 `.claude/` 子目录豁免表加入 `images`（与 `worktrees`/`preview`/`neturon` 同列），否则 Write 落 `.claude/images/` 被拦。
-- **边界**：全局会话（无 `projectLabel`）resolver 返 null → 不渲染、留原文；单图受 `/gateway/file` 4 MB 上限约束。
-- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v436）。
+- **边界**：会话未找到（无 `projectLabel`）resolver 返 null → 不渲染、留原文；单图受 `/gateway/file` 4 MB 上限约束。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值。
 - **探针锚点**：`probes/probe-md-image.ts`（纯函数：注入 resolver 断言合法代号出 `<img>`、非法/无 resolver 保留原文、XSS 类代号不注入）。
 
 ## 51. 底栏 composer 遮罩（dsh `.composerSeat` 渐隐带移植，2026-10-03）

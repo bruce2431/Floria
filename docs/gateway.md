@@ -301,4 +301,4 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清）。
 
-**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按项目内相对路径读盘，`.claude/images/` 仅是普通项目内路径，无需网关改动。**边界**：全局会话（`projectScope:'global'`，无 `label`）不渲染此类图；单图受 `GET /gateway/file` 的 4 MB 上限约束。
+**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按相对路径读盘，`.claude/images/` 仅是普通路径。**`label` 不做 scope 筛选**：项目会话 `label`=项目名（解析到项目根），全局根会话 `label`=`全局根 · 散装对话`（解析到工作区根）——两者标签空间不重叠（项目 label 是目录名、不含 `·`），故全局会话同样能取图。单图受 `GET /gateway/file` 的 4 MB 上限约束。

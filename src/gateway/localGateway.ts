@@ -2385,12 +2385,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 项目内文件内容读取：/gateway/file?label=<项目>&path=<项目内相对路径> → 原始字节
-  // （供个性化预览页识图渲染 Obsidian canvas / 加载图片音频视频）。受上方 /gateway/* token 校验保护。
+  // 文件内容读取：/gateway/file?label=<会话 label>&path=<相对路径> → 原始字节
+  // （供个性化预览页识图渲染 Obsidian canvas / 加载图片音频视频 / 会话消息里 AI 生成图取图）。
+  // label 不做 scope 筛选：项目会话 label=<项目名>（fDir=项目根），全局根会话 label=「全局根 · 散装对话」
+  // （fDir=工作区根）——两者标签空间不重叠（项目 label 是目录名，不含 `·`）。受上方 /gateway/* token 校验保护。
   if (req.method === 'GET' && url.pathname === '/gateway/file') {
     const fLabel = url.searchParams.get('label') || ''
     const fPath = url.searchParams.get('path') || ''
-    const fProj = findProjects(root).find((g) => g.scope === 'project' && g.label === fLabel)
+    const fProj = findProjects(root).find((g) => g.label === fLabel)
     if (!fProj) {
       sendJson(res, 404, { error: 'project not found' })
       return

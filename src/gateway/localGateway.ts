@@ -436,6 +436,8 @@ const detachTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const DISPLAY_TTL_MS = 10 * 60 * 1000 // conversationDisplays 10 分钟无刷新视为过期
 const ACTIVITY_TTL_MS = 10 * 60 * 1000 // sessionActivity 10 分钟无上报视为过期
 const MAX_REPORT_BODY_BYTES = 1024 * 1024
+// 编辑区单次写回上限：对齐 GET /gateway/file 的 4 MB 读侧上限（能读到的就能写回）
+const MAX_FILE_WRITE_BYTES = 4 * 1024 * 1024
 
 // ============================================================================
 // 小工具
@@ -1004,6 +1006,9 @@ export type EntryOpResult =
   | { ok: true; path?: string; name?: string; trash?: string }
   | { ok: false; code: number; error: string }
 
+/** 文件内容写结果。成功附新 mtime（= 下次编辑的冲突基线）。 */
+export type FileWriteResult = { ok: true; path: string; mtime: number } | { ok: false; code: number; error: string }
+
 /**
  * 项目内条目重命名（GET /gateway/file 的写侧对应件）：只改 basename，不跨目录移动。
  * 目标已存在 → 409（不覆盖、不自动序号——改名是用户显式输入，静默换成别的名字比报错更糟）。
@@ -1047,6 +1052,34 @@ export function trashProjectEntry(projRoot: string, rel: string): EntryOpResult 
   renameSync(abs, to)
   return { ok: true, trash: `.trash/${basename(to)}` }
 }
+
+/**
+ * 写已存在文件的内容（GET /gateway/file 的写侧对应件，2026-10-05 work 编辑区）。只改内容，
+ * 不新建/不删除；路径穿越防护同 resolveWithinRoot。baseMtime 缺省 = 强制覆盖；给了则与当前
+ * mtime 比对（浮点精确相等，来自读侧同一 stat），不等 → 409 conflict（外部已改，不静默覆盖）。
+ * 抽成纯函数是要让探针能直测真实现（probe-file-tree-ops.ts）。
+ */
+export function writeProjectFile(projRoot: string, rel: string, content: string, baseMtime?: number): FileWriteResult {
+  const abs = resolveWithinRoot(projRoot, rel)
+  if (!abs || abs === projRoot) return { ok: false, code: 403, error: 'forbidden' }
+  if (typeof baseMtime !== 'number' || !Number.isFinite(baseMtime)) {
+    // 未给基线：允许写（首次保存），但文件必须已存在（write 不做新建）
+    if (!existsSync(abs) || !statSync(abs).isFile()) return { ok: false, code: 404, error: 'not found' }
+  } else {
+    let cur: number
+    try {
+      const st = statSync(abs)
+      if (!st.isFile()) return { ok: false, code: 404, error: 'not found' }
+      cur = st.mtimeMs
+    } catch {
+      return { ok: false, code: 404, error: 'not found' }
+    }
+    if (cur !== baseMtime) return { ok: false, code: 409, error: 'conflict' }
+  }
+  writeFileSync(abs, String(content ?? ''), 'utf8')
+  return { ok: true, path: rel.replace(/\\/g, '/').replace(/^\/+/, ''), mtime: statSync(abs).mtimeMs }
+}
+
 
 function findProjects(root: string): ProjectInfo[] {
   const groups: ProjectInfo[] = []
@@ -2377,7 +2410,15 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       return
     }
     const fType = MIME[extname(fAbs)] ?? 'application/octet-stream'
-    res.writeHead(200, { 'Content-Type': fType, 'Cache-Control': 'no-cache' })
+    const fMtime = statSync(fAbs).mtimeMs
+    // ETag = 毫秒级 mtime（Last-Modified 只有秒级、不足以表达同一秒内的两次写）；work 编辑区记它作
+    // 冲突基线，写回时带回由 writeProjectFile 精确比对（见该函数）。
+    res.writeHead(200, {
+      'Content-Type': fType,
+      'Cache-Control': 'no-cache',
+      ETag: `"${fMtime}"`,
+      'Last-Modified': new Date(fMtime).toUTCString(),
+    })
     res.end(readFileSync(fAbs))
     return
   }
@@ -2401,6 +2442,46 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       )
       if (!rOut.ok) sendJson(res, rOut.code, { error: rOut.error })
       else sendJson(res, 200, rOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内已存在文件写内容：POST /gateway/file/write {label, path, content, baseMtime?}（2026-10-05 work 编辑区）
+  // 语义与防护全在 writeProjectFile（纯函数，探针 probe-file-tree-ops 直测）；此处只管解析 label 与 body 上限。
+  // body 用 4 MB 上限（readReportBody 的 1 MB 容不下源码文件），超限 → 413。受上方 /gateway/* token 校验保护。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/write') {
+    try {
+      let wBody: unknown
+      try {
+        wBody = JSON.parse((await readBodyWithLimit(req, MAX_FILE_WRITE_BYTES)).toString('utf8') || '{}')
+      } catch (e) {
+        if (e instanceof ReportBodyTooLargeError) {
+          sendJson(res, 413, { error: 'too large' })
+          return
+        }
+        throw e
+      }
+      if (wBody === null || typeof wBody !== 'object' || Array.isArray(wBody)) {
+        sendJson(res, 400, { error: 'invalid body' })
+        return
+      }
+      const wp = wBody as Record<string, unknown>
+      const wProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof wp.label === 'string' ? wp.label : ''),
+      )
+      if (!wProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const wOut = writeProjectFile(
+        resolve(wProj.dir, '..', '..'),
+        typeof wp.path === 'string' ? wp.path : '',
+        typeof wp.content === 'string' ? wp.content : '',
+        typeof wp.baseMtime === 'number' ? wp.baseMtime : undefined,
+      )
+      if (!wOut.ok) sendJson(res, wOut.code, { error: wOut.error })
+      else sendJson(res, 200, wOut)
     } catch (e) {
       sendError(res, e)
     }

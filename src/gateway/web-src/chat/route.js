@@ -14,10 +14,10 @@ import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr } from '../sidebar/mgr.js'
-import { clearRailExt } from '../sidebar/rail-ext.js'
+import { clearRailExt } from '../views/cards/ext/ext-card.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, workScopeOk } from '../sidebar/work.js'
-import { openProjectPreview } from '../views/cards/preview-card.js'
+import { openProjectPreview } from '../views/cards/preview/preview-card.js'
 import { hydrateExtCardId, openCard } from '../views/registry.js'
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
@@ -189,6 +189,17 @@ import { hydrateExtCardId, openCard } from '../views/registry.js'
     live.streamText = '' // 流式字符通道暂态
     clearTakeover() // 清残留的提问/审批 takeover（输入栏恢复）
     renderCtxMeter(null) // 无会话上下文：隐藏上下文环
+  }
+
+  // 会话卡离场钩子（session-card.js 的 deactivate 契约；registry.openCard 切异卡时调用，preview-card
+  // 硬进入分支经 registry.deactivateCard('session') 显式调用）——停实时计时 → 拆 stage 占位 →
+  // 清全局槽 → 复位 currentHash。**仅此一处合成**：离开会话视图的清单不再散落各入口（三次同根
+  // 复发教训：就地补清单必漏下一个入口）。
+  function teardownSessionView() {
+    stopLiveFoldTimer()
+    stageRelease()
+    clearSessionSlots()
+    state.currentHash = ''
   }
 
   function renderHome() {
@@ -376,4 +387,5 @@ export {
   renderSession,
   route,
   syncMgrTabs,
+  teardownSessionView,
 }

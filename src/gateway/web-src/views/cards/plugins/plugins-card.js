@@ -1,9 +1,9 @@
 // 插件卡（管理视图「插件」tab，插件 / 技能两态）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；
 // 唯一手改处，web/app.js 为生成物）
 
-import { I } from '../../core/icons.js'
-import { esc, saveMgrView, state } from '../../core/state.js'
-import { MGR, MGR_ERR, MGR_LOADING, loadMgrData, mgrColor } from '../../sidebar/mgr-data.js'
+import { I } from '../../../core/icons.js'
+import { esc, saveMgrView, state } from '../../../core/state.js'
+import { MGR, MGR_ERR, MGR_LOADING, loadMgrData, mgrColor } from '../../../sidebar/mgr-data.js'
   // ---------- 插件卡（插件 / 技能）----------
   // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
   // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 registry / mgr.js。

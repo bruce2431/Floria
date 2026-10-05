@@ -11,28 +11,28 @@
 
 import { I } from '../core/icons.js'
 import { chatArea, esc, patchUI, readUI, sessionCard } from '../core/state.js'
-import { neuronsCardDef } from './cards/neurons-card.js'
-import { pluginsCardDef } from './cards/plugins-card.js'
-import { projectsCardDef } from './cards/projects-card.js'
-import { modelsCardDef } from './cards/models-card.js'
-import { previewCardDef } from './cards/preview-card.js'
-import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext-card.js'
+import { sessionCardDef } from './cards/session/session-card.js'
+import { neuronsCardDef } from './cards/neurons/neurons-card.js'
+import { pluginsCardDef } from './cards/plugins/plugins-card.js'
+import { projectsCardDef } from './cards/projects/projects-card.js'
+import { modelsCardDef } from './cards/models/models-card.js'
+import { previewCardDef } from './cards/preview/preview-card.js'
+import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-card.js'
 
   // ---------- 卡片注册表 ----------
-  // 会话卡常驻 index.html（承载 #messages/#input-wrap/#char 等模块级 const 引用的单例 DOM，不能销毁
-  // 重建）→ card() 直接返回既存元素；其余卡由 openCard 按需创建/复用。
-  const sessionCardDef = { id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false, card: () => sessionCard }
+  // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
+  // #session-card，deactivate=teardownSessionView）；其余四张管理卡同态各自成模块。
   const CARDS = [sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef]
   const cardOf = (id) => CARDS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
-  // 代码，只有宿主生成的 iframe 壳（views/cards/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
+  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
   // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
   // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
   // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
   // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
-  // 清（清点收在 views/cards/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
+  // 清（清点收在 views/cards/preview/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
   // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
   let EXT = []
   let EXT_LABEL = ''
@@ -155,14 +155,22 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext-card.j
     return makeCard(id)
   }
   // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
+  // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
   // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
   // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
   function openCard(id, payload) {
     const c = cardOf(id)
     if (!c) return null
+    const prev = currentCardId()
+    if (prev && prev !== id) cardOf(prev)?.deactivate?.()
     const el = showCard(c.card ? c.card() : reuseOrMake(c.id))
     if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
     return el
+  }
+  // 契约出口：卡外（如 preview-card 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
+  function deactivateCard(id) {
+    cardOf(id)?.deactivate?.()
   }
   // 当前槽内卡的 id（'session' 表示会话卡在场；无卡返回 null）。work 模式切入时据此判定是否需先退卡。
   function currentCardId() {
@@ -182,6 +190,7 @@ export {
   clearExtCards,
   clearQuoteActions,
   currentCardId,
+  deactivateCard,
   hydrateExtCardId,
   hydrateExtCards,
   openCard,

@@ -1,13 +1,13 @@
 // 神经元卡（web「神经」tab）：层级1 = 神经元选择卡片，层级2 = Canvas 力导向三级节点图
 // （mem→cog→社群；2026-09-16 新增，数据源 = 网关 /gateway/neurons[/graph]，见 src/gateway/neuronViz.ts）
-// 2026-10-01 卡片化：sidebar/neurons.js → views/cards/neurons-card.js（唯一手改处，web/app.js 为生成物）。
+// 2026-10-01 卡片化：sidebar/neurons.js → views/cards/neurons/neurons-card.js（唯一手改处，web/app.js 为生成物）。
 
-import { apiUrl, needToken } from '../../core/gateway.js'
-import { I } from '../../core/icons.js'
-import { esc, isMobile, saveMgrView, state } from '../../core/state.js'
-import { viewBody } from '../registry.js'
-import { mgrColor, MGR_PALETTE } from '../../sidebar/mgr-data.js'
-import { setPanel } from '../../sidebar/recent.js'
+import { apiUrl, needToken } from '../../../core/gateway.js'
+import { I } from '../../../core/icons.js'
+import { esc, isMobile, saveMgrView, state } from '../../../core/state.js'
+import { viewBody } from '../../registry.js'
+import { mgrColor, MGR_PALETTE } from '../../../sidebar/mgr-data.js'
+import { closePanel } from '../../../core/panel.js'
   // ---------- 神经元卡（web「神经」tab）----------
   // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
   // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
@@ -112,7 +112,7 @@ import { setPanel } from '../../sidebar/recent.js'
         state.mgrView.neuronSel = c.dataset.id
         saveMgrView()
         NEU_RERENDER()
-        if (isMobile()) setPanel(false)
+        if (isMobile()) closePanel()
       }),
     )
   }

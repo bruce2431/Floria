@@ -40,6 +40,9 @@ import { ctx } from '../inputbar/ctx-meter.js'
     // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
     wkAssistMode: 'side', wkAssistH: 430,
+    // wkEdit = 编辑区模式（false=阅读（渲染/pre），true=源码编辑）。跨文件记忆（打开下一个文件沿用同一模式），
+    // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
+    wkEdit: false,
     // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
     // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
     wkFlex: { editor: 1, assist: 1, preview: 1 },
@@ -99,7 +102,7 @@ import { ctx } from '../inputbar/ctx-meter.js'
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
     stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex, wkEdit: !!state.wkEdit })
   }
   function loadWork() {
     try {
@@ -116,6 +119,7 @@ import { ctx } from '../inputbar/ctx-meter.js'
       loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
       if (d.wkFlex && typeof d.wkFlex === 'object') {
         for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
       }

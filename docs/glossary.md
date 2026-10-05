@@ -32,22 +32,28 @@
 | 规范名 | 实体 | 说明 | 旧称 |
 |---|---|---|---|
 | 底板 | `--plane`（`#ececf1`） | 容器底色，`body` 与 `#app` 同色 ⇒ 整窗读作一块底板（`#app` 的 22px 外框圆弧融进底板不再显形）；**侧栏与视图卡之间的缝隙露出它当分隔**。卡化读法见 web-ui §41 | 底子/画布 |
-| 无形槽 | `#chat-area` | 承载视图卡的无形状容器：通高、无圆角/无背景/无边距，只作定位与卡的 flex 容器；`#gate-screen`（token 门浮层）与 `#menu-btn`（侧栏唤出汉堡，全视口共用）留槽级，与「当前哪张卡」无关。**同一时刻槽里恰好一张卡** | 主区/内容区 |
+| 无形槽 | `#chat-area` | 承载视图卡的无形状容器：通高、无圆角/无背景/无边距，只作定位与卡的 flex 容器；`#gate-screen`（token 门浮层）与 `#menu-btn`（侧栏唤出汉堡，全视口共用）留槽级，与「当前哪张卡」无关。**同一时刻槽里恰好一张卡**；**会话级浮层禁直挂此槽**（须挂 `#session-card` 内），否则跨卡残留（见 web-ui §41） | 主区/内容区 |
 | 视图卡 | `.view-card` | 浮在底板上的圆角卡（`border-radius: var(--radius)` + 边距 2px + `background: var(--chat-bg)` + `position: relative`）：会话流/管理视图/项目预览各一张；**不画线、不加阴影**，分隔只靠与底板的底色差。`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形 | 内容卡 |
-| 会话卡 | `#session-card`（`.view-card.session`） | 会话视图那张卡，常驻 `index.html`——承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM，**离开只切 `hidden` 不销毁** | |
+| 会话卡 | `#session-card`（`.view-card.session`） | 会话视图那张卡，常驻 `index.html`——承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM，**离开只切 `hidden` 不销毁**；描述符 `views/cards/session/session-card.js`（`deactivate` = `teardownSessionView`），见 web-ui §53 | |
 | 管理卡 | `.view-card.mgr` | 插件/项目/模型/神经四个管理视图的卡，按需创建、离开即 `.remove()`（神经元图 rAF 以 `canvas.isConnected` 自毁） | |
-| 预览卡 | `.view-card[data-view=preview]` | 项目预览那张卡（`views/cards/preview-card.js` 描述符，`CARDS` 条目，经 `openCard('preview', {label,hasPreview})` 挂载）；同样按需创建、离开即 `.remove()` | |
+| 预览卡 | `.view-card[data-view=preview]` | 项目预览那张卡（`views/cards/preview/preview-card.js` 描述符，`CARDS` 条目，经 `openCard('preview', {label,hasPreview})` 挂载）；同样按需创建、离开即 `.remove()` | |
 | 卡内滚动层 | `.view-scroll` / `.view-body` | 管理卡的滚动层与内容列（`24px 20px 8px` 内边距 + 920px 内容宽），镜像会话卡 `#chat-scroll` 的几何；全高视图（预览/神经元图）由 `.view-card:has(...)` 改 padding/overflow | |
-| 视图注册表 | `views/registry.js` `CARDS` | 卡定义单一真源（`{id,title,tip,icon,tab,mount\|card}`，一模块一卡组件在 `views/cards/`）：侧栏 tab 生成 / `#mgr/<id>` 路由 / 卡体挂载三处查同一张表；**整卡切换唯一入口 `openCard(id, payload)`**，会话卡以 `tab:false` 入表走同一路径（web-ui §41） | tab 定义 |
+| 视图注册表 | `views/registry.js` `CARDS` | 卡定义单一真源（`{id,title,tip,icon,tab,mount\|card,deactivate?}`，一卡一目录 `views/cards/<name>/<name>-card.js`）：侧栏 tab 生成 / `#mgr/<id>` 路由 / 卡体挂载三处查同一张表；**整卡切换唯一入口 `openCard(id, payload)`**（切换先调离场卡 `deactivate?.()`）+ 契约出口 `deactivateCard(id)`，会话卡以 `tab:false` 入表走同一路径（web-ui §41/§53） | tab 定义 |
+| 卡生命周期契约 | `openCard` 离场钩子 / `deactivateCard` | 切卡时通道自动调用离场卡描述符的 `deactivate()`（`prev && prev !== id` 才触发），承载会话语义卸载等收尾；`deactivateCard(id)` 是供卡主动卸另一卡的契约出口。**依赖方向不变量**：卡 → 小底座（core + mgr-data + registry + 卡自身目录），禁卡依赖兄弟子系统（web-ui §53，`probes/probe-web-card-boundary.ts` 锁） | 卡片契约 |
+| 侧栏开合核 | `core/panel.js` `applyPanelOpen`/`closePanel` | 侧栏开合落地唯一实现（钉住态 `state.panelPinned` + 可见态 `state.panelOpen` + `#sidebar.open` + 折叠清 `--panel-w`）；`sidebar/recent.js` 的 `setPanel` 委托其核（popup/行浮窗清理留包装层），卡只经 `closePanel()` 收抽屉（web-ui §53） | 侧栏 |
 | 侧栏 | `#sidebar` | = 折叠态（宽度 0，无自带外观）+ 展开面板。**是 `#app` 的真实 flex 子元素**（桌面 ≥721px 亦然）：折叠 0 ↔ 展开 280 **只由自身宽度驱动**，主区 `#chat-area` 靠 flex 跟随收放（无 `padding-left` 避让，门期收宽至 0）。**背景透明 = 底板本身**（无自身形状）；手机 ≤720px 为覆盖式抽屉（脱离 flex 流，宽 `min(300px, 84vw)`，显式给底板色，否则透出 `#scrim` 发黑）。展开态右缘可拖拽调宽（`#panel-resizer` 把手，仅展开态 ≥721px 显示，范围 [232, min(560, 视口−120)] 写 `:root --panel-w`，**不记忆**——折叠即清内联值回默认 280px）。唤出入口 = `#menu-btn`（钉住）/ 窗口左缘唤出（`document` 级监听，无对应元素，悬停预览、离开即收），见 web-ui §38 | 侧栏 |
 | 注册快捷按钮 | `.rail-ico` | **预览页**经 `postMessage` 注册的快捷按钮（点击回跳预览页）；注册集属于当前那份预览文档，换文档即清（web-ui §39）。**挂载点暂缺（2026-09-25）**——原容器 `#rail-ext` 随 64px 折叠带撤除，样式与注册链保留、落地位置待定 | 预览注册按钮 / 注册轨按钮 |
 | 展开面板 | `#panel` | 展开态 280px：模式行 + 两个面板（chat / work，同一时刻恰一个非 hidden）；底色同底板、**不画右缘分隔线**（侧栏是通高平面，分隔由底板色从卡缝露出承担，web-ui §41） | |
 | 模式切换 tab | `.mode-switch` > `.ms-btn` | 侧栏模式分段控件（`floria·chat` / `floria·work`），占原位品牌行；两钮恒 `font-weight:600`（颜色区分选中，防 CJK 字宽跳动）。原 `.floria-logo` 品牌按钮退役，折叠入口仍是右侧 `#panel-collapse`。见 web-ui §43 | 品牌行/logo 行 |
 | chat 面板 | `#chat-panel` | 现行侧栏（管理 tabs + 最近列表）；`sbMode=chat` 时在场 | |
 | work 面板 | `#work-panel` | Prism 式工作区侧栏：项目切换（`#wk-proj-seat` + `#wk-proj-pop`）/ 文件·聊天 tab / 新建入口（`#wk-new` + `#wk-new-pop`）/ 文件树（`#wk-body`）/ 视图开关浮层（`#wk-view-pop`，侧栏右上角 `#wk-view` 展开）/ 工作区卡（`#wk-foot`）；`sbMode=work` 时在场。见 web-ui §43 | 项目态侧栏 |
-| 工作区编辑区 | `#work-editor` | work 模式主区左栏（只读查看项目内文件），与 `#session-card`（助手）、`#work-preview`（预览）并排组成三栏；**刻意不用 `.view-card` 类**（常驻栏，不参与「槽里恰好一张卡」语义）。手机 ≤720px 不成立多栏，改为 `.wk-file-open` 覆盖层（头部 `#wk-ed-back` 返回） | 编辑器/预览栏 |
+| 工作区编辑区 | `#work-editor` | work 模式主区左栏，与 `#session-card`（助手）、`#work-preview`（预览）并排组成三栏；**源码编辑 + 阅读双模**（编辑态 `.editing` 挂栏、阅读态渲染 md/pre），图片/二进制只读。**刻意不用 `.view-card` 类**（常驻栏，不参与「槽里恰好一张卡」语义）。手机 ≤720px 不成立多栏，改为 `.wk-file-open` 覆盖层（头部 `#wk-ed-back` 返回）。见 web-ui §54 | 编辑器/预览栏 |
+| 编辑/阅读切换钮 | `#wk-ed-mode` | 编辑区头部右侧图标钮（`I.dshEdit`⇄`I.dshBook`），点按或 **Ctrl+E** 切换源码编辑态/阅读态；图片与二进制不显示该钮（不可编辑）。`state.wkEdit` 记忆模式（默认 `false`=阅读） | 编辑模式按钮 |
+| 保存态 | `#wk-ed-save` | 编辑区头部路径右侧文本，单点写（`wkEdState`）：空=干净、`已保存`、`.dirty`=未保存（停输 ~1s 自动存，Ctrl+S 立即存）、`.conflict`=外部已改（409，`window.confirm` 选覆盖/重载，绝不静默覆盖） | 保存指示 |
+| 源码编辑框 | `.wk-ed-ta` | 编辑态的 `<textarea>`（叠在着色层上、自身滚动，等宽、**文本透明 + `caret-color` 显光标**）；值经 **DOM 属性赋值 `ta.value`** 灌入（不走 innerHTML 转义）。textarea 内部选区不进 `window.getSelection()` ⇒ 编辑态 `#work-editor.editing` 屏蔽引用浮窗（web-ui §54） | textarea/编辑框 |
+| 编辑区着色层 | `.wk-ed-hl` | 编辑态叠在 textarea 下的**只读着色层**（`aria-hidden`，`pointer-events:none`）。`wkHlHtml` 按扩展名分词上色；**token 只改 color**（禁字重/字形，否则与 textarea 错位）。`wkEdPaint` 重绘后回填 scroll、`wkEdPaintSoon` rAF 合帧；textarea `scroll` 同步。token 类 `.hl-kw/str/num/com/h/b/i/code/link/quote/li/hr`（web-ui §54） | 语法高亮/着色层 |
 | 视图开关浮层 | `#wk-view-pop` | work 模式「编辑区 / 侧边栏 / 助手 / 预览」四个开关（`.wkv-row`，`data-wkpane` = editor/sidebar/assist/workspace），由侧栏右上角 `#wk-view`（`\|\|` 图标）展开；**与「折叠侧栏」合并成同一个浮层**（`sidebar` 行走 `setPanel(on,{pin:on})`，work 模式下 `#panel-collapse` 隐藏）。不变量 = 三栏至少保留一栏（`applyPanes()` 全关时强制回助手栏并 toast） | 两栏开关浮层 |
-| 个性化工作区预览栏 | `#work-preview` | work 模式主区第三栏（`state.wkPreview` 门控，`#chat-area.work.wk-preview`），渲染当前工作项目的项目预览——**复用 `views/cards/preview-card.js` 的 `mountPreview()` 三级链**（backend 容器 → `.claude/preview/` 静态页 → 默认项目页），切项目跟随、关掉不销毁重开零重载。**持久列、非 `.view-card`**，不清会话槽、不切模式（区别于打开「项目」页的槽预览卡，web-ui §43） | 预览栏 |
+| 个性化工作区预览栏 | `#work-preview` | work 模式主区第三栏（`state.wkPreview` 门控，`#chat-area.work.wk-preview`），渲染当前工作项目的项目预览——**复用 `views/cards/preview/preview-card.js` 的 `mountPreview()` 三级链**（backend 容器 → `.claude/preview/` 静态页 → 默认项目页），切项目跟随、关掉不销毁重开零重载。**持久列、非 `.view-card`**，不清会话槽、不切模式（区别于打开「项目」页的槽预览卡，web-ui §43） | 预览栏 |
 | 新建入口「+」 | `#wk-new` / `#wk-new-pop` | work 侧栏 tab 行右侧加号：聊天 tab = 新建聊天（`navigate('#/')`）；文件 tab = 弹 `#wk-new-pop`（新建文件/新建文件夹/上传文件/上传文件夹，**功能暂未接入**）。按钮 title 与 🔍 提示随 tab 切换 | 加号/新建 |
 | 最近列表 | `#recent`/`#recent-body` | 会话容器（「最近」头 + 整理会话 + 模式 tabs）；连接状态点 `#floria-conn` 随模式行改址落在此头左侧 | |
 | 整理会话弹层 | `#organize-pop` | 「一个列表 / 按项目展开」切换浮层 | |

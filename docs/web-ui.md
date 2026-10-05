@@ -182,11 +182,11 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **模块布局**：
 - `app.js` 入口=import 群 + 事件绑定 + 启动序列
-- `core/`：icons（SVG 图标）、state（元素引用/共享可变态/toast/媒体工具）、char（角色形象）、markdown、sessions（会话映射）、live（SSE 会话事件）、gateway（WS 连接/审批中继）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）
-- `sidebar/`：mgr-data、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）
+- `core/`：icons（SVG 图标）、state（元素引用/共享可变态/toast/媒体工具）、char（角色形象）、markdown、sessions（会话映射）、live（SSE 会话事件）、gateway（WS 连接/审批中继/apiSetModel）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）、panel（侧栏开合核 `applyPanelOpen`/`closePanel`，见 §53）
+- `sidebar/`：mgr-data（管理视图数据源 + 模型供应商映射）、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）
 - `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、send（gwSend/syncGwSend）
 - `chat/`：route（路由渲染）、messages（消息渲染）、stage（钉顶占位/stage 机制）
-- `views/`：registry（**视图注册表 + 槽位单通道整卡切换**——一模块一卡组件在 `views/cards/`，tab 的 id/标题/图标/`mount` 单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处走同一张 `CARDS` 表 + 唯一入口 `openCard`，见 §41）；`views/cards/`：`plugins/projects/models/neurons/preview-card.js`（五张第一方卡，各自 `mount`）+ `ext-card.js`（外部卡 iframe 壳 + 声明过滤器，见 §42）
+- `views/`：registry（**视图注册表 + 槽位单通道整卡切换**——卡片组件在 `views/cards/<name>/`，tab 的 id/标题/图标/`mount` 单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处走同一张 `CARDS` 表 + 唯一入口 `openCard` + 契约出口 `deactivateCard`，见 §41/§53）；`views/cards/`：`ext/preview/plugins/projects/models/neurons/session/<name>-card.js`（七张卡，一卡一目录；第一方卡各自 `mount`；`ext-card.js` = 外部卡 iframe 壳 + 声明过滤器 + 侧栏按钮状态清点，见 §42）
 
 **跨模块可变状态 = SETTERS 机制**：14 个跨模块写入的 let（`ALL`/`connUp`/`gateAwait`/`gateVerified`/`sessionCwd`/`takeover`/`turnLive`/`btnMode`/`MODEL_CUR`/`modelUserPicked`/`pendingUserMsgs`/`firstSendHash`/`lastNavHash`/`approvalPending`）在定义模块尾生成 `export function setX(v){X=v}`，写入方一律调 setter（import 绑定不可赋值=ESM 硬约束）；读跨模块符号走 import（函数级循环 import 安全：hoisting + live binding）。
 
@@ -323,7 +323,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 26. 「神经」tab：神经元选择卡片 + 三级节点图
 
-侧栏第 4 个管理 tab（`data-mgr="neurons"`），与插件/项目/模型并列。前端模块 `web-src/views/cards/neurons-card.js`（`neuronsCardDef`，卡内整卡重渲走 `ctx.rerender()`），`state.mgrView.neuronSel` 区分层级并持久化。
+侧栏第 4 个管理 tab（`data-mgr="neurons"`），与插件/项目/模型并列。前端模块 `web-src/views/cards/neurons/neurons-card.js`（`neuronsCardDef`，卡内整卡重渲走 `ctx.rerender()`），`state.mgrView.neuronSel` 区分层级并持久化。
 
 **层级1 选择卡片页**：`renderNeuPicker` → `#neu-grid` 卡片（脑图标 + mem/cog/社群/更新四枚 `neu-stats` chips），数据源 `GET /gateway/neurons`（[gateway.md](gateway.md) §14）；`loadNeuronsData` 带 NEU/NEU_LOADING/NEU_ERR 三态与重试钮。
 
@@ -379,7 +379,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 ## 34. 切视图即清全局槽收敛为共享出口：管理视图（神经 tab）不再被实时流洗成 chat
 
 - **不变量**：`live.curUuid` 非空 ⇔ 当前视图正展示该会话（七条 SSE 守卫——session-delta / queue-state / task-state / compact-state / turn-state / stream-text / model——全押在它上面）。
-- **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，三个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）、`openProjectPreview` 硬挂载分支（`views/cards/preview-card.js`）。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
+- **修法 = 单源出口**（`chat/route.js` `clearSessionSlots()`）：清槽清单（`lastMsgLen`/`localMessages`/`deltaSeq`/`queueRemote`/`curUuid`/`tasks`+`renderTaskDock`/`streamText` + `clearTakeover` + `renderCtxMeter(null)`）收敛为一个函数，两个「离开会话视图」入口统一调用——`renderHome`（首页空态）、`renderMgr` 顶部（一次覆盖四分支，含神经 tab）；预览路由硬挂载不再自懂 chat，改经卡片契约出口 `deactivateCard('session')`（会话卡 `deactivate` = `teardownSessionView` → `clearSessionSlots`，2026-10-05，见 §53）。会话态的重新接线仍在 `renderSession`/`refreshSession`（唯一重建点），本函数不涉。
 - **守护不变量**：任何进入非会话视图的入口必须先 `clearSessionSlots()`；清槽清单只有一份（新增入口调它，勿就地补行）。**探针**：`probes/probe-web-view-slots.ts`（只读，27/0）——源码结构断言（三入口接线 / 清槽早于 `mgr-on` / 各模块内联清槽行数受控 / 产物 `app.js` 含定义与 ≥3 调用点 / sw 与 `?v=` 同步）+ 行为真值表（守卫表达式从 `core/live.js` 提取后喂 `(curUuid, ev.session)` 四组合）。
 
 ## 35. 键盘弹出适配：整页平移一个键盘高，内部零重排
@@ -400,8 +400,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 ## 36. 无当前会话态统一为空串：乐观气泡不再「先闪现后消失」
 
 - **不变量**：`state.currentHash` 的无会话态恒为 `''`（与 `firstSendHash`、乐观项 `pendingUserMsgs.hash` 同一约定），**不得再引入 `null``**——乐观项归属守卫、事务收口、主张计时起点 `claimStartTs`、撤回链 `inCur` 命中都押在这一个表示上。`falsy` 用法（`!state.currentHash`）不受影响。
-- **五处赋值点**：`core/state.js` 初值、`chat/route.js` 的 `route()`（非 session 路由分支）与 `renderHome`、`sidebar/mgr.js` 的 `renderMgr` 与 `views/cards/preview-card.js` 的 `openProjectPreview`（硬挂载分支）。判定侧一行未动即全部有效。
-- **探针**：`probes/probe-optimistic-hash.ts`（只读）——源码层断言五处赋值点均为 `''` 且全 `web-src` 无 `currentHash = null` 残留、`addUser` 写入即 `state.currentHash`、生成物 `app.js` 同步。
+- **赋值点**：`core/state.js` 初值、`chat/route.js` 的 `route()`（非 session 路由分支）与 `renderHome`、`sidebar/mgr.js` 的 `renderMgr`、`chat/route.js` 的 `teardownSessionView`（会话视图整体卸载出口，2026-10-05 自 preview 卡迁入，见 §53）。判定侧一行未动即全部有效。
+- **探针**：`probes/probe-optimistic-hash.ts`（只读）——源码层断言赋值点均为 `''` 且全 `web-src` 无 `currentHash = null` 残留、`addUser` 写入即 `state.currentHash`、生成物 `app.js` 同步。
 
 ## 37. 用户图片渲染 id 双来源：模型识图能力不影响图片显示
 
@@ -416,7 +416,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **折叠态无自带外观**（2026-09-25 定案）：原 64px 折叠图标带 `#rail`（logo / 展开 / 新建 / 搜索 / 最近会话气泡 / 头像）连同其桌面覆盖层与交叉淡出过渡一并撤除，折叠 = 宽度 0、主区满宽。**唤出入口只有两个**：
   - `#menu-btn` 汉堡（内容卡左上角 `top/left:10px`，全视口共用一枚，即手机端原有抽屉把手）：点击 = `setPanel(true,{pin:true})` 打开并**钉住**；`#sidebar.open ~ #chat-area #menu-btn` 展开态隐藏，收回入口在面板头部（`.floria-logo` / `#panel-collapse`，均 `setPanel(false)`）。
   - **左缘唤出**（`web-src/app.js` 的 `document` 级监听，无对应元素）：判据 = 「指针到达窗口左缘」的两种观测合一——①`mousemove` 取样到 `clientX ≤ 8`；②`mouseout` 且 `relatedTarget === null && clientX ≤ 0`（指针**直接从左缘离开窗口**）。守卫 `edgeArmed()`：`!state.panelOpen && !isMobile() && !body.token-gate`。**为何不用细条元素**：快速左移常在同一个取样间隔内直接冲出窗口，8px 细条的 `mouseenter` 会被整段跳过（用户实测「向左后再向右一点点才唤出」）。唤出为**不钉住**的预览式，移出侧栏即自动收（`sidebar/recent.js` 的 `#sidebar` `mouseleave` → 未钉住则 `setPanel(false)`）。
-- **钉住单一状态源 = `recent.js` 模块内 `panelPinned`**：`setPanel(open, opt)` 里 `panelPinned = !!open && !!opt.pin`（收起一律清），`mouseleave` 只读它裁决收不收。全项目仅 `#menu-btn` 的 click 传 `{pin:true}`。
+- **钉住单一状态源 = `state.panelPinned`**：开合核 `core/panel.js` `applyPanelOpen(open, pin)` 里 `state.panelPinned = !!open && !!pin`（收起一律清），`recent.js` 的 `setPanel(open,opt)` 委托它（popup 清理/行状态留包装层，见 §53）；`mouseleave` 只读它裁决收不收。全项目仅 `#menu-btn` 的 click 传 `{pin:true}`。
 - **趴栏/门图锚在内容卡内**：`#empty-hint` 与 `#gate-screen` 都是 `#chat-area` 内的 `position:absolute; inset:0` + flex 居中，故侧栏拉伸时随卡片重居中；**`.g-stage` 宽度基准 = 包含块**（`min(88%, 620px, calc(100vh - 160px))`，手机档去 620 上限）——**不得用 `vw`**：work 两栏 / 侧栏展开 / 窄窗口下卡比 `88vw` 窄时，stage 会溢出卡外被 `.view-card` 的 `overflow:hidden` 裁掉，而空态底栏（`#input-wrap`）宽度 = stage + 40px 且随之居中 ⇒ 底栏连同「发送消息」占位、右侧模型 chip 一并被裁。空态 ↔ 会话态的输入栏迁移仍走 FLIP（`chat/route.js` `flipInput`）。
 - **token 门**：`body.token-gate #sidebar { width: 0; overflow: hidden }`——侧栏在 flex 流内，`transform` 位移**不释放宽度**，必须收宽才不挤主区；门解除后随 `#sidebar` 的 width 过渡 0→280 拉伸，与门图淡出、趴栏淡入同一时序。
 - **panel 无独立定位规则**：`#panel` 宽 0 ↔ `var(--panel-w)` 随 `#sidebar.open` 同步过渡，内容靠定宽 `.panel-inner` 逐帧揭示；手机（≤720px）改覆盖式抽屉（`transform: translateX(-100%)`，不受影响）。
@@ -441,10 +441,10 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 - **底板 = `--plane`（`#ececf1`）**：`body` 与 `#app` 同色 ⇒ 整窗读作**一块底板**，`#app` 的 22px 外框圆弧融进底板不再显形（Prism 的读法：只有内容卡有形状）。`index.html` 的 `theme-color` 同步取该值。
 - **侧栏 = 底板本身**：`#sidebar` / `#panel` 背景一律透明，图标与面板内容直接落在底板上（原 `#sidebar` 白底是「一条白柱子」读法的来源）。**例外**：手机（≤720px）抽屉是盖在卡**之上**的浮层，透明会透出 `#scrim`（z25）而发黑 ⇒ 该 media 内显式给 `background: var(--plane)`。
-- **槽 = `#chat-area`（无形状）**：通高、无圆角/无背景/无边距，只作定位与「卡」的 flex 容器；`#gate-screen`（token 门全屏浮层）与 `#menu-btn`（侧栏唤出汉堡）留槽级，与「当前哪张卡」无关。
+- **槽 = `#chat-area`（无形状）**：通高、无圆角/无背景/无边距，只作定位与「卡」的 flex 容器；`#gate-screen`（token 门全屏浮层）与 `#menu-btn`（侧栏唤出汉堡）留槽级，与「当前哪张卡」无关。**槽级子元素白名单 = 全局件（`#gate-screen`/`#menu-btn`）+ work 常驻栏（`#work-editor`/`#work-preview`/`.work-gutter`，CSS 门控、刻意非 `.view-card`）+ 注册表按需创建的卡**。**会话级浮层（随会话生灭、只在 chat 视图中该显）一律挂 `#session-card` 内**——随会话卡 `hidden` 同隐，几何以卡的 `position:relative` 为包含块。**禁直挂 `#chat-area`**：共享槽子元素跨卡常驻 ⇒ 挂在管理/预览卡上残留（串卡，实例见 §49 轮次导航轨）。
 - **卡 = `.view-card`**：`border-radius: var(--radius)` + `margin: 2px`（缝宽用户实测 1~2px 定案）+ `background: var(--chat-bg)` + `position: relative`，四周缝隙露出底板——**与侧栏之间那条缝就是分隔**（替代已删的 `#panel` 右缘 `border-right`，见 §38）。卡不画线、不加阴影，分隔只靠底色差（`--plane` ↔ `--chat-bg`）。**`overflow: hidden` = 卡矩形（含圆角）是内容的硬边界**——卡的形状由自身背景圆角给出，任何**不透明填充物**（预览卡/外部卡的白底 iframe、神经元画布）都必须被它裁掉；否则方角盖住四角、卡与槽缘之间的底板缝断在角上，与「内容透明」的会话卡读法不一致。**不变量：槽里同一时刻恰好一张卡**——`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形，`#empty-hint`/`#input-wrap.docked`/`#char` 这些绝对定位后代几何逐像素不变；`position: relative` 是它们百分比基准的包含块，不可省。
-- **一模块一卡组件（`views/cards/`）**：每个第一方卡自持一份描述符 `{id,title,tip,icon,tab,mount}`（`plugins/projects/models/neurons/preview-card.js` + 外部壳 `ext-card.js`），`mount(host, ctx)` 只把内容写进交给它的卡体（`host` = `.view-body`；`ctx = { id, payload, rerender }`）。卡内触发的整卡重渲（如插件卡切 kind/cat）走 `ctx.rerender()` 由通道出，卡不反向依赖注册表。
-- **整卡切换（`views/registry.js`）**：视图定义单一真源 = `CARDS` 表（会话描述符 + 五张卡描述符，`registry.js` 聚合导入本表；**卡描述符必须排在 `registry.js` 之前**——`registry` 顶层 `const CARDS` 引用各卡 `*CardDef`），消费三处——侧栏 tab 生成（`renderMgrTabs()` 启动时注入 `#mgr-tabs`，`index.html` 不再有死按钮/内联 SVG）、`#mgr/<id>` 路由（`parseRoute` 的 `r.mgr` 即 id）、卡体渲染。**切卡唯一入口 `openCard(id, payload)`**：查卡 → 换卡 → 调卡自己的 `mount`，未知 id 返回 null（不回落任何视图）。会话卡以 `tab:false` 入表（其 DOM 是常驻单例，描述符用 `card:()=>sessionCard`）走同一条路径，无默认内容旁路。`currentCardId()` 交出槽内当前卡 id（`'session'`/其它/`null`），供 work 模式切入时判定是否需先退卡。
+- **一模块一卡组件（`views/cards/<name>/<name>-card.js`，一卡一目录）**：每个第一方卡自持一份描述符 `{id,title,tip,icon,tab,mount?,card?,deactivate?}`（`ext/preview/plugins/projects/models/neurons/session` 七张；卡专属组件随卡放同目录），`mount(host, ctx)` 只把内容写进交给它的卡体（`host` = `.view-body`；`ctx = { id, payload, rerender }`）。卡内触发的整卡重渲（如插件卡切 kind/cat）走 `ctx.rerender()` 由通道出，卡不反向依赖注册表。**可选 `deactivate()`**：切离该卡时由通道调用（离场钩子），承载「会话语义卸载」等收尾。依赖方向不变量与生命周期契约见 §53。
+- **整卡切换（`views/registry.js`）**：视图定义单一真源 = `CARDS` 表（会话描述符 + 六张第一方卡描述符，`registry.js` 聚合导入本表；**卡描述符必须排在 `registry.js` 之前**——`registry` 顶层 `const CARDS` 引用各卡 `*CardDef`），消费三处——侧栏 tab 生成（`renderMgrTabs()` 启动时注入 `#mgr-tabs`，`index.html` 不再有死按钮/内联 SVG）、`#mgr/<id>` 路由（`parseRoute` 的 `r.mgr` 即 id）、卡体渲染。**切卡唯一入口 `openCard(id, payload)`**：查卡 → **切换时先调离场卡 `deactivate?.()`**（`prev && prev !== id` 才触发，同 id 复用/软重入不触发）→ 换卡 → 调卡自己的 `mount`，未知 id 返回 null（不回落任何视图）。会话卡以 `tab:false` 入表（其 DOM 是常驻单例，描述符用 `card:()=>sessionCard`）走同一条路径，无默认内容旁路；**契约出口 `deactivateCard(id)`** 供卡主动卸另一卡用（如预览卡硬进入先 `deactivateCard('session')`）。`currentCardId()` 交出槽内当前卡 id（`'session'`/其它/`null`），供 work 模式切入时判定是否需先退卡。
 - **卡的生灭**：会话卡常驻 `index.html`（`#session-card`，承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM）→ 离开只切 `hidden`（`.view-card[hidden]{display:none}` 必需，否则被 `display:flex` 压过）；管理卡/预览卡按需创建、离开即 `.remove()`（神经元图的 rAF 以 `canvas.isConnected` 自毁，`display:none` 不释放）。同 id 卡在场即复用 ⇒ 卡体整换而滚动层不动，**滚动位置天然保持**（管理视图手写 `scrollTop` 存取块退役）。
 - **卡内滚动层**：`.view-scroll`（padding `24px 20px 8px`）+ `.view-body`（`max-width: 920px` 居中）= 镜像 `.mgr-on` 时代 `#chat-scroll` + `#messages{max-width:920px}` 的几何；会话卡仍用 `#chat-scroll`（stage 链读它的 `scrollTop`/`scrollHeight`）。全高视图（项目预览 / 神经元图）的判据从槽上的 `.mgr-on:has(...)` 改为卡内结构：`.view-card:has(.preview-shell|.ext-shell|.neu-graph) > .view-scroll`（`padding:0` + `overflow:hidden` + 纵向 flex）。**该状态下 `.view-body` 的 `max-width` 与 `margin` 必须一并撤销**（二者是同一个「920px 居中帽」的两个半条）——`.view-scroll` 此时是纵向 flex 容器，交叉轴上的 auto margin 会让 flex item 退出 stretch、宽度塌成 `fit-content`（内容为 `width:100%` 的 iframe 时回落到默认 300px）。**不变量：全高卡内 `.view-body` 的宽度恒由卡宽决定。**
 - **异步回程守卫**：回程渲染一律经 `viewBody(id)`——本视图的卡仍在槽里才交出卡体，否则返回 null（旧实现 `loadNeuronGraph` 的 `finally` 无条件重渲，图数据慢过用户切 tab 时会把别的视图洗掉）。
@@ -467,10 +467,10 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **端点**：`GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`；label 未命中 / 无 preview → 404，有 preview 无卡片 → 空数组。卡片资源**不需要新路由**——`/preview/<label>/<path>` 已托管 preview 目录内任意文件（含 `resolve` + `startsWith` 越界防护与鉴权）。解析侧见 gateway.md §6.5。
 - **表与命名空间**：运行时表 `EXT` 与第一方 `CARDS` **分开存**（`views/registry.js`），只在 `cardOf` / `renderMgrTabs` 两个查询点合流；外部卡 id 为 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车），tip 带项目 label。`#mgr-tabs` 的点击因此必须是容器**委托**（见 §41 末条）。
 - **不变量**
-  1. **外部卡集恒属于「最近一次挂载的那份 preview 文档所属项目」**——异 label 硬挂载 / iframe 换 src / 文档重挂即清（清点 = `views/cards/preview-card.js` 的 `syncExtCards(label)`，与 `clearRailExt()` 同点）；**离开预览路由不清**，否则用户点外部卡 tab 的瞬间卡就没了。
+  1. **外部卡集恒属于「最近一次挂载的那份 preview 文档所属项目」**——异 label 硬挂载 / iframe 换 src / 文档重挂即清（清点 = `views/cards/preview/preview-card.js` 的 `syncExtCards(label)`，与 `clearRailExt()` 同点）；**离开预览路由不清**，否则用户点外部卡 tab 的瞬间卡就没了。
   2. **只为「当前帧」作证**——`floria-cards-register` 与 `floria-rail-register` 共用同一道门：`e.source === 当前 .preview-frame.contentWindow`；label 取帧上锚定的 `dataset.label`，**不由消息自称**。
-  3. **外部永不进第一方注册表**——外部卡**没有 `mount` 代码**，其 `mount` 由宿主生成（`views/cards/ext-card.js` 的 `mountExtCard` 写 iframe 壳）⇒ 外部代码不获得在宿主 DOM 执行的能力。
-  4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/cards/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
+  3. **外部永不进第一方注册表**——外部卡**没有 `mount` 代码**，其 `mount` 由宿主生成（`views/cards/ext/ext-card.js` 的 `mountExtCard` 写 iframe 壳）⇒ 外部代码不获得在宿主 DOM 执行的能力。
+  4. **非法声明丢弃不兜底**——字段不合格 / 未知 `host` / 越界 `path` → 整条丢；两条来源共用 `views/cards/ext/ext-card.js` `normExtCards` 的**同一份过滤器**（postMessage 不过网关，必须自己再校一遍，但不给两处各写一套）。
   5. **申报缓存与刷新恢复（2026-10-02）**——`EXT` 只活在内存里（刷新即空），故网关权威快照（`replace=true`，含 `cards` 与 `quoteActions` 同存）按 label 落 `UI_KEY` 的 `extDecls` 段（`persistExtDecls`，写口仍是 `patchUI`）；postMessage 增量注册**不落盘**（那是预览页的实时补充，混进快照会让缓存随文档生命周期漂移）。回填口 `hydrateExtCards(label)` / `hydrateExtCardId(id)`（`ext:<label>:<cardId>` → label = 最后一个冒号之前那段）复用**同一注册口** `registerExtCards(label, cards, true)`（不另写第二套建表逻辑），三处接线：启动 `initWork()`（`loadWork` 之后）、切项目 `selectProject()`（换槽即换卡）、路由直进 `route()` 的 `mgr` 分支（按 id 里的 label 回填，先于 `renderMgr`）。网络清单仍为权威：`syncWorkExtCards()`（预览栏开着时由 `mountPreview`→`syncExtCards` 拉，关着时在 `ensureWork` 补拉链里拉）拉新整份覆盖——缓存只是「上次所见」的快照，不猜不兜底。
 - **样式**：`.ext-shell`（`relative` + 纵向 flex + `height:100%`）> `.ext-frame`（`flex:1; width:100%; border:0`）。与 `.preview-shell`/`.preview-frame` **同构但不复用类名**——宿主侧所有「当前预览帧」的查询（rail-ext 的 `.preview-frame`、`openProjectPreview` 三级链）都按 `.preview-frame` 定位，外部卡若同用会顶替真预览帧。全高卡特例判据须并入 `.ext-shell`（与 `:has(.preview-shell|.neu-graph)` 同一块，见 §41 卡内滚动层）。
 - **探针锚点**：`probes/probe-web-ext-cards.ts`（结构 + 行为真值表；网关侧解析从 `localGateway.ts` 提取、经 `Bun.Transpiler` 剥类型后直接跑，不另起网关）。
@@ -490,11 +490,11 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
   - **空态底栏不随模式变（且相对立绘位置锁定）**：work 模式下空态底栏**仍守趴栏台面**——与 chat 空态共用同一条 `#empty-hint #input-wrap` 规则，**无模式分叉、无 work 专属覆盖**。锚点 = **台面中心**（`top: 76.75%` + `transform: translate(-50%, -50%)`，按 `state-newchat.webp` 实测标定，76.75% 即立绘台面中心）——**这是「底栏相对立绘的落点」，2026-09-27 用户定案不可改**（曾改底边锚 `calc(83% - 12px)` + `translateY(-100%)` 让底栏上移压住女孩手臂，被否）。新聊天（空态）与旧聊天（会话态）底栏几何**量级不同属预期**，不做对齐——空态是配合角色立绘的趴栏设计（台面就在那个高度），挪到卡底会与背景脱节。
 - **栏宽可调（分界条，2026-09-27）**：栏宽真源 = `state.wkFlex`（三栏各自的 `flex-grow`，`flex-basis:0` ⇒ 宽 ∝ grow），持久化进 `UI_KEY` 的 `wkFlex`；落地口 = `sidebar/work.js` `applyWorkFlex()`（`applyPanes()` 末尾调用，末尾再调 `applyAssistMode()` 让脱流助手跟着重锚；非 work 模式移除内联 `flex`，否则会污染 chat 模式 `.view-card` 的 `flex:1`；助手脱流时同样清掉内联 `flex`——absolute 已脱出 flex 流）。**不变量（2026-09-29 根修）**：写内联 `flex` 前必须把**可见 in-flow 栏**的 grow 按比例归一化到总和 1（`vis` = `PANE_EL` 中 `paneVisible()` 为真者；不可见栏既不参与求和、也不落内联 `flex`）。`wkFlex` 存的是拖拽时「一对栏和不变」的**比例权重**，单栏权重可 < 1；若直接写进 `flex-grow`，关掉其它栏后可见栏 grow 之和可 < 1，而 CSS flex 规范在 grow 总和 < 1 时**只分配该比例的剩余空间、余下留白** ⇒ 栏（实测为助手卡）右侧空出一条 `--plane` 空白带。分界条 = `#chat-area > .work-gutter` 两条（DOM 序夹在编辑区→预览→助手之间），拖拽 `bindGutter()` 按指针在「左栏左缘 → 右栏右缘」区间的占比重分配**这相邻两栏**的 grow（和不变），每侧留 `PANE_MIN=180px` 地板。缝显隐 = 左右都有可见栏（`nearPane()` 沿 DOM 序跳过隐藏栏与另一条缝；`paneVisible()` 对脱流助手恒返回 false，否则预览列与浮卡间会冒出幽灵分界条），并去重（两条缝被一段全隐藏栏隔开时只留靠左一条）；栏隐藏 ⇒ 对应缝自动消失。手机 ≤720px 两条缝一律不出。
 - **模式互斥**：work 模式只在会话卡在场时成立——`chat/route.js` 的 `route()` 在 `r.name` 为 `mgr`/`preview` 且当前为 work 时调 `setSbMode('chat')`（顶 tab 高亮、面板显隐、`.work` 由 `applySbMode` 一并落地）。反向无特殊处理（work 侧栏本就不含管理/预览入口）。
-- **数据源（零后端改动）**：项目列表 = `/gateway/sessions` 的 `groups`（`core/sessions.js` `loadSessions` 顺带存进 `state.projects`，含无会话项目）；文件树 = `GET /gateway/project?label=` 的 `files`（节点 `{name,type:'dir'|'file',children?}`）；单文件 = `GET /gateway/file?label=&path=`（原始字节，已有路径穿越防护 + 4 MB 上限 + MIME 头）。
+- **数据源**：项目列表 = `/gateway/sessions` 的 `groups`（`core/sessions.js` `loadSessions` 顺带存进 `state.projects`，含无会话项目）；文件树 = `GET /gateway/project?label=` 的 `files`（节点 `{name,type:'dir'|'file',children?}`）；单文件 = `GET /gateway/file?label=&path=`（原始字节，路径穿越防护 + 4 MB 上限 + MIME 头 + **`ETag`/`Last-Modified`**——ETag = 毫秒级 mtime，编辑写回的冲突基线，见 §54）；写回 = `POST /gateway/file/write`（§54）。
 - **work 数据的「门后补拉」**：`ensureWork()`（`sidebar/work.js`）是 work 数据补齐的唯一路径（补拉链含文件树 / 编辑区 / 预览栏 / **外部卡申报** `syncWorkExtCards()`——预览栏开着时该申报由 `mountPreview` 链内拉，关着时在此补齐，见 §42 不变量 5），三处调用——`applySbMode()` 进入 work、启动 `initWork()`→`applySbMode()`、以及 `core/auth.js` `hideGate()` 的 `loadSessions().then` 链内（`state.sbMode==='work'` 时）。**为什么必须挂在 hideGate**：`loadProjectTree()` 与 `renderEditor()`→`readFile()` 都依赖 token，boot 时 `needToken()` 仍为真（`loadProjectTree` 直接早退、`readFile` 拿 401 且不重试），刷新后从 localStorage 恢复的 `workProj`/`workFile` 就停在「无文件树 + 编辑区读取失败」——手点 ⟳ 才好的现象即此。补拉点与 mgr/models/neurons 数据的门后补拉同点（不新开窗口、不加定时重试）。
 - **项目列表渲染单一路径（不变量）**：`renderWorkChrome()` = 项目名 + 底部卡计数 + 下拉内容（末尾调 `renderWorkProjects()`）的**同一次**渲染，四处调用点共用；下拉内容不得只在下拉打开那一刻从 `state.projects` 快照单独渲一次。**下拉绝不由「在途/空列表」渲染**：`#wk-proj-seat` 点击先 `await ensureProjectList()`（已有列表即返回，空则拉一次——`loadSessions` 在启动早期会因 `needToken()` 早退）再 `pop.hidden = false`。空态文案（`.wk-empty`）取 `--text-2`，`--text-3` 在白底浮层上肉眼等同空白（失败必须看得见）。
 - **模块顶层名字全局唯一（构建不变量）**：`scripts/bundle-web-modules.ts` 把各模块体**原样拼进同一个 IIFE**（只剥 `import` 行），故全部模块的顶层 `function`/`const` 共享一个作用域——**同名即静默覆盖**（按 MODULES 序后出现者胜），先声明者的调用点会跑到另一个实现上且无任何报错。新增模块的顶层名一律带模块前缀。探针锚点：`probes/probe-web-module-scope.ts`（模块间同名 / 与 prelude 注入名 `$` 冲突 / 产物 `app.js` 顶层声明去重，三闸）。
-- **编辑区渲染分流**（`readFile()`）：图片扩展名 → `<img src=fileUrl>`；`content-type` 判文本（含 `.md` 兜底）→ `.md` 走 `core/markdown.js` 的 `mdHtml`（排版作用域 `.wk-ed-md`，与 `.msg .body` 同一套规则，见 styles.css Markdown 段）否则 `<pre class="wk-code">` 转义原文；413/403/二进制 → 居中提示不静默空白。**`edSeq` 序号守卫**：快速连点文件时丢弃迟到的旧响应。
+- **编辑区渲染分流**（`readFile()` → `renderEdBody()`）：图片扩展名 → `<img src=fileUrl>`；`content-type` 判文本（含 `.md` 兜底）→ 阅读态 `.md` 走 `core/markdown.js` 的 `mdHtml`（带 `data-l` 行锚；排版作用域 `.wk-ed-md`，与 `.msg .body` 同一套规则，见 styles.css Markdown 段）否则 `<pre class="wk-code">` 转义原文；编辑态 → 原生 `<textarea class="wk-ed-ta">`（`ta.value = text` 赋值，见 §54）；413/403/二进制 → 居中提示不静默空白（`wkEdMeta.msg`）。**`edSeq` 序号守卫**：快速连点文件时丢弃迟到的旧响应。**编辑区双模 / 自动保存 / 冲突处置见 §54**。
 - **文件树**：整块 `innerHTML` 重渲 ⇒ 点击事件**委托在 `#wk-body` 容器上**（逐行绑定会被下次重渲抹掉）；过滤词命中自身或任一子孙即保留目录（`wkNodeHit`，否则目录被滤掉、里面的命中项也没了）。行操作浮窗（右键 / 长按）与聊天 tab 同走 `recent.js` 的 document 级委托——`mountWork()` 调 `registerWorkRows()` 注册 `.wk-row`（`key` = `data-wkfile`/`data-wkdir`，菜单 重命名/删除），`renderWorkBody()` 重渲后调 `reliftRowMenu()` 复位长按浮起（见 §7 / §45）。
 - **与预览页注册按钮的关系**：work 侧栏不含 `#rail-ext` 挂载点（折叠带已于 2026-09-25 撤除，见 §38/§39）；work 模式不改变该链路的状态。
 - **样式**：模式 tab / `#work-panel` / 文件树 / `#work-editor` 两栏 / 助手三态（`.wk-assist-head` 头部工具条 / `.wk-assist-grip` 把手 / `.wk-assist-pill` 收敛条 / `#session-card.wk-assist-float` / `.wk-assist-slim`）/ 手机覆盖层集中在 `styles.css` 末段「侧栏 chat / work 双模式」块；`#work-panel[hidden]`、`#chat-panel[hidden]`、`#wk-proj-pop[hidden]`/`#wk-view-pop[hidden]`/`#wk-new-pop[hidden]` 须显式声明（面板带 `display:flex`，作者样式优先级高于 UA 的 `[hidden]{display:none}`）。手机 ≤720px 三栏不成立：常态只显示助手，预览栏强制 `display:none`；点文件给 `#chat-area` 加 `.wk-file-open` → `#work-editor` 变 `position:absolute; inset:2px` 覆盖层，`#wk-ed-back`（仅手机露出）清除该态。
@@ -589,17 +589,19 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 49. 轮次导航轨（TurnNavigator，dsh 移植）
 
-**能力**（2026-10-02）：会话区右侧一列**短线刻度**，每格 = 一个对话轮次（= 一条开启用户气泡所辖段）。hover 弹出预览卡（提示词 50 字 + 该轮最后一个回复 120 字），点击滚动跳到该轮，当前可见轮加粗高亮。dsh `packages/client/ui-chat/.../TurnNavigator.tsx` + `turn-rail-items.ts` 的 vanilla 移植；dsh 的「未加载轮次经 seq 分页载入」在 Pj16 前端全量加载下自然省略，其余形态/交互按源码复刻。
+**能力**（2026-10-02）：会话区右侧一列**短线刻度**，每格 = 一个对话轮次（= 一条开启用户气泡所辖段）。出预览卡（提示词 50 字 + 该轮最后一个回复 120 字），跳到该轮，当前可见轮加粗高亮。dsh `packages/client/ui-chat/.../TurnNavigator.tsx` + `turn-rail-items.ts` 的 vanilla 移植；dsh 的「未加载轮次经 seq 分页载入」在 Pj16 前端全量加载下自然省略，其余形态/交互按源码复刻。
+
+- **交互（桌面悬停 / 触屏滑动，2026-10-05 触屏兼容）**：鼠标——悬停刻度=亮预览（不跳），点击刻度=跳。触屏（无 hover）——手指按住刻度出预览，**沿轨滑动预览逐格跟随**，**松开手指=跳到当前预览轮**；滑到轨上下缘自动滚轨（可见刻度装不下整段时能滑到远处的轮），手势被系统打断（`pointercancel`）则不跳。触屏判定按 `pointerdown` 的真实 `pointerType`（`click.pointerType` 在 webkit 恒 `mouse`，判不出触屏）；触屏下 `click` 一律忽略（跳转已由 `pointerup` 完成）。触屏 `pointermove` 因 implicit pointer capture 的 `target` 恒为起手刻度，须用 `document.elementFromPoint` 取指下刻度。`.turn-rail` 置 `touch-action:none`（否则竖滑被浏览器当滚动、起手即 `pointercancel`）。触屏后须屏蔽 webkit 补发的兼容鼠标 hover（实测序列 `…pointerup:touch → click:mouse → pointermove:mouse`，不挡会在跳转后把预览卡又亮回来），用 `RAIL_TOUCH_GUARD`（600ms）窗口过滤。预览卡 `pointer-events` 触屏下开为 `auto`（`@media(hover:none)` + `body.touch`）。
 
 - **数据源 = 已渲染 DOM**（模块 `chat/turn-rail.js`，唯一手改处）：`#messages` 内 `querySelectorAll('[data-t="u"],[data-t="a"]')` 按**文档序**分组——`[data-t="u"]`（data-m=段键）为轮锚，落其后的 `[data-t="a"]` 归入当前轮，取该轮最后一个为回复预览。不新增数据请求，与渲染同源。
-- **挂载**：动态建 `<nav id="turn-rail">` 追加 `#chat-area`（position:relative 无形槽），absolute 定位不参与 flex 流；`index.html` 不改结构。
-- **刷新驱动 = MutationObserver**（`#messages` childList+subtree+characterData，150ms debounce）：覆盖整页重建 / 增量 append / 流式文本三路，无需在各渲染出口插调用。
-- **显示门**：非会话态（`#chat-area` 无 `.in-session` 或带 `.work`）、轮次 < 2、视口 ≤ 900px 任一命中即 `hidden`。
+- **挂载**：动态建 `<nav id="turn-rail">` 追加**会话卡 `#session-card`**（非共享槽 `#chat-area`）——`#session-card` 是 `.view-card` 故 `position:relative`，即轨的定位包含块；且随会话卡 `hidden` 同隐（`.view-card[hidden]{display:none}`）。absolute 定位不参与 flex 流；`index.html` 不改结构。**禁挂 `#chat-area`**：那是承载全部卡的共享无形槽，挂上去会在管理/预览卡上残留（串卡，见 §41 槽级白名单）。
+- **刷新驱动 = MutationObserver**（`#messages` childList+subtree+characterData，150ms **节流**）：覆盖整页重建 / 增量 append / 流式文本三路，无需在各渲染出口插调用。用节流而非 debounce——连续流式下 debounce 会饥饿不触发。
+- **显示门**：非会话态（`#chat-area` 无 `.in-session` 或带 `.work`）、轮次 < 2、视口 ≤ 640px 任一命中即 `hidden`（手机竖屏隐藏，平板竖屏 768–834 保留）。
 - **跳转**：`topInScroll(el)` 取锚的内容坐标写 `#chat-scroll.scrollTop`（smooth）；点击即 `stage.yielded = true`（用户导航 = 接管视口，停止 stage 两层跟随，与滚动输入同口径）。
 - **scaleX 三态**（`styles.css` `.tr-mark::before`，`transform-origin: right center`）：默认 `0.6` / hover·预览 `0.9` / 当前轮 `1`；配色 `--border` / `--text-3` / `--text`。
 - **构建不变量**：登记进 `scripts/bundle-web-modules.ts` MODULES，区间号须排在 `core/state.js`（messagesEl）与 `chat/stage.js`（stage/topInScroll）之后、`__app__` 启动序列（5379）之前；顶层立即 `railInit()`。
-- **cache-bust**：`web/sw.js` 的 `CACHE` 与 `web/index.html` 的 `/styles.css?v=` `/app.js?v=` 三处同值（本次 v427）。
-- **探针锚点**：暂无（纯前端 DOM 组件，待补 `probes/probe-turn-rail.ts`）。
+- **cache-bust**：`web/sw.js` 的 `CACHE` 与 `web/index.html` 的 `/styles.css?v=` `/app.js?v=` 三处同值。
+- **探针锚点**：暂无（纯前端 DOM 组件）。触屏/悬停行为可用 Playwright webkit（`hasTouch:true` + 真实 `tap()`）加载真实 `styles.css`+`turn-rail.js`+假 DOM 复验。
 
 ## 50. AI 生成图展示（markdown 代号，2026-10-03）
 
@@ -630,9 +632,41 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **能力**：assistant 正式回复气泡底部操作条在复制钮之后补「用量 X tok」按钮 + 时间（本地中文单位格式 `YYYY 年 M 月 D 日 HH : MM`，前导零省略），还原 dsh 回复下的按钮/文字形态。用量按钮文字与时间**同一字号**（`12px`，`.msg-usage` 显式设 `.mu-txt` 字号，不再 `font:inherit` 落后于 `.msg-time`）。**点用量按钮 → 弹出明细面板**（dsh 同款：头部「本轮用量」+ 合计，行 = 提供方 / 模型、缓存命中 %、未缓存输入、缓存读取、缓存写入、输出）。**仅回复气泡携带**（用户气泡仍只有复制钮）；赞/踩/分享**未做**（用户 2026-10-04 定案「不要这三个」）。
 
 - **数据源**：投影层 `DisplayMessage.usage`（`src/utils/conversationDisplay.ts` assistant 分支 `usageDetail`）＝明细对象 `{input,cacheRead,cacheWrite,output}`（分别取自 `input_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`/`output_tokens`；四者合计 0 / 无 usage → undefined）+ `DisplayMessage.model`（`message.model`，弹出面板「提供方 / 模型」行）+ 既有 `DisplayMessage.timestamp`。合计 = 四字段之和（消费端相加）；缓存命中 = `cacheRead/(input+cacheRead+cacheWrite)`。**CLI 与网关共用同一投影**（`/gateway/session` 与 `/gateway/conversation` 两个消费端自动带上），前端零额外请求。
-- **渲染**：`chat/messages.js` `replyBubbleHtml(key, text, usage, ts, model)` 产 `.msg-actions` = `.msg-copy` → `.usage-wrap`（`<span>`，含 `.msg-usage` 按钮 + `.usage-pop` 面板）→ `.msg-time`。`fmtUsage`：≥1e6 折 M、≥1e3 折 K（一位小数），否则原值；`fmtTok`：千分位整数；`fmtClock`：本地 `YYYY 年 M 月 D 日 HH : MM`（月/日/时/分取 Number 直出、前导零自动省略，如 `4 月 3 日 9 : 5`；无时间戳/非法 → 空不渲）。提供方标签 = `modelProviderOf({k:'model',v:model})`（`views/cards/models-card.js`，与输入栏模型菜单同源唯一一份）。
+- **渲染**：`chat/messages.js` `replyBubbleHtml(key, text, usage, ts, model)` 产 `.msg-actions` = `.msg-copy` → `.usage-wrap`（`<span>`，含 `.msg-usage` 按钮 + `.usage-pop` 面板）→ `.msg-time`。`fmtUsage`：≥1e6 折 M、≥1e3 折 K（一位小数），否则原值；`fmtTok`：千分位整数；`fmtClock`：本地 `YYYY 年 M 月 D 日 HH : MM`（月/日/时/分取 Number 直出、前导零自动省略，如 `4 月 3 日 9 : 5`；无时间戳/非法 → 空不渲）。提供方标签 = `modelProviderOf({k:'model',v:model})`（数据层 `sidebar/mgr-data.js`，与输入栏模型菜单同源唯一一份）。
 - **弹层锚点（dsh 同款）**：按钮与面板同包进 `.usage-wrap`（`position:relative`），面板 `left:0` ⇒ **面板左缘对齐「用量」按钮左缘**（非复制钮左缘/气泡左缘），上弹 `bottom:calc(100%+8px)`。
 - **弹层交互**：`messages.js` 点击委托——点 `.msg-usage` 切 `.usage-pop[hidden]` 并同步 `aria-expanded`；**单开互斥**（开本关它，`closeUsagePops`）；点面板外区关闭。
 - **复制排除不变量**：用量按钮/时间/面板同置 `.msg-actions` 内，`messageCopyText` 剔 `.msg-actions` 时一并排除，复制纯文本不含它们。
-- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v442）。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值。
 - **探针锚点**：`Floria/probes/probe-reply-usage.ts`（读真实转录跑 `filterConversationForDisplay`，断言全部 assistant 条带 usage 明细 + model）。
+
+
+## 53. 卡片解耦：生命周期契约 + 依赖方向不变量（2026-10-05）
+
+卡片架构目标（用户口径）＝ **web 调用卡片、卡片自持组件、每张卡独立可运行** —— 加功能不牵一发动全身。本版为**收敛式**（不迁 routing）：卡片契约已成立（一卡一目录 + 单通道 `openCard`），把四张第一方卡残留的**横向依赖兄弟子系统**根治，并把相邻**反向泄漏**（子系统 import 卡）一并收拢。
+
+- **生命周期契约（`views/registry.js`）**：描述符新增可选 `deactivate()`（离场钩子）。`openCard(id,payload)` 在**切换**时调离场卡钩子：`const prev=currentCardId(); if(prev && prev!==id) cardOf(prev)?.deactivate?.()`（同 id 复用/软重入不触发）。契约出口 `deactivateCard(id)`＝`cardOf(id)?.deactivate?.()`，供卡主动卸另一张卡。
+- **会话卡独立成模块**：`views/cards/session/session-card.js` 出 `sessionCardDef`（`card:()=>sessionCard` + `deactivate: teardownSessionView`），registry 只 import 描述符不再内联。`chat/route.js` 新增合成 `teardownSessionView()` = `stopLiveFoldTimer()` + `stageRelease()` + `clearSessionSlots()` + `state.currentHash=''`（**函数声明**，同 IIFE 内 hoist），并导出——「离开会话视图」的会话语义卸载收归 route 单点。
+- **依赖方向不变量**：**卡 → 小底座**（`core/{state,icons,sessions,gateway,panel}.js` + 数据层 `sidebar/mgr-data.js` + 契约 `views/registry.js` + 外部申报共享底座 `views/cards/ext/ext-card.js` + 卡自身目录），**禁 卡 → 兄弟子系统**（`chat/` 其余、`sidebar/{recent,rail-ext,work,mgr}.js`、`inputbar/`、`core/live.js`、`core/auth.js`）。探针 `probes/probe-web-card-boundary.ts` 锁死防复发（第二断言：`views/registry.js` import ⊆ `{core/state,core/icons,./cards/*}`，不做 god importer）。**已知例外**（显式豁免带注释，本版不动 routing）：`projects-card.js`→`chat/route.js`（`navigate` hash 路由）、`session-card.js`→`chat/route.js`（`teardownSessionView`，会话卡=会话视图本体）。
+- **去横向依赖的三处根治**
+  1. **preview-card 去 chat 依赖**：删 import `clearSessionSlots`/`stageRelease`/`stopLiveFoldTimer`，硬进入分支改调 `deactivateCard('session')`（语义＝先清会话视图再占槽，preview 不再懂 chat）；`clearRailExt` 状态清点迁 `views/cards/ext/ext-card.js`（同属 preview 外部申报域），`sidebar/rail-ext.js` 只留桥接/渲染。
+  2. **models-card 去 inputbar 依赖**：`apiSetModel` 迁 `core/gateway.js`（网关客户端已持 `needToken/apiUrl/gToken`），`inputbar/model-select.js` 反向导入；`modelProviderOf`/`MODEL_PROVIDER_KEYS` 迁 `sidebar/mgr-data.js`（数据层），`inputbar/model-select.js`/`chat/messages.js` 改从 mgr-data 导入（修反向泄漏）。
+  3. **setPanel → `core/panel.js`**：`applyPanelOpen(open,pin)`（写 `state.panelPinned`/`panelOpen` + `#sidebar.open` + 折叠清 `--panel-w`）与 `closePanel()` 为唯一实现；`sidebar/recent.js` 的 `setPanel` 委托其核（popup 清理/行浮窗/syncPaneRows 留包装层）。`neurons-card` 用 `closePanel()`（无导航），`projects-card` 用 `closePanel()`（保留 `navigate` 例外）。
+- **一卡一目录**：`views/cards/<name>/<name>-card.js`（`ext/preview/plugins/projects/models/neurons/session`）；拼接器 `scripts/bundle-web-modules.ts` 的 MODULES 表路径同步，顺序 `ext→preview→plugins→projects→models→neurons→session→registry→work`（session-card 须排在 registry 前，registry 顶层 `CARDS` 引用 `sessionCardDef` const；其余卡内只引用函数声明，hoist 安全）。
+- **探针锚点**：`probes/probe-web-card-boundary.ts`（卡片 import 白名单 + registry 非 god importer）；随迁更新 `probe-web-view-slots.ts`（A4 卸会话态改判 `deactivateCard('session')`）、`probe-optimistic-hash.ts`（赋值点含 `teardownSessionView`）、`probe-work-scope.ts`（G1 pin 真源改判 `core/panel.js` `applyPanelOpen`）、`probe-web-ext-cards.ts`（七张卡组件排 registry 前）。
+
+## 54. work 编辑区编辑：源码编辑 + 阅读切换 + 自动保存（2026-10-05）
+
+**能力**：work 编辑区（`#work-editor`）从只读升级为**可编辑**——仿 Obsidian 的「源码模式 / 阅读模式」双模（不做 Live Preview）。所有文本文件均可源码编辑；markdown 额外有渲染阅读态。图片 / 二进制 / 超 4 MB 文件不可编辑（工具栏按钮隐藏，仍走阅读态）。
+
+- **模式真源 = `state.wkEdit`**（`core/state.js`，`false`=阅读 / `true`=编辑）：全局一份（不按项目分槽）、跨文件记忆、经 `saveWork/loadWork` 持久化（同 `wkAssistMode` 系）。切换入口 = `.wk-ed-head` 的 `#wk-ed-mode` 按钮（图标 `I.dshEdit`(进编辑) / `I.dshBook`(回阅读)）与快捷键 **Ctrl+E**；`wkSetEdit(on)` 唯一写口，离开编辑态前 `await wkEdFlush()` 落盘。
+- **编辑态载体 = 两层叠放**（`renderEdBody()` 建）：`.wk-ed-wrap` 内 `<div class="wk-ed-hl" aria-hidden>`（着色层，只读展示）+ 原生 `<textarea class="wk-ed-ta">`（正文真源、自身滚动；`ta.value = wkEdText` 赋值——**不走 innerHTML 转义**：value 不需 HTML 转义且要保住原始引号/实体）。本工程零依赖、无法引 CodeMirror/Monaco，故手搓。两规则排版逐字同源（mono / 12.5px / 1.6 / `16px 20px` padding / `white-space:pre-wrap` / `overflow-wrap:break-word` / `tab-size:2`）⇒ 两态切换视觉零跳动、两层逐字对齐。textarea 文本 `color:transparent` + `caret-color:var(--text)`（光标可见），选区背景半透明透出着色层。
+- **源码着色（编辑态语法高亮）**：`wkHlHtml(text, wkEdLang(path))` 扫描切片生成着色层 HTML（`sidebar/work.js`）——语言按扩展名（md / json / js·ts / css / html / py / sh / yaml；其余纯转义不上色）。**硬不变量：token 只改 `color`**（禁字重/字形/字号，任何字体度量差异都会让两层字宽/换行错位）；`wkHlScan` 只包 span 不增删字符（未命中段仅转义），故与 textarea 逐字对齐。重绘写着色层 `innerHTML` 后**回填 scroll**（innerHTML 重置滚动），rAF 合帧（`wkEdPaintSoon`）避免输入期每键重排；textarea `scroll` 事件同步 `hl.scrollTop/Left`。token 类 `.hl-kw/str/num/com/h/b/i/code/link/quote/li/hr`（styles.css）。
+- **读写缓冲（模块级，`sidebar/work.js`）**：`wkEdFile`(已载入路径) / `wkEdMeta`(`{isImg,isMd,editable,msg?}`) / `wkEdText`(正文真源) / `wkEdMtime`(读侧 ETag 解析的毫秒 mtime，冲突基线) / `wkEdDirty` / `wkEdSaving` / `wkEdConflict`。`renderEditor()` 幂等：`wkEdFile === state.workFile` 时只 `renderEdBody()` 重渲，不重复打网络。
+- **自动保存**：`input` 事件（委托在 `#wk-ed-body`）→ `wkEdInput()` 置脏 + 去抖 `WK_SAVE_MS=1000` → `wkEdSave()`；**Ctrl+S**（委托在 `#work-editor` 的 keydown）立即存。保存态文本 `#wk-ed-save`（`wkEdState()` 唯一写点：conflict > saving > dirty > 空）落 `.wk-ed-save`（`.dirty` 次色 / `.conflict` 警示色）。
+- **写回与冲突（不变量：自动保存绝不覆盖外部改动）**：`wkEdSave()` POST `/gateway/file/write`，默认带 `baseMtime = wkEdMtime`；后端 `writeProjectFile` 精确比对当前 `mtimeMs`，不符 → **409**。409 时置 `wkEdConflict` ⇒ `wkEdInput()` **暂停自动保存**（只在 Ctrl+S 等显式保存时提示）；显式保存命中 409 走 `wkEdResolveConflict()`：`confirm` 二选一——确定=无基线强制覆盖（`force`）、取消=`wkEdReload()` 重载磁盘版本。保存期间又有输入 → 留脏续排程（`wkEdSave` 末尾比对 textarea 现值）。
+- **未保存拦截（防丢字）**：切文件 `openWorkFile()` / 切项目 `selectProject()` 前 `if (wkEdDirty) await wkEdFlush()`（交互式——冲突时弹处置框）；退 work 模式（`applySbMode()` off）`wkEdFlush()` 不阻塞。`wkEdFlush()` = 清去抖计时器 + 收 textarea 现值，脏且无冲突才落盘。
+- **选中引用浮窗屏蔽**：编辑态给 `#work-editor` 落 `.editing` 类（`applyEdMode()` 唯一判定点）；`inputbar/quote.js` `quoteSnapOfRange()` 见 `inEditor.classList.contains('editing')` 即 `return null`——textarea 内部选区不进 `window.getSelection()`，且编辑时拖选是常规操作，弹窗会不断打断。**阅读态行为一字不改**（`data-l` 行锚 / `pre.wk-code` 偏移链照旧，见 §47）。
+- **后端**：纯函数 `writeProjectFile(projRoot, rel, content, baseMtime?)`（`localGateway.ts`，导出可直测）——`resolveWithinRoot` 越界/空 rel → 403；不存在或目录 → 404（**只改已存在文件，不新建**——新建属「+ 新菜单」，未接入）；`baseMtime` 与 `statSync().mtimeMs` 精确不等 → 409；成功写回 `{path, mtime}`。端点 `POST /gateway/file/write`（body `{label,path,content,baseMtime?}`，上限 `MAX_FILE_WRITE_BYTES = 4 MB`，对齐读侧）镜像 `rename`/`delete` 结构。`GET /gateway/file` 新增 `ETag: "<mtimeMs>"` + `Last-Modified`。
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（43 断言，含 `writeProjectFile`：越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖、写端点转译结果码、GET 带 ETag/Last-Modified）。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v447）。
+

@@ -1,13 +1,12 @@
 // 模型选择（状态/seat/menu）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { hideGate } from '../core/auth.js'
-import { gToken, needToken, apiUrl } from '../core/gateway.js'
+import { needToken, apiSetModel } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { inputEl, state, esc, toast, isTouch } from '../core/state.js'
 import { EFFORT_LEVELS, cmd, msel, modelPop, modelSeatEl, closeCmdPop } from './commands.js'
 import { closeMentionPop } from './mention.js'
-import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData } from '../sidebar/mgr-data.js'
-import { modelProviderOf } from '../views/cards/models-card.js'
+import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderOf } from '../sidebar/mgr-data.js'
   function modelDir() {
     const pool = ((MODELS && Array.isArray(MODELS.items) ? MODELS.items : []) || [])
       .filter(it => it && typeof it.src === 'string' && it.src.startsWith('凭据池') && it.v)
@@ -204,21 +203,7 @@ import { modelProviderOf } from '../views/cards/models-card.js'
     const on = modelPop.querySelector('.option.on')
     if (on) on.scrollIntoView({ block: 'nearest' })
   }
-  // 2026-08-22 模型/思考等级切换接通网关：POST /gateway/model（持久化写 settings.json + 广播实时生效），
-  // 未验证（needToken：网关模式且 cookie/token 均未通过）返回 false → toast 提示。
-  // 2026-08-29 修复：门控从 !gToken 改 needToken()——cookie 授权设备刷新后 gToken 为空但已验证，
-  // 误报「未连接网关」；/gateway/* 网关侧本就「query token 或 cookie」二选一。
-  async function apiSetModel(body) {
-    if (needToken()) return false
-    try {
-      const res = await fetch(apiUrl('/gateway/model'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      return res.ok
-    } catch { return false }
-  }
+  // 2026-10-05 apiSetModel 迁 core/gateway.js（网关客户端唯一持有 needToken/apiUrl；卡片去 inputbar 依赖）。
   function mselChoose() {
     const row = mselRows()[msel.active]
     if (!row) return
@@ -261,7 +246,6 @@ export function setModelUserPicked(v) { modelUserPicked = v }
 export {
   MODEL_CUR,
   MODEL_KEY,
-  apiSetModel,
   closeModelPop,
   currentChoice,
   effLabel,

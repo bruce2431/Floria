@@ -28,6 +28,20 @@ import { syncGwSend } from '../inputbar/send.js'
     const q = path.includes('?') ? '&' : '?'
     return path + q + 'token=' + encodeURIComponent(gToken)
   }
+  // 模型/思考等级切换（POST /gateway/model：持久化写 settings.json + 广播实时生效）。
+  // 2026-10-05 自 inputbar/model-select.js 迁入——网关客户端是 needToken/apiUrl/gToken 的唯一持有者，
+  // 卡片与输入栏都经此调用（去卡片→inputbar 横向依赖）。needToken 门：未验证返回 false 由调用方提示。
+  async function apiSetModel(body) {
+    if (needToken()) return false
+    try {
+      const res = await fetch(apiUrl('/gateway/model'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return res.ok
+    } catch { return false }
+  }
 
   function gatewayCss() {
     const s = document.createElement('style')
@@ -293,6 +307,7 @@ export {
   GATEWAY_REVIEW,
   HOT_RELOAD,
   apiUrl,
+  apiSetModel,
   connect,
   detectGateway,
   gToken,

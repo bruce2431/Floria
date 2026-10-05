@@ -36,8 +36,8 @@ function body(file: string, header: string): string {
 }
 
 const registryJs = await Bun.file(`${SRC}/views/registry.js`).text()
-const extCardJs = await Bun.file(`${SRC}/views/cards/ext-card.js`).text()
-const previewCardJs = await Bun.file(`${SRC}/views/cards/preview-card.js`).text()
+const extCardJs = await Bun.file(`${SRC}/views/cards/ext/ext-card.js`).text()
+const previewCardJs = await Bun.file(`${SRC}/views/cards/preview/preview-card.js`).text()
 const railExtJs = await Bun.file(`${SRC}/sidebar/rail-ext.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const workJs = await Bun.file(`${SRC}/sidebar/work.js`).text()
@@ -164,12 +164,12 @@ ok('壳 = 一卡一 iframe（.ext-shell > .ext-frame）', extCardJs.includes("'<
 ok('壳不复用 .preview-frame/.preview-shell 类名（避免顶替宿主「当前预览帧」的定位）', !/class="preview-(frame|shell)"/.test(extCardJs) && /class="ext-shell"/.test(extCardJs) && /class="ext-frame"/.test(extCardJs))
 
 // ---------- 拼接与产物 ----------
-ok('B1 bundle-web-modules.ts 收编 views/cards/ext-card.js', bundleTs.includes("views/cards/ext-card.js"))
+ok('B1 bundle-web-modules.ts 收编 views/cards/ext/ext-card.js', bundleTs.includes("views/cards/ext/ext-card.js"))
 const rows = [...bundleTs.matchAll(/\{ file: '(views\/[\w/-]+\.js)'/g)].map((m) => m[1])
 // 全部卡组件（views/cards/*.js）必须排在 registry.js 之前（registry 顶层 CARDS 引用各卡 CardDef const）
 const regAt = rows.indexOf('views/registry.js')
 const cardRows = rows.filter((f) => f.startsWith('views/cards/'))
-ok('B1 六张卡组件全排在 registry.js 之前（同区间号 → 稳定排序）', regAt > 0 && cardRows.length === 6 && cardRows.every((f) => rows.indexOf(f) < regAt), rows.join(' < '))
+ok('B1 七张卡组件全排在 registry.js 之前（同区间号 → 稳定排序）', regAt > 0 && cardRows.length === 7 && cardRows.every((f) => rows.indexOf(f) < regAt), rows.join(' < '))
 ok('B2 产物 app.js 含 mountExtCard 定义', appJs.includes('function mountExtCard('))
 ok('B2 产物 app.js 含 registerExtCards / clearExtCards 定义', appJs.includes('function registerExtCards(') && appJs.includes('function clearExtCards('))
 ok('B2 产物 app.js 含实时申报分支', appJs.includes("if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }"))

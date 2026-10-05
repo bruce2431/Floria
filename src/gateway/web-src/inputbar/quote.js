@@ -78,6 +78,9 @@ import { gwSend, syncGwSend } from './send.js'
     const rect = range.getBoundingClientRect()
     const inEditor = el.closest('#work-editor')
     if (inEditor) {
+      // 编辑态（源码 textarea）不弹引用浮窗：textarea 内部选区不进 window.getSelection()，且编辑时拖选
+      // 是常规操作，弹窗会不断打断。阅读态行为不变（#work-editor.editing 由 sidebar/work.js applyEdMode 落）。
+      if (inEditor.classList.contains('editing')) return null
       // 空态提示行 / 未打开文件：没有可引用的文件位置
       if (!state.workFile) return null
       const lines = quoteEditorLines(range)

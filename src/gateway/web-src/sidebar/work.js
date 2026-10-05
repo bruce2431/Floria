@@ -9,7 +9,7 @@ import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
 import { currentCardId, hydrateExtCards } from '../views/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { renderProjSeat } from '../inputbar/commands.js'
-import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
+import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.js'
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
   // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
@@ -24,6 +24,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
 
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
+  const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
@@ -74,6 +75,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
       ensureWork()
       startWorkAuto()
     } else {
+      if (wkEdDirty) wkEdFlush() // 退 work 模式：pending 编辑先落盘（不阻塞模式切换）
       hideWkPops()
       stopWorkAuto()
     }
@@ -597,6 +599,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
     loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
@@ -681,9 +684,143 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
     applyPanes()
   }
 
-  // ---------- 编辑区（主区左栏，只读） ----------
+  // ---------- 编辑区（主区左栏：阅读 / 源码编辑，仿 Obsidian 源码+阅读双模） ----------
+  // 阅读态 = 原只读行为（图片 <img> / markdown 经 mdHtml 渲染（带 data-l 行锚）/ 其它文本 <pre>）。
+  // 编辑态 = 原生 <textarea>（本工程零依赖、无法引入 CodeMirror/Monaco）。模式真源 = state.wkEdit
+  // （跨文件记忆 + localStorage 持久化）；#work-editor.editing 类在编辑态落，供 inputbar/quote.js 屏蔽引用浮窗。
+  // 保存 = 停止输入 1s 自动（去抖）+ Ctrl+S 立即；写回带 ETag 基线 wkEdMtime，外部改过 → 409，不静默覆盖。
+  // 图片 / 二进制 / 超 4 MB 文件不可编辑（工具栏按钮隐藏，仍走阅读态）。
+  let wkEdFile = ''     // 已载入编辑缓冲的路径（与 wkEdMeta/wkEdText 同拍）；'' = 未载入
+  let wkEdMeta = null   // { isImg, isMd, editable, msg? }；null = 未载入
+  let wkEdText = ''     // 当前文件正文（编辑态 = textarea 缓冲真源）
+  let wkEdMtime = null  // 读侧 ETag 解析的 mtime（毫秒），写回冲突基线；null = 无
+  let wkEdDirty = false
+  let wkEdTimer = 0
+  let wkEdSaving = false
+  let wkEdConflict = false
+
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
+  }
+  const wkEdTa = () => document.querySelector('#wk-ed-body .wk-ed-ta')
+
+  // ---------- 源码着色（编辑态语法高亮；仿编辑器源码模式） ----------
+  // 不变量：着色层 `.wk-ed-hl` 与 textarea 逐字叠放、同步滚动；token **只改 color**——禁字重/字形/字号，
+  // 任何字形差异都会让两层字宽/换行错位（排版同源由 styles.css 的 .wk-ed-hl / .wk-ed-ta 两条规则保证）。
+  // 着色只写进 aria-hidden 的着色层；textarea 文本透明（caret-color 可见）、选区背景半透明透出着色。
+  const WK_HL_KW = {
+    js: ' const let var function return if else for while do switch case break continue new class extends super import export from default async await yield try catch finally throw typeof instanceof in of delete void this null undefined true false static get set ',
+    py: ' def class return if elif else for while import from as pass break continue with try except finally raise lambda yield global nonlocal and or not in is None True False async await del assert ',
+    sh: ' if then else elif fi for while do done case esac function return local export echo cd exit set unset source ',
+    yaml: ' true false null yes no on off ',
+    css: '', html: '',
+  }
+  // 扩展名 → 语言键；'' = 纯文本（仅转义，不上色）
+  function wkEdLang(p) {
+    const m = /\.([a-z0-9]+)$/i.exec(p || '')
+    const e = m ? m[1].toLowerCase() : ''
+    if (/^(md|markdown)$/.test(e)) return 'md'
+    if (e === 'json') return 'json'
+    if (/^(js|mjs|cjs|jsx|ts|tsx)$/.test(e)) return 'js'
+    if (/^(css|scss|less)$/.test(e)) return 'css'
+    if (/^(html|htm|xml|svg|vue)$/.test(e)) return 'html'
+    if (e === 'py') return 'py'
+    if (/^(sh|bash|zsh)$/.test(e)) return 'sh'
+    if (/^(yaml|yml|toml|ini|conf)$/.test(e)) return 'yaml'
+    return ''
+  }
+  // 扫描切片：命中段转义后包 span（cls 返回 '' 则不包），未命中段仅转义——字符零增删，与 textarea 逐字对齐。
+  function wkHlScan(text, re, cls) {
+    let out = '', last = 0
+    re.lastIndex = 0
+    let m
+    while ((m = re.exec(text))) {
+      if (m.index > last) out += esc(text.slice(last, m.index))
+      const k = cls(m[0])
+      out += k ? `<span class="${k}">${esc(m[0])}</span>` : esc(m[0])
+      last = re.lastIndex
+      if (m.index === re.lastIndex) re.lastIndex++
+    }
+    return out + esc(text.slice(last))
+  }
+  // 代码族两套注释：# 行注释（py/sh/yaml）与 //、/* */、<!-- -->（css/js/html）——css 用 # 会误伤 #id 选择器
+  const WK_HL_RE_SLASH = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|<!--[\s\S]*?-->|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`|\b0x[0-9a-fA-F]+\b|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
+  const WK_HL_RE_HASH = /#[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
+  function wkHlCodeCls(lang) {
+    const kw = WK_HL_KW[lang] || ''
+    return (t) => {
+      if (t.startsWith('/*') || t.startsWith('//') || t.startsWith('#') || t.startsWith('<!--')) return 'hl-com'
+      if (t[0] === '"' || t[0] === "'" || t[0] === '`') return 'hl-str'
+      const c = t.charCodeAt(0)
+      if (c >= 48 && c <= 57) return 'hl-num'
+      return kw.indexOf(' ' + t + ' ') >= 0 ? 'hl-kw' : ''
+    }
+  }
+  const WK_HL_RE_MD = /```[\s\S]*?```|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]*\]\([^)\n]*\)|^#{1,6}[ \t].*$|^>[ \t].*$|^(?:[-*+]|\d+\.)[ \t]|^(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm
+  function wkHlMdCls(t) {
+    if (t[0] === '`') return 'hl-code'
+    if (t[0] === '*' && t[1] === '*') return 'hl-b'
+    if (t[0] === '_' && t[1] === '_') return 'hl-b'
+    if (t[0] === '*' || t[0] === '_') return 'hl-i'
+    if (t[0] === '[') return 'hl-link'
+    if (t[0] === '#') return 'hl-h'
+    if (t[0] === '>') return 'hl-quote'
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(t)) return 'hl-hr'
+    return 'hl-li'
+  }
+  const WK_HL_RE_JSON = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g
+  function wkHlJsonCls(t) {
+    if (t[0] === '"') return 'hl-str'
+    if (t[0] === 't' || t[0] === 'f' || t[0] === 'n') return 'hl-kw'
+    return 'hl-num'
+  }
+  function wkHlHtml(text, lang) {
+    if (lang === 'md') return wkHlScan(text, WK_HL_RE_MD, wkHlMdCls)
+    if (lang === 'json') return wkHlScan(text, WK_HL_RE_JSON, wkHlJsonCls)
+    if (lang === 'py' || lang === 'sh' || lang === 'yaml') return wkHlScan(text, WK_HL_RE_HASH, wkHlCodeCls(lang))
+    if (lang) return wkHlScan(text, WK_HL_RE_SLASH, wkHlCodeCls(lang))
+    return esc(text)
+  }
+  // 着色重绘：写着色层 innerHTML 后回填 scroll（innerHTML 重置滚动），rAF 合帧——输入期每帧至多绘一次
+  let wkEdPaintQ = false
+  function wkEdPaint() {
+    const ta = wkEdTa()
+    const hl = document.querySelector('#wk-ed-body .wk-ed-hl')
+    if (!ta || !hl) return
+    hl.innerHTML = wkHlHtml(ta.value, wkEdLang(state.workFile))
+    hl.scrollTop = ta.scrollTop
+    hl.scrollLeft = ta.scrollLeft
+  }
+  function wkEdPaintSoon() {
+    if (wkEdPaintQ) return
+    wkEdPaintQ = true
+    requestAnimationFrame(() => { wkEdPaintQ = false; wkEdPaint() })
+  }
+
+  // 顶部「保存态」文本落地（唯一写点）：conflict > saving > dirty > 空。传 (txt, cls) 则原样落。
+  function wkEdState(txt, cls) {
+    const el = $('wk-ed-save')
+    if (!el) return
+    if (txt === undefined) {
+      txt = wkEdConflict ? '外部已修改' : wkEdSaving ? '保存中…' : wkEdDirty ? '未保存' : ''
+      cls = wkEdConflict ? 'conflict' : wkEdDirty || wkEdSaving ? 'dirty' : ''
+    }
+    el.textContent = txt || ''
+    el.classList.toggle('dirty', cls === 'dirty')
+    el.classList.toggle('conflict', cls === 'conflict')
+  }
+
+  // 模式类 + 工具栏按钮落地（编辑态唯一判定点）：不可编辑（图/二进制/超限）恒阅读态、按钮隐藏。
+  function applyEdMode() {
+    const on = !!state.workFile && !!wkEdMeta && !wkEdMeta.isImg && wkEdMeta.editable
+    const editing = !!(on && state.wkEdit)
+    const ed = $('work-editor')
+    if (ed) ed.classList.toggle('editing', editing)
+    const btn = $('wk-ed-mode')
+    if (!btn) return
+    btn.hidden = !on
+    btn.innerHTML = editing ? I.dshBook : I.dshEdit
+    btn.title = editing ? '阅读' : '编辑'
   }
 
   function renderEditor() {
@@ -692,22 +829,89 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
     if (pathEl) pathEl.textContent = state.workFile || ''
     if (!body) return
     if (!state.workFile) {
+      wkEdReset()
       body.innerHTML = '<div class="wk-ed-empty">从左侧文件树选择一个文件</div>'
       return
     }
     if (!state.workProj) {
+      wkEdReset()
       body.innerHTML = '<div class="wk-ed-empty">未选择项目</div>'
       return
     }
-    readFile(state.workFile)
+    if (wkEdFile !== state.workFile) {
+      readFile(state.workFile)
+      return
+    }
+    renderEdBody()
+  }
+
+  function wkEdReset() {
+    wkEdFile = ''
+    wkEdMeta = null
+    wkEdText = ''
+    wkEdMtime = null
+    wkEdDirty = false
+    wkEdConflict = false
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    applyEdMode()
+    wkEdState('')
+  }
+
+  function renderEdBody() {
+    const body = $('wk-ed-body')
+    if (!body || !wkEdMeta) return
+    if (wkEdMeta.isImg) {
+      body.innerHTML = `<div class="wk-ed-img"><img src="${esc(fileUrl(state.workFile))}" alt="${esc(state.workFile)}" /></div>`
+      applyEdMode()
+      return
+    }
+    if (!wkEdMeta.editable) {
+      body.innerHTML = `<div class="wk-ed-empty">${esc(wkEdMeta.msg || '不支持预览')}</div>`
+      applyEdMode()
+      return
+    }
+    if (state.wkEdit) {
+      // 编辑态 = 着色层 <div class="wk-ed-hl">（aria-hidden，只读展示）+ 透明文本 textarea 叠放；
+      // textarea 自身滚动，scroll 事件回填着色层 scrollTop/Left 保持逐字对齐。textarea 用 DOM 属性赋值
+      // （不走 innerHTML 转义：value 不需 HTML 转义，且要保住原始引号/实体）。
+      const wrap = document.createElement('div')
+      wrap.className = 'wk-ed-wrap'
+      const hl = document.createElement('div')
+      hl.className = 'wk-ed-hl'
+      hl.setAttribute('aria-hidden', 'true')
+      const ta = document.createElement('textarea')
+      ta.className = 'wk-ed-ta'
+      ta.spellcheck = false
+      ta.value = wkEdText
+      wrap.append(hl, ta)
+      body.replaceChildren(wrap)
+      wkEdPaint() // 首次着色（写在 replaceChildren 后，二者已挂载）
+      ta.addEventListener('scroll', () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft })
+      ta.focus()
+    } else if (wkEdMeta.isMd) {
+      // markdown 阅读态带行锚（data-l）：选中引用据此取选区首尾所在源行（inputbar/quote.js quoteEditorLines）
+      body.innerHTML = `<div class="wk-ed-md md">${mdHtml(wkEdText, 'data-l')}</div>`
+    } else {
+      body.innerHTML = `<pre class="wk-code">${esc(wkEdText)}</pre>`
+    }
+    applyEdMode()
+    wkEdState()
   }
 
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
+    wkEdConflict = false
     if (IMG_EXT.test(p)) {
-      body.innerHTML = `<div class="wk-ed-img"><img src="${esc(fileUrl(p))}" alt="${esc(p)}" /></div>`
+      wkEdFile = p
+      wkEdMeta = { isImg: true, isMd: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      renderEdBody()
       return
     }
     body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -715,32 +919,155 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
       const res = await fetch(fileUrl(p))
       if (seq !== edSeq) return
       if (!res.ok) {
-        body.innerHTML = `<div class="wk-ed-empty">${esc(
-          res.status === 413 ? '文件超过 4 MB，不支持预览' : res.status === 403 ? '该项目外的路径不可访问' : `读取失败（HTTP ${res.status}）`,
-        )}</div>`
+        wkEdFile = p
+        wkEdMeta = {
+          isImg: false,
+          isMd: false,
+          editable: false,
+          msg:
+            res.status === 413
+              ? '文件超过 4 MB，不支持编辑'
+              : res.status === 403
+                ? '该项目外的路径不可访问'
+                : `读取失败（HTTP ${res.status}）`,
+        }
+        renderEdBody()
         return
       }
       const ct = (res.headers.get('content-type') || '').toLowerCase()
       const looksText = /^text\/|json|javascript|typescript|xml|svg|x-sh|csv|yaml/.test(ct) || MD_EXT.test(p)
       if (!looksText) {
-        body.innerHTML = `<div class="wk-ed-empty">二进制文件（${esc(ct || '未知类型')}），不支持预览</div>`
+        wkEdFile = p
+        wkEdMeta = { isImg: false, isMd: false, editable: false, msg: `二进制文件（${ct || '未知类型'}），不支持预览` }
+        renderEdBody()
         return
       }
       const text = await res.text()
       if (seq !== edSeq) return
-      // markdown 预览带行锚（mdHtml 第二参数）：渲染期把每个源行号写进 DOM（data-l），
-      // 选中引用据此取选区首尾所在行——渲染后的文本已丢格式符，回查原文不可靠（inputbar/quote.js）。
-      body.innerHTML = MD_EXT.test(p)
-        ? `<div class="wk-ed-md md">${mdHtml(text, 'data-l')}</div>`
-        : `<pre class="wk-code">${esc(text)}</pre>`
+      const etag = res.headers.get('etag')
+      let mtime = etag ? Number(etag.replace(/"/g, '')) : NaN
+      if (!Number.isFinite(mtime)) mtime = null
+      wkEdFile = p
+      wkEdText = text
+      wkEdMeta = { isImg: false, isMd: MD_EXT.test(p), editable: true }
+      wkEdMtime = mtime
+      wkEdDirty = false
+      renderEdBody()
     } catch (e) {
       if (seq !== edSeq) return
       body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
     }
   }
 
-  function openWorkFile(p) {
+  // 模式切换（阅读 ⇄ 编辑）：离开编辑态前先把 textarea 现值收进缓冲并 flush 保存（防丢字），再重渲。
+  async function wkSetEdit(on) {
+    on = !!on
+    if (on === state.wkEdit) return
+    if (!on) await wkEdFlush()
+    state.wkEdit = on
+    saveWork()
+    renderEdBody()
+  }
+
+  // 强制重拉磁盘版本（冲突「取消」分支 / 需放弃本地改动时用）
+  async function wkEdReload() {
+    if (!state.workFile) return
+    const p = state.workFile
+    wkEdFile = ''
+    await readFile(p)
+  }
+
+  function wkEdInput() {
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    wkEdDirty = true
+    wkEdPaintSoon() // 着色层随输入重绘（rAF 合帧）
+    wkEdState()
+    if (wkEdConflict) return // 冲突未决：暂停自动保存，交 Ctrl+S 显式处置（避免覆盖外部改动）
+    if (wkEdTimer) clearTimeout(wkEdTimer)
+    wkEdTimer = setTimeout(() => {
+      wkEdTimer = 0
+      wkEdSave({})
+    }, WK_SAVE_MS)
+  }
+
+  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘（交互式——冲突时弹处置框）
+  async function wkEdFlush() {
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    if (!wkEdDirty || wkEdConflict) return
+    await wkEdSave({ interactive: true })
+  }
+
+  // 保存：默认带 baseMtime（外部改过 → 409，不覆盖）；force = 无基线强制覆盖（用户确认后）。
+  async function wkEdSave(opts) {
+    const force = !!(opts && opts.force)
+    const interactive = !!(opts && opts.interactive)
+    if (!state.workFile || !state.workProj || wkEdSaving) return
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    if (!wkEdDirty && !force) return
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    wkEdSaving = true
+    wkEdState('保存中…', 'dirty')
+    let conflict = false
+    try {
+      const payload = { label: state.workProj, path: state.workFile, content: wkEdText }
+      if (!force && wkEdMtime !== null) payload.baseMtime = wkEdMtime
+      const res = await fetch(apiUrl('/gateway/file/write'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (res.status === 409) conflict = true
+      else {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
+        if (typeof data.mtime === 'number') wkEdMtime = data.mtime
+        const fresh = wkEdTa()
+        wkEdDirty = !!(fresh && fresh.value !== wkEdText) // 保存期间又改了 → 留脏，下面续排程
+      }
+    } catch (e) {
+      wkEdSaving = false
+      wkEdState('保存失败', 'conflict')
+      toast('保存失败：' + (e.message || e))
+      return
+    }
+    wkEdSaving = false
+    if (conflict) {
+      wkEdConflict = true
+      wkEdState('外部已修改', 'conflict')
+      if (interactive) return wkEdResolveConflict()
+      toast('文件已被外部修改，未自动覆盖（Ctrl+S 可覆盖）')
+      return
+    }
+    if (wkEdDirty) wkEdInput()
+    else wkEdState()
+  }
+
+  // 冲突处置（用户显式保存时）：确定 = 用当前内容覆盖；取消 = 放弃编辑、重载磁盘版本。绝静默二选一。
+  async function wkEdResolveConflict() {
+    const overwrite = window.confirm('磁盘上的文件已被外部修改。\n\n确定：用当前内容覆盖\n取消：放弃编辑，载入磁盘版本')
+    if (overwrite) {
+      wkEdConflict = false
+      wkEdDirty = true
+      return wkEdSave({ force: true })
+    }
+    wkEdDirty = false
+    wkEdConflict = false
+    await wkEdReload()
+  }
+
+  async function openWorkFile(p) {
     if (!p) return
+    if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     // 编辑区被开关关掉时点文件 = 明确要看内容 → 自动把编辑区打开（不静默什么都不发生）
     if (!state.wkEditor) {
@@ -981,6 +1308,23 @@ import { mountPreview, syncExtCards } from '../views/cards/preview-card.js'
       }
     })
     $('wk-ed-back').addEventListener('click', closeWorkFile)
+    // 编辑区：阅读/编辑切换按钮 + Ctrl+S 保存 / Ctrl+E 切模式（绑在 #work-editor 上，编辑态才命中）
+    $('wk-ed-mode').addEventListener('click', () => wkSetEdit(!state.wkEdit))
+    $('work-editor').addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 's') {
+        e.preventDefault()
+        wkEdSave({ interactive: true })
+      } else if (k === 'e') {
+        e.preventDefault()
+        wkSetEdit(!state.wkEdit)
+      }
+    })
+    // textarea 整块由 renderEdBody 重建 → input 委托在容器上
+    $('wk-ed-body').addEventListener('input', (e) => {
+      if (e.target && e.target.classList.contains('wk-ed-ta')) wkEdInput()
+    })
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {

@@ -1,7 +1,7 @@
 /**
  * 探针 · 神经元可视化（web「神经」tab）
  *   后端 A = src/gateway/neuronViz.ts 数据链，真实 Neuron-Pj16 库只读直读
- *   前端 B = web-src/views/cards/neurons-card.js 源码切片注入（task-dock 探针模式），与真实库 payload 做集成
+ *   前端 B = web-src/views/cards/neurons/neurons-card.js 源码切片注入（task-dock 探针模式），与真实库 payload 做集成
  * 跑法：cd Floria && bun probes/probe-neuron-viz.ts
  */
 import { readFileSync } from 'node:fs'
@@ -155,7 +155,7 @@ ok(
 // ───────────────────────── B 前端 · 源码切片注入 ─────────────────────────
 sec('B 前端 · neurons-card.js 切片注入（模型/仿真/浮窗真实源码）')
 
-const src = readFileSync(join(import.meta.dir, '..', 'src', 'gateway', 'web-src', 'views', 'cards', 'neurons-card.js'), 'utf-8')
+const src = readFileSync(join(import.meta.dir, '..', 'src', 'gateway', 'web-src', 'views', 'cards', 'neurons', 'neurons-card.js'), 'utf-8')
 const START = '  // ---------- 三级图模型（纯函数，探针覆盖） ----------'
 const END = '\nexport {'
 const i0 = src.indexOf(START)

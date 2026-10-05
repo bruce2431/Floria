@@ -13,6 +13,9 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   { file: 'core/icons.js', ranges: [[13, 44]], first: ['  // ---------- SVG 图标 ----------'] },
   { file: 'sidebar/mgr-data.js', ranges: [[45, 111]], first: ['  // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------'] },
   { file: 'core/state.js', ranges: [[112, 159], [274, 286]], first: ['  // ---------- 元素 ----------', '  function toast(msg) {'] },
+  // 侧栏开合核（2026-10-05 自 recent.js setPanel 抽出）：区间号仅作执行序排序（模块内全为函数声明，
+  // 顶层无执行码；被 recent.js 与两张卡 neurons/projects 在运行时调用）。
+  { file: 'core/panel.js', ranges: [[2932, 2932]], first: ['  // ---------- 侧栏开合核 ----------'] },
   { file: 'core/char.js', ranges: [[160, 176]], first: ['  // ---------- 角色形象（2026-08-14 实验） ----------'] },
   { file: 'core/markdown.js', ranges: [[177, 273]], first: ['  // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------'] },
   { file: 'core/sessions.js', ranges: [[287, 347]], first: ['  // ---------- 会话映射 ----------'] },
@@ -27,12 +30,15 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   // 只作执行序排序。**顺序=本表顺序**（同区间号走稳定排序）：各卡定义件全部排在 registry.js 之前
   // （registry 顶层 `const CARDS` 引用各卡 CardDef const，须在其后）；卡描述符内只引用函数声明
   // （hoist 安全），故卡之间互序无关。registry.js 之后才是 work.js（引用 registry 的 currentCardId）。
-  { file: 'views/cards/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
-  { file: 'views/cards/preview-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 预览卡 ----------'] },
-  { file: 'views/cards/plugins-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 插件卡（插件 / 技能）----------'] },
-  { file: 'views/cards/projects-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 项目卡 ----------'] },
-  { file: 'views/cards/models-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 模型卡 ----------'] },
-  { file: 'views/cards/neurons-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 神经元卡（web「神经」tab）----------'] },
+  { file: 'views/cards/ext/ext-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 外部卡片（卡片化二期）----------'] },
+  { file: 'views/cards/preview/preview-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 预览卡 ----------'] },
+  { file: 'views/cards/plugins/plugins-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 插件卡（插件 / 技能）----------'] },
+  { file: 'views/cards/projects/projects-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 项目卡 ----------'] },
+  { file: 'views/cards/models/models-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 模型卡 ----------'] },
+  { file: 'views/cards/neurons/neurons-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 神经元卡（web「神经」tab）----------'] },
+  // 会话卡描述符（2026-10-05 自 registry.js 迁出，一模块一卡）：card() 返回既存单例 #session-card，
+  // deactivate 挂 chat/route.js 的 teardownSessionView。须排在 registry.js（顶层 CARDS 引用本卡 const）之前。
+  { file: 'views/cards/session/session-card.js', ranges: [[2932, 2932]], first: ['  // ---------- 会话卡 ----------'] },
   // 视图注册表（2026-09-23 视图卡化；2026-10-01 卡片化二期：单通道 openCard）：区间号取 2932 只作
   // 执行序排序 —— 排在 tab 生成所需的 core/icons.js(I) 与 core/state.js(esc/#chat-area/session-card) 之后、
   // 各卡定义件之后、__app__ 事件绑定之前。

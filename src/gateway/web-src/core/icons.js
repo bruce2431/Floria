@@ -76,6 +76,8 @@
     dshClose: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg>',
     // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline）
     dshEdit: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.9482 1.97949L13.9253 4.95508L5.51453 13.3659L2.53613 12.6157L2.18896 9.24414L10.9482 1.97949ZM8.2951 4.63011L4.75226 8.17207L7.71064 9.1084L11.2535 5.56544L8.2951 4.63011ZM3.60287 10.1729L3.78518 12.1367L5.7417 12.5674L6.2064 12.1027L4.06812 11.4503L3.60287 10.1729Z"/></svg>',
+    // 阅读视图（work 编辑区 阅读/编辑 切换用；展开的书页，描线族，与 dshChev/dshSliders 同 1px 口径）
+    dshBook: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.7C6.9 2.9 5.45 2.6 4.15 2.6c-.55 0-1.08.06-1.55.18v9.04c.47-.12 1-.18 1.55-.18 1.3 0 2.75.3 3.85 1.1"/><path d="M8 3.7c1.1-.8 2.55-1.1 3.85-1.1.55 0 1.08.06 1.55.18v9.04c-.47-.12-1-.18-1.55-.18-1.3 0-2.75.3-3.85 1.1"/><path d="M8 3.7v9.04"/></svg>',
     // 新建独立会话（web 与 CLI 等权并行）：终端窗口 + 提示符
     web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
   }

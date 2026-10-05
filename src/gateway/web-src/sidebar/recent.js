@@ -7,6 +7,7 @@ import { I } from '../core/icons.js'
 import { refreshList, refreshSession } from '../core/live.js'
 import { hashOf } from '../core/sessions.js'
 import { bodyEl, sidebar, bubblePop, recentLabel, modeTabsEl, state, ALL, esc, toast, isMobile } from '../core/state.js'
+import { applyPanelOpen } from '../core/panel.js'
 import { gwSend } from '../inputbar/send.js'
 import { renderBubble, renderSearch } from './bubble-search.js'
 import { renderList, renderProject } from './mgr.js'
@@ -16,11 +17,7 @@ import { renderList, renderProject } from './mgr.js'
   // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
   // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
   function setPanel(open, opt) {
-    state.panelPinned = !!open && !!(opt && opt.pin)
-    state.panelOpen = open
-    sidebar.classList.toggle('open', open)
-    // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
-    if (!open) document.documentElement.style.removeProperty('--panel-w')
+    applyPanelOpen(open, !!(opt && opt.pin)) // 状态落地唯一核（core/panel.js）：钉住态 + 可见态 + #sidebar.open + 调宽复位
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')

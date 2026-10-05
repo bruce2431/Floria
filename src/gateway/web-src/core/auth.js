@@ -10,7 +10,7 @@ import { closeMentionPop } from '../inputbar/mention.js'
 import { renderModelSeat } from '../inputbar/model-select.js'
 import { syncGwSend } from '../inputbar/send.js'
 import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
-import { loadNeuronsData } from '../views/cards/neurons-card.js'
+import { loadNeuronsData } from '../views/cards/neurons/neurons-card.js'
 import { renderRecent } from '../sidebar/recent.js'
 import { ensureWork } from '../sidebar/work.js'
   function deviceHint() {

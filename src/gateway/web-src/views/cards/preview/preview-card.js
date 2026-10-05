@@ -1,13 +1,10 @@
 // 预览卡（项目预览 + 外部卡申报同步）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；
 // 唯一手改处，web/app.js 为生成物）
 
-import { clearSessionSlots } from '../../chat/route.js'
-import { stageRelease } from '../../chat/stage.js'
-import { gToken } from '../../core/gateway.js'
-import { stopLiveFoldTimer } from '../../core/live.js'
-import { esc, state } from '../../core/state.js'
-import { clearRailExt } from '../../sidebar/rail-ext.js'
-import { clearExtCards, clearQuoteActions, openCard, registerExtCards, registerQuoteActions, viewBody } from '../registry.js'
+import { gToken } from '../../../core/gateway.js'
+import { esc, state } from '../../../core/state.js'
+import { clearExtCards, clearQuoteActions, deactivateCard, openCard, registerExtCards, registerQuoteActions, viewBody } from '../../registry.js'
+import { clearRailExt } from '../ext/ext-card.js'
   // ---------- 预览卡 ----------
   // 槽位预览卡（openProjectPreview，独占主区）；预览渲染器 mountPreview 另被 work 个性化工作区第三栏
   // 复用（sidebar/work.js），到 iframe 这一层没有第二套代码。
@@ -43,14 +40,12 @@ import { clearExtCards, clearQuoteActions, openCard, registerExtCards, registerQ
   //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
   //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
   function openProjectPreview(label, hasPreview) {
-    // 离开会话视图必须清全局槽（清槽清单与不变量见 route.js clearSessionSlots）。软重入（同 label
-    // 且帧在场）不清、不重建 shell——异 label / 帧不在场才动，见 mountPreview 的两级重入说明。
+    // 硬进入（异 label / 帧不在场；软重入不清不重建 shell，见 mountPreview 两级重入说明）：先卸会话视图
+    // 再占预览槽——deactivateCard('session') 即 registry 契约出口，给到会话卡自身的 teardown 钩子
+    // （停实时计时 + 拆 stage 占位 + 清全局槽 + 复位 currentHash）。本卡不再懂 chat 清理清单。
     const body0 = viewBody('preview')
     if (state.preview !== label || !body0 || !body0.querySelector('.preview-frame')) {
-      state.currentHash = ''
-      stopLiveFoldTimer()
-      stageRelease()
-      clearSessionSlots()
+      deactivateCard('session')
       state.preview = label
     }
     openCard('preview', { label, hasPreview })

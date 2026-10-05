@@ -120,7 +120,7 @@
 
 - `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`。label 未命中 / `hasPreview` 为假 → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。
 - 解析：`readPreviewJson(previewDir)` 是 `preview.json` 的**单一解析入口**（`readBackendCfg` 与 `readPreviewCards` 共用；`JSON.parse` 带 `try/catch`，坏 JSON / 顶层非对象一律返回 null ⇒ 空集，不抛到 `findProjects`）。`readPreviewCards` 逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空、`host === 'view'`、`isPreviewRelPath(path)` 为真；不合格项**整条丢弃**（不猜、不补默认值、不回落）。`icon` 非空串即留（是否为合法图标键由前端 `I` 表判定，缺省回落 `plug`）。
-- `isPreviewRelPath`：preview 目录内相对路径 —— 拒绝对路径 / 反斜杠 / `?` / 空段 / `.` `..` 段 / 解码后越界 / 非法 `%` 序列；允许尾随 `#片段`。**同款规则在前端 `views/cards/ext-card.js` `isExtPath` 再写一份**——两条外部输入（网关读的 `preview.json` / 不过网关的 `postMessage`）各自守门，不是重复实现。
+- `isPreviewRelPath`：preview 目录内相对路径 —— 拒绝对路径 / 反斜杠 / `?` / 空段 / `.` `..` 段 / 解码后越界 / 非法 `%` 序列；允许尾随 `#片段`。**同款规则在前端 `views/cards/ext/ext-card.js` `isExtPath` 再写一份**——两条外部输入（网关读的 `preview.json` / 不过网关的 `postMessage`）各自守门，不是重复实现。
 - 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）。
 - 解析行为真值表见 `probes/probe-web-ext-cards.ts`（从源码提取函数体、剥 TS 类型后直接跑，不另起网关）。
 
@@ -135,7 +135,7 @@
 - `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…] }`（**同一端点、一次请求取两份申报**，不新增路由）。
 - 解析：`readPreviewQuoteActions(previewDir)` 复用同一 `readPreviewJson` 单一解析入口。逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空；不合格项整条丢弃（不猜不补）。`icon` 非空串即留（是否合法由前端 `I` 表判定，缺省回落 `plug`）。段缺失 = 空集（正常态）。
 - **动作是纯数据**：无 `path`、不指向文件——宿主只渲染动作行，点击把 `id` 回发预览页（`floria-quote-action`），**执行逻辑留在项目页面自己的运行上下文**（要调项目自己的 API 与页面状态）。
-- 前端对应件 `views/cards/ext-card.js` `normQuoteActions()`（同款字段校验，与 `isExtPath` 之于 `isPreviewRelPath` 同理由：两条外部输入各自守门）。
+- 前端对应件 `views/cards/ext/ext-card.js` `normQuoteActions()`（同款字段校验，与 `isExtPath` 之于 `isPreviewRelPath` 同理由：两条外部输入各自守门）。
 
 ## 7. web 独立会话进程链
 
@@ -287,7 +287,7 @@ web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
 
-## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`，2026-09-27）
+## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`）
 
 work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两端点只解析 `label` 找项目根，语义与防护全在导出纯函数里——端点即「纯函数结果码 → HTTP 码」的直译，写法与 `/gateway/fs` 复用 `resolveWithinRoot` 同源。
 
@@ -297,6 +297,8 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 **共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` 命中 `scope==='project'` 后才动盘。
 
-- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 三件真实现：重命名 13 例 + 删除 12 例 + 端点转译/`SKIP_TREE_DIRS` 文本断言，31 项；临时树建在 `os.tmpdir()`，跑完自清）。
+**`POST /gateway/file/write`**（2026-10-05，work 编辑区写回侧，[web-ui.md](web-ui.md) §54）body `{label, path, content, baseMtime?}` → `writeProjectFile(projRoot, path, content, baseMtime)`。**只改已存在文件的内容，不新建/不删除**；`path` 越界与空 `path` → **403**，不存在或为目录 → **404**。**乐观并发（不静默覆盖）**：给了 `baseMtime` 即与当前 `statSync().mtimeMs` **精确比对**（非区间容差），不等 → **409 `conflict`**（磁盘已被外部改动，调用方须显式处置）；不给则强制覆盖。成功 → `{ok, path, mtime}`（新 mtime = 下次保存的基线）。body 上限 `MAX_FILE_WRITE_BYTES = 4 MB`（对齐读侧，超限 413）。**读侧配套**：`GET /gateway/file` 新增 `ETag: "<mtimeMs>"` + `Last-Modified`（ETag 用毫秒级 mtime——`Last-Modified` 只有秒级、无法表达同一秒内两次写），编辑区即以此作基线回传。
 
-**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按项目内相对路径读盘，`.claude/images/` 仅是普通项目内路径，无需网关改动。**边界**：全局会话（`projectScope:'global'`，无 `label`）不渲染此类图；单图受 `GET /gateway/file` 的 4 MB 上限约束。
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清）。
+
+**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按项目内相对路径读盘，`.claude/images/` 仅是普通项目内路径，无需网关改动。**边界**：全局会话（`projectScope:'global'`，无 `label`）不渲染此类图；单图受 `GET /gateway/file` 的 4 MB 上限约束。

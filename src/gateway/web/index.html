@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=442" />
+  <link rel="stylesheet" href="/styles.css?v=447" />
 </head>
 <body>
 <div id="app">
@@ -157,13 +157,16 @@
          仅已开始的对话（#chat-area.in-session）+ 侧栏折叠（#sidebar 无 .open）+ 宽屏时显示，
          首页新对话不显示；pointer-events:none 不挡交互。
          2026-08-15 临时隐藏中：styles.css #char display:none（代码保留空跑），删除该行即恢复 -->
-    <!-- 工作区编辑区（2026-09-25 work 模式）：只读查看项目内文件，与 #session-card 并排组成两栏
-         （#chat-area.work → flex-direction:row）。刻意不用 .view-card 类——它是 work 模式的常驻栏，
-         若带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。 -->
+    <!-- 工作区编辑区（2026-09-25 work 模式，2026-10-05 加编辑态）：查看/编辑项目内文件，与 #session-card
+         并排组成两栏（#chat-area.work → flex-direction:row）。刻意不用 .view-card 类——它是 work 模式的
+         常驻栏，若带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。
+         #wk-ed-mode = 阅读/编辑切换（图标 + 点击由 sidebar/work.js 注入）；#wk-ed-save = 保存态文本。 -->
     <section id="work-editor">
       <div class="wk-ed-head">
         <button id="wk-ed-back" class="wk-ico" title="返回助手"></button>
         <span id="wk-ed-path" class="wk-ed-path"></span>
+        <span id="wk-ed-save" class="wk-ed-save"></span>
+        <button id="wk-ed-mode" class="wk-ico" title="编辑" hidden></button>
       </div>
       <div class="wk-ed-body" id="wk-ed-body"></div>
     </section>
@@ -340,6 +343,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=442"></script>
+<script src="/app.js?v=447"></script>
 </body>
 </html>

@@ -1,11 +1,11 @@
 // 项目卡（管理视图「项目」tab）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；唯一手改处，web/app.js 为生成物）
 
-import { navigate } from '../../chat/route.js'
-import { I } from '../../core/icons.js'
-import { hashOf } from '../../core/sessions.js'
-import { ALL, esc, isMobile, saveMgrView, state } from '../../core/state.js'
-import { mgrColor } from '../../sidebar/mgr-data.js'
-import { setPanel } from '../../sidebar/recent.js'
+import { navigate } from '../../../chat/route.js'
+import { I } from '../../../core/icons.js'
+import { hashOf } from '../../../core/sessions.js'
+import { ALL, esc, isMobile, saveMgrView, state } from '../../../core/state.js'
+import { mgrColor } from '../../../sidebar/mgr-data.js'
+import { closePanel } from '../../../core/panel.js'
   // ---------- 项目卡 ----------
   // 数据源 = 已加载会话 ALL 按 projectLabel 分组（projectScope==='project'），不另起后端接口。
   // 点项目胶囊一律进预览（hash 路由 #preview/<label>），无 rerender 需求。
@@ -57,13 +57,13 @@ import { setPanel } from '../../sidebar/recent.js'
         if (b.dataset.label) {
           // 进预览走 hash 路由（#preview/<label>），刷新后可恢复当前预览页
           navigate('#preview/' + encodeURIComponent(b.dataset.label))
-          if (isMobile()) setPanel(false)
+          if (isMobile()) closePanel()
           return
         }
         const hash = b.dataset.hash
         if (!hash) return
         navigate('#/' + encodeURIComponent(hash))
-        if (isMobile()) setPanel(false)
+        if (isMobile()) closePanel()
       }),
     )
   }

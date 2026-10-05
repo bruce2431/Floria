@@ -20,7 +20,6 @@ function ok(name: string, cond: boolean, detail = '') {
 const stateJs = await Bun.file(`${SRC}/core/state.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const mgrJs = await Bun.file(`${SRC}/sidebar/mgr.js`).text()
-const previewCardJs = await Bun.file(`${SRC}/views/cards/preview-card.js`).text()
 const messagesJs = await Bun.file(`${SRC}/chat/messages.js`).text()
 const approvalJs = await Bun.file(`${SRC}/inputbar/approval.js`).text()
 const liveJs = await Bun.file(`${SRC}/core/live.js`).text()
@@ -31,7 +30,7 @@ const allSrc = (
   await Promise.all(
     ['core/state.js', 'chat/route.js', 'sidebar/mgr.js', 'chat/messages.js', 'inputbar/approval.js',
      'core/live.js', 'inputbar/send.js', 'sidebar/recent.js', 'core/gateway.js', 'core/auth.js',
-     'views/cards/neurons-card.js', 'views/cards/preview-card.js']
+     'views/cards/neurons/neurons-card.js', 'views/cards/preview/preview-card.js']
       .map((f) => Bun.file(`${SRC}/${f}`).text()),
   )
 ).join('\n')
@@ -40,10 +39,11 @@ const allSrc = (
 ok('A1 state 初值 currentHash: \'\'', /currentHash:\s*''\s*,/.test(stateJs))
 ok("A2 route() 非 session 分支落 ''", /state\.currentHash\s*=\s*r\.name === 'session' \? r\.hash : ''/.test(routeJs))
 ok("A3 renderHome 落 ''", /state\.currentHash\s*=\s*''/.test(routeJs))
-ok("A4 renderMgr + openProjectPreview 各落 '' 一次（卡片化后：mgr.js / preview-card.js 各 1）",
+// 2026-10-05 卡片解耦：preview 卡不再自写 ''，会话视图整体卸载出口收归 route.js 的 teardownSessionView。
+ok("A4 renderMgr + teardownSessionView 各落 '' 一次（route.js 2 处：renderHome + teardownSessionView）",
   (mgrJs.match(/state\.currentHash\s*=\s*''/g) || []).length === 1 &&
-  (previewCardJs.match(/state\.currentHash\s*=\s*''/g) || []).length === 1,
-  `mgr ${(mgrJs.match(/state\.currentHash\s*=\s*''/g) || []).length} / preview ${(previewCardJs.match(/state\.currentHash\s*=\s*''/g) || []).length}`)
+  (routeJs.match(/state\.currentHash\s*=\s*''/g) || []).length === 2,
+  `mgr ${(mgrJs.match(/state\.currentHash\s*=\s*''/g) || []).length} / route ${(routeJs.match(/state\.currentHash\s*=\s*''/g) || []).length}`)
 
 // ---------- ② 全仓无 null 双表示残留 ----------
 const nullHits = allSrc.match(/state\.currentHash\s*=\s*null|currentHash:\s*null/g) || []

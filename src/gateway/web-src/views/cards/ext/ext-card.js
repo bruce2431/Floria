@@ -1,6 +1,6 @@
 // 外部预览卡片（卡片化二期）（2026-10-01 卡片化：views/ → views/cards/；唯一手改处，web/app.js 为生成物）
 
-import { esc } from '../../core/state.js'
+import { esc } from '../../../core/state.js'
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
   // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
@@ -11,7 +11,7 @@ import { esc } from '../../core/state.js'
   //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
   //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
   // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
-  //        （清空点收在 views/cards/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
+  //        （清空点收在 views/cards/preview/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
 
   // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
   // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
@@ -74,8 +74,23 @@ import { esc } from '../../core/state.js'
       '</div>'
   }
 
+  // ---------- 预览页注册的侧栏快捷按钮 · 状态与清点（2026-10-05 自 sidebar/rail-ext.js 迁入）----------
+  // 快捷按钮集（floria-rail-register 申报）与外部卡申报同属「当前预览文档」域，故其清点与 EXT 清点
+  // 同居本模块；preview-card / route 直接调 clearRailExt（不再横向 import sidebar/rail-ext.js）。
+  // 桥接与渲染（bindRailExtBridge / renderRailExt）留在 sidebar/rail-ext.js，经 setRailExtItems 写本表。
+  let railExtItems = []
+  function setRailExtItems(items) { railExtItems = items }
+  function clearRailExt() {
+    railExtItems = []
+    const box = $('rail-ext')
+    if (box) box.innerHTML = ''
+  }
+
 export {
+  clearRailExt,
   mountExtCard,
   normExtCards,
   normQuoteActions,
+  railExtItems,
+  setRailExtItems,
 }

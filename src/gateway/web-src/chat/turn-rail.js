@@ -1,6 +1,13 @@
 // 轮次导航轨（dsh TurnNavigator 移植，2026-10-02）：会话区右侧一列短线刻度，每格=一个对话轮次
-//（=一条已提交用户气泡所辖段），hover 出预览卡（提示词 50 字 + 回复 120 字）、点击滚动跳到该轮、
-// 当前可见轮高亮。数据源=#messages 已渲染 DOM（Pj16 前端全量加载，dsh 的「未加载轮次分页」自然省略）。
+//（=一条已提交用户气泡所辖段），出预览卡（提示词 50 字 + 回复 120 字）、跳到该轮、当前可见轮高亮。
+// 数据源=#messages 已渲染 DOM（Pj16 前端全量加载，dsh 的「未加载轮次分页」自然省略）。
+//
+// 交互（桌面悬停 / 触屏滑动，语义各自贴合）：
+//  · 鼠标：悬停刻度=预览（不跳），点击刻度=跳。
+//  · 触屏（无 hover）：手指按住刻度出预览，沿轨滑动预览跟随（每格=一轮），**松开手指=跳到当前预览轮**；
+//    手指滑到轨上下缘自动滚轨（可见刻度有限时仍能滑到远处的轮）。触屏判定按 pointerdown 的真实 pointerType
+//    ——click 事件在 webkit 上恒报 pointerType=mouse（iPad 实测），靠 click.pointerType 会把触屏误判成鼠标。
+//    .turn-rail touch-action:none：否则竖滑被浏览器当滚动手势，起手即 pointercancel，滑不动。
 //
 // 关键设计（对齐 dsh：刻度稳定、预览不随刷新丢失）：
 //  · 刻度仅在**轮次集合变化**时重建（结构指纹 railKeys）；流式文本增长/滚动只刷预览文本，不碰刻度 DOM
@@ -17,8 +24,9 @@ import { messagesEl } from '../core/state.js'
   const RAIL_RESP_MAX = 120 // 预览回复封顶
   const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 带内最后一个锚 = 当前轮
   const RAIL_NARROW = 640 // 窄于此宽隐藏刻度（手机竖屏；平板竖屏 768–834 保留）
-  const RAIL_BUILD = 'rail-t2-2026.10.02' // 构建标记：dataset.build 可核验跑的是哪版
-  const RAIL_TOUCH_HOLD = 2500 // 触屏点刻度后预览卡停留时长（无 hover 时的唤起路径）
+  const RAIL_BUILD = 'rail-t4-2026.10.05' // 构建标记：dataset.build 可核验跑的是哪版
+  const RAIL_TOUCH_GUARD = 600 // 触屏后忽略「兼容鼠标 hover」事件的窗口（ms）——webkit 触摸完必补发一条 pointermove:mouse
+  const RAIL_SCRUB_EDGE = 26 // 滑动时手指进入轨上下缘该距离内自动滚轨（px）
 
   let railItems = [] // [{ key, el, prompt, response }]（文档序）
   let railKeys = '' // 结构指纹（各轮 key 拼接）：变化才重建刻度
@@ -26,7 +34,12 @@ import { messagesEl } from '../core/state.js'
   let railPreviewKey = null // 预览锚定轮次 key（跨重建保稳）
   let railTimer = null
   let railLastTick = 0
-  let railHideTimer = null // 触屏预览卡自动收起计时器
+  let railPtrTouch = false // 最近一次 pointerdown 的真实指针类型（click.pointerType 在 webkit 恒 mouse，不可用）
+  let railTouchAt = 0 // 最近一次触屏交互时刻：用于屏蔽紧随其后的兼容鼠标 hover 事件
+  let railScrub = false // 触屏滑动进行中（pointerdown 起、pointerup 止）
+  let railScrubRaf = null // 滑动边缘自动滚轨的 rAF 句柄
+  let railScrubX = 0 // 滑动中手指视口坐标（用于 elementFromPoint 定位刻度 + 判边缘）
+  let railScrubY = 0
 
   // 元素正文（优先 .body，滤掉 who/图片/文件标签文本）
   function railText(el) {
@@ -78,34 +91,97 @@ import { messagesEl } from '../core/state.js'
     return nav
   }
 
-  function railHideSoon(nav) {
-    if (railHideTimer) clearTimeout(railHideTimer)
-    railHideTimer = setTimeout(() => { railHideTimer = null; railSetPreview(nav, null) }, RAIL_TOUCH_HOLD)
+  // 手指坐标下的刻度（触屏 implicit pointer capture：pointermove 的 e.target 恒为起手刻度，
+  // 必须用 elementFromPoint 取手指当前压住的刻度）。
+  function railMarkAt(nav, x, y) {
+    const el = document.elementFromPoint(x, y)
+    const m = el && el.closest ? el.closest('.tr-mark') : null
+    return m && nav.contains(m) ? m : null
+  }
+
+  // 滑动到轨上下缘时自动滚轨（可见刻度装不下整段轮次时仍能滑到远处）；每帧滚一点并重取指下刻度。
+  function railScrubTick(nav) {
+    railScrubRaf = null
+    if (!railScrub) return
+    const scroller = nav.querySelector('.tr-scroller')
+    const r = scroller.getBoundingClientRect()
+    let dy = 0
+    if (railScrubY < r.top + RAIL_SCRUB_EDGE) dy = -Math.ceil((r.top + RAIL_SCRUB_EDGE - railScrubY) / 3)
+    else if (railScrubY > r.bottom - RAIL_SCRUB_EDGE) dy = Math.ceil((railScrubY - (r.bottom - RAIL_SCRUB_EDGE)) / 3)
+    if (dy) {
+      const before = scroller.scrollTop
+      scroller.scrollTop = before + dy
+      if (scroller.scrollTop !== before) {
+        const m = railMarkAt(nav, railScrubX, railScrubY)
+        if (m) railSetPreview(nav, m.dataset.key)
+      }
+    }
+    if (railScrub) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
+  }
+
+  function railScrubStart(nav) {
+    railScrub = true
+    if (railScrubRaf == null) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
+  }
+  function railScrubStop() {
+    railScrub = false
+    if (railScrubRaf != null) { cancelAnimationFrame(railScrubRaf); railScrubRaf = null }
   }
 
   function railBind(nav) {
-    // 绑在 nav（含 scroller 与刻度，冒泡覆盖），pointermove + pointerover 双触发：
-    // 刻度重建/内容刷新后若光标静止其上，pointerover 仍能唤出预览卡（单靠 pointermove 会漏）。
+    // 真实指针类型只看 pointerdown（capture）：click.pointerType 在 webkit 恒 mouse，判不出触屏。
+    // 触屏起手即进入滑动态并亮起指下刻度的预览。
+    nav.addEventListener('pointerdown', (e) => {
+      railPtrTouch = e.pointerType === 'touch'
+      if (!railPtrTouch) return
+      railTouchAt = Date.now()
+      railScrubX = e.clientX
+      railScrubY = e.clientY
+      railScrubStart(nav)
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (m) railSetPreview(nav, m.dataset.key)
+    }, true)
+    // 鼠标悬停唤卡：pointermove + pointerover 双触发（刻度重建/内容刷新后光标静止其上，pointerover 仍能唤出）。
+    // 触屏走滑动分支。另须屏蔽触屏后紧接的兼容鼠标事件：webkit 触摸完必补发一条 pointerType=mouse 的
+    // pointermove（实测 …pointerup:touch → click:mouse → pointermove:mouse），不挡会在跳转后又把预览卡亮回来。
     const onHover = (e) => {
+      if (e.pointerType === 'touch' || railScrub) return
+      if (Date.now() - railTouchAt < RAIL_TOUCH_GUARD) return
       const m = e.target.closest ? e.target.closest('.tr-mark') : null
       if (m) railSetPreview(nav, m.dataset.key)
     }
-    nav.addEventListener('pointermove', onHover)
-    nav.addEventListener('pointerover', onHover)
-    // 触屏 tap 后浏览器会补发 pointerleave（pointerType=touch），此时不能收卡——卡由 railHideSoon 定时收。
-    nav.addEventListener('pointerleave', () => { if (railHideTimer) return; railSetPreview(nav, null) })
-    // 触屏：tap 刻度 = 亮出该轮预览卡（停留 RAIL_TOUCH_HOLD）并跳到该轮；触屏无 hover，靠此唤起。
-    nav.addEventListener('click', (e) => {
-      const m = e.target.closest ? e.target.closest('.tr-mark') : null
-      if (!m) return
-      railSetPreview(nav, m.dataset.key)
-      railHideSoon(nav)
-      railJump(m.dataset.key)
+    nav.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'touch') { onHover(e); return }
+      if (!railScrub) return
+      railScrubX = e.clientX
+      railScrubY = e.clientY
+      const m = railMarkAt(nav, e.clientX, e.clientY)
+      if (m) railSetPreview(nav, m.dataset.key) // 手指不在刻度上时保留上一格（滑过空隙不闪断）
     })
-    // 点轨外任意处收回预览卡（触屏无 pointerleave，须显式收）。
+    nav.addEventListener('pointerover', onHover)
+    // 鼠标离开轨收起预览；触屏的 pointerleave（pointerup 后补发）不收——触屏卡由「松开/点轨外」收。
+    nav.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; railSetPreview(nav, null) })
+    // 触屏松开 = 跳到当前预览轮（滑动手势的落点）。
+    nav.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch' || !railScrub) return
+      railScrubStop()
+      const key = railPreviewKey
+      if (key != null) { railSetPreview(nav, null); railJump(key) }
+    })
+    // 手势被系统打断（来电/多指等）＝取消，不跳。
+    nav.addEventListener('pointercancel', (e) => {
+      if (e.pointerType !== 'touch') return
+      railScrubStop()
+      railSetPreview(nav, null)
+    })
+    nav.addEventListener('click', (e) => {
+      if (railPtrTouch) return // 触屏跳转已由 pointerup 完成，忽略 webkit 补发的兼容 click
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (m) railJump(m.dataset.key)
+    })
+    // 点轨外任意处收回预览卡（鼠标 pointerleave 已收；触屏起手在轨外时须显式收）。
     document.addEventListener('pointerdown', (e) => {
       if (nav.contains(e.target)) return
-      if (railHideTimer) { clearTimeout(railHideTimer); railHideTimer = null }
       railSetPreview(nav, null)
     }, true)
   }
@@ -135,9 +211,9 @@ import { messagesEl } from '../core/state.js'
       m.classList.toggle('tr-active', i === railActiveIdx)
       m.classList.toggle('tr-hot', i === pIdx) // 注意：类名不可用 tr-preview——那是预览卡自己的类，撞名会让刻度按钮命中卡片样式
     })
-    // active 刻度留在轨内可视（手动算，禁 scrollIntoView——会外溢滚动祖先链）
+    // 当前刻度留在轨内可视（预览中优先保预览轮，否则保当前轮；手动算，禁 scrollIntoView——会外溢滚动祖先链）
     const scroller = nav.querySelector('.tr-scroller')
-    const act = marks[railActiveIdx]
+    const act = marks[pIdx >= 0 ? pIdx : railActiveIdx]
     if (act) {
       const top = act.offsetTop
       const h = scroller.clientHeight

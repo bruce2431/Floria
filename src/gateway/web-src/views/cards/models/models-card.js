@@ -1,10 +1,9 @@
 // 模型卡（管理视图「模型」tab）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；唯一手改处，web/app.js 为生成物）
 
-import { needToken } from '../../core/gateway.js'
-import { I } from '../../core/icons.js'
-import { esc, state, toast } from '../../core/state.js'
-import { apiSetModel } from '../../inputbar/model-select.js'
-import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor } from '../../sidebar/mgr-data.js'
+import { needToken, apiSetModel } from '../../../core/gateway.js'
+import { I } from '../../../core/icons.js'
+import { esc, state, toast } from '../../../core/state.js'
+import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor, modelProviderOf } from '../../../sidebar/mgr-data.js'
   // ---------- 模型卡 ----------
   // 数据源 = 网关 /gateway/models（只读展示 + 设为默认）。modelProviderOf 同被输入栏模型菜单复用（唯一一份）。
   const modelsCardDef = {
@@ -24,36 +23,6 @@ import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor } from '..
     loadModelsData(false)
   }
 
-  // 模型列表（按供应商分组；数据源 = 网关 /gateway/models，只读展示）
-  const MODEL_PROVIDER_KEYS = [
-    [/^ANTHROPIC_/, 'Claude · Anthropic'],
-    [/^OPENAI_/, 'OpenAI'],
-    [/^GEMINI_/, 'Google Gemini'],
-    [/^DEEPSEEK_/, 'DeepSeek'],
-    [/^QWEN_/, 'Qwen · 通义千问'],
-    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
-    [/^GLM_/, '智谱 GLM'],
-    [/^MOONSHOT_/, 'Moonshot Kimi'],
-    [/^OPENROUTER_/, 'OpenRouter'],
-  ]
-  // 供应商判定：key 优先（模型类环境变量名带供应商前缀），通用 model 键或未命中则按模型串前缀。
-  function modelProviderOf(it) {
-    const k = String(it.k || '')
-    const v = String(it.v || '')
-    if (k !== 'model') {
-      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
-    }
-    const vl = v.toLowerCase()
-    if (vl.startsWith('claude')) return 'Claude · Anthropic'
-    if (vl.startsWith('deepseek')) return 'DeepSeek'
-    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
-    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
-    if (vl.startsWith('gemini')) return 'Google Gemini'
-    if (vl.startsWith('glm')) return '智谱 GLM'
-    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
-    if (vl.includes('doubao')) return '字节豆包'
-    return '自定义 / 其他'
-  }
   // 模型列表的卡体渲染（写进 .mgr-model-list）
   function renderMgrModelList() {
     const list = $('mgr-model-list')
@@ -145,9 +114,7 @@ import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor } from '..
   }
 
 export {
-  MODEL_PROVIDER_KEYS,
   modelCapHtml,
-  modelProviderOf,
   modelsCardDef,
   renderMgrModelList,
   renderMgrModels,

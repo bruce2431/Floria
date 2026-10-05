@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renameProjectEntry, sanitizeEntryName, trashProjectEntry } from '../src/gateway/localGateway.js'
+import { renameProjectEntry, sanitizeEntryName, trashProjectEntry, writeProjectFile } from '../src/gateway/localGateway.js'
 
 let pass = 0
 let fail = 0
@@ -79,6 +79,28 @@ ok('sanitizeEntryName 超长保留扩展名', (() => {
 })())
 ok('sanitizeEntryName 空串/./.. 归空', sanitizeEntryName('') === '' && sanitizeEntryName('..') === '' && sanitizeEntryName('.') === '')
 
+// ---------- 写内容（POST /gateway/file/write）----------
+writeFileSync(join(root, 'w.txt'), 'old')
+const w1 = writeProjectFile(root, 'w.txt', 'new content')
+ok('写回成功且回新 mtime', w1.ok && w1.path === 'w.txt' && typeof w1.mtime === 'number')
+ok('写回内容已落盘', readFileSync(join(root, 'w.txt'), 'utf8') === 'new content')
+
+// 基线不符（模拟外部改动）→ 409 且不覆盖
+const w2 = writeProjectFile(root, 'w.txt', 'mine', (w1.ok ? w1.mtime : 0) + 12345)
+ok('基线不符 → 409 且不覆盖', !w2.ok && w2.code === 409 && readFileSync(join(root, 'w.txt'), 'utf8') === 'new content')
+// 基线正确 → 正常写
+const w3 = writeProjectFile(root, 'w.txt', 'ok2', w1.ok ? w1.mtime : 0)
+ok('基线正确 → 写入成功', w3.ok && readFileSync(join(root, 'w.txt'), 'utf8') === 'ok2')
+// 无基线（强制覆盖）
+const w4 = writeProjectFile(root, 'w.txt', 'forced')
+ok('无基线 → 强制覆盖成功', w4.ok && readFileSync(join(root, 'w.txt'), 'utf8') === 'forced')
+
+ok('写越界 → 403', (() => { const r = writeProjectFile(root, '../evil.txt', 'x'); return !r.ok && r.code === 403 })())
+ok('写空 rel（项目根）→ 403', !writeProjectFile(root, '', 'x').ok)
+ok('写不存在文件 → 404', (() => { const r = writeProjectFile(root, 'nope.txt', 'x'); return !r.ok && r.code === 404 })())
+ok('写目录 → 404', (() => { const r = writeProjectFile(root, 'sub2', 'x'); return !r.ok && r.code === 404 })())
+ok('写不存在的父目录（越界防护不误放行）→ 404', (() => { const r = writeProjectFile(root, 'nope/deep.txt', 'x'); return !r.ok && r.code === 404 })())
+
 // ---------- 删除（= 移入 .trash/）----------
 const d1 = trashProjectEntry(root, 'keep.txt')
 ok('删除移入 .trash/：原路径消失', d1.ok && !existsSync(join(root, 'keep.txt')))
@@ -101,6 +123,8 @@ ok('删除不存在 → 404', (() => { const r = trashProjectEntry(root, 'nope.t
 const gw = readFileSync(join(import.meta.dir, '..', 'src/gateway/localGateway.ts'), 'utf8')
 ok('.trash 在 SKIP_TREE_DIRS 内', /SKIP_TREE_DIRS = new Set\(\[[^\]]*'\.trash'/.test(gw))
 ok('两个端点各自转译纯函数结果码', /file\/rename'\)[\s\S]{0,600}?sendJson\(res, rOut\.code/.test(gw) && /file\/delete'\)[\s\S]{0,600}?sendJson\(res, dOut\.code/.test(gw))
+ok('写端点转译纯函数结果码', /file\/write'\)[\s\S]{0,2000}?sendJson\(res, wOut\.code/.test(gw))
+ok('GET /gateway/file 带 ETag（写回冲突基线）', /ETag:/.test(gw) && /Last-Modified/.test(gw))
 
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${pass}/${pass + fail}`)

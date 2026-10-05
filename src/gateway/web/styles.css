@@ -2366,7 +2366,7 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
 .wk-ed-back { display: none; }
 .wk-ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
-.wk-ed-body { flex: 1; min-height: 0; overflow: auto; }
+.wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .wk-ed-body::-webkit-scrollbar { width: 8px; height: 8px; }
 .wk-ed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .wk-code { margin: 0; padding: 16px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre; }
@@ -2374,6 +2374,40 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
 .wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }
+/* 保存态文本（#wk-ed-save）+ 源码编辑 textarea（2026-10-05 编辑区编辑功能）。
+   保存态：无脏/无冲突时不显字；脏=次色、冲突=警示色。ta 用 absolute 铺满 .wk-ed-body（父 position:relative），
+   自身滚动；排版与 .wk-code 同源（mono / 12.5px / 1.6 / 16px 20px padding）——两态切换视觉零跳动。 */
+.wk-ed-save { flex: none; font-size: 12.5px; color: var(--text-3); }
+.wk-ed-save.dirty { color: var(--text-2); }
+.wk-ed-save.conflict { color: #e0603f; }
+/* 两层叠放：.wk-ed-hl 着色层（只读展示）+ .wk-ed-ta 透明文本 textarea（真源、自身滚动）。
+   两规则排版必须逐字同源（font/mono、12.5px、1.6、16px 20px padding、pre-wrap、break-word、tab-size 2）
+   ——任何一处不同都会让两层错位。token 只改 color（禁字重/字形），故 .wk-ed-hl 内 span 不改字体度量。 */
+.wk-ed-wrap { position: absolute; inset: 0; overflow: hidden; }
+.wk-ed-hl {
+  position: absolute; inset: 0; margin: 0; padding: 16px 20px; box-sizing: border-box;
+  overflow: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text);
+}
+.wk-ed-ta {
+  position: absolute; inset: 0; box-sizing: border-box; margin: 0; padding: 16px 20px;
+  border: none; outline: none; resize: none; background: transparent; color: transparent; caret-color: var(--text);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6; tab-size: 2;
+  white-space: pre-wrap; overflow-wrap: break-word;
+}
+.wk-ed-ta::selection { background: color-mix(in srgb, var(--text) 24%, transparent); }
+.wk-ed-hl .hl-kw { color: #8b5cf6; }
+.wk-ed-hl .hl-str { color: #16a34a; }
+.wk-ed-hl .hl-num { color: #d97706; }
+.wk-ed-hl .hl-com { color: var(--text-3); }
+.wk-ed-hl .hl-h { color: #3b82f6; }
+.wk-ed-hl .hl-b { color: #db2777; }
+.wk-ed-hl .hl-i { color: #0891b2; }
+.wk-ed-hl .hl-code { color: #ea580c; }
+.wk-ed-hl .hl-link { color: #2563eb; text-decoration: underline; }
+.wk-ed-hl .hl-quote { color: var(--text-3); }
+.wk-ed-hl .hl-li { color: #ea580c; }
+.wk-ed-hl .hl-hr { color: var(--text-3); }
 
 /* 手机端（≤720px）：两栏不成立——常态只显示助手，点文件时编辑区以覆盖层全屏打开（返回键收起） */
 @media (max-width: 720px) {
@@ -2390,9 +2424,11 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 }
 
 /* 轮次导航轨（2026-10-02 dsh TurnNavigator 移植）：会话区右侧一列短线刻度，每格=一个轮次。
-   刻度宽 20px 右对齐，scaleX 表达态（默认 .6 / 悬停·预览 .9 / 当前轮 1）；hover 出右侧预览卡。
-   nav 挂在 #chat-area（position:relative）内 absolute 定位，不参与 flex 流。手机竖屏（≤640px）隐藏（平板竖屏 768–834 保留）。 */
-.turn-rail { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 28px; z-index: 7; cursor: pointer; }
+   刻度宽 20px 右对齐，scaleX 表达态（默认 .6 / 悬停·预览 .9 / 当前轮 1）；鼠标悬停或触屏按住滑动出左侧预览卡，
+   触屏松开手指跳到当前预览轮。touch-action:none——否则竖滑被浏览器当滚动手势、起手即 pointercancel 滑不动。
+   nav 挂在 #session-card（position:relative）内 absolute 定位，不参与 flex 流；随会话卡 hidden 一起消失。
+   手机竖屏（≤640px）隐藏（平板竖屏 768–834 保留）。 */
+.turn-rail { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 28px; z-index: 7; cursor: pointer; touch-action: none; }
 .turn-rail[hidden] { display: none; }
 .tr-scroller { max-height: min(420px, 62vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .tr-scroller::-webkit-scrollbar { display: none; }
@@ -2414,6 +2450,10 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   box-shadow: var(--shadow); pointer-events: none; animation: tr-preview-in 0.12s ease-out;
 }
 .tr-preview[hidden] { display: none; }
+/* 触屏：预览卡可命中（鼠标下 pointer-events:none 不挡消息阅读）。触屏判定同全站约定——
+   @media(hover:none) 覆盖手机，body.touch 覆盖 iPad（桌面模式骗过 hover:none）。 */
+@media (hover: none) { .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; } }
+body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .tr-prompt { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .tr-resp { overflow: hidden; margin-top: 4px; color: var(--text-2); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .tr-resp[hidden] { display: none; }

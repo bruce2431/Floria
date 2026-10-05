@@ -10,7 +10,7 @@ import { messagesEl, state, live, esc, toast } from '../core/state.js'
 import { renderTransient, claimStartTs, takeover, clearTakeover } from '../inputbar/approval.js'
 import { stripQuoteBodies } from '../inputbar/mention.js'
 import { firstSendHash } from '../sidebar/recent.js'
-import { modelProviderOf } from '../views/cards/models-card.js'
+import { modelProviderOf } from '../sidebar/mgr-data.js'
   // ---------- 消息渲染 ----------
   // AI 生成图取图 URL 解析（2026-10-03）：模型输出 ![](code)（code = 该项目根 .claude/images/ 下的文件名），
   // 把代号拼成网关取图 URL——复用 GET /gateway/file?label=<项目>&path=<相对路径>（网关零改动）。

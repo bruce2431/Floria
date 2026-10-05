@@ -27,6 +27,7 @@ const sendJs = await Bun.file(`${SRC}/inputbar/send.js`).text()
 const imagesJs = await Bun.file(`${SRC}/inputbar/images.js`).text()
 const workJs = await Bun.file(`${SRC}/sidebar/work.js`).text()
 const recentJs = await Bun.file(`${SRC}/sidebar/recent.js`).text()
+const panelJs = await Bun.file(`${SRC}/core/panel.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const styles = await Bun.file(`${WEB}/styles.css`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
@@ -151,12 +152,14 @@ ok('F9 产物 app.js 含缺口判据定义唯一', count(appJs, /function wkFloa
 
 // ---------- ⑩ 视图浮层「侧边栏」开关 = 侧栏是否常在（2026-09-28）----------
 // 不变量：开关亮 ⇔ 侧栏被主动打开（钉住）；左缘悬停预览式唤出（瞬时露出、移出即收）不算打开。
-// 判定点 = work.js paneOn('sidebar') 读 state.panelPinned；钉住态由 recent.js setPanel 单点写，
-// 落地后同步浮层行状态（pin 可被汉堡/收起钮/遮罩/浮层开关任一处翻转）。
+// 判定点 = work.js paneOn('sidebar') 读 state.panelPinned；钉住态 2026-10-05 收归 core/panel.js
+// applyPanelOpen 单点写（recent.js setPanel 委托之，popup/行状态清理留包装层）。
 const paneOnBody = body(workJs, 'function paneOn(')
 ok('G1 侧边栏开关真源 = state.panelPinned（不含悬停可见态）', paneOnBody.includes('return !!state.panelPinned') && !paneOnBody.includes('state.panelOpen'), paneOnBody.replace(/\s+/g, ' ').slice(-120))
+const applyPanelBody = body(panelJs, 'function applyPanelOpen(')
+ok('G1 applyPanelOpen 写 panelPinned（pin 真源单点，core/panel.js）', /state\.panelPinned = !!open && !!pin/.test(applyPanelBody))
 const setPanelBody = body(recentJs, 'function setPanel(')
-ok('G1 setPanel 写 panelPinned（pin 真源单点）', /state\.panelPinned = !!open && !!\(opt && opt\.pin\)/.test(setPanelBody))
+ok('G1 setPanel 委托 applyPanelOpen（不再自写 pin）', setPanelBody.includes('applyPanelOpen(') && !/state\.panelPinned\s*=/.test(setPanelBody))
 ok('G1 setPanel 落地后同步浮层行状态', setPanelBody.includes('syncPaneRows()'))
 ok('G1 mouseleave 收起判据读 panelPinned（悬停唤出可收）', /if \(!state\.panelPinned\) setPanel\(false\)/.test(recentJs))
 ok('G1 state.js 有 panelPinned 初始位', /panelPinned: false/.test(stateJs))

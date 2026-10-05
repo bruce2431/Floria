@@ -4,8 +4,8 @@ import { hideGate } from '../core/auth.js'
 import { needToken, apiUrl } from '../core/gateway.js'
 import { loadModelCur, saveModelCur, MODEL_CUR, renderModelSeat } from '../inputbar/model-select.js'
 import { state } from '../core/state.js'
-import { renderMgrGrid } from '../views/cards/plugins-card.js'
-import { renderMgrModelList } from '../views/cards/models-card.js'
+import { renderMgrGrid } from '../views/cards/plugins/plugins-card.js'
+import { renderMgrModelList } from '../views/cards/models/models-card.js'
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
   // 首次进入管理视图 fetch，刷新按钮 force 重新拉取；失败显示错误 + 重试（不回落假数据）。
@@ -79,16 +79,49 @@ import { renderMgrModelList } from '../views/cards/models-card.js'
     for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0
     return MGR_PALETTE[h % MGR_PALETTE.length]
   }
+  // 供应商判定（2026-10-05 自 views/cards/models/models-card.js 迁入数据层——模型卡与输入栏模型菜单
+  // 共用唯一一份；卡片去兄弟子系统横向依赖后经此取用）。key 优先（模型类环境变量名带供应商前缀），
+  // 通用 model 键或未命中则按模型串前缀。
+  const MODEL_PROVIDER_KEYS = [
+    [/^ANTHROPIC_/, 'Claude · Anthropic'],
+    [/^OPENAI_/, 'OpenAI'],
+    [/^GEMINI_/, 'Google Gemini'],
+    [/^DEEPSEEK_/, 'DeepSeek'],
+    [/^QWEN_/, 'Qwen · 通义千问'],
+    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
+    [/^GLM_/, '智谱 GLM'],
+    [/^MOONSHOT_/, 'Moonshot Kimi'],
+    [/^OPENROUTER_/, 'OpenRouter'],
+  ]
+  function modelProviderOf(it) {
+    const k = String(it.k || '')
+    const v = String(it.v || '')
+    if (k !== 'model') {
+      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
+    }
+    const vl = v.toLowerCase()
+    if (vl.startsWith('claude')) return 'Claude · Anthropic'
+    if (vl.startsWith('deepseek')) return 'DeepSeek'
+    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
+    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
+    if (vl.startsWith('gemini')) return 'Google Gemini'
+    if (vl.startsWith('glm')) return '智谱 GLM'
+    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
+    if (vl.includes('doubao')) return '字节豆包'
+    return '自定义 / 其他'
+  }
 
 export {
   MGR,
   MGR_ERR,
   MGR_LOADING,
   MGR_PALETTE,
+  MODEL_PROVIDER_KEYS,
   MODELS,
   MODELS_ERR,
   MODELS_LOADING,
   loadMgrData,
   loadModelsData,
   mgrColor,
+  modelProviderOf,
 }

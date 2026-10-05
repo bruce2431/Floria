@@ -269,8 +269,8 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
 // ---- 4e. 项目申报的浮窗动作（2026-09-28）：纯数据表 + 与内置行合流 ----
 {
   const registry = read(resolve(SRC, 'views/registry.js'))
-  const extCard = read(resolve(SRC, 'views/cards/ext-card.js'))
-  const preview = read(resolve(SRC, 'views/cards/preview-card.js'))
+  const extCard = read(resolve(SRC, 'views/cards/ext/ext-card.js'))
+  const preview = read(resolve(SRC, 'views/cards/preview/preview-card.js'))
   if (/function normQuoteActions\(/.test(extCard) && /function registerQuoteActions\(/.test(registry) && /function quoteActions\(/.test(registry)) ok('动作表：ext-card.normQuoteActions + registry.registerQuoteActions/quoteActions 齐')
   else bad('动作表缺失（normQuoteActions / registerQuoteActions / quoteActions）')
   if (/export \{[^}]*normQuoteActions,/.test(extCard) || /normQuoteActions,/.test(extCard)) ok('ext-card.js 导出 normQuoteActions')

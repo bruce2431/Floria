@@ -87,6 +87,8 @@
     dshClose: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg>',
     // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline）
     dshEdit: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.9482 1.97949L13.9253 4.95508L5.51453 13.3659L2.53613 12.6157L2.18896 9.24414L10.9482 1.97949ZM8.2951 4.63011L4.75226 8.17207L7.71064 9.1084L11.2535 5.56544L8.2951 4.63011ZM3.60287 10.1729L3.78518 12.1367L5.7417 12.5674L6.2064 12.1027L4.06812 11.4503L3.60287 10.1729Z"/></svg>',
+    // 阅读视图（work 编辑区 阅读/编辑 切换用；展开的书页，描线族，与 dshChev/dshSliders 同 1px 口径）
+    dshBook: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.7C6.9 2.9 5.45 2.6 4.15 2.6c-.55 0-1.08.06-1.55.18v9.04c.47-.12 1-.18 1.55-.18 1.3 0 2.75.3 3.85 1.1"/><path d="M8 3.7c1.1-.8 2.55-1.1 3.85-1.1.55 0 1.08.06 1.55.18v9.04c-.47-.12-1-.18-1.55-.18-1.3 0-2.75.3-3.85 1.1"/><path d="M8 3.7v9.04"/></svg>',
     // 新建独立会话（web 与 CLI 等权并行）：终端窗口 + 提示符
     web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
   }
@@ -164,6 +166,37 @@
     for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0
     return MGR_PALETTE[h % MGR_PALETTE.length]
   }
+  // 供应商判定（2026-10-05 自 views/cards/models/models-card.js 迁入数据层——模型卡与输入栏模型菜单
+  // 共用唯一一份；卡片去兄弟子系统横向依赖后经此取用）。key 优先（模型类环境变量名带供应商前缀），
+  // 通用 model 键或未命中则按模型串前缀。
+  const MODEL_PROVIDER_KEYS = [
+    [/^ANTHROPIC_/, 'Claude · Anthropic'],
+    [/^OPENAI_/, 'OpenAI'],
+    [/^GEMINI_/, 'Google Gemini'],
+    [/^DEEPSEEK_/, 'DeepSeek'],
+    [/^QWEN_/, 'Qwen · 通义千问'],
+    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
+    [/^GLM_/, '智谱 GLM'],
+    [/^MOONSHOT_/, 'Moonshot Kimi'],
+    [/^OPENROUTER_/, 'OpenRouter'],
+  ]
+  function modelProviderOf(it) {
+    const k = String(it.k || '')
+    const v = String(it.v || '')
+    if (k !== 'model') {
+      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
+    }
+    const vl = v.toLowerCase()
+    if (vl.startsWith('claude')) return 'Claude · Anthropic'
+    if (vl.startsWith('deepseek')) return 'DeepSeek'
+    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
+    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
+    if (vl.startsWith('gemini')) return 'Google Gemini'
+    if (vl.startsWith('glm')) return '智谱 GLM'
+    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
+    if (vl.includes('doubao')) return '字节豆包'
+    return '自定义 / 其他'
+  }
 
   // ---------- 元素 ----------
   const chatArea = $('chat-area')
@@ -202,6 +235,9 @@
     // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
     wkAssistMode: 'side', wkAssistH: 430,
+    // wkEdit = 编辑区模式（false=阅读（渲染/pre），true=源码编辑）。跨文件记忆（打开下一个文件沿用同一模式），
+    // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
+    wkEdit: false,
     // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
     // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
     wkFlex: { editor: 1, assist: 1, preview: 1 },
@@ -261,7 +297,7 @@
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
   function saveWork() {
     stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex, wkEdit: !!state.wkEdit })
   }
   function loadWork() {
     try {
@@ -278,6 +314,7 @@
       loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
       if (d.wkFlex && typeof d.wkFlex === 'object') {
         for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
       }
@@ -1522,6 +1559,17 @@ function setSessionCwd(v) { sessionCwd = v }
     renderCtxMeter(null) // 无会话上下文：隐藏上下文环
   }
 
+  // 会话卡离场钩子（session-card.js 的 deactivate 契约；registry.openCard 切异卡时调用，preview-card
+  // 硬进入分支经 registry.deactivateCard('session') 显式调用）——停实时计时 → 拆 stage 占位 →
+  // 清全局槽 → 复位 currentHash。**仅此一处合成**：离开会话视图的清单不再散落各入口（三次同根
+  // 复发教训：就地补清单必漏下一个入口）。
+  function teardownSessionView() {
+    stopLiveFoldTimer()
+    stageRelease()
+    clearSessionSlots()
+    state.currentHash = ''
+  }
+
   function renderHome() {
     stopLiveFoldTimer()
     setTurnLive(false); syncGwSend() // 2026-09-04 打断按钮：离开会话还原发送键
@@ -2700,11 +2748,7 @@ function setLastNavHash(v) { lastNavHash = v }
   // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
   // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
   function setPanel(open, opt) {
-    state.panelPinned = !!open && !!(opt && opt.pin)
-    state.panelOpen = open
-    sidebar.classList.toggle('open', open)
-    // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
-    if (!open) document.documentElement.style.removeProperty('--panel-w')
+    applyPanelOpen(open, !!(opt && opt.pin)) // 状态落地唯一核（core/panel.js）：钉住态 + 可见态 + #sidebar.open + 调宽复位
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
@@ -3283,12 +3327,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   //       display:contents 不产生盒，子元素与内置四个图标同列同 gap 居中（零新增视觉）。
   // 不变量：注册集属于**当前加载的那份预览文档**——文档换（iframe 换 src / 重建 / 离开预览），
   //        注册集即失效并清空；凭 e.source 精确匹配当前 .preview-frame 才采纳，别处窗口伪报不进来。
-  let railExtItems = []
-  function clearRailExt() {
-    railExtItems = []
-    const box = $('rail-ext')
-    if (box) box.innerHTML = ''
-  }
+  // 状态表 railExtItems + clearRailExt 已迁 views/cards/ext/ext-card.js（与本模块只读/写经由它）；
+  // 本模块只留桥接与渲染。
   function renderRailExt() {
     const box = $('rail-ext')
     if (!box) return
@@ -3313,12 +3353,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
       // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
-      // views/cards/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      // views/cards/ext/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
       if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
-      railExtItems = (Array.isArray(d.items) ? d.items : [])
+      setRailExtItems((Array.isArray(d.items) ? d.items : [])
         .filter((it) => it && typeof it.id === 'string' && it.id && Object.prototype.hasOwnProperty.call(I, it.icon))
-        .map((it) => ({ id: it.id, icon: it.icon, title: typeof it.title === 'string' ? it.title : '' }))
+        .map((it) => ({ id: it.id, icon: it.icon, title: typeof it.title === 'string' ? it.title : '' })))
       renderRailExt()
     })
   }
@@ -3439,6 +3479,22 @@ function setFirstSendHash(v) { firstSendHash = v }
     )
   }
 
+  // ---------- 侧栏开合核 ----------
+  // 开合落地唯一实现：钉住态 + 可见态 + #sidebar.open + 折叠清拖拽调宽。recent.js 的 setPanel 委托本核
+  // （弹层清理 / 行浮窗 / work 视图浮窗行状态留在其包装层）；卡（neurons/projects）只需「无导航收抽屉」
+  // → closePanel（不再横向 import sidebar/recent.js）。真源 = state.panelPinned（悬停唤出只置 panelOpen，
+  // 不算「打开」——「侧边栏」开关与 work paneOn 均读 panelPinned）。
+  function applyPanelOpen(open, pin) {
+    state.panelPinned = !!open && !!pin
+    state.panelOpen = open
+    sidebar.classList.toggle('open', open)
+    // 折叠即清拖拽调宽（2026-09-12）：移除 :root 内联 --panel-w，再展开回默认 280px（不持久化）
+    if (!open) document.documentElement.style.removeProperty('--panel-w')
+  }
+  function closePanel() {
+    applyPanelOpen(false)
+  }
+
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
   // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
@@ -3449,7 +3505,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
   //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
   // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
-  //        （清空点收在 views/cards/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
+  //        （清空点收在 views/cards/preview/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
 
   // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
   // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
@@ -3512,6 +3568,18 @@ function setFirstSendHash(v) { firstSendHash = v }
       '</div>'
   }
 
+  // ---------- 预览页注册的侧栏快捷按钮 · 状态与清点（2026-10-05 自 sidebar/rail-ext.js 迁入）----------
+  // 快捷按钮集（floria-rail-register 申报）与外部卡申报同属「当前预览文档」域，故其清点与 EXT 清点
+  // 同居本模块；preview-card / route 直接调 clearRailExt（不再横向 import sidebar/rail-ext.js）。
+  // 桥接与渲染（bindRailExtBridge / renderRailExt）留在 sidebar/rail-ext.js，经 setRailExtItems 写本表。
+  let railExtItems = []
+  function setRailExtItems(items) { railExtItems = items }
+  function clearRailExt() {
+    railExtItems = []
+    const box = $('rail-ext')
+    if (box) box.innerHTML = ''
+  }
+
   // ---------- 预览卡 ----------
   // 槽位预览卡（openProjectPreview，独占主区）；预览渲染器 mountPreview 另被 work 个性化工作区第三栏
   // 复用（sidebar/work.js），到 iframe 这一层没有第二套代码。
@@ -3547,14 +3615,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
   //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
   function openProjectPreview(label, hasPreview) {
-    // 离开会话视图必须清全局槽（清槽清单与不变量见 route.js clearSessionSlots）。软重入（同 label
-    // 且帧在场）不清、不重建 shell——异 label / 帧不在场才动，见 mountPreview 的两级重入说明。
+    // 硬进入（异 label / 帧不在场；软重入不清不重建 shell，见 mountPreview 两级重入说明）：先卸会话视图
+    // 再占预览槽——deactivateCard('session') 即 registry 契约出口，给到会话卡自身的 teardown 钩子
+    // （停实时计时 + 拆 stage 占位 + 清全局槽 + 复位 currentHash）。本卡不再懂 chat 清理清单。
     const body0 = viewBody('preview')
     if (state.preview !== label || !body0 || !body0.querySelector('.preview-frame')) {
-      state.currentHash = ''
-      stopLiveFoldTimer()
-      stageRelease()
-      clearSessionSlots()
+      deactivateCard('session')
       state.preview = label
     }
     openCard('preview', { label, hasPreview })
@@ -3805,13 +3871,13 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (b.dataset.label) {
           // 进预览走 hash 路由（#preview/<label>），刷新后可恢复当前预览页
           navigate('#preview/' + encodeURIComponent(b.dataset.label))
-          if (isMobile()) setPanel(false)
+          if (isMobile()) closePanel()
           return
         }
         const hash = b.dataset.hash
         if (!hash) return
         navigate('#/' + encodeURIComponent(hash))
-        if (isMobile()) setPanel(false)
+        if (isMobile()) closePanel()
       }),
     )
   }
@@ -3846,36 +3912,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     loadModelsData(false)
   }
 
-  // 模型列表（按供应商分组；数据源 = 网关 /gateway/models，只读展示）
-  const MODEL_PROVIDER_KEYS = [
-    [/^ANTHROPIC_/, 'Claude · Anthropic'],
-    [/^OPENAI_/, 'OpenAI'],
-    [/^GEMINI_/, 'Google Gemini'],
-    [/^DEEPSEEK_/, 'DeepSeek'],
-    [/^QWEN_/, 'Qwen · 通义千问'],
-    [/^DASHSCOPE_/, 'Qwen · 通义千问'],
-    [/^GLM_/, '智谱 GLM'],
-    [/^MOONSHOT_/, 'Moonshot Kimi'],
-    [/^OPENROUTER_/, 'OpenRouter'],
-  ]
-  // 供应商判定：key 优先（模型类环境变量名带供应商前缀），通用 model 键或未命中则按模型串前缀。
-  function modelProviderOf(it) {
-    const k = String(it.k || '')
-    const v = String(it.v || '')
-    if (k !== 'model') {
-      for (const [re, name] of MODEL_PROVIDER_KEYS) if (re.test(k)) return name
-    }
-    const vl = v.toLowerCase()
-    if (vl.startsWith('claude')) return 'Claude · Anthropic'
-    if (vl.startsWith('deepseek')) return 'DeepSeek'
-    if (vl.startsWith('qwen')) return 'Qwen · 通义千问'
-    if (vl.startsWith('gpt') || vl.startsWith('o1') || vl.startsWith('o3')) return 'OpenAI'
-    if (vl.startsWith('gemini')) return 'Google Gemini'
-    if (vl.startsWith('glm')) return '智谱 GLM'
-    if (vl.startsWith('moonshot') || vl.includes('kimi')) return 'Moonshot Kimi'
-    if (vl.includes('doubao')) return '字节豆包'
-    return '自定义 / 其他'
-  }
   // 模型列表的卡体渲染（写进 .mgr-model-list）
   function renderMgrModelList() {
     const list = $('mgr-model-list')
@@ -4070,7 +4106,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         state.mgrView.neuronSel = c.dataset.id
         saveMgrView()
         NEU_RERENDER()
-        if (isMobile()) setPanel(false)
+        if (isMobile()) closePanel()
       }),
     )
   }
@@ -4578,22 +4614,28 @@ function setFirstSendHash(v) { firstSendHash = v }
     return n >= 1000 ? (n / 1000).toFixed(1) + 'k 字' : n + ' 字'
   }
 
+  // ---------- 会话卡 ----------
+  const sessionCardDef = {
+    id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false,
+    card: () => sessionCard,
+    deactivate: teardownSessionView,
+  }
+
 
   // ---------- 卡片注册表 ----------
-  // 会话卡常驻 index.html（承载 #messages/#input-wrap/#char 等模块级 const 引用的单例 DOM，不能销毁
-  // 重建）→ card() 直接返回既存元素；其余卡由 openCard 按需创建/复用。
-  const sessionCardDef = { id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false, card: () => sessionCard }
+  // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
+  // #session-card，deactivate=teardownSessionView）；其余四张管理卡同态各自成模块。
   const CARDS = [sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef]
   const cardOf = (id) => CARDS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
-  // 代码，只有宿主生成的 iframe 壳（views/cards/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
+  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
   // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
   // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
   // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
   // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
-  // 清（清点收在 views/cards/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
+  // 清（清点收在 views/cards/preview/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
   // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
   let EXT = []
   let EXT_LABEL = ''
@@ -4716,14 +4758,22 @@ function setFirstSendHash(v) { firstSendHash = v }
     return makeCard(id)
   }
   // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
+  // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
   // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
   // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
   function openCard(id, payload) {
     const c = cardOf(id)
     if (!c) return null
+    const prev = currentCardId()
+    if (prev && prev !== id) cardOf(prev)?.deactivate?.()
     const el = showCard(c.card ? c.card() : reuseOrMake(c.id))
     if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
     return el
+  }
+  // 契约出口：卡外（如 preview-card 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
+  function deactivateCard(id) {
+    cardOf(id)?.deactivate?.()
   }
   // 当前槽内卡的 id（'session' 表示会话卡在场；无卡返回 null）。work 模式切入时据此判定是否需先退卡。
   function currentCardId() {
@@ -4752,6 +4802,7 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
+  const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
@@ -4802,6 +4853,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       ensureWork()
       startWorkAuto()
     } else {
+      if (wkEdDirty) wkEdFlush() // 退 work 模式：pending 编辑先落盘（不阻塞模式切换）
       hideWkPops()
       stopWorkAuto()
     }
@@ -5325,6 +5377,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
     loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
@@ -5409,9 +5462,143 @@ function setFirstSendHash(v) { firstSendHash = v }
     applyPanes()
   }
 
-  // ---------- 编辑区（主区左栏，只读） ----------
+  // ---------- 编辑区（主区左栏：阅读 / 源码编辑，仿 Obsidian 源码+阅读双模） ----------
+  // 阅读态 = 原只读行为（图片 <img> / markdown 经 mdHtml 渲染（带 data-l 行锚）/ 其它文本 <pre>）。
+  // 编辑态 = 原生 <textarea>（本工程零依赖、无法引入 CodeMirror/Monaco）。模式真源 = state.wkEdit
+  // （跨文件记忆 + localStorage 持久化）；#work-editor.editing 类在编辑态落，供 inputbar/quote.js 屏蔽引用浮窗。
+  // 保存 = 停止输入 1s 自动（去抖）+ Ctrl+S 立即；写回带 ETag 基线 wkEdMtime，外部改过 → 409，不静默覆盖。
+  // 图片 / 二进制 / 超 4 MB 文件不可编辑（工具栏按钮隐藏，仍走阅读态）。
+  let wkEdFile = ''     // 已载入编辑缓冲的路径（与 wkEdMeta/wkEdText 同拍）；'' = 未载入
+  let wkEdMeta = null   // { isImg, isMd, editable, msg? }；null = 未载入
+  let wkEdText = ''     // 当前文件正文（编辑态 = textarea 缓冲真源）
+  let wkEdMtime = null  // 读侧 ETag 解析的 mtime（毫秒），写回冲突基线；null = 无
+  let wkEdDirty = false
+  let wkEdTimer = 0
+  let wkEdSaving = false
+  let wkEdConflict = false
+
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
+  }
+  const wkEdTa = () => document.querySelector('#wk-ed-body .wk-ed-ta')
+
+  // ---------- 源码着色（编辑态语法高亮；仿编辑器源码模式） ----------
+  // 不变量：着色层 `.wk-ed-hl` 与 textarea 逐字叠放、同步滚动；token **只改 color**——禁字重/字形/字号，
+  // 任何字形差异都会让两层字宽/换行错位（排版同源由 styles.css 的 .wk-ed-hl / .wk-ed-ta 两条规则保证）。
+  // 着色只写进 aria-hidden 的着色层；textarea 文本透明（caret-color 可见）、选区背景半透明透出着色。
+  const WK_HL_KW = {
+    js: ' const let var function return if else for while do switch case break continue new class extends super import export from default async await yield try catch finally throw typeof instanceof in of delete void this null undefined true false static get set ',
+    py: ' def class return if elif else for while import from as pass break continue with try except finally raise lambda yield global nonlocal and or not in is None True False async await del assert ',
+    sh: ' if then else elif fi for while do done case esac function return local export echo cd exit set unset source ',
+    yaml: ' true false null yes no on off ',
+    css: '', html: '',
+  }
+  // 扩展名 → 语言键；'' = 纯文本（仅转义，不上色）
+  function wkEdLang(p) {
+    const m = /\.([a-z0-9]+)$/i.exec(p || '')
+    const e = m ? m[1].toLowerCase() : ''
+    if (/^(md|markdown)$/.test(e)) return 'md'
+    if (e === 'json') return 'json'
+    if (/^(js|mjs|cjs|jsx|ts|tsx)$/.test(e)) return 'js'
+    if (/^(css|scss|less)$/.test(e)) return 'css'
+    if (/^(html|htm|xml|svg|vue)$/.test(e)) return 'html'
+    if (e === 'py') return 'py'
+    if (/^(sh|bash|zsh)$/.test(e)) return 'sh'
+    if (/^(yaml|yml|toml|ini|conf)$/.test(e)) return 'yaml'
+    return ''
+  }
+  // 扫描切片：命中段转义后包 span（cls 返回 '' 则不包），未命中段仅转义——字符零增删，与 textarea 逐字对齐。
+  function wkHlScan(text, re, cls) {
+    let out = '', last = 0
+    re.lastIndex = 0
+    let m
+    while ((m = re.exec(text))) {
+      if (m.index > last) out += esc(text.slice(last, m.index))
+      const k = cls(m[0])
+      out += k ? `<span class="${k}">${esc(m[0])}</span>` : esc(m[0])
+      last = re.lastIndex
+      if (m.index === re.lastIndex) re.lastIndex++
+    }
+    return out + esc(text.slice(last))
+  }
+  // 代码族两套注释：# 行注释（py/sh/yaml）与 //、/* */、<!-- -->（css/js/html）——css 用 # 会误伤 #id 选择器
+  const WK_HL_RE_SLASH = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|<!--[\s\S]*?-->|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`|\b0x[0-9a-fA-F]+\b|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
+  const WK_HL_RE_HASH = /#[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
+  function wkHlCodeCls(lang) {
+    const kw = WK_HL_KW[lang] || ''
+    return (t) => {
+      if (t.startsWith('/*') || t.startsWith('//') || t.startsWith('#') || t.startsWith('<!--')) return 'hl-com'
+      if (t[0] === '"' || t[0] === "'" || t[0] === '`') return 'hl-str'
+      const c = t.charCodeAt(0)
+      if (c >= 48 && c <= 57) return 'hl-num'
+      return kw.indexOf(' ' + t + ' ') >= 0 ? 'hl-kw' : ''
+    }
+  }
+  const WK_HL_RE_MD = /```[\s\S]*?```|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]*\]\([^)\n]*\)|^#{1,6}[ \t].*$|^>[ \t].*$|^(?:[-*+]|\d+\.)[ \t]|^(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm
+  function wkHlMdCls(t) {
+    if (t[0] === '`') return 'hl-code'
+    if (t[0] === '*' && t[1] === '*') return 'hl-b'
+    if (t[0] === '_' && t[1] === '_') return 'hl-b'
+    if (t[0] === '*' || t[0] === '_') return 'hl-i'
+    if (t[0] === '[') return 'hl-link'
+    if (t[0] === '#') return 'hl-h'
+    if (t[0] === '>') return 'hl-quote'
+    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(t)) return 'hl-hr'
+    return 'hl-li'
+  }
+  const WK_HL_RE_JSON = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g
+  function wkHlJsonCls(t) {
+    if (t[0] === '"') return 'hl-str'
+    if (t[0] === 't' || t[0] === 'f' || t[0] === 'n') return 'hl-kw'
+    return 'hl-num'
+  }
+  function wkHlHtml(text, lang) {
+    if (lang === 'md') return wkHlScan(text, WK_HL_RE_MD, wkHlMdCls)
+    if (lang === 'json') return wkHlScan(text, WK_HL_RE_JSON, wkHlJsonCls)
+    if (lang === 'py' || lang === 'sh' || lang === 'yaml') return wkHlScan(text, WK_HL_RE_HASH, wkHlCodeCls(lang))
+    if (lang) return wkHlScan(text, WK_HL_RE_SLASH, wkHlCodeCls(lang))
+    return esc(text)
+  }
+  // 着色重绘：写着色层 innerHTML 后回填 scroll（innerHTML 重置滚动），rAF 合帧——输入期每帧至多绘一次
+  let wkEdPaintQ = false
+  function wkEdPaint() {
+    const ta = wkEdTa()
+    const hl = document.querySelector('#wk-ed-body .wk-ed-hl')
+    if (!ta || !hl) return
+    hl.innerHTML = wkHlHtml(ta.value, wkEdLang(state.workFile))
+    hl.scrollTop = ta.scrollTop
+    hl.scrollLeft = ta.scrollLeft
+  }
+  function wkEdPaintSoon() {
+    if (wkEdPaintQ) return
+    wkEdPaintQ = true
+    requestAnimationFrame(() => { wkEdPaintQ = false; wkEdPaint() })
+  }
+
+  // 顶部「保存态」文本落地（唯一写点）：conflict > saving > dirty > 空。传 (txt, cls) 则原样落。
+  function wkEdState(txt, cls) {
+    const el = $('wk-ed-save')
+    if (!el) return
+    if (txt === undefined) {
+      txt = wkEdConflict ? '外部已修改' : wkEdSaving ? '保存中…' : wkEdDirty ? '未保存' : ''
+      cls = wkEdConflict ? 'conflict' : wkEdDirty || wkEdSaving ? 'dirty' : ''
+    }
+    el.textContent = txt || ''
+    el.classList.toggle('dirty', cls === 'dirty')
+    el.classList.toggle('conflict', cls === 'conflict')
+  }
+
+  // 模式类 + 工具栏按钮落地（编辑态唯一判定点）：不可编辑（图/二进制/超限）恒阅读态、按钮隐藏。
+  function applyEdMode() {
+    const on = !!state.workFile && !!wkEdMeta && !wkEdMeta.isImg && wkEdMeta.editable
+    const editing = !!(on && state.wkEdit)
+    const ed = $('work-editor')
+    if (ed) ed.classList.toggle('editing', editing)
+    const btn = $('wk-ed-mode')
+    if (!btn) return
+    btn.hidden = !on
+    btn.innerHTML = editing ? I.dshBook : I.dshEdit
+    btn.title = editing ? '阅读' : '编辑'
   }
 
   function renderEditor() {
@@ -5420,22 +5607,89 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (pathEl) pathEl.textContent = state.workFile || ''
     if (!body) return
     if (!state.workFile) {
+      wkEdReset()
       body.innerHTML = '<div class="wk-ed-empty">从左侧文件树选择一个文件</div>'
       return
     }
     if (!state.workProj) {
+      wkEdReset()
       body.innerHTML = '<div class="wk-ed-empty">未选择项目</div>'
       return
     }
-    readFile(state.workFile)
+    if (wkEdFile !== state.workFile) {
+      readFile(state.workFile)
+      return
+    }
+    renderEdBody()
+  }
+
+  function wkEdReset() {
+    wkEdFile = ''
+    wkEdMeta = null
+    wkEdText = ''
+    wkEdMtime = null
+    wkEdDirty = false
+    wkEdConflict = false
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    applyEdMode()
+    wkEdState('')
+  }
+
+  function renderEdBody() {
+    const body = $('wk-ed-body')
+    if (!body || !wkEdMeta) return
+    if (wkEdMeta.isImg) {
+      body.innerHTML = `<div class="wk-ed-img"><img src="${esc(fileUrl(state.workFile))}" alt="${esc(state.workFile)}" /></div>`
+      applyEdMode()
+      return
+    }
+    if (!wkEdMeta.editable) {
+      body.innerHTML = `<div class="wk-ed-empty">${esc(wkEdMeta.msg || '不支持预览')}</div>`
+      applyEdMode()
+      return
+    }
+    if (state.wkEdit) {
+      // 编辑态 = 着色层 <div class="wk-ed-hl">（aria-hidden，只读展示）+ 透明文本 textarea 叠放；
+      // textarea 自身滚动，scroll 事件回填着色层 scrollTop/Left 保持逐字对齐。textarea 用 DOM 属性赋值
+      // （不走 innerHTML 转义：value 不需 HTML 转义，且要保住原始引号/实体）。
+      const wrap = document.createElement('div')
+      wrap.className = 'wk-ed-wrap'
+      const hl = document.createElement('div')
+      hl.className = 'wk-ed-hl'
+      hl.setAttribute('aria-hidden', 'true')
+      const ta = document.createElement('textarea')
+      ta.className = 'wk-ed-ta'
+      ta.spellcheck = false
+      ta.value = wkEdText
+      wrap.append(hl, ta)
+      body.replaceChildren(wrap)
+      wkEdPaint() // 首次着色（写在 replaceChildren 后，二者已挂载）
+      ta.addEventListener('scroll', () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft })
+      ta.focus()
+    } else if (wkEdMeta.isMd) {
+      // markdown 阅读态带行锚（data-l）：选中引用据此取选区首尾所在源行（inputbar/quote.js quoteEditorLines）
+      body.innerHTML = `<div class="wk-ed-md md">${mdHtml(wkEdText, 'data-l')}</div>`
+    } else {
+      body.innerHTML = `<pre class="wk-code">${esc(wkEdText)}</pre>`
+    }
+    applyEdMode()
+    wkEdState()
   }
 
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
+    wkEdConflict = false
     if (IMG_EXT.test(p)) {
-      body.innerHTML = `<div class="wk-ed-img"><img src="${esc(fileUrl(p))}" alt="${esc(p)}" /></div>`
+      wkEdFile = p
+      wkEdMeta = { isImg: true, isMd: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      renderEdBody()
       return
     }
     body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -5443,32 +5697,155 @@ function setFirstSendHash(v) { firstSendHash = v }
       const res = await fetch(fileUrl(p))
       if (seq !== edSeq) return
       if (!res.ok) {
-        body.innerHTML = `<div class="wk-ed-empty">${esc(
-          res.status === 413 ? '文件超过 4 MB，不支持预览' : res.status === 403 ? '该项目外的路径不可访问' : `读取失败（HTTP ${res.status}）`,
-        )}</div>`
+        wkEdFile = p
+        wkEdMeta = {
+          isImg: false,
+          isMd: false,
+          editable: false,
+          msg:
+            res.status === 413
+              ? '文件超过 4 MB，不支持编辑'
+              : res.status === 403
+                ? '该项目外的路径不可访问'
+                : `读取失败（HTTP ${res.status}）`,
+        }
+        renderEdBody()
         return
       }
       const ct = (res.headers.get('content-type') || '').toLowerCase()
       const looksText = /^text\/|json|javascript|typescript|xml|svg|x-sh|csv|yaml/.test(ct) || MD_EXT.test(p)
       if (!looksText) {
-        body.innerHTML = `<div class="wk-ed-empty">二进制文件（${esc(ct || '未知类型')}），不支持预览</div>`
+        wkEdFile = p
+        wkEdMeta = { isImg: false, isMd: false, editable: false, msg: `二进制文件（${ct || '未知类型'}），不支持预览` }
+        renderEdBody()
         return
       }
       const text = await res.text()
       if (seq !== edSeq) return
-      // markdown 预览带行锚（mdHtml 第二参数）：渲染期把每个源行号写进 DOM（data-l），
-      // 选中引用据此取选区首尾所在行——渲染后的文本已丢格式符，回查原文不可靠（inputbar/quote.js）。
-      body.innerHTML = MD_EXT.test(p)
-        ? `<div class="wk-ed-md md">${mdHtml(text, 'data-l')}</div>`
-        : `<pre class="wk-code">${esc(text)}</pre>`
+      const etag = res.headers.get('etag')
+      let mtime = etag ? Number(etag.replace(/"/g, '')) : NaN
+      if (!Number.isFinite(mtime)) mtime = null
+      wkEdFile = p
+      wkEdText = text
+      wkEdMeta = { isImg: false, isMd: MD_EXT.test(p), editable: true }
+      wkEdMtime = mtime
+      wkEdDirty = false
+      renderEdBody()
     } catch (e) {
       if (seq !== edSeq) return
       body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
     }
   }
 
-  function openWorkFile(p) {
+  // 模式切换（阅读 ⇄ 编辑）：离开编辑态前先把 textarea 现值收进缓冲并 flush 保存（防丢字），再重渲。
+  async function wkSetEdit(on) {
+    on = !!on
+    if (on === state.wkEdit) return
+    if (!on) await wkEdFlush()
+    state.wkEdit = on
+    saveWork()
+    renderEdBody()
+  }
+
+  // 强制重拉磁盘版本（冲突「取消」分支 / 需放弃本地改动时用）
+  async function wkEdReload() {
+    if (!state.workFile) return
+    const p = state.workFile
+    wkEdFile = ''
+    await readFile(p)
+  }
+
+  function wkEdInput() {
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    wkEdDirty = true
+    wkEdPaintSoon() // 着色层随输入重绘（rAF 合帧）
+    wkEdState()
+    if (wkEdConflict) return // 冲突未决：暂停自动保存，交 Ctrl+S 显式处置（避免覆盖外部改动）
+    if (wkEdTimer) clearTimeout(wkEdTimer)
+    wkEdTimer = setTimeout(() => {
+      wkEdTimer = 0
+      wkEdSave({})
+    }, WK_SAVE_MS)
+  }
+
+  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘（交互式——冲突时弹处置框）
+  async function wkEdFlush() {
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    if (!wkEdDirty || wkEdConflict) return
+    await wkEdSave({ interactive: true })
+  }
+
+  // 保存：默认带 baseMtime（外部改过 → 409，不覆盖）；force = 无基线强制覆盖（用户确认后）。
+  async function wkEdSave(opts) {
+    const force = !!(opts && opts.force)
+    const interactive = !!(opts && opts.interactive)
+    if (!state.workFile || !state.workProj || wkEdSaving) return
+    const ta = wkEdTa()
+    if (ta) wkEdText = ta.value
+    if (!wkEdDirty && !force) return
+    if (wkEdTimer) {
+      clearTimeout(wkEdTimer)
+      wkEdTimer = 0
+    }
+    wkEdSaving = true
+    wkEdState('保存中…', 'dirty')
+    let conflict = false
+    try {
+      const payload = { label: state.workProj, path: state.workFile, content: wkEdText }
+      if (!force && wkEdMtime !== null) payload.baseMtime = wkEdMtime
+      const res = await fetch(apiUrl('/gateway/file/write'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (res.status === 409) conflict = true
+      else {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
+        if (typeof data.mtime === 'number') wkEdMtime = data.mtime
+        const fresh = wkEdTa()
+        wkEdDirty = !!(fresh && fresh.value !== wkEdText) // 保存期间又改了 → 留脏，下面续排程
+      }
+    } catch (e) {
+      wkEdSaving = false
+      wkEdState('保存失败', 'conflict')
+      toast('保存失败：' + (e.message || e))
+      return
+    }
+    wkEdSaving = false
+    if (conflict) {
+      wkEdConflict = true
+      wkEdState('外部已修改', 'conflict')
+      if (interactive) return wkEdResolveConflict()
+      toast('文件已被外部修改，未自动覆盖（Ctrl+S 可覆盖）')
+      return
+    }
+    if (wkEdDirty) wkEdInput()
+    else wkEdState()
+  }
+
+  // 冲突处置（用户显式保存时）：确定 = 用当前内容覆盖；取消 = 放弃编辑、重载磁盘版本。绝静默二选一。
+  async function wkEdResolveConflict() {
+    const overwrite = window.confirm('磁盘上的文件已被外部修改。\n\n确定：用当前内容覆盖\n取消：放弃编辑，载入磁盘版本')
+    if (overwrite) {
+      wkEdConflict = false
+      wkEdDirty = true
+      return wkEdSave({ force: true })
+    }
+    wkEdDirty = false
+    wkEdConflict = false
+    await wkEdReload()
+  }
+
+  async function openWorkFile(p) {
     if (!p) return
+    if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     // 编辑区被开关关掉时点文件 = 明确要看内容 → 自动把编辑区打开（不静默什么都不发生）
     if (!state.wkEditor) {
@@ -5709,6 +6086,23 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
     })
     $('wk-ed-back').addEventListener('click', closeWorkFile)
+    // 编辑区：阅读/编辑切换按钮 + Ctrl+S 保存 / Ctrl+E 切模式（绑在 #work-editor 上，编辑态才命中）
+    $('wk-ed-mode').addEventListener('click', () => wkSetEdit(!state.wkEdit))
+    $('work-editor').addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (k === 's') {
+        e.preventDefault()
+        wkEdSave({ interactive: true })
+      } else if (k === 'e') {
+        e.preventDefault()
+        wkSetEdit(!state.wkEdit)
+      }
+    })
+    // textarea 整块由 renderEdBody 重建 → input 委托在容器上
+    $('wk-ed-body').addEventListener('input', (e) => {
+      if (e.target && e.target.classList.contains('wk-ed-ta')) wkEdInput()
+    })
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
@@ -6137,6 +6531,20 @@ function setFirstSendHash(v) { firstSendHash = v }
   function apiUrl(path) {
     const q = path.includes('?') ? '&' : '?'
     return path + q + 'token=' + encodeURIComponent(gToken)
+  }
+  // 模型/思考等级切换（POST /gateway/model：持久化写 settings.json + 广播实时生效）。
+  // 2026-10-05 自 inputbar/model-select.js 迁入——网关客户端是 needToken/apiUrl/gToken 的唯一持有者，
+  // 卡片与输入栏都经此调用（去卡片→inputbar 横向依赖）。needToken 门：未验证返回 false 由调用方提示。
+  async function apiSetModel(body) {
+    if (needToken()) return false
+    try {
+      const res = await fetch(apiUrl('/gateway/model'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      return res.ok
+    } catch { return false }
   }
 
   function gatewayCss() {
@@ -7258,21 +7666,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const on = modelPop.querySelector('.option.on')
     if (on) on.scrollIntoView({ block: 'nearest' })
   }
-  // 2026-08-22 模型/思考等级切换接通网关：POST /gateway/model（持久化写 settings.json + 广播实时生效），
-  // 未验证（needToken：网关模式且 cookie/token 均未通过）返回 false → toast 提示。
-  // 2026-08-29 修复：门控从 !gToken 改 needToken()——cookie 授权设备刷新后 gToken 为空但已验证，
-  // 误报「未连接网关」；/gateway/* 网关侧本就「query token 或 cookie」二选一。
-  async function apiSetModel(body) {
-    if (needToken()) return false
-    try {
-      const res = await fetch(apiUrl('/gateway/model'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      return res.ok
-    } catch { return false }
-  }
+  // 2026-10-05 apiSetModel 迁 core/gateway.js（网关客户端唯一持有 needToken/apiUrl；卡片去 inputbar 依赖）。
   function mselChoose() {
     const row = mselRows()[msel.active]
     if (!row) return
@@ -9126,6 +9520,9 @@ function setGateVerified(v) { gateVerified = v }
     const rect = range.getBoundingClientRect()
     const inEditor = el.closest('#work-editor')
     if (inEditor) {
+      // 编辑态（源码 textarea）不弹引用浮窗：textarea 内部选区不进 window.getSelection()，且编辑时拖选
+      // 是常规操作，弹窗会不断打断。阅读态行为不变（#work-editor.editing 由 sidebar/work.js applyEdMode 落）。
+      if (inEditor.classList.contains('editing')) return null
       // 空态提示行 / 未打开文件：没有可引用的文件位置
       if (!state.workFile) return null
       const lines = quoteEditorLines(range)
@@ -9355,8 +9752,9 @@ function setGateVerified(v) { gateVerified = v }
   const RAIL_RESP_MAX = 120 // 预览回复封顶
   const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 带内最后一个锚 = 当前轮
   const RAIL_NARROW = 640 // 窄于此宽隐藏刻度（手机竖屏；平板竖屏 768–834 保留）
-  const RAIL_BUILD = 'rail-t2-2026.10.02' // 构建标记：dataset.build 可核验跑的是哪版
-  const RAIL_TOUCH_HOLD = 2500 // 触屏点刻度后预览卡停留时长（无 hover 时的唤起路径）
+  const RAIL_BUILD = 'rail-t4-2026.10.05' // 构建标记：dataset.build 可核验跑的是哪版
+  const RAIL_TOUCH_GUARD = 600 // 触屏后忽略「兼容鼠标 hover」事件的窗口（ms）——webkit 触摸完必补发一条 pointermove:mouse
+  const RAIL_SCRUB_EDGE = 26 // 滑动时手指进入轨上下缘该距离内自动滚轨（px）
 
   let railItems = [] // [{ key, el, prompt, response }]（文档序）
   let railKeys = '' // 结构指纹（各轮 key 拼接）：变化才重建刻度
@@ -9364,7 +9762,12 @@ function setGateVerified(v) { gateVerified = v }
   let railPreviewKey = null // 预览锚定轮次 key（跨重建保稳）
   let railTimer = null
   let railLastTick = 0
-  let railHideTimer = null // 触屏预览卡自动收起计时器
+  let railPtrTouch = false // 最近一次 pointerdown 的真实指针类型（click.pointerType 在 webkit 恒 mouse，不可用）
+  let railTouchAt = 0 // 最近一次触屏交互时刻：用于屏蔽紧随其后的兼容鼠标 hover 事件
+  let railScrub = false // 触屏滑动进行中（pointerdown 起、pointerup 止）
+  let railScrubRaf = null // 滑动边缘自动滚轨的 rAF 句柄
+  let railScrubX = 0 // 滑动中手指视口坐标（用于 elementFromPoint 定位刻度 + 判边缘）
+  let railScrubY = 0
 
   // 元素正文（优先 .body，滤掉 who/图片/文件标签文本）
   function railText(el) {
@@ -9416,34 +9819,97 @@ function setGateVerified(v) { gateVerified = v }
     return nav
   }
 
-  function railHideSoon(nav) {
-    if (railHideTimer) clearTimeout(railHideTimer)
-    railHideTimer = setTimeout(() => { railHideTimer = null; railSetPreview(nav, null) }, RAIL_TOUCH_HOLD)
+  // 手指坐标下的刻度（触屏 implicit pointer capture：pointermove 的 e.target 恒为起手刻度，
+  // 必须用 elementFromPoint 取手指当前压住的刻度）。
+  function railMarkAt(nav, x, y) {
+    const el = document.elementFromPoint(x, y)
+    const m = el && el.closest ? el.closest('.tr-mark') : null
+    return m && nav.contains(m) ? m : null
+  }
+
+  // 滑动到轨上下缘时自动滚轨（可见刻度装不下整段轮次时仍能滑到远处）；每帧滚一点并重取指下刻度。
+  function railScrubTick(nav) {
+    railScrubRaf = null
+    if (!railScrub) return
+    const scroller = nav.querySelector('.tr-scroller')
+    const r = scroller.getBoundingClientRect()
+    let dy = 0
+    if (railScrubY < r.top + RAIL_SCRUB_EDGE) dy = -Math.ceil((r.top + RAIL_SCRUB_EDGE - railScrubY) / 3)
+    else if (railScrubY > r.bottom - RAIL_SCRUB_EDGE) dy = Math.ceil((railScrubY - (r.bottom - RAIL_SCRUB_EDGE)) / 3)
+    if (dy) {
+      const before = scroller.scrollTop
+      scroller.scrollTop = before + dy
+      if (scroller.scrollTop !== before) {
+        const m = railMarkAt(nav, railScrubX, railScrubY)
+        if (m) railSetPreview(nav, m.dataset.key)
+      }
+    }
+    if (railScrub) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
+  }
+
+  function railScrubStart(nav) {
+    railScrub = true
+    if (railScrubRaf == null) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
+  }
+  function railScrubStop() {
+    railScrub = false
+    if (railScrubRaf != null) { cancelAnimationFrame(railScrubRaf); railScrubRaf = null }
   }
 
   function railBind(nav) {
-    // 绑在 nav（含 scroller 与刻度，冒泡覆盖），pointermove + pointerover 双触发：
-    // 刻度重建/内容刷新后若光标静止其上，pointerover 仍能唤出预览卡（单靠 pointermove 会漏）。
+    // 真实指针类型只看 pointerdown（capture）：click.pointerType 在 webkit 恒 mouse，判不出触屏。
+    // 触屏起手即进入滑动态并亮起指下刻度的预览。
+    nav.addEventListener('pointerdown', (e) => {
+      railPtrTouch = e.pointerType === 'touch'
+      if (!railPtrTouch) return
+      railTouchAt = Date.now()
+      railScrubX = e.clientX
+      railScrubY = e.clientY
+      railScrubStart(nav)
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (m) railSetPreview(nav, m.dataset.key)
+    }, true)
+    // 鼠标悬停唤卡：pointermove + pointerover 双触发（刻度重建/内容刷新后光标静止其上，pointerover 仍能唤出）。
+    // 触屏走滑动分支。另须屏蔽触屏后紧接的兼容鼠标事件：webkit 触摸完必补发一条 pointerType=mouse 的
+    // pointermove（实测 …pointerup:touch → click:mouse → pointermove:mouse），不挡会在跳转后又把预览卡亮回来。
     const onHover = (e) => {
+      if (e.pointerType === 'touch' || railScrub) return
+      if (Date.now() - railTouchAt < RAIL_TOUCH_GUARD) return
       const m = e.target.closest ? e.target.closest('.tr-mark') : null
       if (m) railSetPreview(nav, m.dataset.key)
     }
-    nav.addEventListener('pointermove', onHover)
-    nav.addEventListener('pointerover', onHover)
-    // 触屏 tap 后浏览器会补发 pointerleave（pointerType=touch），此时不能收卡——卡由 railHideSoon 定时收。
-    nav.addEventListener('pointerleave', () => { if (railHideTimer) return; railSetPreview(nav, null) })
-    // 触屏：tap 刻度 = 亮出该轮预览卡（停留 RAIL_TOUCH_HOLD）并跳到该轮；触屏无 hover，靠此唤起。
-    nav.addEventListener('click', (e) => {
-      const m = e.target.closest ? e.target.closest('.tr-mark') : null
-      if (!m) return
-      railSetPreview(nav, m.dataset.key)
-      railHideSoon(nav)
-      railJump(m.dataset.key)
+    nav.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'touch') { onHover(e); return }
+      if (!railScrub) return
+      railScrubX = e.clientX
+      railScrubY = e.clientY
+      const m = railMarkAt(nav, e.clientX, e.clientY)
+      if (m) railSetPreview(nav, m.dataset.key) // 手指不在刻度上时保留上一格（滑过空隙不闪断）
     })
-    // 点轨外任意处收回预览卡（触屏无 pointerleave，须显式收）。
+    nav.addEventListener('pointerover', onHover)
+    // 鼠标离开轨收起预览；触屏的 pointerleave（pointerup 后补发）不收——触屏卡由「松开/点轨外」收。
+    nav.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') return; railSetPreview(nav, null) })
+    // 触屏松开 = 跳到当前预览轮（滑动手势的落点）。
+    nav.addEventListener('pointerup', (e) => {
+      if (e.pointerType !== 'touch' || !railScrub) return
+      railScrubStop()
+      const key = railPreviewKey
+      if (key != null) { railSetPreview(nav, null); railJump(key) }
+    })
+    // 手势被系统打断（来电/多指等）＝取消，不跳。
+    nav.addEventListener('pointercancel', (e) => {
+      if (e.pointerType !== 'touch') return
+      railScrubStop()
+      railSetPreview(nav, null)
+    })
+    nav.addEventListener('click', (e) => {
+      if (railPtrTouch) return // 触屏跳转已由 pointerup 完成，忽略 webkit 补发的兼容 click
+      const m = e.target.closest ? e.target.closest('.tr-mark') : null
+      if (m) railJump(m.dataset.key)
+    })
+    // 点轨外任意处收回预览卡（鼠标 pointerleave 已收；触屏起手在轨外时须显式收）。
     document.addEventListener('pointerdown', (e) => {
       if (nav.contains(e.target)) return
-      if (railHideTimer) { clearTimeout(railHideTimer); railHideTimer = null }
       railSetPreview(nav, null)
     }, true)
   }
@@ -9473,9 +9939,9 @@ function setGateVerified(v) { gateVerified = v }
       m.classList.toggle('tr-active', i === railActiveIdx)
       m.classList.toggle('tr-hot', i === pIdx) // 注意：类名不可用 tr-preview——那是预览卡自己的类，撞名会让刻度按钮命中卡片样式
     })
-    // active 刻度留在轨内可视（手动算，禁 scrollIntoView——会外溢滚动祖先链）
+    // 当前刻度留在轨内可视（预览中优先保预览轮，否则保当前轮；手动算，禁 scrollIntoView——会外溢滚动祖先链）
     const scroller = nav.querySelector('.tr-scroller')
-    const act = marks[railActiveIdx]
+    const act = marks[pIdx >= 0 ? pIdx : railActiveIdx]
     if (act) {
       const top = act.offsetTop
       const h = scroller.clientHeight

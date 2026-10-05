@@ -2290,14 +2290,14 @@ function setLastNavHash(v) { lastNavHash = v }
     if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K'
     return String(v)
   }
-  // 回复时刻（本地 YYYY-MM-DD HH:MM，dsh 回复操作条尾部时间；2026-10-04 用户定「时间精确到年月日时分」）。
+  // 回复时刻（本地中文单位格式 `YYYY 年 M 月 D 日 HH : MM`；数字前导零一律省略，如 4 月 3 日 9 : 5。
+  // 2026-10-04 用户定「写成 YYYY 年 MM 月 DD 日 HH : SS，数字为 02 时仅显示 2」= 时分精度 + 去前导零）。
   function fmtClock(ts) {
     const n = Number(ts)
     if (!(n > 0)) return ''
     const d = new Date(n)
     if (Number.isNaN(d.getTime())) return ''
-    const p = (v) => String(v).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日 ${d.getHours()} : ${d.getMinutes()}`
   }
   // 精确 token 计数（弹出面板用，dsh 同款千分位：69,353）。
   function fmtTok(n) {
@@ -9395,11 +9395,13 @@ function setGateVerified(v) { gateVerified = v }
     return out
   }
 
-  // nav 单例：动态创建（index.html 不用改），追加到 #chat-area
+  // nav 单例：动态创建（index.html 不用改），追加到**会话卡 #session-card**——它是 chat 的组件，
+  // 必须与会话卡同生共死。#chat-area 卡片化后是共享槽，切到管理/预览卡时只隐藏会话卡、挂在槽上的
+  // 野兄弟不受影响（z-index 7 会压在别的卡上 = 串卡）。
   function railNav() {
     let nav = document.getElementById('turn-rail')
     if (nav && nav.isConnected) return nav
-    const host = document.getElementById('chat-area')
+    const host = document.getElementById('session-card')
     if (!host) return null
     nav = document.createElement('nav')
     nav.id = 'turn-rail'

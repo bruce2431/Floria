@@ -8,7 +8,7 @@
 //  · 预览锚定在**轮次 key**（用户气泡 data-m）而非下标，跨结构刷新仍能复位到同一轮。
 //  · 只采集**已提交**轮次：[data-t="u"][data-m]，排除 #live-zone 内乐观气泡（无 data-m，否则多算一格）。
 //  · 回复取该轮**最后一个非空** [data-t="a"] 文本（dsh findLast(text!=='') 同义），避免收尾工具步空文本覆盖。
-// 挂载=动态建 nav 追加到 #chat-area（position:absolute 无形槽，不参与 flex 流）；刷新=对 #messages 挂
+// 挂载=动态建 nav 追加到 #session-card（position:absolute，不参与 flex 流；随会话卡 hidden 一起消失）；刷新=对 #messages 挂
 // MutationObserver（覆盖面重建/增量 append/流式文本），节流（非 debounce——连续流式下 debounce 会饥饿不触发）。
 
 import { stage, topInScroll } from './stage.js'
@@ -57,11 +57,13 @@ import { messagesEl } from '../core/state.js'
     return out
   }
 
-  // nav 单例：动态创建（index.html 不用改），追加到 #chat-area
+  // nav 单例：动态创建（index.html 不用改），追加到**会话卡 #session-card**——它是 chat 的组件，
+  // 必须与会话卡同生共死。#chat-area 卡片化后是共享槽，切到管理/预览卡时只隐藏会话卡、挂在槽上的
+  // 野兄弟不受影响（z-index 7 会压在别的卡上 = 串卡）。
   function railNav() {
     let nav = document.getElementById('turn-rail')
     if (nav && nav.isConnected) return nav
-    const host = document.getElementById('chat-area')
+    const host = document.getElementById('session-card')
     if (!host) return null
     nav = document.createElement('nav')
     nav.id = 'turn-rail'

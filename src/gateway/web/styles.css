@@ -252,7 +252,7 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 .msg-usage {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 3px 7px; border: none; border-radius: 7px; background: transparent;
-  font: inherit; color: var(--text-3); cursor: pointer;
+  font-family: inherit; font-size: 12px; line-height: 1; color: var(--text-3); cursor: pointer;
 }
 .msg-usage:hover { background: var(--hover); color: var(--text-2); }
 .msg-usage[aria-expanded="true"] { background: var(--active); color: var(--text-2); }

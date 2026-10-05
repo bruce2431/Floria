@@ -627,12 +627,12 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 52. 回复操作条：用量按钮（弹出明细）+ 时间（dsh 回复底部还原，2026-10-04）
 
-**能力**：assistant 正式回复气泡底部操作条在复制钮之后补「用量 X tok」按钮 + 时间（本地 `YYYY-MM-DD HH:MM`），还原 dsh 回复下的按钮/文字形态。**点用量按钮 → 弹出明细面板**（dsh 同款：头部「本轮用量」+ 合计，行 = 提供方 / 模型、缓存命中 %、未缓存输入、缓存读取、缓存写入、输出）。**仅回复气泡携带**（用户气泡仍只有复制钮）；赞/踩/分享**未做**（用户 2026-10-04 定案「不要这三个」）。
+**能力**：assistant 正式回复气泡底部操作条在复制钮之后补「用量 X tok」按钮 + 时间（本地中文单位格式 `YYYY 年 M 月 D 日 HH : MM`，前导零省略），还原 dsh 回复下的按钮/文字形态。用量按钮文字与时间**同一字号**（`12px`，`.msg-usage` 显式设 `.mu-txt` 字号，不再 `font:inherit` 落后于 `.msg-time`）。**点用量按钮 → 弹出明细面板**（dsh 同款：头部「本轮用量」+ 合计，行 = 提供方 / 模型、缓存命中 %、未缓存输入、缓存读取、缓存写入、输出）。**仅回复气泡携带**（用户气泡仍只有复制钮）；赞/踩/分享**未做**（用户 2026-10-04 定案「不要这三个」）。
 
 - **数据源**：投影层 `DisplayMessage.usage`（`src/utils/conversationDisplay.ts` assistant 分支 `usageDetail`）＝明细对象 `{input,cacheRead,cacheWrite,output}`（分别取自 `input_tokens`/`cache_read_input_tokens`/`cache_creation_input_tokens`/`output_tokens`；四者合计 0 / 无 usage → undefined）+ `DisplayMessage.model`（`message.model`，弹出面板「提供方 / 模型」行）+ 既有 `DisplayMessage.timestamp`。合计 = 四字段之和（消费端相加）；缓存命中 = `cacheRead/(input+cacheRead+cacheWrite)`。**CLI 与网关共用同一投影**（`/gateway/session` 与 `/gateway/conversation` 两个消费端自动带上），前端零额外请求。
-- **渲染**：`chat/messages.js` `replyBubbleHtml(key, text, usage, ts, model)` 产 `.msg-actions` = `.msg-copy` → `.usage-wrap`（`<span>`，含 `.msg-usage` 按钮 + `.usage-pop` 面板）→ `.msg-time`。`fmtUsage`：≥1e6 折 M、≥1e3 折 K（一位小数），否则原值；`fmtTok`：千分位整数；`fmtClock`：本地 `YYYY-MM-DD HH:MM`（无时间戳/非法 → 空不渲）。提供方标签 = `modelProviderOf({k:'model',v:model})`（`views/cards/models-card.js`，与输入栏模型菜单同源唯一一份）。
+- **渲染**：`chat/messages.js` `replyBubbleHtml(key, text, usage, ts, model)` 产 `.msg-actions` = `.msg-copy` → `.usage-wrap`（`<span>`，含 `.msg-usage` 按钮 + `.usage-pop` 面板）→ `.msg-time`。`fmtUsage`：≥1e6 折 M、≥1e3 折 K（一位小数），否则原值；`fmtTok`：千分位整数；`fmtClock`：本地 `YYYY 年 M 月 D 日 HH : MM`（月/日/时/分取 Number 直出、前导零自动省略，如 `4 月 3 日 9 : 5`；无时间戳/非法 → 空不渲）。提供方标签 = `modelProviderOf({k:'model',v:model})`（`views/cards/models-card.js`，与输入栏模型菜单同源唯一一份）。
 - **弹层锚点（dsh 同款）**：按钮与面板同包进 `.usage-wrap`（`position:relative`），面板 `left:0` ⇒ **面板左缘对齐「用量」按钮左缘**（非复制钮左缘/气泡左缘），上弹 `bottom:calc(100%+8px)`。
 - **弹层交互**：`messages.js` 点击委托——点 `.msg-usage` 切 `.usage-pop[hidden]` 并同步 `aria-expanded`；**单开互斥**（开本关它，`closeUsagePops`）；点面板外区关闭。
 - **复制排除不变量**：用量按钮/时间/面板同置 `.msg-actions` 内，`messageCopyText` 剔 `.msg-actions` 时一并排除，复制纯文本不含它们。
-- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v440）。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本次 v442）。
 - **探针锚点**：`Floria/probes/probe-reply-usage.ts`（读真实转录跑 `filterConversationForDisplay`，断言全部 assistant 条带 usage 明细 + model）。

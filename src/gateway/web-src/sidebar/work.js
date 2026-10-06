@@ -57,6 +57,20 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     renderProjSeat()
   }
 
+  // 模式 tab 的白块定位（唯一处）：把选中 .ms-btn 在轨道内的 offsetLeft/offsetWidth 写进 .ms-thumb 的
+  // 内联 left/width（.mode-switch 是 position:relative，即两钮的 offsetParent，量值可直接用）。
+  // 侧栏折叠态下 #panel 虽 width:0，但 .panel-inner 仍持 --panel-w 宽、按钮尺寸不变（只是被 overflow
+  // 裁掉），故任何时刻量都有效，无需等侧栏展开再定位。字体异步到位会改字宽 ⇒ 由 mountWork 在
+  // document.fonts.ready 后重量一次。
+  function positionMsThumb() {
+    const sw = $('mode-switch')
+    const th = sw && sw.querySelector('.ms-thumb')
+    const btn = sw && sw.querySelector('.ms-btn.on')
+    if (!th || !btn) return
+    th.style.left = btn.offsetLeft + 'px'
+    th.style.width = btn.offsetWidth + 'px'
+  }
+
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
   function applySbMode() {
     const on = state.sbMode === 'work'
@@ -65,9 +79,12 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     // 退卡走 route('#/') 统一收口（顺带清管理/预览路由态、预览页注册件与后端保活心跳），不在此另起清点。
     if (on && currentCardId() && currentCardId() !== 'session') navigate('#/')
     document.querySelectorAll('.ms-btn').forEach((b) => b.classList.toggle('on', b.dataset.sbmode === state.sbMode))
+    positionMsThumb() // 选中钮换位 → 白块滑过去（transition 在 CSS）
     // #panel.work：work 模式下隐藏顶栏 #panel-search（会话搜索的 chat 模式入口）——work 的 🔍 已覆盖
     // 当前 tab 的过滤，两者同为放大镜同屏并存即「两个搜索」的重复观感（样式见 styles.css 该段）
     $('panel').classList.toggle('work', on)
+    // 模式色钩子（2026-10-06）：#app.work 一处驱动全部随模式切换的颜色（--sunken-bg 等，见 styles.css #app 注释）
+    $('app').classList.toggle('work', on)
     $('chat-panel').hidden = on
     $('work-panel').hidden = !on
     chatArea.classList.toggle('work', on)
@@ -230,7 +247,8 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       }
     }
     if (state.workFile) {
-      parts.push(`<button class="wk-tb-pill${shown === 'file' ? ' on' : ''}" data-wktb="file"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name">${esc(baseOf(state.workFile))}</span></button>`)
+      const fname = esc(baseOf(state.workFile))
+      parts.push(`<button class="wk-tb-pill${shown === 'file' ? ' on' : ''}" data-wktb="file" title="${fname}"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name">${fname}</span><span class="wk-tb-x" title="关闭">×</span></button>`)
     }
     const html = parts.join('')
     if (box.innerHTML !== html) box.innerHTML = html
@@ -1192,6 +1210,18 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     renderEditor()
   }
 
+  // 关掉打开的文件（顶栏文件 pill 的 ×）：pending 编辑先落盘（不因关 tab 丢改动），清 workFile，
+  // 下沉格回聊天 tab（applyPanes 的不变量会保底——聊天栏不在则文件/预览仍在即可）。
+  async function closeWkFile() {
+    if (wkEdDirty) await wkEdFlush()
+    state.workFile = ''
+    state.wkMainTab = 'chat'
+    saveWork()
+    renderEditor()
+    renderWorkBody()
+    applyPanes()
+  }
+
   // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
   // 两个写接口落在网关（POST /gateway/file/rename | /delete），本模块只做「弹出菜单 + 提交 + 刷新树」。
   // 删除 = 移入项目根 .trash/（工作区规范禁止真删），故不设二次确认——.trash/ 本身就是撤销位。
@@ -1310,6 +1340,10 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       const el = $(id)
       if (el) ro.observe(el)
     }
+    // 模式 tab 白块：applySbMode 首次定位时字体可能还没到位（字宽变 ⇒ 白块错位），fonts.ready 后重量一次；
+    // 窗口宽变同理（面板拖宽不改钮宽，但换字号/系统缩放下会）。
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionMsThumb)
+    window.addEventListener('resize', positionMsThumb)
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
@@ -1354,6 +1388,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       }
       const b = e.target.closest('[data-wktb]')
       if (!b || b.dataset.wktb !== 'file') return
+      if (e.target.closest('.wk-tb-x')) { closeWkFile(); return } // × = 关掉打开的文件
       state.wkMainTab = 'file'
       applyPanes()
       saveWork()
@@ -1457,6 +1492,10 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       const s = e.target.closest('.sess-item')
       if (s && s.dataset.hash) {
         wkEnsureTab(s.dataset.hash) // 显式打开一个会话 = 顶栏占一枚胶囊
+        // 点会话 = 明确要看这个会话：聊天 tab 顶上来（否则文件 tab 占着格，看着像「点了没反应」）
+        state.wkMainTab = 'chat'
+        state.wkAssist = true
+        state.wkAssistMode = 'side'
         // 与侧栏会话条目同语义（recent.js bindSessClicks）：已在该会话内不重复 navigate
         if (s.dataset.hash !== state.currentHash) navigate('#/' + encodeURIComponent(s.dataset.hash))
         applyPanes() // 新胶囊 + active 落地

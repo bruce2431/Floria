@@ -9,7 +9,7 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=453" />
+  <link rel="stylesheet" href="/styles.css?v=454" />
 </head>
 <body>
 <div id="app">
@@ -25,6 +25,9 @@
                主区随之变两栏（编辑区 + 助手）。原 .floria-logo 品牌按钮由本 tab 取代；
                折叠入口仍是右侧 #panel-collapse（全视口可见），连接状态移到「最近」行。 -->
           <div class="mode-switch" id="mode-switch">
+            <!-- 选中态白块（.ms-thumb）：横向滑动承载选中态，work 模式下向下延展贴合侧栏白卡（样式见
+                 styles.css「侧栏 chat / work 双模式」段；位置由 work.js positionMsThumb() 实测写入） -->
+            <span class="ms-thumb" aria-hidden="true"></span>
             <button class="ms-btn on" data-sbmode="chat">floria·chat</button>
             <button class="ms-btn" data-sbmode="work">floria·work</button>
           </div>
@@ -355,6 +358,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=453"></script>
+<script src="/app.js?v=454"></script>
 </body>
 </html>

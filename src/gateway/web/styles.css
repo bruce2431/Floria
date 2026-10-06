@@ -76,7 +76,12 @@ a { text-decoration: none; color: inherit; }
    也勿各自复刻「100vh − 键盘」之类的公式（状态源会变多，见 CLAUDE 根本原则 5）。 */
 /* 2026-09-23 卡化：app 即底板（background = --plane，与 body 同色 ⇒ 外框圆弧融进底板不再显形，
    这正是 Prism 的读法——整窗是底板，只有内容卡有形状）。#sidebar 与 #chat-area 是它的两个 flex 子元素。 */
-#app { display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; background: var(--plane); }
+/* 2026-10-06 模式色钩子（workstate，用户定案）：随模式切换的**颜色**统一挂 #app.work 这一个类，
+   由 sidebar/work.js applySbMode() 落。--sunken-bg = 下沉区/内容卡底色（chat = 白卡 --chat-bg，
+   work = 底板 --plane）：#composer-mask 等「该跟当前模式底盘同色」的件一律消费本变量——
+   新增随模式的颜色只在此加一行，不再各写各的选择器（模式色单一真源）。 */
+#app { --sunken-bg: var(--chat-bg); display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; background: var(--plane); }
+#app.work { --sunken-bg: var(--plane); }
 /* 整页平移本体（键盘在场才落这条规则：transform 非 none 会让 #app 成为 fixed 后代的包含块，
    #img-lightbox / #drop-overlay / .toast 的 inset 会改基准——无键盘时保持原基准不动） */
 body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
@@ -123,16 +128,16 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* composer 遮罩（2026-10-03 移植 dsh .composerSeat 渐隐带，几何见 index.html 注）：会话态贴底栏
    区域全卡宽渐隐——顶部 36px 由透明过渡到卡底色（固定 px 停止、不随底栏长高拉伸，等价 dsh 的
    「24% of resting composer 用 px 固定」），36px 以下实心，遮住底栏两侧与下方滚过的消息流。
-   底色用 --chat-bg 而非硬编码白（dsh 同款：导出图硬编码白，实现改底色变量）⇒ 两主题各自从自身
-   底色渐隐；0 端用 color-mix 保色相（透明端退化为 transparent-black 会让白底渐隐带发灰）。
+   底色用 --sunken-bg（模式色钩子，见 #app 注释）而非硬编码白 ⇒ 随模式换底（chat 白卡 / work 底板）；
+   0 端用 color-mix 保色相（透明端退化为 transparent-black 会让白底渐隐带发灰）。
    高度 = 底栏高 --bar-h（核心 viewport.js settle 实测）+ 22px 底距 + 36px 渐隐带。z-index 3：
    盖住消息流（含 sticky 头 z1），低于 #input-wrap（z5）与 #char（z4）；pointer-events:none。 */
 #composer-mask {
   position: absolute; left: 0; right: 0; bottom: 0;
   height: calc(var(--bar-h, 116px) + 58px);
   background: linear-gradient(180deg,
-    color-mix(in srgb, var(--chat-bg) 0%, transparent) 0,
-    var(--chat-bg) 36px);
+    color-mix(in srgb, var(--sunken-bg) 0%, transparent) 0,
+    var(--sunken-bg) 36px);
   pointer-events: none; z-index: 3;
   opacity: 0; transition: opacity 0.25s ease;
 }
@@ -1508,8 +1513,9 @@ body.token-gate #input-wrap { display: none; }
    仍是 --panel-w（全局 border-box）；折叠态 width:0 且 padding:0，不留白条。 */
 #sidebar.open { width: calc(var(--panel-w) + 4px); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent; border-radius: var(--radius); overflow: hidden; }
 /* work：侧栏与主区拼成**同一张白卡**（2026-10-06 用户定案）——右边不留缝、右角不圆，
-   与 #chat-area.work（左角不圆）严丝合缝；chat 模式侧栏是透明卡壳（上方规则）。 */
-#sidebar.open:has(#panel.work) { margin-right: 0; background: var(--chat-bg); border-radius: var(--radius) 0 0 var(--radius); }
+   与 #chat-area.work（左角不圆）严丝合缝；chat 模式侧栏是透明卡壳（上方规则）。
+   选择器用模式色钩子 #app.work（同上，applySbMode 落），不再走 :has(#panel.work) 旁路。 */
+#app.work #sidebar.open { margin-right: 0; background: var(--chat-bg); border-radius: var(--radius) 0 0 var(--radius); }
 
 /* 预览页注册的侧栏快捷按钮样式（2026-09-23 SPEC §6.4，契约见 sidebar/rail-ext.js）。
    挂载点 #rail-ext 随折叠带在 2026-09-25 撤除，注册链与样式保留待命——落地位置定了接回即可。 */
@@ -1882,7 +1888,7 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   }
   #sidebar.open { transform: none; box-shadow: none; }
   /* 手机：主区是整屏，白卡拼缝/外缝一律退场（#app 本就地圆角 0、无留边） */
-  #sidebar.open:has(#panel.work) { border-radius: 0 var(--radius) var(--radius) 0; }
+  #app.work #sidebar.open { border-radius: 0 var(--radius) var(--radius) 0; }
   #chat-area.work { margin: 0; border-radius: 0; }
   #chat-area.work > .wk-topbar { margin: 6px 6px 0; }
   #chat-area.work > #work-editor,
@@ -2193,11 +2199,28 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    本段只给样式，不含任何状态判断分支——「哪个 tab / 哪一列可见」全由类与 hidden 表达。 */
 
 /* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命） */
-.mode-switch { display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
-/* 两钮恒 font-weight:600（颜色区分选中）：400↔600 切换会让 CJK 字宽微变、分段控件宽度跳动 */
-.ms-btn { padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-2); white-space: nowrap; transition: background 0.15s, color 0.15s; }
+.mode-switch { position: relative; display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
+/* 选中态白块（2026-10-06 用户定案「白块向下延展贴合侧栏卡」）：一块绝对定位的白块横向滑动承载选中态
+   （不再由 .ms-btn.on 各自换底色 ⇒ 切换是滑动动画，不是整块闪现）。work 模式下白块向下长出尾巴
+   （bottom 3px → -12px、下两角改方），穿过 .panel-header 的 10px 底内边距接上下方白色侧栏卡，
+   读作「选中的模式 tab 与它的面板连成一体」；chat 模式侧栏是透明卡壳（露底板色）无卡可贴，
+   白块就停在轨道内不外延。left/width 由 work.js positionMsThumb() 按选中钮实测写入
+   （不依赖两钮等宽，折叠态下 .panel-inner 仍持 --panel-w 故量值依然有效）。 */
+.ms-thumb {
+  position: absolute; left: 3px; top: 3px; bottom: 3px; width: calc(50% - 4px);
+  border-radius: 7px; background: var(--bg); box-shadow: var(--shadow-sm); pointer-events: none;
+  transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), width 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    bottom 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), border-radius 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+/* work：白块下延贴卡（.panel-header 底内边距 10px ⇒ 延 11px 恰好越过分界 1px，够融合又不压到
+   下方首个行件）——关掉投影，否则尾巴下缘的阴影落在白卡上会画出一道接缝（融合即无影） */
+#app.work .ms-thumb { bottom: -11px; border-radius: 7px 7px 0 0; box-shadow: none; }
+/* 两钮恒 font-weight:600（颜色区分选中）：400↔600 切换会让 CJK 字宽微变、分段控件宽度跳动。
+   底色由 .ms-thumb 承担，本钮只翻字色，且须压在白块之上（z-index:1）。 */
+.ms-btn { position: relative; z-index: 1; padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-2); white-space: nowrap; transition: color 0.15s; }
 .ms-btn:hover { color: var(--text); }
-.ms-btn.on { background: var(--bg); color: var(--text); box-shadow: var(--shadow-sm); }
+.ms-btn.on { color: var(--text); }
 
 /* 两个面板同占 .panel-inner 的剩余高度（各自内部滚动）；[hidden] 显式声明——面板带 display:flex，
    作者样式优先级高于 UA 的 [hidden]{display:none}，不写这条则 hidden 属性失效 */

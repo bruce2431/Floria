@@ -192,7 +192,7 @@ ok('H4 产物 app.js 内两个新口定义唯一', count(appJs, /function stashW
 
 // ---------- ⑫ work 布局改版：下沉区顶栏 tab + CSS Grid 三列 + 预览常驻最右（2026-10-06）----------
 // 侧栏填充按模式分：chat = 透明卡壳（几何保留、透出底板 --plane，主区会话白卡成对比）；
-// work = 白卡并与主区拼成同一张（:has(#panel.work) 覆盖背景）。
+// work = 白卡并与主区拼成同一张（模式色钩子 #app.work 覆盖背景，见下方 J 组）。
 // 形态：work 区是**一整张白卡**（#sidebar.open 与 #chat-area.work 等底同色、中缝零间距），
 // 卡中间「挖」一个圆角矩形当**下沉洞**（顶栏格 + 内容格拼成，底色 --plane、四周留 8px 白边）；
 // 预览默认开、固定最右列（#chat-area.work 白卡的一部分）。
@@ -209,7 +209,7 @@ ok('I3 预览关 → 单列退化（:not(.wk-preview)）', /#chat-area\.work:not
 ok('I3 下沉区 tab 显隐类（.wk-show-chat / .wk-show-file）', /\.wk-show-chat > #session-card/.test(styles) && /\.wk-show-file > #work-editor/.test(styles))
 ok('I3 顶栏 pill 样式（.wk-tb-pill + .on 高亮）', /\.wk-tb-pill \{/.test(styles) && /\.wk-tb-pill\.on \{/.test(styles))
 ok('I3 一整张白卡：主区白底 + 外留 2px 缝 + 右半圆角', /#chat-area\.work \{[\s\S]*?margin: 2px 2px 2px 0;[\s\S]*?background: var\(--chat-bg\);[\s\S]*?border-radius: 0 var\(--radius\) var\(--radius\) 0/.test(styles))
-ok('I3 侧栏与主区拼成同一张白卡（右缝归零 + 右角不圆 + work 白底）', /#sidebar\.open:has\(#panel\.work\) \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
+ok('I3 侧栏与主区拼成同一张白卡（右缝归零 + 右角不圆 + work 白底）', /#app\.work #sidebar\.open \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
 ok('I3 chat 侧栏透明卡壳（open 态几何保留 + 透明填充，外留 2px 缝）', /#sidebar\.open \{ width: calc\(var\(--panel-w\) \+ 4px\); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent/.test(styles))
 ok('I3 下沉洞上半（顶栏格 --plane + 8px 边距 + 上圆角）', /#chat-area\.work > \.wk-topbar \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 8px 8px 0;[\s\S]*?border-radius: var\(--radius\) var\(--radius\) 0 0/.test(styles))
 ok('I3 下沉洞下半（内容格 --plane + 下圆角，浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 0 8px 8px;[\s\S]*?border-radius: 0 0 var\(--radius\) var\(--radius\)/.test(styles))
@@ -241,6 +241,26 @@ ok('J5 work 侧栏点会话入开放集（sess-item 分支 wkEnsureTab）', /clo
 ok('J5 syncWorkTabs 导出且在 route.js 调用', /export \{[\s\S]*?syncWorkTabs[\s\S]*?\}/.test(workJs) && routeJs.includes('syncWorkTabs()'))
 ok('J6 CSS 关闭钮样式（.wk-tb-x + hover）', /\.wk-tb-x \{/.test(styles) && /\.wk-tb-x:hover \{/.test(styles))
 ok('J6 产物 app.js 胶囊口定义唯一', count(appJs, /function wkCloseTab\(/g) === 1 && count(appJs, /function syncWorkTabs\(/g) === 1 && appJs.includes('data-wkchat'))
+
+// ---------- ⑭ 四 bug 修复（2026-10-06）：文件 tab 关闭钮 / 点会话切聊天 tab / 模式白块 / 模式色钩子 ----------
+// K1 打开的文件顶栏 pill 带关闭钮（× → closeWkFile：先 flush 编辑 → 清 workFile → 切回聊天 tab）
+ok('K1 文件 pill 带 ×（renderTopbar 文件分支渲 .wk-tb-x）', /data-wktb="file"[\s\S]{0,300}wk-tb-x/.test(rt))
+ok('K1 × 接线到 closeWkFile（mountWork 文件分支）', body(workJs, 'function mountWork()').includes('closeWkFile()'))
+ok('K1 closeWkFile 先 flush 再清 workFile + 切聊天 tab', /async function closeWkFile\(\)[\s\S]{0,300}wkEdFlush\(\)[\s\S]{0,200}workFile = ''[\s\S]{0,200}wkMainTab = 'chat'/.test(workJs))
+// K2 work 侧栏点会话 → 强制聊天 tab 顶上来（否则文件 tab 占着下沉格，看着像「点了没反应」）
+ok('K2 sess-item 分支强制 wkMainTab=chat + 助手靠回栏', /closest\('\.sess-item'\)[\s\S]{0,400}wkMainTab = 'chat'[\s\S]{0,200}wkAssist = true[\s\S]{0,120}wkAssistMode = 'side'/.test(workJs))
+// K3 模式 tab 白块：横向滑动承载选中态，work 模式下向下延展贴合侧栏白卡（不再由 .ms-btn.on 自绘底色）
+ok('K3 index.html 含白块（.ms-thumb 在 .mode-switch 内）', /<div class="mode-switch"[\s\S]{0,400}class="ms-thumb"/.test(idx))
+ok('K3 CSS 白块滑动（left/width transition）', /\.ms-thumb \{[\s\S]{0,400}transition: left 0\.24s[\s\S]{0,200}width 0\.24s/.test(styles))
+ok('K3 work 下延贴卡（bottom 负值 + 下两角改方 + 关投影）', /#app\.work \.ms-thumb \{ bottom: -11px; border-radius: 7px 7px 0 0; box-shadow: none; \}/.test(styles))
+ok('K3 选中钮只翻字色不再自绘底色（.ms-btn.on 无 background）', /\.ms-btn\.on \{ color: var\(--text\); \}/.test(styles) && !/\.ms-btn\.on \{[^}]*background/.test(styles))
+ok('K3 白块定位单口 positionMsThumb（applySbMode 调 + fonts.ready 重量）', count(workJs, /function positionMsThumb\(/g) === 1 && body(workJs, 'function applySbMode()').includes('positionMsThumb()') && workJs.includes('document.fonts.ready.then(positionMsThumb)'))
+// K4 模式色钩子（workstate）：随模式切换的颜色统一挂 #app.work 一个类（唯一写口 applySbMode）
+ok('K4 work.js 落 #app.work（applySbMode 唯一写口）', body(workJs, 'function applySbMode()').includes("$('app').classList.toggle('work', on)"))
+ok('K4 CSS 定义 --sunken-bg（chat 白卡 / work 底板）', /#app \{ --sunken-bg: var\(--chat-bg\);/.test(styles) && /#app\.work \{ --sunken-bg: var\(--plane\); \}/.test(styles))
+ok('K4 composer-mask 消费 --sunken-bg（work 下挡板随底板换色）', /#composer-mask \{[\s\S]*?var\(--sunken-bg\) 36px/.test(styles))
+ok('K4 旧旁路选择器 :has(#panel.work) 清除（模式色单一真源）', !/:has\(#panel\.work\) \{/.test(styles))
+ok('K4 产物 app.js 含白块定位 + 模式钩子', count(appJs, /function positionMsThumb\(/g) === 1 && appJs.includes("classList.toggle('work', on)"))
 
 console.log(`\n${pass}/${fail}`)
 process.exit(fail ? 1 : 0)

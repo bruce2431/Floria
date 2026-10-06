@@ -211,8 +211,8 @@ ok('I3 顶栏 pill 样式（.wk-tb-pill + .on 高亮）', /\.wk-tb-pill \{/.test
 ok('I3 一整张白卡：主区白底 + 外留 2px 缝 + 右半圆角', /#chat-area\.work \{[\s\S]*?margin: 2px 2px 2px 0;[\s\S]*?background: var\(--chat-bg\);[\s\S]*?border-radius: 0 var\(--radius\) var\(--radius\) 0/.test(styles))
 ok('I3 侧栏与主区拼成同一张白卡（右缝归零 + 右角不圆 + work 白底）', /#app\.work #sidebar\.open \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
 ok('I3 chat 侧栏透明卡壳（open 态几何保留 + 透明填充，外留 2px 缝）', /#sidebar\.open \{ width: calc\(var\(--panel-w\) \+ 4px\); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent/.test(styles))
-ok('I3 下沉洞上半（顶栏格 --plane + 8px 边距 + 上圆角）', /#chat-area\.work > \.wk-topbar \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 8px 8px 0;[\s\S]*?border-radius: var\(--radius\) var\(--radius\) 0 0/.test(styles))
-ok('I3 下沉洞下半（内容格 --plane + 下圆角，浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 0 8px 8px;[\s\S]*?border-radius: 0 0 var\(--radius\) var\(--radius\)/.test(styles))
+ok('I3 下沉洞上半（顶栏格 --plane + 2px 边距 + 上圆角）', /#chat-area\.work > \.wk-topbar \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 2px 2px 0;[\s\S]*?border-radius: var\(--radius\) var\(--radius\) 0 0/.test(styles))
+ok('I3 下沉洞下半（内容格 --plane + 下圆角，浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 0 2px 2px;[\s\S]*?border-radius: 0 0 var\(--radius\) var\(--radius\)/.test(styles))
 ok('I3 角色图承载面透明（.g-stage 无白底，防 re-框成白方块）', /\.g-stage \{[\s\S]*?background: transparent/.test(styles))
 ok('I3 预览保持白卡（.wk-preview > #work-preview 显形）', /#chat-area\.work\.wk-preview > #work-preview \{ display: flex/.test(styles))
 ok('I4 旧链 CSS 清除（.wk-file-open 覆盖层 / .wk-ed-back 已删）', !/\.wk-file-open/.test(styles) && !/\.wk-ed-back/.test(styles))
@@ -252,9 +252,15 @@ ok('K2 sess-item 分支强制 wkMainTab=chat + 助手靠回栏', /closest\('\.se
 // K3 模式 tab 白块：横向滑动承载选中态，work 模式下向下延展贴合侧栏白卡（不再由 .ms-btn.on 自绘底色）
 ok('K3 index.html 含白块（.ms-thumb 在 .mode-switch 内）', /<div class="mode-switch"[\s\S]{0,400}class="ms-thumb"/.test(idx))
 ok('K3 CSS 白块滑动（left/width transition）', /\.ms-thumb \{[\s\S]{0,400}transition: left 0\.24s[\s\S]{0,200}width 0\.24s/.test(styles))
-ok('K3 work 下延贴卡（bottom 负值 + 下两角改方 + 关投影）', /#app\.work \.ms-thumb \{ bottom: -11px; border-radius: 7px 7px 0 0; box-shadow: none; \}/.test(styles))
+ok('K3 work 上缘齐平 + 下延贴卡（top:0 / bottom 负值 / 下两角改方 / 关投影）', /#app\.work \.ms-thumb \{ top: 0; bottom: -11px; border-radius: 9px 9px 0 0; box-shadow: none; \}/.test(styles))
 ok('K3 选中钮只翻字色不再自绘底色（.ms-btn.on 无 background）', /\.ms-btn\.on \{ color: var\(--text\); \}/.test(styles) && !/\.ms-btn\.on \{[^}]*background/.test(styles))
 ok('K3 白块定位单口 positionMsThumb（applySbMode 调 + fonts.ready 重量）', count(workJs, /function positionMsThumb\(/g) === 1 && body(workJs, 'function applySbMode()').includes('positionMsThumb()') && workJs.includes('document.fonts.ready.then(positionMsThumb)'))
+ok('K3 work 白块上/外侧外缘吃满（gap 中线 + 轨道 padding 外沿 + 内外圆角 9/6）', /const gapMid = 1[\s\S]{0,400}first \? 0 : btn\.offsetLeft - gapMid[\s\S]{0,200}first \? btn\.offsetLeft \+ btn\.offsetWidth \+ gapMid : sw\.clientWidth[\s\S]{0,300}borderTopLeftRadius = first \? '9px' : '6px'[\s\S]{0,200}borderTopRightRadius = first \? '6px' : '9px'/.test(workJs))
+ok('K3 chat 模式白块仍是轨道内浮丸（内联圆角清空 ⇒ 回落到 CSS 7px）', /} else \{[\s\S]{0,300}borderTopLeftRadius = ''[\s\S]{0,120}borderTopRightRadius = ''/.test(workJs))
+// K5 卡片区域间距统一（2026-10-06 用户定案「以 chat 的 2px 为准」）：work 下沉洞四边缝 8px→2px
+ok('K5 work 洞缝 2px（顶栏 / 内容格，与 chat .view-card 外边距同值）', /#chat-area\.work > \.wk-topbar \{[\s\S]{0,200}margin: 2px 2px 0;/.test(styles) && /#session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]{0,200}margin: 0 2px 2px;/.test(styles))
+ok('K5 手机档同律 2px（旧 6px 已清）', /#chat-area\.work > \.wk-topbar \{ margin: 2px 2px 0; \}/.test(styles) && !/margin: 6px 6px 0/.test(styles) && !/margin: 0 6px 6px/.test(styles))
+ok('K5 旧 8px 洞缝已清（单一真源）', !/margin: 8px 8px 0/.test(styles) && !/margin: 0 8px 8px/.test(styles))
 // K4 模式色钩子（workstate）：随模式切换的颜色统一挂 #app.work 一个类（唯一写口 applySbMode）
 ok('K4 work.js 落 #app.work（applySbMode 唯一写口）', body(workJs, 'function applySbMode()').includes("$('app').classList.toggle('work', on)"))
 ok('K4 CSS 定义 --sunken-bg（chat 白卡 / work 底板）', /#app \{ --sunken-bg: var\(--chat-bg\);/.test(styles) && /#app\.work \{ --sunken-bg: var\(--plane\); \}/.test(styles))

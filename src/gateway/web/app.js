@@ -4847,13 +4847,29 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 侧栏折叠态下 #panel 虽 width:0，但 .panel-inner 仍持 --panel-w 宽、按钮尺寸不变（只是被 overflow
   // 裁掉），故任何时刻量都有效，无需等侧栏展开再定位。字体异步到位会改字宽 ⇒ 由 mountWork 在
   // document.fonts.ready 后重量一次。
+  // work：白块不再是「钮上的浮丸」，而是与轨道上缘、选中侧外缘齐平的**整段**（左右各吃到 gap 中线、
+  // 外缘吃到轨道 padding 外沿），下缘由 CSS 延展贴侧栏白卡——「上/右没贴」的修复即在此（2026-10-06）。
   function positionMsThumb() {
     const sw = $('mode-switch')
     const th = sw && sw.querySelector('.ms-thumb')
     const btn = sw && sw.querySelector('.ms-btn.on')
     if (!th || !btn) return
-    th.style.left = btn.offsetLeft + 'px'
-    th.style.width = btn.offsetWidth + 'px'
+    const btns = sw.querySelectorAll('.ms-btn')
+    const first = btn === btns[0]
+    if (state.sbMode === 'work') {
+      const gapMid = 1 // gap 2px 的中线
+      const left = first ? 0 : btn.offsetLeft - gapMid
+      const right = first ? btn.offsetLeft + btn.offsetWidth + gapMid : sw.clientWidth
+      th.style.left = left + 'px'
+      th.style.width = right - left + 'px'
+      th.style.borderTopLeftRadius = first ? '9px' : '6px'
+      th.style.borderTopRightRadius = first ? '6px' : '9px'
+    } else {
+      th.style.left = btn.offsetLeft + 'px'
+      th.style.width = btn.offsetWidth + 'px'
+      th.style.borderTopLeftRadius = ''
+      th.style.borderTopRightRadius = ''
+    }
   }
 
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。

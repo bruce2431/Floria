@@ -1890,9 +1890,9 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
   /* 手机：主区是整屏，白卡拼缝/外缝一律退场（#app 本就地圆角 0、无留边） */
   #app.work #sidebar.open { border-radius: 0 var(--radius) var(--radius) 0; }
   #chat-area.work { margin: 0; border-radius: 0; }
-  #chat-area.work > .wk-topbar { margin: 6px 6px 0; }
+  #chat-area.work > .wk-topbar { margin: 2px 2px 0; }
   #chat-area.work > #work-editor,
-  #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) { margin: 0 6px 6px; }
+  #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) { margin: 0 2px 2px; }
   #panel, #sidebar.open #panel, .panel-inner { width: 100%; }
 
   /* 抽屉遮罩：侧栏滑入时盖住主区，点空白关闭 */
@@ -2201,21 +2201,22 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命） */
 .mode-switch { position: relative; display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
 /* 选中态白块（2026-10-06 用户定案「白块向下延展贴合侧栏卡」）：一块绝对定位的白块横向滑动承载选中态
-   （不再由 .ms-btn.on 各自换底色 ⇒ 切换是滑动动画，不是整块闪现）。work 模式下白块向下长出尾巴
-   （bottom 3px → -12px、下两角改方），穿过 .panel-header 的 10px 底内边距接上下方白色侧栏卡，
-   读作「选中的模式 tab 与它的面板连成一体」；chat 模式侧栏是透明卡壳（露底板色）无卡可贴，
-   白块就停在轨道内不外延。left/width 由 work.js positionMsThumb() 按选中钮实测写入
-   （不依赖两钮等宽，折叠态下 .panel-inner 仍持 --panel-w 故量值依然有效）。 */
+   （不再由 .ms-btn.on 各自换底色 ⇒ 切换是滑动动画，不是整块闪现）。work 模式下白块与轨道上缘/选中侧
+   外缘齐平（top 3px → 0；左右缘吃到 gap 中线与轨道 padding 外沿），并向下长出尾巴穿过 .panel-header
+   的 10px 底内边距接上下方白色侧栏卡，读作「选中的模式 tab 与它的面板连成一体」；chat 模式侧栏是
+   透明卡壳（露底板色）无卡可贴，白块就停在轨道内的一枚浮丸（四角 7px、不延展）。
+   几何全部由 work.js positionMsThumb() 实测写入（left/width/两上圆角），不依赖两钮等宽。 */
 .ms-thumb {
   position: absolute; left: 3px; top: 3px; bottom: 3px; width: calc(50% - 4px);
   border-radius: 7px; background: var(--bg); box-shadow: var(--shadow-sm); pointer-events: none;
   transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), width 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    bottom 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), border-radius 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    box-shadow 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+    top 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
+    border-radius 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-/* work：白块下延贴卡（.panel-header 底内边距 10px ⇒ 延 11px 恰好越过分界 1px，够融合又不压到
-   下方首个行件）——关掉投影，否则尾巴下缘的阴影落在白卡上会画出一道接缝（融合即无影） */
-#app.work .ms-thumb { bottom: -11px; border-radius: 7px 7px 0 0; box-shadow: none; }
+/* work：白块上缘齐平 + 下延贴卡（.panel-header 底内边距 10px ⇒ 延 11px 恰好越过分界 1px，够融合又不
+   压到下方首个行件）——关掉投影，否则尾巴下缘的阴影落在白卡上会画出一道接缝（融合即无影）。
+   本条只管纵向；横向「上/右要贴」由 positionMsThumb 写内联几何（上圆角 9px 外侧 / 6px 内侧）。 */
+#app.work .ms-thumb { top: 0; bottom: -11px; border-radius: 9px 9px 0 0; box-shadow: none; }
 /* 两钮恒 font-weight:600（颜色区分选中）：400↔600 切换会让 CJK 字宽微变、分段控件宽度跳动。
    底色由 .ms-thumb 承担，本钮只翻字色，且须压在白块之上（z-index:1）。 */
 .ms-btn { position: relative; z-index: 1; padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-2); white-space: nowrap; transition: color 0.15s; }
@@ -2345,12 +2346,14 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > #session-card { grid-column: 1; grid-row: 2; min-width: 0; }
 
 /* 下沉洞（2026-10-06 用户定案）＝白卡中「预留的一片圆角矩形」：顶栏格与内容格同底色、
-   同左右边距、上下各半个圆角，两格拼成一个圆角矩形，四周留 8px 白边。
+   同左右边距、上下各半个圆角，两格拼成一个圆角矩形。四边留缝 2px——与 chat 的 .view-card /
+   #session-card 外边距同值（2026-10-06 用户定案「卡片区域间距以 chat 的 2px 为准」）：切模式时
+   卡片边界不再平移，两模式几何同律，只差颜色与组件。
    底色写 --plane（底板灰）：视觉上就是「卡上挖了个洞露底板」——白卡在底下，涂灰外无他法
    （CSS 无真正镂空），灰值与底板同源故等价。 */
 #chat-area.work > .wk-topbar {
   background: var(--plane);
-  margin: 8px 8px 0;
+  margin: 2px 2px 0;
   border-radius: var(--radius) var(--radius) 0 0;
 }
 #chat-area.work > .work-gutter { grid-column: 2; grid-row: 1 / span 2; }
@@ -2370,7 +2373,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > #work-editor,
 #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) {
   background: var(--plane);
-  margin: 0 8px 8px;
+  margin: 0 2px 2px;
   border-radius: 0 0 var(--radius) var(--radius);
 }
 

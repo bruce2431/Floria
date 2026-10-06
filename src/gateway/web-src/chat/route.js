@@ -41,6 +41,18 @@ import { hydrateExtCardId, openCard } from '../views/registry.js'
     return { name: 'session', hash: decodeURIComponent(raw) }
   }
 
+  // 会话 hash 归一（全长 / 旧短 hash → 列表内规范 hash；查无原样透传，由 renderSession 显示「不存在」）。
+  const resolveSessionHash = (h) => { const s = findSession(h); return s ? hashOf(s) : h }
+
+  // 启动期预解析当前路由 hash（唯一调用点 = app.js，须在 initWork 之前）：让 initWork→applyPanes 的
+  // 「聊天栏在场 ⇒ 当前路由 tab 必在开放集」兜底读到**真实** active key，而不是尚未被 route 赋值的
+  // currentHash('')。否则 work 模式刷新时该兜底把 '' 当哨兵 'new'，凭空往开放集塞一枚「新对话」胶囊
+  // （不变量见 sidebar/work.js applyPanes；与同步修复前「刷新多出一枚新会话胶囊」同根）。
+  function bootHash() {
+    const r = parseRoute()
+    return r.name === 'session' ? resolveSessionHash(r.hash) : ''
+  }
+
   function route() {
     closeMentionPop()
     const r = parseRoute()
@@ -65,10 +77,7 @@ import { hydrateExtCardId, openCard } from '../views/registry.js'
     // 让 renderRecent() 一次导航即高亮正确目标。
     // 2026-08-28 /session/<全长hash> → resolve 校验会话存在（currentHash/SSE/WS 全链全长）；
     // 未知 hash 原样透传（renderSession 显示「会话不存在」）。
-    if (r.name === 'session') {
-      const sess = findSession(r.hash)
-      r.hash = sess ? hashOf(sess) : r.hash
-    }
+    if (r.name === 'session') r.hash = resolveSessionHash(r.hash)
     state.currentHash = r.name === 'session' ? r.hash : ''
     syncWorkTabs() // work 模式：把当前路由并入聊天 tab 开放集并重渲顶栏（chat 模式空跑）
     renderRecent()
@@ -375,6 +384,7 @@ import { hydrateExtCardId, openCard } from '../views/registry.js'
 export function setLastNavHash(v) { lastNavHash = v }
 
 export {
+  bootHash,
   clearSessionSlots,
   emptyStageEl,
   flipInput,

@@ -6,7 +6,7 @@
    数据来自后端：/gateway/sessions 列表、/gateway/session?id= 单会话。
    只读查看：composer 不可发送。 */
 // —— 2026-09-10 模块化切割入口（事件绑定 + 启动序列；其余逻辑在 core/sidebar/inputbar/chat 各模块）——
-import { route, navigate, renderSession } from './chat/route.js'
+import { route, navigate, renderSession, bootHash } from './chat/route.js'
 import { hideGate } from './core/auth.js'
 import { setChar } from './core/char.js'
 import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './core/gateway.js'
@@ -129,6 +129,9 @@ import { initWork, setSbMode } from './sidebar/work.js'
     renderRecent()
     // work 模式启动恢复（2026-09-25）：恢复持久化模式/项目/文件 → 绑事件 → 落地；须在 route() 之前，
     // route 进入 mgr/preview 时会把模式强制切回 chat（视图卡与 work 两栏互斥，见 chat/route.js）。
+    // 2026-10-06 根修「work 刷新多出一枚新会话胶囊」：先把真实路由 hash 落地，否则 initWork→applyPanes
+    // 的开放集兜底（wkEnsureTab(wkActiveKey())）会读到尚未赋值的 currentHash('') ⇒ 当哨兵 'new' 塞一枚。
+    state.currentHash = bootHash()
     initWork()
     route()
     if (GATEWAY) initGateway()

@@ -40,6 +40,27 @@ import { initWork, setSbMode } from './sidebar/work.js'
   $('panel-collapse').addEventListener('click', () => setPanel(false))
   $('panel-search').innerHTML = I.mag
   $('panel-search').addEventListener('click', openSearch)
+  // 主题切换（2026-10-06 夜晚模式）：<html> 的 data-theme 首帧由 index.html 预置脚本落地（免闪帧），
+  // 此处只管交互——按当前态注入日/月图标，点击翻转 + 写 localStorage['floria-theme']（覆盖系统的跟随）
+  // + 同步 theme-color meta。真源 = <html data-theme>，localStorage 只作下次首帧的预置输入。
+  const THEME_KEY = 'floria-theme'
+  const themeDark = () => document.documentElement.getAttribute('data-theme') === 'dark'
+  function paintTheme() {
+    const dark = themeDark()
+    const btn = $('panel-theme')
+    btn.innerHTML = dark ? I.sun : I.moon
+    btn.title = dark ? '切换到浅色' : '切换到夜晚模式'
+    const m = document.querySelector('meta[name="theme-color"]')
+    if (m) m.setAttribute('content', dark ? '#000000' : '#ececf1')
+  }
+  $('panel-theme').addEventListener('click', () => {
+    const dark = !themeDark()
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark')
+    else document.documentElement.removeAttribute('data-theme')
+    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light') } catch { /* 存储不可用忽略 */ }
+    paintTheme()
+  })
+  paintTheme()
   // 侧栏模式切换（2026-09-25）：floria·chat ⇄ floria·work。委托在容器上——两个 .ms-btn 常驻不重渲，
   // 但委托写法与其它侧栏控件一致，且 setSbMode 已内部落地全部渲染（applySbMode）。
   $('mode-switch').addEventListener('click', (e) => {

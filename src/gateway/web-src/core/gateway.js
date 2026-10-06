@@ -50,9 +50,9 @@ import { syncGwSend } from '../inputbar/send.js'
       /* 2026-08-21 审批卡：DSH ApprovalPanel 完全移植（warn 语义令牌就地映射）——
          amber 顶部条带[8px 圆点 + 13/18 文字] + 正文[15/24 500 headline + mono 命令] + 右对齐胶囊按钮。
          2026-08-22 composer takeover：审批卡占输入栏，.appr-card 提为全局（去掉 .msg.approval 作用域） */
-      .appr-card{overflow:hidden;width:100%;border:1px solid #fcd34d;border-radius:20px;background:#fff;box-shadow:0 4px 12px 0 rgba(0,0,0,.02),0 2px 8px 0 rgba(0,0,0,.04)}
-      .appr-strip{display:flex;align-items:center;gap:8px;padding:10px 16px;background:#fef3c7;color:#b45309;font-size:13px;line-height:18px}
-      .appr-strip .appr-dot{flex:none;width:8px;height:8px;border-radius:50%;background:#b45309}
+      .appr-card{overflow:hidden;width:100%;border:1px solid var(--warn-line);border-radius:20px;background:var(--bg);box-shadow:0 4px 12px 0 rgba(0,0,0,.02),0 2px 8px 0 rgba(0,0,0,.04)}
+      .appr-strip{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--warn-bg);color:var(--warn-fg);font-size:13px;line-height:18px}
+      .appr-strip .appr-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warn-fg)}
       /* 2026-09-10 用户定案「审批栏拉到合适高度、不出滑条」：旧定值 200px 让十几行的命令体（Edit 的
          old/new_string 等）恒出滚动条=又丑又要二次滚。改为视口预算——正文吃满自然高度，上限=视口高
          减 260px（黄条带 38 + 按钮行 60 + 底距 22 + 聊天区至少可见 ~140），只有真超屏才滚（真边界，
@@ -69,7 +69,7 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-kv .ak-v{color:var(--text);font-family:var(--mono);word-break:break-all;white-space:pre-wrap;overflow-wrap:anywhere}
       .appr-file{margin-bottom:2px;color:var(--text);font-family:var(--mono);font-size:13px;line-height:20px;word-break:break-all;overflow-wrap:anywhere}
       .appr-meta{margin-bottom:2px;color:var(--text-3);font-size:12px;line-height:18px}
-      .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:#f7f8fa;color:#0f1115;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+      .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:var(--field-2);color:var(--ink);font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
       /* ExitPlanMode 计划正文的 Markdown 作用域（approval.js prettyToolInput → mdHtml）：
          审批卡不在 .msg/.done-think 内，故 mdHtml 产出的块级标签在此重新给样式，语义对齐 styles.css 同名规则。 */
       .appr-md{color:var(--text);font-size:13px;line-height:20px;word-break:break-word}
@@ -82,7 +82,7 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
       .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
-      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#f7f8fa}
+      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--field-2)}
       .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
       .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
       .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
@@ -91,14 +91,14 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}
       .appr-md .md-table th{background:var(--rail-bg);font-weight:600}
       .appr-diff{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-      .appr-diff-h{padding:5px 10px;background:#f7f8fa;color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
+      .appr-diff-h{padding:5px 10px;background:var(--field-2);color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
       .appr-diff-b{margin:0;padding:8px 10px;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
-      .appr-diff-b.old{background:#fef6f6;color:#b91c1c}
-      .appr-diff-b.new{background:#f6fbf7;color:#15803d}
+      .appr-diff-b.old{background:var(--danger-soft);color:var(--danger-fg)}
+      .appr-diff-b.new{background:var(--ok-soft);color:var(--ok-fg)}
       .appr-btns{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px}
-      .appr-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-2)}
+      .appr-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-2)}
       .appr-btns button:disabled{opacity:.5;cursor:default}
-      .appr-deny:hover:not(:disabled){background:#fef2f2;color:#dc2626;border-color:transparent}
+      .appr-deny:hover:not(:disabled){background:var(--danger-soft);color:var(--danger-fg);border-color:transparent}
       .appr-allow{border:none!important;background:#4176e6!important;color:#fff!important}
       .appr-allow:hover:not(:disabled){background:#679efe!important}
       /* 2026-08-30 提问卡 DSH QuestionComposer 对齐：eyebrow+右上折叠/×；编号方块选项（label+描述
@@ -112,28 +112,28 @@ import { syncGwSend } from '../inputbar/send.js'
       .qa-eyebrow{flex:none;color:var(--text-3);font-size:12px;line-height:16px;font-weight:500}
       .qa-title-sm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
       .qa-fold{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
-      .qa-fold:hover{background:#f3f4f6;color:var(--text)}
+      .qa-fold:hover{background:var(--hover);color:var(--text)}
       .qa-fold svg{width:14px;height:14px;transform:rotate(180deg)}
       .qa-collapsed .qa-fold svg{transform:none}
       .qa-x{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
-      .qa-x:hover{background:#fef2f2;color:#dc2626}
+      .qa-x:hover{background:var(--danger-soft);color:var(--danger-fg)}
       .qa-x svg{width:11px;height:11px}
       .qa-main{display:flex;flex-direction:column;gap:10px;padding:6px 16px 14px}
       .qa-title{color:var(--text);font-size:15px;font-weight:600;line-height:22px}
       .qa-opts{display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto}
-      .qa-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;text-align:left;cursor:pointer;color:var(--text)}
-      .qa-opt:hover{border-color:#4176e6;background:#f7faff}
-      .qa-opt.sel{border-color:#4176e6;background:#eff5ff}
-      .qa-opt .qa-num{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:#f3f4f6;color:var(--text-2);font-size:12px;font-weight:500;line-height:20px;text-align:center;box-sizing:border-box}
+      .qa-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);text-align:left;cursor:pointer;color:var(--text)}
+      .qa-opt:hover{border-color:#4176e6;background:var(--accent-hover)}
+      .qa-opt.sel{border-color:#4176e6;background:var(--accent-sel)}
+      .qa-opt .qa-num{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--hover);color:var(--text-2);font-size:12px;font-weight:500;line-height:20px;text-align:center;box-sizing:border-box}
       .qa-opt.sel .qa-num{background:#4176e6;color:#fff}
       .qa-opt .qa-copy{flex:1;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:14px;line-height:20px}
       .qa-opt .qa-label{color:var(--text)}
       .qa-opt .qa-desc{color:var(--text-2);font-size:12px;line-height:18px}
       .qa-multi-hint{color:var(--text-3);font-size:11px;font-weight:400;margin-left:4px}
-      .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:#fff}
+      .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}
       /* 2026-09-26 撤聚焦强调：.qa-inputrow:focus-within 曾与 .qa-opt.sel 视觉同款 ⇒ 单选点选项后
          再点输入框就「两处高亮」。聚焦不再单独表态，点输入行即 pickText 上 .sel（选中态唯一）。 */
-      .qa-inputrow.sel{border-color:#4176e6;background:#eff5ff}
+      .qa-inputrow.sel{border-color:#4176e6;background:var(--accent-sel)}
       .qa-input-ico{flex:none;width:14px;height:14px;color:var(--text-3);display:flex;align-items:center;justify-content:center}
       .qa-input-ico svg{width:14px;height:14px}
       .qa-inputrow .qa-input{flex:1;height:34px;border:none;outline:none;background:transparent;color:var(--text);font-size:14px;font-family:inherit}
@@ -141,15 +141,15 @@ import { syncGwSend } from '../inputbar/send.js'
       .qa-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
       .qa-nav{display:flex;align-items:center;gap:6px}
       .qa-nav-btn{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--text-2);cursor:pointer;border-radius:6px;padding:0}
-      .qa-nav-btn:hover:not(.off){background:#f3f4f6;color:var(--text)}
+      .qa-nav-btn:hover:not(.off){background:var(--hover);color:var(--text)}
       .qa-nav-btn.off{opacity:.35;cursor:default}
       .qa-nav-btn svg{width:14px;height:14px}
       .qa-nav-btn.prev svg{transform:rotate(180deg)}
       .qa-nav-pos{color:var(--text-2);font-size:12px;line-height:16px;min-width:32px;text-align:center}
       .qa-foot-btns{display:flex;gap:8px}
-      .qa-foot-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-2)}
+      .qa-foot-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-2)}
       .qa-foot-btns button:disabled{opacity:.5;cursor:default}
-      .qa-skip:hover:not(:disabled){background:#f3f4f6;color:var(--text)}
+      .qa-skip:hover:not(:disabled){background:var(--hover);color:var(--text)}
       /* 2026-08-30 间距对齐（用户「最下一行到边界 vs 最上一行到边界差别很大」）：空状态行不吃空间
          （.appr-state padding 0 16px 12px + qa-main gap 10px 使脚行到卡底 ≈36px，眉行到卡顶仅 12px）；
          折叠单行卡 qa-top 底垫 0→12px（原底部贴边不对称）。
@@ -162,9 +162,9 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-path{display:flex;gap:6px;align-items:flex-start;color:var(--text-2);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:18px;word-break:break-all}
       .appr-path .ap-l{flex:none;color:#999}
       .appr-sugs{display:flex;flex-direction:column;gap:6px;padding:2px 0 0}
-      .appr-sug{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff;text-align:left;cursor:pointer;color:var(--text);font-size:13px;line-height:19px}
-      .appr-sug:hover{border-color:#4176e6;background:#f7faff}
-      .appr-sug.sel{border-color:#4176e6;background:#eff5ff}
+      .appr-sug{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);text-align:left;cursor:pointer;color:var(--text);font-size:13px;line-height:19px}
+      .appr-sug:hover{border-color:#4176e6;background:var(--accent-hover)}
+      .appr-sug.sel{border-color:#4176e6;background:var(--accent-sel)}
       .appr-sug .as-box{flex:none;width:15px;height:15px;margin-top:2px;border-radius:4px;border:1.5px solid var(--border);box-sizing:border-box}
       .appr-sug.sel .as-box{border-color:#4176e6;background:#4176e6}
       .appr-sug.sel .as-box::after{content:'';display:block;width:4px;height:7px;margin:1px auto 0;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -176,7 +176,7 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-state{display:flex;align-items:center;gap:8px;padding:0 16px 12px;font-size:12px;line-height:18px}
       .appr-state .as-wait{color:var(--text-3)}
       .appr-state .as-err{color:#d25f4a}
-      .appr-state .appr-retry{height:26px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-1)}
+      .appr-state .appr-retry{height:26px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-1)}
       .appr-state .appr-retry:hover{background:var(--hover)}`
     document.head.appendChild(s)
   }

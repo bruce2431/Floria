@@ -17,6 +17,10 @@
     mag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.3"/><path d="M15.6 15.6 20 20"/></svg>',
     bubble: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
     toggle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="5" width="6.5" height="14" rx="2"/><rect x="14" y="5" width="6.5" height="14" rx="2"/></svg>',
+    // 主题切换（2026-10-06 夜晚模式）：侧栏头部动作区的日/月钮——浅色态显月亮（点了转暗）、
+    // 暗色态显太阳（点了转亮）。与 mag/collapse 同语言：24 视框 / 1.7 描线 / currentColor。
+    sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.3M12 19.1v2.3M2.6 12h2.3M19.1 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>',
+    moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 13.6A8.2 8.2 0 1 1 10.4 3.8a6.4 6.4 0 0 0 9.8 9.8z"/></svg>',
     collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6 15.5 12 9.5 18"/></svg>',
     folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
     // 插件（2026-09-23 视图卡化：从 index.html 的 tab 内联 SVG 迁入，注册表按 icon:'plug' 引用）
@@ -4401,10 +4405,21 @@ function setFirstSendHash(v) { firstSendHash = v }
     return best
   }
 
+  // 夜晚模式（2026-10-06）：画布内容不反色，但节点的「分隔描边」与社群标签须按底色切一组色——
+  // 浅色下描边=白（把彩点从白底上分离）、标签=深灰；暗色下描边=画布底色 #161616（把彩点从暗底上分离）、
+  // 标签=浅灰。逐帧读取（drawNeu 每帧重绘）⇒ 切主题后下一帧自动生效，无需事件。
+  function neuPalette() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+    return dark
+      ? { ringCog: 'rgba(22,22,22,0.9)', ringComm: 'rgba(22,22,22,0.95)', label: 'rgba(208,212,220,0.85)' }
+      : { ringCog: 'rgba(255,255,255,0.9)', ringComm: 'rgba(255,255,255,0.95)', label: 'rgba(40,50,70,0.85)' }
+  }
+
   function drawNeu(st) {
     const { ctx, model, view } = st
     const w = st.w || 0
     const h = st.h || 0
+    const pal = neuPalette()
     ctx.clearRect(0, 0, w, h)
     ctx.save()
     ctx.translate(w / 2 + view.x, h / 2 + view.y)
@@ -4430,18 +4445,18 @@ function setFirstSendHash(v) { firstSendHash = v }
         ctx.fillStyle = '#9aa7b8'
       } else if (n.type === 'cog') {
         ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+        ctx.strokeStyle = pal.ringCog
         ctx.lineWidth = 1.2
         ctx.stroke()
       } else {
         ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+        ctx.strokeStyle = pal.ringComm
         ctx.lineWidth = 2
         ctx.stroke()
       }
       ctx.fill()
       if (n.type === 'comm') {
-        ctx.fillStyle = 'rgba(40,50,70,0.85)'
+        ctx.fillStyle = pal.label
         ctx.font = '10px system-ui, sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText((n.ref.name || '群' + (n.ref.i + 1)) + '·' + n.ref.size, n.x, n.y + n.r + 12)
@@ -6662,6 +6677,27 @@ function setFirstSendHash(v) { firstSendHash = v }
   $('panel-collapse').addEventListener('click', () => setPanel(false))
   $('panel-search').innerHTML = I.mag
   $('panel-search').addEventListener('click', openSearch)
+  // 主题切换（2026-10-06 夜晚模式）：<html> 的 data-theme 首帧由 index.html 预置脚本落地（免闪帧），
+  // 此处只管交互——按当前态注入日/月图标，点击翻转 + 写 localStorage['floria-theme']（覆盖系统的跟随）
+  // + 同步 theme-color meta。真源 = <html data-theme>，localStorage 只作下次首帧的预置输入。
+  const THEME_KEY = 'floria-theme'
+  const themeDark = () => document.documentElement.getAttribute('data-theme') === 'dark'
+  function paintTheme() {
+    const dark = themeDark()
+    const btn = $('panel-theme')
+    btn.innerHTML = dark ? I.sun : I.moon
+    btn.title = dark ? '切换到浅色' : '切换到夜晚模式'
+    const m = document.querySelector('meta[name="theme-color"]')
+    if (m) m.setAttribute('content', dark ? '#000000' : '#ececf1')
+  }
+  $('panel-theme').addEventListener('click', () => {
+    const dark = !themeDark()
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark')
+    else document.documentElement.removeAttribute('data-theme')
+    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light') } catch { /* 存储不可用忽略 */ }
+    paintTheme()
+  })
+  paintTheme()
   // 侧栏模式切换（2026-09-25）：floria·chat ⇄ floria·work。委托在容器上——两个 .ms-btn 常驻不重渲，
   // 但委托写法与其它侧栏控件一致，且 setSbMode 已内部落地全部渲染（applySbMode）。
   $('mode-switch').addEventListener('click', (e) => {
@@ -7066,9 +7102,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       /* 2026-08-21 审批卡：DSH ApprovalPanel 完全移植（warn 语义令牌就地映射）——
          amber 顶部条带[8px 圆点 + 13/18 文字] + 正文[15/24 500 headline + mono 命令] + 右对齐胶囊按钮。
          2026-08-22 composer takeover：审批卡占输入栏，.appr-card 提为全局（去掉 .msg.approval 作用域） */
-      .appr-card{overflow:hidden;width:100%;border:1px solid #fcd34d;border-radius:20px;background:#fff;box-shadow:0 4px 12px 0 rgba(0,0,0,.02),0 2px 8px 0 rgba(0,0,0,.04)}
-      .appr-strip{display:flex;align-items:center;gap:8px;padding:10px 16px;background:#fef3c7;color:#b45309;font-size:13px;line-height:18px}
-      .appr-strip .appr-dot{flex:none;width:8px;height:8px;border-radius:50%;background:#b45309}
+      .appr-card{overflow:hidden;width:100%;border:1px solid var(--warn-line);border-radius:20px;background:var(--bg);box-shadow:0 4px 12px 0 rgba(0,0,0,.02),0 2px 8px 0 rgba(0,0,0,.04)}
+      .appr-strip{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--warn-bg);color:var(--warn-fg);font-size:13px;line-height:18px}
+      .appr-strip .appr-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--warn-fg)}
       /* 2026-09-10 用户定案「审批栏拉到合适高度、不出滑条」：旧定值 200px 让十几行的命令体（Edit 的
          old/new_string 等）恒出滚动条=又丑又要二次滚。改为视口预算——正文吃满自然高度，上限=视口高
          减 260px（黄条带 38 + 按钮行 60 + 底距 22 + 聊天区至少可见 ~140），只有真超屏才滚（真边界，
@@ -7085,7 +7121,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-kv .ak-v{color:var(--text);font-family:var(--mono);word-break:break-all;white-space:pre-wrap;overflow-wrap:anywhere}
       .appr-file{margin-bottom:2px;color:var(--text);font-family:var(--mono);font-size:13px;line-height:20px;word-break:break-all;overflow-wrap:anywhere}
       .appr-meta{margin-bottom:2px;color:var(--text-3);font-size:12px;line-height:18px}
-      .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:#f7f8fa;color:#0f1115;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+      .appr-pre{margin:0;padding:10px 12px;border-radius:10px;background:var(--field-2);color:var(--ink);font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
       /* ExitPlanMode 计划正文的 Markdown 作用域（approval.js prettyToolInput → mdHtml）：
          审批卡不在 .msg/.done-think 内，故 mdHtml 产出的块级标签在此重新给样式，语义对齐 styles.css 同名规则。 */
       .appr-md{color:var(--text);font-size:13px;line-height:20px;word-break:break-word}
@@ -7098,7 +7134,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
       .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
-      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:#f7f8fa}
+      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--field-2)}
       .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
       .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
       .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
@@ -7107,14 +7143,14 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}
       .appr-md .md-table th{background:var(--rail-bg);font-weight:600}
       .appr-diff{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-      .appr-diff-h{padding:5px 10px;background:#f7f8fa;color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
+      .appr-diff-h{padding:5px 10px;background:var(--field-2);color:var(--text-3);font-size:11px;line-height:16px;font-weight:600}
       .appr-diff-b{margin:0;padding:8px 10px;font-family:var(--mono);font-size:12.5px;line-height:19px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
-      .appr-diff-b.old{background:#fef6f6;color:#b91c1c}
-      .appr-diff-b.new{background:#f6fbf7;color:#15803d}
+      .appr-diff-b.old{background:var(--danger-soft);color:var(--danger-fg)}
+      .appr-diff-b.new{background:var(--ok-soft);color:var(--ok-fg)}
       .appr-btns{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px}
-      .appr-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-2)}
+      .appr-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-2)}
       .appr-btns button:disabled{opacity:.5;cursor:default}
-      .appr-deny:hover:not(:disabled){background:#fef2f2;color:#dc2626;border-color:transparent}
+      .appr-deny:hover:not(:disabled){background:var(--danger-soft);color:var(--danger-fg);border-color:transparent}
       .appr-allow{border:none!important;background:#4176e6!important;color:#fff!important}
       .appr-allow:hover:not(:disabled){background:#679efe!important}
       /* 2026-08-30 提问卡 DSH QuestionComposer 对齐：eyebrow+右上折叠/×；编号方块选项（label+描述
@@ -7128,28 +7164,28 @@ function setFirstSendHash(v) { firstSendHash = v }
       .qa-eyebrow{flex:none;color:var(--text-3);font-size:12px;line-height:16px;font-weight:500}
       .qa-title-sm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px;line-height:18px}
       .qa-fold{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
-      .qa-fold:hover{background:#f3f4f6;color:var(--text)}
+      .qa-fold:hover{background:var(--hover);color:var(--text)}
       .qa-fold svg{width:14px;height:14px;transform:rotate(180deg)}
       .qa-collapsed .qa-fold svg{transform:none}
       .qa-x{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--text-3);cursor:pointer;border-radius:6px}
-      .qa-x:hover{background:#fef2f2;color:#dc2626}
+      .qa-x:hover{background:var(--danger-soft);color:var(--danger-fg)}
       .qa-x svg{width:11px;height:11px}
       .qa-main{display:flex;flex-direction:column;gap:10px;padding:6px 16px 14px}
       .qa-title{color:var(--text);font-size:15px;font-weight:600;line-height:22px}
       .qa-opts{display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto}
-      .qa-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;text-align:left;cursor:pointer;color:var(--text)}
-      .qa-opt:hover{border-color:#4176e6;background:#f7faff}
-      .qa-opt.sel{border-color:#4176e6;background:#eff5ff}
-      .qa-opt .qa-num{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:#f3f4f6;color:var(--text-2);font-size:12px;font-weight:500;line-height:20px;text-align:center;box-sizing:border-box}
+      .qa-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);text-align:left;cursor:pointer;color:var(--text)}
+      .qa-opt:hover{border-color:#4176e6;background:var(--accent-hover)}
+      .qa-opt.sel{border-color:#4176e6;background:var(--accent-sel)}
+      .qa-opt .qa-num{flex:none;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--hover);color:var(--text-2);font-size:12px;font-weight:500;line-height:20px;text-align:center;box-sizing:border-box}
       .qa-opt.sel .qa-num{background:#4176e6;color:#fff}
       .qa-opt .qa-copy{flex:1;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:14px;line-height:20px}
       .qa-opt .qa-label{color:var(--text)}
       .qa-opt .qa-desc{color:var(--text-2);font-size:12px;line-height:18px}
       .qa-multi-hint{color:var(--text-3);font-size:11px;font-weight:400;margin-left:4px}
-      .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:#fff}
+      .qa-inputrow{display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;margin-bottom:-4px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}
       /* 2026-09-26 撤聚焦强调：.qa-inputrow:focus-within 曾与 .qa-opt.sel 视觉同款 ⇒ 单选点选项后
          再点输入框就「两处高亮」。聚焦不再单独表态，点输入行即 pickText 上 .sel（选中态唯一）。 */
-      .qa-inputrow.sel{border-color:#4176e6;background:#eff5ff}
+      .qa-inputrow.sel{border-color:#4176e6;background:var(--accent-sel)}
       .qa-input-ico{flex:none;width:14px;height:14px;color:var(--text-3);display:flex;align-items:center;justify-content:center}
       .qa-input-ico svg{width:14px;height:14px}
       .qa-inputrow .qa-input{flex:1;height:34px;border:none;outline:none;background:transparent;color:var(--text);font-size:14px;font-family:inherit}
@@ -7157,15 +7193,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       .qa-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
       .qa-nav{display:flex;align-items:center;gap:6px}
       .qa-nav-btn{width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--text-2);cursor:pointer;border-radius:6px;padding:0}
-      .qa-nav-btn:hover:not(.off){background:#f3f4f6;color:var(--text)}
+      .qa-nav-btn:hover:not(.off){background:var(--hover);color:var(--text)}
       .qa-nav-btn.off{opacity:.35;cursor:default}
       .qa-nav-btn svg{width:14px;height:14px}
       .qa-nav-btn.prev svg{transform:rotate(180deg)}
       .qa-nav-pos{color:var(--text-2);font-size:12px;line-height:16px;min-width:32px;text-align:center}
       .qa-foot-btns{display:flex;gap:8px}
-      .qa-foot-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-2)}
+      .qa-foot-btns button{height:32px;padding:0 16px;border-radius:999px;font-size:13px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-2)}
       .qa-foot-btns button:disabled{opacity:.5;cursor:default}
-      .qa-skip:hover:not(:disabled){background:#f3f4f6;color:var(--text)}
+      .qa-skip:hover:not(:disabled){background:var(--hover);color:var(--text)}
       /* 2026-08-30 间距对齐（用户「最下一行到边界 vs 最上一行到边界差别很大」）：空状态行不吃空间
          （.appr-state padding 0 16px 12px + qa-main gap 10px 使脚行到卡底 ≈36px，眉行到卡顶仅 12px）；
          折叠单行卡 qa-top 底垫 0→12px（原底部贴边不对称）。
@@ -7178,9 +7214,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-path{display:flex;gap:6px;align-items:flex-start;color:var(--text-2);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:18px;word-break:break-all}
       .appr-path .ap-l{flex:none;color:#999}
       .appr-sugs{display:flex;flex-direction:column;gap:6px;padding:2px 0 0}
-      .appr-sug{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff;text-align:left;cursor:pointer;color:var(--text);font-size:13px;line-height:19px}
-      .appr-sug:hover{border-color:#4176e6;background:#f7faff}
-      .appr-sug.sel{border-color:#4176e6;background:#eff5ff}
+      .appr-sug{display:flex;align-items:flex-start;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);text-align:left;cursor:pointer;color:var(--text);font-size:13px;line-height:19px}
+      .appr-sug:hover{border-color:#4176e6;background:var(--accent-hover)}
+      .appr-sug.sel{border-color:#4176e6;background:var(--accent-sel)}
       .appr-sug .as-box{flex:none;width:15px;height:15px;margin-top:2px;border-radius:4px;border:1.5px solid var(--border);box-sizing:border-box}
       .appr-sug.sel .as-box{border-color:#4176e6;background:#4176e6}
       .appr-sug.sel .as-box::after{content:'';display:block;width:4px;height:7px;margin:1px auto 0;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -7192,7 +7228,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-state{display:flex;align-items:center;gap:8px;padding:0 16px 12px;font-size:12px;line-height:18px}
       .appr-state .as-wait{color:var(--text-3)}
       .appr-state .as-err{color:#d25f4a}
-      .appr-state .appr-retry{height:26px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--text-1)}
+      .appr-state .appr-retry{height:26px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:500;line-height:18px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--text-1)}
       .appr-state .appr-retry:hover{background:var(--hover)}`
     document.head.appendChild(s)
   }

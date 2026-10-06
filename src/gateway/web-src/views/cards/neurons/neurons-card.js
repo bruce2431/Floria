@@ -399,10 +399,21 @@ import { closePanel } from '../../../core/panel.js'
     return best
   }
 
+  // 夜晚模式（2026-10-06）：画布内容不反色，但节点的「分隔描边」与社群标签须按底色切一组色——
+  // 浅色下描边=白（把彩点从白底上分离）、标签=深灰；暗色下描边=画布底色 #161616（把彩点从暗底上分离）、
+  // 标签=浅灰。逐帧读取（drawNeu 每帧重绘）⇒ 切主题后下一帧自动生效，无需事件。
+  function neuPalette() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark'
+    return dark
+      ? { ringCog: 'rgba(22,22,22,0.9)', ringComm: 'rgba(22,22,22,0.95)', label: 'rgba(208,212,220,0.85)' }
+      : { ringCog: 'rgba(255,255,255,0.9)', ringComm: 'rgba(255,255,255,0.95)', label: 'rgba(40,50,70,0.85)' }
+  }
+
   function drawNeu(st) {
     const { ctx, model, view } = st
     const w = st.w || 0
     const h = st.h || 0
+    const pal = neuPalette()
     ctx.clearRect(0, 0, w, h)
     ctx.save()
     ctx.translate(w / 2 + view.x, h / 2 + view.y)
@@ -428,18 +439,18 @@ import { closePanel } from '../../../core/panel.js'
         ctx.fillStyle = '#9aa7b8'
       } else if (n.type === 'cog') {
         ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+        ctx.strokeStyle = pal.ringCog
         ctx.lineWidth = 1.2
         ctx.stroke()
       } else {
         ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+        ctx.strokeStyle = pal.ringComm
         ctx.lineWidth = 2
         ctx.stroke()
       }
       ctx.fill()
       if (n.type === 'comm') {
-        ctx.fillStyle = 'rgba(40,50,70,0.85)'
+        ctx.fillStyle = pal.label
         ctx.font = '10px system-ui, sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText((n.ref.name || '群' + (n.ref.i + 1)) + '·' + n.ref.size, n.x, n.y + n.r + 12)

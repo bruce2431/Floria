@@ -692,3 +692,17 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（53 断言，含评论读写：空读、写+计数、落 `.claude/comments.json`、回读、整份替换、非数组 400、非对象元素过滤、坏 JSON/顶层非对象 → 空、两端点存在且转译结果码）；`probes/probe-comment-marks.ts`（18 断言，原文标记结构：cmtRangesFor 导出、cmtAfterChange/refreshMarks 回调、wkCodeHtml 逐行锚、cmtApplyMarks 落 `.cmt-mark`/`.cmt-mark-res`/`data-cmt-id`、定位回跳滚动、恒拉评论、样式/拼接注册/cache-bust）。web 模块注册 = `scripts/bundle-web-modules.ts` MODULES 表 `sidebar/comments.js`（排在 `work.js` 之后、`quote.js` 之前）。
 - **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v451）。
 
+## 56. 夜晚模式（暗色主题，配色参考 Prism）（2026-10-06）
+
+**能力**：web 前端支持**暗色主题**，配色取 Prism（prism.openai.com）深色实机采样值。**真源 = `<html data-theme>`**：缺省属性 = 浅色；`data-theme="dark"` = 暗色。**浅色是逐像素不变的基线**——所有暗色差异只在 `html[data-theme="dark"]` 一处覆盖，浅色路径零改动。
+
+- **令牌两层**（`web/styles.css`）：` :root` 持浅色值（语义令牌的浅值恰等于原硬编码值，故「硬编码 → 令牌」替换在浅色下零视觉差异）；紧跟其后 `html[data-theme="dark"] { ... }` 只覆盖令牌值。派生量（`--sunken-bg: var(--chat-bg)`、`#app.work{--sunken-bg:var(--plane)}`）自动跟随，无需另改。暗色板：画布 `--plane:#000000`、浮起面 `--bg/--chat-bg/--rail-bg:#161616`、线 `--border:#2a2a2a`/`--border-soft:#1f1f1f`、正文 `--text:#e8e8e8`、次要 `--text-2:#9a9a9a`、悬停/选中 `--hover:#242424`/`--active:#2a2a2a`；**口红色 `--blue:#4d6bfe` 不变**（设计系统唯一彩色）。卡化关系保留（卡 `#161616` 比底板 `#000000` 亮，缝里露黑当分隔，与 Prism「#161616 面浮在 #000 上」同构）。
+- **无闪帧启动**（`web/index.html`）：`<head>` 内**样式表之前**的内联 `<script>` 读 `localStorage['floria-theme']`（缺省 = 跟随 `prefers-color-scheme`）→ 首帧即把 `data-theme` 落到 `<html>` 并同步 `<meta name="theme-color">`（浅 `#ececf1` / 暗 `#000000`）。样式表随后解析，无白/黑闪帧。
+- **切换按钮**（`web/index.html` + `web-src/core/icons.js` + `web-src/app.js`）：侧栏头部动作区 `#panel-actions` 内 `#panel-theme`（`.act-btn`，与搜索/折叠并列，chat/work 两模式均可见）。图标 = `I.sun`/`I.moon`（16px 描线，与 `mag`/`collapse` 同语言）。`app.js` `THEME_KEY='floria-theme'` + `themeDark()`（读 `<html data-theme>`） + `paintTheme()`（按当前态注入日/月图标 + `title` + 同步 `theme-color`）+ click → 翻转 `data-theme` + 写 localStorage + `paintTheme()`。**真源 = `<html data-theme>`，localStorage 只作下次首帧的预置输入**。
+- **硬编码面全面令牌化**（浅值不减）：输入栏白卡 / 各弹层（mention/proj/cmd/model/popup/search/rename/neu/row-menu）/ toast（反色陷阱 → 用 `--bg`/`--text` 语义对）/ `.sess-item.lift`/`.wk-row.lift` / `.preview-overlay` / 用户气泡与 system 底 `/ 代码块 / 开关滑块 / 各类语义底色（warn `--warn-*` / danger `--danger-*` / ok `--ok-*` / accent-soft `--accent-*`）/ 坑位（`--knob`/`--inset-bg`/`--inset-shadow`）——逐块替换为语义令牌。**运行时注入的审批卡 / QA 提问卡**（`web-src/core/gateway.js` 内 `<style>` 拼串）同样改 `var(--...)`（注入在 `#app` 内，令牌可继承）；白字压蓝面（`.appr-allow` / `.qa-opt.sel` 等）保持不变。
+- **编辑器语法高亮**（`styles.css`）：浅色 `.hl-*` 不动；追加 `html[data-theme="dark"] .wk-ed-hl .hl-*` 一组按暗底重调的色值（kw #a78bfa / str #4ade80 / num #fbbf24 / h #60a5fa / b #f472b6 / i #22d3ee / code #fb923c / link #60a5fa / li #fb923c）。
+- **神经画布**（`web-src/views/cards/neurons/neurons-card.js`）：`neuPalette()` 按 `documentElement data-theme` 返回一组描线/标签色（浅：白环 + 深标签；暗：`#161616` 环 + 浅标签），`drawNeu()` 内 `const pal = neuPalette()` 取用（节点环 `pal.ringCog`/`pal.ringComm`、社群标签 `pal.label`）。**画布每帧 rAF 重绘，切主题下一帧自动生效，无需事件**。
+- **刻意不改（保持内容原色）**：`#gate-screen` 门态白板（图片定案）、`.preview-frame`/`.ext-frame` 与 `.chart-embed` iframe（外部内容无暗色版，不反色，只外壳/边框改令牌）、彩色调色板 / 状态点 / 危险红。
+- **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v461）。
+
+

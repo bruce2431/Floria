@@ -4,12 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>floria</title>
-  <meta name="theme-color" content="#ececf1" /><!-- = 底板色（--plane），与页面底色同源 -->
+  <meta name="theme-color" content="#ececf1" /><!-- = 底板色（--plane），与页面底色同源；夜晚模式由下方预置脚本改写 -->
+  <!-- 主题预置（2026-10-06 夜晚模式）：必须排在样式表之前——先把 data-theme 落到 <html>，样式表按它
+       解析，首帧即正确、无白/黑闪帧。缺省跟随系统 prefers-color-scheme；手动切换后写
+       localStorage['floria-theme']（'light'|'dark'）覆盖系统。theme-color（=底板色）随之同步，
+       免移动端地址栏与页面底色割裂。（app.js 侧只做切换/图标，不再重复判定首帧。） -->
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('floria-theme') } catch (e) { /* 存储不可用则按跟随系统 */ }
+      var dark = t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      var m = document.querySelector('meta[name="theme-color"]');
+      if (m) m.setAttribute('content', dark ? '#000000' : '#ececf1');
+    })();
+  </script>
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=459" />
+  <link rel="stylesheet" href="/styles.css?v=462" />
 </head>
 <body>
 <div id="app">
@@ -34,6 +48,9 @@
           </div>
           <div class="panel-actions">
             <button id="panel-search" class="act-btn" title="搜索会话"></button>
+            <!-- 主题切换（2026-10-06 夜晚模式）：日/月图标由 app.js 按当前 data-theme 注入，点击在
+                 浅/暗间翻转并写 localStorage['floria-theme']（头部预置脚本据此免闪帧）。 -->
+            <button id="panel-theme" class="act-btn" title="切换主题" aria-label="切换深浅色主题"></button>
             <button id="panel-collapse" class="act-btn" title="折叠侧栏"></button>
           </div>
         </div>
@@ -359,6 +376,6 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=459"></script>
+<script src="/app.js?v=462"></script>
 </body>
 </html>

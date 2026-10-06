@@ -18,6 +18,8 @@
 | 卡片申报 | `preview.json` 的 `cards` 段 / `floria-cards-register` | preview 向宿主声明「我有哪些卡、摆在哪」（静态清单 + 运行期 postMessage 同 id 覆盖）；与 `backend` 并列的第二种能力申报，渲染位置由 preview 要求（`host:"view"`）。链路 → [web-ui.md](web-ui.md) §42 + [gateway.md](gateway.md) §6.5 | |
 | 神经元视图 | `.neu-pane`（`.neu-card` / `.neu-graph` / `.neu-pop`） | 「神经」tab：层级1 神经元库选择卡片 + 层级2 三级节点图（mem→cog→社群，Canvas 力导向）+ 悬停/点击浮窗；数据源 [gateway.md](gateway.md) §14 | |
 | web 前端 | `gateway/web/` | 浏览器端界面（等权前端之一） | web界面 |
+| 主题 | `<html data-theme>`（`html[data-theme="dark"]`） | 前端配色主题：缺省属性 = 浅色；`data-theme="dark"` = **夜晚模式**（配色参考 Prism）。真源 = `<html data-theme>`；`localStorage['floria-theme']`（`'light'`/`'dark'`，缺省跟随 `prefers-color-scheme`）只作下次首帧的预置输入。所有暗色差异只在 `html[data-theme="dark"]` 一处覆盖语义令牌，浅色路径逐像素不变。见 web-ui §56 | 夜晚模式 / 暗色主题 |
+| 主题切换钮 | `#panel-theme`（`.act-btn`，`I.sun`⇄`I.moon`） | 侧栏头部动作区 `#panel-actions` 内的日/月图标钮（与搜索/折叠并列，chat/work 两模式均可见）：点击翻转 `<html data-theme>` + 写 localStorage + 换图标 + 同步 `theme-color`。见 web-ui §56 | 明暗切换钮 |
 | CLI 界面 | REPL（React/Ink） | 终端界面（等权前端之一） | cli界面 |
 | PC 端 | — | 本地电脑（exe/网关所在） | 本地 |
 | 远程端 | — | iPad/iPhone 等远程设备 | 遥测（已退役） |
@@ -31,7 +33,7 @@
 
 | 规范名 | 实体 | 说明 | 旧称 |
 |---|---|---|---|
-| 底板 | `--plane`（`#ececf1`） | 容器底色，`body` 与 `#app` 同色 ⇒ 整窗读作一块底板（`#app` 的 22px 外框圆弧融进底板不再显形）；**侧栏与视图卡之间的缝隙露出它当分隔**。卡化读法见 web-ui §41 | 底子/画布 |
+| 底板 | `--plane`（浅 `#ececf1` / 暗 `#000000`） | 容器底色，`body` 与 `#app` 同色 ⇒ 整窗读作一块底板（`#app` 的 22px 外框圆弧融进底板不再显形）；**侧栏与视图卡之间的缝隙露出它当分隔**。卡化读法见 web-ui §41 | 底子/画布 |
 | 无形槽 | `#chat-area` | 承载视图卡的无形状容器：通高、无圆角/无背景/无边距，只作定位与卡的 flex 容器；`#gate-screen`（token 门浮层）与 `#menu-btn`（侧栏唤出汉堡，全视口共用）留槽级，与「当前哪张卡」无关。**同一时刻槽里恰好一张卡**；**会话级浮层禁直挂此槽**（须挂 `#session-card` 内），否则跨卡残留（见 web-ui §41） | 主区/内容区 |
 | 视图卡 | `.view-card` | 浮在底板上的圆角卡（`border-radius: var(--radius)` + 边距 2px + `background: var(--chat-bg)` + `position: relative`）：会话流/管理视图/项目预览各一张；**不画线、不加阴影**，分隔只靠与底板的底色差。`margin: 2px` 从槽移到卡上 ⇒ 卡矩形 ≡ 卡化前 `#chat-area` 的矩形 | 内容卡 |
 | 会话卡 | `#session-card`（`.view-card.session`） | 会话视图那张卡，常驻 `index.html`——承载 `messagesEl`/`inputWrap`/`charEl` 等模块级 const 引用的单例 DOM，**离开只切 `hidden` 不销毁**；描述符 `views/cards/session/session-card.js`（`deactivate` = `teardownSessionView`），见 web-ui §53 | |

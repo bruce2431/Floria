@@ -14,6 +14,11 @@
   --hover: #f2f2f4;
   --active: #e9e9ec;
   --selected: #e4e4ea; /* 会话列表选中行底（比 --active 更深，2026-10-06） */
+  /* 浮起面（悬停扶起 tab / 长按扶起文件行）：独立于 --bg 的抬升面令牌。浅色=白卡压底板，
+     夜晚底板是 #000，沿用 --bg(#161616) 会与底板糊在一起、黑影也失效，故单列一套。 */
+  --float-bg: #ffffff;
+  --float-line: #e2e2e6;
+  --float-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
@@ -62,6 +67,9 @@ html[data-theme="dark"] {
   --hover: #242424;
   --active: #2a2a2a;
   --selected: #303030;
+  --float-bg: #2e2e2e;                            /* 抬升面：明显高于底板 #000 的浮卡底 */
+  --float-line: rgba(255, 255, 255, 0.18);        /* 亮描边圈出浮卡轮廓（黑底上 --border 不可辨） */
+  --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.8); /* 加厚投影，黑底上仍读得出「浮起来」 */
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
@@ -2000,11 +2008,17 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
 
 /* ===== 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸露出完整标题 =====
    JS 把 hover 行临时 position:fixed（#recent-body overflow 裁剪容器，行内加宽必被裁）。
-   .lift = 扶起终态（白卡+描边阴影+上移 2px），.lift-anim = 四路过渡（背景/阴影/上移/宽度）；
-   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一白卡。z-index 60 盖过主区与列表普通行。 */
+   .lift = 扶起终态（浮起面+描边阴影+上移 2px），.lift-anim = 四路过渡（背景/阴影/上移/宽度）；
+   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一浮卡（--float-* 令牌，夜晚＝明显高于底板的抬升面）。
+   z-index 60 盖过主区与列表普通行。 */
+/* 浮起面在 work 白天模式下的换向（2026-10-06 用户报「work 日照模式 tab 浮起同样被盖住」）：
+   work 侧栏是白卡（--chat-bg），白底上再浮白卡 = 看不出浮起、选中样式被盖住；白天模式改取底板灰
+   --plane，与 chat 模式（灰底浮白卡）互为正负。夜晚两种模式的宿主都是深底，浮卡统一取更亮的抬升面
+   （见 html[data-theme="dark"] 的 --float-* 令牌），故此处只在非夜晚生效。 */
+html:not([data-theme="dark"]) #app.work { --float-bg: var(--plane); --float-line: #d7d7de; }
 .sess-item.lift {
-  background: var(--bg); border-radius: 10px;
-  box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgba(0, 0, 0, 0.12);
+  background: var(--float-bg); border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--float-line), var(--float-shadow);
   transform: translateY(-2px);
 }
 .sess-item.lift-anim { transition: width 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease; }
@@ -2379,8 +2393,8 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 长按扶起（触屏唤出文件行操作浮窗）：与 .sess-item.lift 同一份外观，宽度不动（文件树是缩进层级，
    拉宽会盖住右侧栏位）——.lift 只负责脱出 #wk-body 的 overflow 裁剪并浮到浮窗之下。 */
 .wk-row.lift {
-  background: var(--bg); border-radius: 7px;
-  box-shadow: 0 0 0 1px var(--border), 0 6px 18px rgba(0, 0, 0, 0.12);
+  background: var(--float-bg); border-radius: 7px;
+  box-shadow: 0 0 0 1px var(--float-line), var(--float-shadow);
   transform: translateY(-2px);
 }
 

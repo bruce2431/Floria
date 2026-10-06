@@ -29,6 +29,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   const MD_EXT = /\.(md|markdown)$/i
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
+  let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
@@ -183,10 +184,25 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     applyPanes(); saveWork()
   }
   // 路由落地后并入开放集并重渲顶栏（唯一外部入口，chat/route.js 调）：仅 work + 聊天栏在场时插手。
+  // 新会话窗口被替换（2026-10-06 用户定案）：在空对话 tab（新会话窗口）下从侧栏打开具体会话，
+  // 直接顶掉占位 new tab（新会话窗口即被该会话替换），顶栏不留单独的「新对话」胶囊。
+  // 只在「上一次激活 = new、本次激活 = 具体会话」时替换——后台挂着的 new tab（当前不在其上）不受影响。
   function syncWorkTabs() {
-    if (state.sbMode !== 'work' || !state.wkAssist) return
-    wkEnsureTab(wkActiveKey())
+    const key = wkActiveKey()
+    if (state.sbMode !== 'work' || !state.wkAssist) { wkPrevActiveKey = key; return }
+    if (key !== WK_NEW_TAB && wkPrevActiveKey === WK_NEW_TAB) {
+      const i = state.wkChats.indexOf(WK_NEW_TAB)
+      if (i >= 0) state.wkChats.splice(i, 1)
+    }
+    wkEnsureTab(key)
+    wkPrevActiveKey = key
     renderTopbar()
+    // 2026-10-06 根修「work 侧栏选中灰底更新慢」：可见的会话列表在 #wk-body（renderWorkBody 渲），
+    // 不在 route()/SSE 的重渲出口里（refreshList 只渲 #recent-body）。路由落地若不重渲它，行上的
+    // .on（按 currentHash 判，见 recent.js itemHtml）要等 workAutoTick 的 5s 对账才同步 → 切会话后
+    // 选中灰底滞后 1~2s 才跟手。此处随路由同步重渲一次：renderWorkBody 内有 innerHTML 比对，
+    // 未变零写 DOM，故代价可忽略，且保证 .on 与 currentHash 恒同拍。
+    renderWorkBody()
   }
 
   // 布局落地（不变量判定唯一处 + 各布局类的唯一写口）：聊天 tab / 文件 tab / 预览至少一个在场，

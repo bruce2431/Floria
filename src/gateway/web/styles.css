@@ -2707,3 +2707,14 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .tr-resp[hidden] { display: none; }
 @keyframes tr-preview-in { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: translateX(0); } }
 @media (max-width: 640px) { .turn-rail { display: none; } }
+
+/* ---------- KaTeX 公式（2026-10-06，见 core/markdown.js 的公式预扫描） ----------
+   KaTeX 输出颜色全继承父级 currentColor（其 CSS 只有 border-color/svg fill:currentColor），
+   故昼/夜主题无需另写覆盖：公式跟随消息正文的 color 走。
+   - .md-math：行内公式（$…$），随段落文字流
+   - .math-block：块级公式（$$…$$），独占一行居中；长公式横向可滚（.katex-display 是 nowrap，
+     不设 overflow 会撑破消息区） */
+.md-math { white-space: normal; }
+.math-block { display: block; margin: 14px 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
+.math-block .katex-display { margin: 0; }
+.md-math .katex, .math-block .katex { font-size: 1.06em; } /* KaTeX 默认 1.21em 相对正文偏大，收敛一档 */

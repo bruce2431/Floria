@@ -364,6 +364,47 @@
   const MD_IMG_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/
   let mdImgResolver = null
   const setImageSrcResolver = (fn) => { mdImgResolver = fn }
+
+  // ---------- 数学公式（2026-10-06，仅 web；CLI 侧不渲染，Markdown.tsx 不挂 math 扩展） ----------
+  // 支持 $…$ 行内、$$…$$ 块级，另兼容 \(…\) 行内 / \[…\] 块级。抽取必须发生在 esc 之前、且在原文上——
+  // esc 会把 & < > " ' 转义，而 LaTeX 里的 a<b、& 对齐符、\alpha 需原样交给 KaTeX。
+  // 做法：先把围栏/行内代码遮罩（防公式误伤代码），再抽公式渲染成 HTML 存表、原文留 \u0002N\u0002 占位；
+  // 占位符全为控制字符，可安全穿过 esc。块级占位前后补 \n 独占一行，由 mdHtml 行循环还原为
+  // <div class="math-block">；行内占位留在段落文字里，由 mdInline 末尾还原。katex 未加载则整段跳过
+  // （$…$ 原样显示）。KaTeX 输出自身安全（trust 默认 false + 整体 esc），可直接进 innerHTML。
+  const MATH_PH = /\u0002(\d+)\u0002/g
+  let mathStore = null
+  function renderMath(body, displayMode) {
+    try {
+      return window.katex.renderToString(body, { displayMode, throwOnError: false, strict: false, output: 'html' })
+    } catch (_) { return null }
+  }
+  function extractMath(src) {
+    mathStore = null
+    if (typeof window === 'undefined' || !window.katex) return src
+    mathStore = []
+    const masked = []
+    let s = src.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, (m) => { masked.push(m); return `\u0003${masked.length - 1}\u0003` })
+    s = s.replace(/`[^`\n]*`/g, (m) => { masked.push(m); return `\u0003${masked.length - 1}\u0003` })
+    const put = (body, block) => {
+      const html = renderMath(body, block)
+      if (!html) return null
+      mathStore.push(html)
+      const ph = `\u0002${mathStore.length - 1}\u0002`
+      return block ? `\n${ph}\n` : ph
+    }
+    // 块级先于行内（否则 $$ 会被 $ 抢占）
+    s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, body) => put(body, true) ?? m)
+    s = s.replace(/\\\[([\s\S]+?)\\\]/g, (m, body) => put(body, true) ?? m)
+    s = s.replace(/\\\(([\s\S]+?)\\\)/g, (m, body) => put(body, false) ?? m)
+    // 行内 $…$：单行内、非空、首尾不留空白、不紧跟数字（避免误吃 $5 之类货币）
+    s = s.replace(/\$([^$\n]+?)\$/g, (m, body) => (/^\s|\s$/.test(body) || /^\d/.test(body) ? m : (put(body, false) ?? m)))
+    return s.replace(/\u0003(\d+)\u0003/g, (_, i) => masked[+i])
+  }
+  function restoreMath(s) {
+    return mathStore ? s.replace(MATH_PH, (_, i) => mathStore[+i]) : s
+  }
+
   function mdInline(s) {
     // s 必须是已转义文本（来自 mdHtml 入口）
     const codes = []
@@ -391,14 +432,14 @@
          .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
          .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
-    return s
+    return restoreMath(s)
   }
   // lineAttr（可选）= 行锚属性名（如 'data-l'）：渲染期把**源行号**写进 DOM，供编辑区选中引用
   // 反查选区位置（core/markdown.js 只做渲染，不知道选区；落锚是渲染时唯一能拿到源行号的地方）。
   // 不传 = 现状（会话消息渲染照旧，不带锚）。
   function mdHtml(src, lineAttr) {
     if (!src) return ''
-    const lines = esc(String(src)).split('\n')
+    const lines = esc(extractMath(String(src))).split('\n')
     const la = (n) => (lineAttr ? ` ${lineAttr}="${n}"` : '')
     // 段落内按源行拆成带锚的 span（一个段落可跨多行，锚落在每一行上而不是段落首行）
     const lw = (n, inner) => (lineAttr ? `<span ${lineAttr}="${n}">${inner}</span>` : inner)
@@ -455,6 +496,9 @@
         continue
       }
       if (inCode) { codeBuf.push(line); codeNums.push(i + 1); continue }
+      // 块级公式占位（extractMath 已渲染成 HTML 存 mathStore）：独占一行 → 输出块级容器
+      const mblk = /^\u0002(\d+)\u0002$/.exec(t)
+      if (mblk) { flushPara(); closeList(); html += `<div class="math-block"${la(i + 1)}>${mathStore[+mblk[1]]}</div>`; continue }
       const h = /^(#{1,4})\s+(.*)$/.exec(t)
       if (h) { flushPara(); closeList(); html += `<h${h[1].length}${la(i + 1)}>${mdInline(h[2])}</h${h[1].length}>`; continue }
       if (t.startsWith('&gt;')) {

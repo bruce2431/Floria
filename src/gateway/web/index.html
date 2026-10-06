@@ -23,7 +23,9 @@
   <link rel="icon" href="/icon.ico" type="image/x-icon" />
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
-  <link rel="stylesheet" href="/styles.css?v=462" />
+  <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=463" />
+  <link rel="stylesheet" href="/styles.css?v=463" />
 </head>
 <body>
 <div id="app">
@@ -376,6 +378,9 @@
 
 <div id="drop-overlay" hidden><div class="drop-hint">松开以添加图片</div></div>
 <div id="toast" class="toast" hidden></div>
-<script src="/app.js?v=462"></script>
+<!-- KaTeX（2026-10-06）：全局 katex（UMD），须在 app.js 之前加载——core/markdown.js 的公式预扫描
+     直接调 katex.renderToString；缺失时该模块跳过公式渲染（$…$ 原样显示），故脚本顺序是硬约束。 -->
+<script src="/vendor/katex/katex.min.js?v=463"></script>
+<script src="/app.js?v=463"></script>
 </body>
 </html>

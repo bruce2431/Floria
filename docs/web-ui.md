@@ -705,4 +705,18 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **刻意不改（保持内容原色）**：`#gate-screen` 门态白板（图片定案）、`.preview-frame`/`.ext-frame` 与 `.chart-embed` iframe（外部内容无暗色版，不反色，只外壳/边框改令牌）、彩色调色板 / 状态点 / 危险红。
 - **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v461）。
 
+## 57. 数学公式渲染（KaTeX，仅 web；CLI 不渲染）（2026-10-06）
+
+**能力**：消息流（及 work 阅读态 markdown 预览）里的 LaTeX 公式渲染成排版结果。**仅 web**——CLI（`components/Markdown.tsx`，`marked` 无 math 扩展）不渲染，公式作普通文本。
+
+- **语法**：`$…$` 行内、`$$…$$` 块级；另兼容 `\(…\)` 行内 / `\[…\]` 块级。定界符须成对；`$$` 块级先于 `$` 行内抽取（否则被 `$` 抢占）。
+- **渲染引擎**：`src/gateway/web/vendor/katex/`（KaTeX 0.16.11，`katex.min.js` 全局 UMD + `katex.min.css`），`index.html` 在 `/app.js` **之前**以 `<script>` 引入（`core/markdown.js` 直接读全局 `katex`）。`renderToString` 选项 `{ displayMode, throwOnError:false, strict:false, output:'html' }`——`output:'html'` 省去隐藏 MathML 层。**字体只随 woff2**（20 个，~296 KB）：css 里 `woff`/`ttf` 两条 `src` 已剥除（现代浏览器恒取 woff2，不留指向不存在文件的死链）。
+- **抽取时机**（`core/markdown.js` `extractMath`）：必须在 `esc` **之前、原文上**做——`esc` 会把 `& < > " '` 转义，而 LaTeX 的 `a<b`、`&` 对齐符、`\alpha` 需原样交给 KaTeX。管线：①遮罩围栏/行内代码（`\u0003N\u0003`，防公式误伤代码）；②抽公式 → KaTeX HTML 存 `mathStore`，原文留 `\u0002N\u0002` 占位（控制字符可安全穿过 `esc`）；③代码遮罩原样放回。
+- **还原**：块级占位（抽取时前后补 `\n` 独占一行）由 `mdHtml` 行循环识别 `/^\u0002(\d+)\u0002$/` → `<div class="math-block">`；行内占位随段落文字留在行内，由 `mdInline` 末尾 `restoreMath()` 还原。`katex` 全局缺失（脚本加载失败）时 `extractMath` 整段跳过，`$…$` 原样显示。
+- **假阳性防护**：行内 `$…$` 要求单行内、非空、**首尾不留空白、不紧跟数字**（避 `$5 and $10` 之类货币被误吃）。
+- **安全**：KaTeX 输出自身可信（`trust` 默认 false，不产 `<a>`/HTML），且公式内容在 `esc` 前抽取、渲染结果于 `mdInline` 末尾整体插入，不进任何再转义/再解析环节。
+- **样式**（`styles.css`）：`.md-math`（行内）/`.math-block`（块级，居中 + `overflow-x:auto`——`.katex-display` 是 `nowrap`，不设会撑破消息区）；字号 `1.06em`（KaTeX 默认 1.21em 相对正文偏大）。**昼/夜通用**：KaTeX 输出颜色全继承父级 `currentColor`，无需按主题另写覆盖。
+- **缓存**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v463）；`CORE` 预缓存 `katex.min.js`/`.css` + 全部 woff2 字体（保离线公式可排版）。
+- **探针锚点**：`probes/probe-math-render.ts`（16 断言，取 `core/markdown.js` 真实源码 + vendored katex 执行：`$$`块级/`$`行内/`\(\)`/`\[\]`、代码内 `$…$` 不误伤、货币不误吃、HTML 转义链未破、katex 缺失降级）。
+
 

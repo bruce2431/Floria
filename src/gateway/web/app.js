@@ -4842,34 +4842,39 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderProjSeat()
   }
 
-  // 模式 tab 的白块定位（唯一处）：把选中 .ms-btn 在轨道内的 offsetLeft/offsetWidth 写进 .ms-thumb 的
-  // 内联 left/width（.mode-switch 是 position:relative，即两钮的 offsetParent，量值可直接用）。
+  // 模式 tab「空位」定位（唯一处）：把当前 .ms-btn 的矩形以 left/right 内衬写进 .ms-thumb
+  // （.mode-switch 是 position:relative，即两钮的 offsetParent，量值可直接用）。
   // 侧栏折叠态下 #panel 虽 width:0，但 .panel-inner 仍持 --panel-w 宽、按钮尺寸不变（只是被 overflow
   // 裁掉），故任何时刻量都有效，无需等侧栏展开再定位。字体异步到位会改字宽 ⇒ 由 mountWork 在
-  // document.fonts.ready 后重量一次。
-  // work：白块不再是「钮上的浮丸」，而是与轨道上缘、选中侧外缘齐平的**整段**（左右各吃到 gap 中线、
-  // 外缘吃到轨道 padding 外沿），下缘由 CSS 延展贴侧栏白卡——「上/右没贴」的修复即在此（2026-10-06）。
+  // document.fonts.ready 后重量一次（那次不带变形动画）。
+  // 切换 = 空位「变形 + 位移」（2026-10-06 用户定案）：用 left/right 两个内衬而不是 left/width——
+  // 前缘（移动方向上的那条边）给短时长先到、后缘给长时长后到，中途两缘一快一慢 ⇒ 空位被拉长，
+  // 到位后收回成目标钮的形状；这就是「变形位移」的读数。方向性 transition 在此按方向写内联。
+  // 非切换的定位（初始化 / resize / 字体到位）一律 transition:none —— 否则首帧会播一次滑动。
+  // 空位归属（2026-10-06 二轮定案）：**落在非当前模式那侧**——处于的模式在卡片上（.ms-btn.on 回
+  // 卡面色），凹下去的那块给另一个模式。位置取 .ms-btn:not(.on)。
+  const MS_FAST = '0.16s cubic-bezier(0.2, 0.8, 0.3, 1)'
+  const MS_SLOW = '0.30s cubic-bezier(0.3, 1.04, 0.5, 1)'
+  let msAtFirst = null // 上一次空位停在哪一侧（null = 尚未定位）
   function positionMsThumb() {
     const sw = $('mode-switch')
     const th = sw && sw.querySelector('.ms-thumb')
-    const btn = sw && sw.querySelector('.ms-btn.on')
-    if (!th || !btn) return
-    const btns = sw.querySelectorAll('.ms-btn')
+    const btns = sw && sw.querySelectorAll('.ms-btn')
+    const btn = sw && sw.querySelector('.ms-btn:not(.on)')
+    if (!th || !btn || !btns || btns.length < 2) return
     const first = btn === btns[0]
-    if (state.sbMode === 'work') {
-      const gapMid = 1 // gap 2px 的中线
-      const left = first ? 0 : btn.offsetLeft - gapMid
-      const right = first ? btn.offsetLeft + btn.offsetWidth + gapMid : sw.clientWidth
-      th.style.left = left + 'px'
-      th.style.width = right - left + 'px'
-      th.style.borderTopLeftRadius = first ? '9px' : '6px'
-      th.style.borderTopRightRadius = first ? '6px' : '9px'
+    const moved = msAtFirst !== null && msAtFirst !== first
+    if (moved) {
+      // 去左侧：前缘 = 左缘 ⇒ left 快、right 慢；去右侧：前缘 = 右缘 ⇒ right 快、left 慢
+      th.style.transition = first
+        ? `left ${MS_FAST}, right ${MS_SLOW}`
+        : `right ${MS_FAST}, left ${MS_SLOW}`
     } else {
-      th.style.left = btn.offsetLeft + 'px'
-      th.style.width = btn.offsetWidth + 'px'
-      th.style.borderTopLeftRadius = ''
-      th.style.borderTopRightRadius = ''
+      th.style.transition = 'none'
     }
+    th.style.left = btn.offsetLeft + 'px'
+    th.style.right = sw.clientWidth - btn.offsetLeft - btn.offsetWidth + 'px'
+    msAtFirst = first
   }
 
   // 面板与主区布局按 state 落地。启动恢复与运行期切换共用这一条路径（无第二份初始化旁路）。
@@ -4880,7 +4885,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 退卡走 route('#/') 统一收口（顺带清管理/预览路由态、预览页注册件与后端保活心跳），不在此另起清点。
     if (on && currentCardId() && currentCardId() !== 'session') navigate('#/')
     document.querySelectorAll('.ms-btn').forEach((b) => b.classList.toggle('on', b.dataset.sbmode === state.sbMode))
-    positionMsThumb() // 选中钮换位 → 白块滑过去（transition 在 CSS）
+    positionMsThumb() // 选中钮换位 → 空位滑到另一侧（方向性 transition 由本函数写内联）
     // #panel.work：work 模式下隐藏顶栏 #panel-search（会话搜索的 chat 模式入口）——work 的 🔍 已覆盖
     // 当前 tab 的过滤，两者同为放大镜同屏并存即「两个搜索」的重复观感（样式见 styles.css 该段）
     $('panel').classList.toggle('work', on)

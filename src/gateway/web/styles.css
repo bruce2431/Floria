@@ -2198,27 +2198,28 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    .wk-show-* / .wk-preview 布局类）。
    本段只给样式，不含任何状态判断分支——「哪个 tab / 哪一列可见」全由类与 hidden 表达。 */
 
-/* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命） */
-.mode-switch { position: relative; display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
-/* 选中态白块（2026-10-06 用户定案「白块向下延展贴合侧栏卡」）：一块绝对定位的白块横向滑动承载选中态
-   （不再由 .ms-btn.on 各自换底色 ⇒ 切换是滑动动画，不是整块闪现）。work 模式下白块与轨道上缘/选中侧
-   外缘齐平（top 3px → 0；左右缘吃到 gap 中线与轨道 padding 外沿），并向下长出尾巴穿过 .panel-header
-   的 10px 底内边距接上下方白色侧栏卡，读作「选中的模式 tab 与它的面板连成一体」；chat 模式侧栏是
-   透明卡壳（露底板色）无卡可贴，白块就停在轨道内的一枚浮丸（四角 7px、不延展）。
-   几何全部由 work.js positionMsThumb() 实测写入（left/width/两上圆角），不依赖两钮等宽。 */
+/* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命）。
+   2026-10-06 用户定案：切换器里**没有任何胶囊元素**（既没有轨道底色，也没有滑动的白块）。卡面上
+   只有唯一一块「空位」——从卡面缺掉的一块（半透明暗底 + 内阴影 = 凹进去的读数），**空位落在非
+   当前模式那侧**（2026-10-06 二轮定案：处于的模式在卡片上；参考图 work 模式下 floria·chat 凹在
+   空位里、floria·work 是卡面裸字）。当前模式那侧**不画任何元素**——它就是所在表面本身（三轮定案
+   「要和背景同色」：给白片会在 chat 灰底上刺眼，与「卡片本身」相悖），只有字色不同。
+   切换 = 这块空位**变形 + 位移**：前缘先到、后缘后到 ⇒ 中途被拉长、到位后收回成该钮的形状
+   （方向性 transition 由 work.js positionMsThumb() 按方向写内联；本件不写 transition，避免初始
+   化/重排时误播动画）。 */
+.mode-switch { position: relative; display: flex; gap: 2px; border-radius: 9px; padding: 3px; }
+/* 唯一那块空位：left/right 内衬由 positionMsThumb() 实测写入（= 非当前钮的矩形），不依赖两钮等宽。
+   半透明暗底使其在 chat 灰底 / work 白卡上都读作下陷。 */
 .ms-thumb {
-  position: absolute; left: 3px; top: 3px; bottom: 3px; width: calc(50% - 4px);
-  border-radius: 7px; background: var(--bg); box-shadow: var(--shadow-sm); pointer-events: none;
-  transition: left 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), width 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    top 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), bottom 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
-    border-radius 0.24s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  position: absolute; left: 3px; right: 50%; top: 3px; bottom: 3px;
+  border-radius: 7px; background: rgba(0, 0, 0, 0.06);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.10); pointer-events: none;
 }
-/* work：白块上缘齐平 + 下延贴卡（.panel-header 底内边距 10px ⇒ 延 11px 恰好越过分界 1px，够融合又不
-   压到下方首个行件）——关掉投影，否则尾巴下缘的阴影落在白卡上会画出一道接缝（融合即无影）。
-   本条只管纵向；横向「上/右要贴」由 positionMsThumb 写内联几何（上圆角 9px 外侧 / 6px 内侧）。 */
-#app.work .ms-thumb { top: 0; bottom: -11px; border-radius: 9px 9px 0 0; box-shadow: none; }
 /* 两钮恒 font-weight:600（颜色区分选中）：400↔600 切换会让 CJK 字宽微变、分段控件宽度跳动。
-   底色由 .ms-thumb 承担，本钮只翻字色，且须压在白块之上（z-index:1）。 */
+   选中钮 = 当前模式「在卡片上」：**不画任何底色**（`background` 缺省 = transparent）⇒ 与所在表面
+   同色（work 白卡 ⇒ 裸字；chat 灰底 ⇒ 裸字，2026-10-06 三轮定案「要和背景同色」——此前给的
+   `--chat-bg` 白片在 chat 灰底上是一块刺眼的白，与「卡片本身」的读数相悖）；两钮都须压在空位
+   之上（z-index:1），只翻字色。 */
 .ms-btn { position: relative; z-index: 1; padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: -0.2px; color: var(--text-2); white-space: nowrap; transition: color 0.15s; }
 .ms-btn:hover { color: var(--text); }
 .ms-btn.on { color: var(--text); }

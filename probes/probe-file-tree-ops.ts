@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renameProjectEntry, sanitizeEntryName, trashProjectEntry, writeProjectFile } from '../src/gateway/localGateway.js'
+import { readProjectComments, renameProjectEntry, sanitizeEntryName, trashProjectEntry, writeProjectComments, writeProjectFile } from '../src/gateway/localGateway.js'
 
 let pass = 0
 let fail = 0
@@ -119,12 +119,32 @@ ok('删除逃逸 → 403', (() => { const r = trashProjectEntry(root, '../evil')
 ok('删除空 rel → 403', !trashProjectEntry(root, '').ok)
 ok('删除不存在 → 404', (() => { const r = trashProjectEntry(root, 'nope.txt'); return !r.ok && r.code === 404 })())
 
+// ---------- 评论批注（GET/POST /gateway/comments）----------
+ok('初始无 comments.json → 空列表', readProjectComments(root).length === 0)
+const cw1 = writeProjectComments(root, [
+  { id: 'c1', path: 'a2.txt', l0: 1, l1: 2, excerpt: 'x', body: 'hello', author: 'u', createdAt: '2026-10-06T00:00:00Z', resolved: false },
+])
+ok('写入成功且计数正确', cw1.ok && cw1.count === 1)
+ok('落盘在 .claude/comments.json（允许新建）', existsSync(join(root, '.claude', 'comments.json')))
+const cr1 = readProjectComments(root)
+ok('读回内容一致', cr1.length === 1 && cr1[0].body === 'hello' && cr1[0].path === 'a2.txt')
+const cw2 = writeProjectComments(root, [])
+ok('全量替换为空列表', cw2.ok && cw2.count === 0 && readProjectComments(root).length === 0)
+ok('非数组 → 400', (() => { const r = writeProjectComments(root, null as unknown as unknown[]); return !r.ok && r.code === 400 })())
+const cw3 = writeProjectComments(root, [{ id: 'a' }, 'bad', 3, null, { id: 'b' }])
+ok('非对象元素被剔除', cw3.ok && cw3.count === 2 && readProjectComments(root).length === 2)
+writeFileSync(join(root, '.claude', 'comments.json'), '{ not json')
+ok('坏 JSON → 空列表且不抛', readProjectComments(root).length === 0)
+writeFileSync(join(root, '.claude', 'comments.json'), JSON.stringify([1, 2]))
+ok('顶层非对象 → 空列表', readProjectComments(root).length === 0)
+
 // .trash 以 . 开头 → 不进 /gateway/project 文件树（walkProjectTree 跳过点开头条目，此处核对常量）
 const gw = readFileSync(join(import.meta.dir, '..', 'src/gateway/localGateway.ts'), 'utf8')
 ok('.trash 在 SKIP_TREE_DIRS 内', /SKIP_TREE_DIRS = new Set\(\[[^\]]*'\.trash'/.test(gw))
 ok('两个端点各自转译纯函数结果码', /file\/rename'\)[\s\S]{0,600}?sendJson\(res, rOut\.code/.test(gw) && /file\/delete'\)[\s\S]{0,600}?sendJson\(res, dOut\.code/.test(gw))
 ok('写端点转译纯函数结果码', /file\/write'\)[\s\S]{0,2000}?sendJson\(res, wOut\.code/.test(gw))
 ok('GET /gateway/file 带 ETag（写回冲突基线）', /ETag:/.test(gw) && /Last-Modified/.test(gw))
+ok('comments 两端点存在且转译结果码', /'\/gateway\/comments'/.test(gw) && /readProjectComments/.test(gw) && /writeProjectComments/.test(gw) && /gateway\/comments'\)[\s\S]{0,1200}?sendJson\(res, cOut\.code/.test(gw))
 
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${pass}/${pass + fail}`)

@@ -16,7 +16,7 @@ import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr } from '../sidebar/mgr.js'
 import { clearRailExt } from '../views/cards/ext/ext-card.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
-import { setSbMode, workScopeOk } from '../sidebar/work.js'
+import { setSbMode, syncWorkTabs, workScopeOk } from '../sidebar/work.js'
 import { openProjectPreview } from '../views/cards/preview/preview-card.js'
 import { hydrateExtCardId, openCard } from '../views/registry.js'
   // ---------- 路由 ----------
@@ -70,6 +70,7 @@ import { hydrateExtCardId, openCard } from '../views/registry.js'
       r.hash = sess ? hashOf(sess) : r.hash
     }
     state.currentHash = r.name === 'session' ? r.hash : ''
+    syncWorkTabs() // work 模式：把当前路由并入聊天 tab 开放集并重渲顶栏（chat 模式空跑）
     renderRecent()
     if (r.name === 'home') renderHome()
     // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进

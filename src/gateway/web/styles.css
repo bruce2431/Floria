@@ -1439,7 +1439,10 @@ body.token-gate #input-wrap { display: none; }
      窄窗口都会触发）。高度基准 calc(100vh-160px) 保持视口口径（卡恒通高，两者本就一致）。 */
   width: min(88%, 620px, calc(100vh - 160px));
   aspect-ratio: 1 / 1;
-  background: #fff;
+  /* 底色透明（2026-10-06）：角色图 state-newchat.webp 已去白底（RGBA，白→alpha=0），
+     stage 再铺白会把它重新框成白方块 ⇒ 在 work 下沉区（灰底板）里露馅。
+     承载面自会提供底色：空态在会话卡（白）内、token 门在 #gate-screen（白）内。 */
+  background: transparent;
 }
 .g-media { position: absolute; inset: 0; }
 .g-media img, .g-media video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
@@ -1496,10 +1499,17 @@ body.token-gate #input-wrap { display: none; }
    底板上——这才消掉「一条白柱子」的读法（Prism 06：圆弧属于内容卡，侧栏没有自身形状）。 */
 #sidebar {
   display: flex; height: 100%; position: relative; z-index: 10;
-  width: 0; background: transparent;
-  transition: width 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.3s ease, visibility 0.3s;
+  width: 0; background: transparent; padding: 0;
+  transition: width 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), padding 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.3s ease, visibility 0.3s;
 }
-#sidebar.open { width: var(--panel-w); }
+/* 展开态 = 一张圆角卡**壳**（2026-10-06 用户定案）：几何（圆角 / 外边距 / 2px 内边距）保留，
+   填充按模式分——chat 透明（透出底板 --plane，侧栏内容直接落底板，主区会话白卡与底板成对比）；
+   work 白卡（下方 :has 规则，与主区拼成同一张）。width 多出的 4px 被 2px padding 吃掉，内容列宽
+   仍是 --panel-w（全局 border-box）；折叠态 width:0 且 padding:0，不留白条。 */
+#sidebar.open { width: calc(var(--panel-w) + 4px); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent; border-radius: var(--radius); overflow: hidden; }
+/* work：侧栏与主区拼成**同一张白卡**（2026-10-06 用户定案）——右边不留缝、右角不圆，
+   与 #chat-area.work（左角不圆）严丝合缝；chat 模式侧栏是透明卡壳（上方规则）。 */
+#sidebar.open:has(#panel.work) { margin-right: 0; background: var(--chat-bg); border-radius: var(--radius) 0 0 var(--radius); }
 
 /* 预览页注册的侧栏快捷按钮样式（2026-09-23 SPEC §6.4，契约见 sidebar/rail-ext.js）。
    挂载点 #rail-ext 随折叠带在 2026-09-25 撤除，注册链与样式保留待命——落地位置定了接回即可。 */
@@ -1858,16 +1868,25 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
      按 240px（≤1023px 档的 --panel-w）窄化，本条宽度整条形同废弃（2026-09-25 手机实测：
      抽屉只有 240px，头部「已连接」被挤断行）。折叠态（无 .open）不设宽就跑 translateX(-100%)，
      宽度只在展开时有意义，故两态同值。
-     抽屉必须不透明（2026-09-23）：桌面侧栏是透明底板，但手机端它是盖在卡**之上**的浮层，
-     透明会透出下面的 #scrim 遮罩（z25）→ 抽屉发黑。此处显式给底板色。 */
+     抽屉必须不透明（2026-09-23）：桌面侧栏是卡片，手机端它是盖在卡**之上**的浮层，
+     透明会透出下面的 #scrim 遮罩（z25）→ 抽屉发黑。此处给白卡底（2026-10-06 改白卡）。
+     抽屉贴左缘，圆角只给右侧。 */
   #sidebar, #sidebar.open {
     position: absolute; top: 0; left: 0; bottom: 0; height: 100%;
-    width: min(300px, 84vw); z-index: 30; background: var(--plane);
+    width: min(300px, 84vw); z-index: 30; background: var(--chat-bg);
+    border-radius: 0 var(--radius) var(--radius) 0; overflow: hidden;
     transform: translateX(-100%);
     transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
     box-shadow: 8px 0 28px rgba(0, 0, 0, 0.16);
+    margin: 0; /* 桌面卡的 2px 浮缝在抽屉上不适用（贴屏缘） */
   }
   #sidebar.open { transform: none; box-shadow: none; }
+  /* 手机：主区是整屏，白卡拼缝/外缝一律退场（#app 本就地圆角 0、无留边） */
+  #sidebar.open:has(#panel.work) { border-radius: 0 var(--radius) var(--radius) 0; }
+  #chat-area.work { margin: 0; border-radius: 0; }
+  #chat-area.work > .wk-topbar { margin: 6px 6px 0; }
+  #chat-area.work > #work-editor,
+  #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) { margin: 0 6px 6px; }
   #panel, #sidebar.open #panel, .panel-inner { width: 100%; }
 
   /* 抽屉遮罩：侧栏滑入时盖住主区，点空白关闭 */
@@ -2168,9 +2187,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 }
 
 /* ============ 侧栏 chat / work 双模式（2026-09-25，参考 Prism） ============
-   状态源 = core/state.js 的 sbMode/projects/workProj/workFile/wkEditor/wkAssist；
-   落地 = sidebar/work.js 的 applySbMode()（切 #chat-panel / #work-panel 的 hidden + 主区 .work）。
-   本段只给样式，不含任何状态判断分支——「哪一栏可见」全由类与 hidden 表达。 */
+   状态源 = core/state.js 的 sbMode/projects/workProj/workFile/wkMainTab/wkAssist/wkPreview/wkPrevW；
+   落地 = sidebar/work.js 的 applySbMode()（切 #chat-panel / #work-panel 的 hidden + 主区 .work 与
+   .wk-show-* / .wk-preview 布局类）。
+   本段只给样式，不含任何状态判断分支——「哪个 tab / 哪一列可见」全由类与 hidden 表达。 */
 
 /* 顶部模式 tab（占原位 .floria-logo 的行；.floria-logo 元素已退役，旧规则保留待命） */
 .mode-switch { display: flex; gap: 2px; background: var(--active); border-radius: 9px; padding: 3px; }
@@ -2276,30 +2296,152 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-foot-ico img, .wk-foot-ico svg { width: 18px; height: 18px; border-radius: 4px; display: block; }
 .wk-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
 
-/* ============ work 主区两栏（编辑区 + 助手） ============
-   #work-editor 刻意不用 .view-card：它是 work 模式常驻栏，带该类会落入 registry 的
-   「槽里同一时刻恰好一张卡」语义。几何复制 .view-card（margin 2px / --radius / --chat-bg）。 */
-#work-editor { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
-#chat-area.work { flex-direction: row; }
-/* 栏宽不再写死 50%/均分：由 work.js 的 applyWorkFlex 按 state.wkFlex（每栏 grow）设内联 flex，
-   下面只是 JS 落地前的默认值（basis 0 ⇒ 宽 ∝ grow）。 */
-#chat-area.work > #work-editor { display: flex; flex: 1 1 0; min-width: 0; }
-#chat-area.work > #session-card { flex: 1 1 0; min-width: 0; }
-#chat-area.work.hide-editor > #work-editor { display: none; }
-#chat-area.work.hide-assist > #session-card { display: none; }
+/* ============ work 主区（下沉区 + 顶栏 tab + 预览列，2026-10-06 Prism 式改版） ============
+   #chat-area.work = grid 两行三列：
+     col1/row1   = .wk-topbar（下沉区顶栏 tab 条，work.js renderTopbar 渲 tab）
+     col1/row2   = #work-editor（文件 tab）/ #session-card（聊天 tab）二选一（.wk-show-* 类）
+     col2/row1-2 = .work-gutter（下沉区 ↔ 预览，唯一一条）
+     col3/row1-2 = #work-preview（常驻最右白卡）
+   下沉视觉：#work-editor / #session-card 在 work 下**无白卡底无 margin**（透出 #app 的 --plane）；
+   预览列保持白卡。预览关 → 列模板收成单列（:not(.wk-preview)），分界条与预览列一并消失。
+   #work-editor 刻意不用 .view-card：它是 work 常驻栏，带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。 */
+#work-editor { display: none; position: relative; min-height: 0; flex-direction: column; overflow: hidden; }
+#chat-area.work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7px var(--wk-pw, 420px);
+  grid-template-rows: auto minmax(0, 1fr);
+  /* 白卡右半边（左半边 = #sidebar.open，见「左侧侧栏」节）：两者等底同色、中缝零间距。
+     外留 2px 缝露底板（与 .view-card 的 margin 同款）。 */
+  margin: 2px 2px 2px 0;
+  background: var(--chat-bg);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+#chat-area.work:not(.wk-preview) { grid-template-columns: minmax(0, 1fr); }
+#chat-area.work > .wk-topbar { grid-column: 1; grid-row: 1; }
+#chat-area.work > #work-editor,
+#chat-area.work > #session-card { grid-column: 1; grid-row: 2; min-width: 0; }
 
-/* 分界条：拖动改左右相邻两栏的 grow 比（work.js）；.on 由 applyWorkFlex 判定（两侧都有可见栏）。
-   只在 work 模式 + 桌面出现；缝本身占 7px，视觉线是 ::before（hover / 拖拽中显形）。 */
+/* 下沉洞（2026-10-06 用户定案）＝白卡中「预留的一片圆角矩形」：顶栏格与内容格同底色、
+   同左右边距、上下各半个圆角，两格拼成一个圆角矩形，四周留 8px 白边。
+   底色写 --plane（底板灰）：视觉上就是「卡上挖了个洞露底板」——白卡在底下，涂灰外无他法
+   （CSS 无真正镂空），灰值与底板同源故等价。 */
+#chat-area.work > .wk-topbar {
+  background: var(--plane);
+  margin: 8px 8px 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+#chat-area.work > .work-gutter { grid-column: 2; grid-row: 1 / span 2; }
+#chat-area.work > #work-preview { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
+
+/* 下沉格二选一（.wk-show-* 由 work.js applyPanes 落，判据 = wkShownTab）。助手浮卡/收敛态是
+   position:absolute 脱流，故无论哪个 tab 在场都要保持 display（放最后按顺序胜出）。 */
+#chat-area.work > #work-editor,
+#chat-area.work > #session-card { display: none; }
+#chat-area.work.wk-show-file > #work-editor { display: flex; }
+#chat-area.work.wk-show-chat > #session-card { display: flex; }
+#chat-area.work > #session-card.wk-assist-float,
+#chat-area.work > #session-card.wk-assist-slim { display: flex; }
+/* 下沉洞下半：内容格（编辑区 / 会话卡）涂灰 + 下半圆角，与顶栏格拼成同一个圆角矩形。
+   浮卡（.wk-assist-float）/ 收敛条（.wk-assist-slim）是脱流的另一种形态，不参与拼洞，
+   故用 :not() 排除（否则本条特指度会盖掉它们各自的白卡底 / 透明壳）。 */
+#chat-area.work > #work-editor,
+#chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) {
+  background: var(--plane);
+  margin: 0 8px 8px;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+/* 下沉区顶栏 tab 条：[+] [聊天] [文件名]。透明条，pill 自绘（参考 Prism：透明底 + 描边 active）。 */
+.wk-topbar { display: none; align-items: center; gap: 6px; padding: 6px 10px 2px; min-width: 0; }
+#chat-area.work > .wk-topbar { display: flex; }
+.wk-tb-tabs { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.wk-tb-tabs::-webkit-scrollbar { display: none; }
+.wk-tb-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font-size: 13px; max-width: 220px; flex: none; }
+.wk-tb-pill:hover { background: var(--hover); color: var(--text-2); }
+.wk-tb-pill.on { background: var(--chat-bg); border-color: var(--border); color: var(--text); }
+.wk-tb-ico { display: flex; flex: none; }
+.wk-tb-ico svg { width: 14px; height: 14px; display: block; }
+.wk-tb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 聊天胶囊右端的关闭钮（×）：只从顶栏移除该 tab，不删会话。 */
+.wk-tb-x { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: -5px; border-radius: 4px; color: var(--text-3); font-size: 15px; line-height: 1; }
+.wk-tb-x:hover { background: var(--border); color: var(--text); }
+#wk-tb-new { flex: none; }
+
+/* 分界条：拖动改预览列宽（work.js bindGutter）；.on 由 applyWorkCols 判定（预览在场）。
+   缝本身占 7px，视觉线是 ::before（hover / 拖拽中显形）。 */
 .work-gutter { display: none; flex: none; width: 7px; align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
 #chat-area.work > .work-gutter.on { display: block; }
 .work-gutter::before { content: ''; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 2px; transform: translateX(-50%); border-radius: 1px; background: transparent; transition: background .15s; }
 .work-gutter:hover::before, .work-gutter.dragging::before { background: var(--border); }
 body.wk-resizing { cursor: col-resize; user-select: none; }
 
-/* 个性化工作区（第三栏，预览）：开关 = #wk-view-pop 的「预览」。与 #work-editor 同构的常驻栏，
-   内容由 mgr.js mountPreview 写进 .preview-shell；三栏并排时均分（1 1 0），关掉即隐藏不销毁。 */
+/* 个性化工作区（第三列，预览）：开关 = #wk-view-pop 的「预览」。常驻最右白卡，内容由 mgr.js
+   mountPreview 写进 .preview-shell；关掉即隐藏不销毁（帧留着，重开零重载）。 */
 #work-preview { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
-#chat-area.work.wk-preview > #work-preview { display: flex; flex: 1 1 0; min-width: 0; }
+#chat-area.work.wk-preview > #work-preview { display: flex; }
+
+/* ============ work 右栏 tab（预览 / 评论，2026-10-06）============
+   #work-preview 从「纯预览列」升级为「右栏」：顶一条 tab（.wk-pv-head）+ 两内容区互斥显隐
+   （#wk-pv-body = 预览帧容器，mountPreview 挂这里 / #wk-cmt = 评论面板）。tab 落地唯一处 =
+   work.js applyPvTab/setPvTab；顶栏评论胶囊 #wk-tb-comment 的 active 同源（同在 applyPvTab 落）。 */
+.wk-pv-head { flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.wk-pv-tab { height: 28px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font: inherit; font-size: 12.5px; cursor: pointer; }
+.wk-pv-tab:hover { background: var(--hover); color: var(--text-2); }
+.wk-pv-tab.on { background: var(--plane); border-color: var(--border); color: var(--text); }
+.wk-pv-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+/* 评论面板：顶过滤行 + 可滚列表 */
+.wk-cmt { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wk-cmt[hidden] { display: none; }
+.cmt-filters { flex: none; display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); }
+.cmt-f { height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-3); font: inherit; font-size: 12px; cursor: pointer; }
+.cmt-f:hover { background: var(--hover); color: var(--text-2); }
+.cmt-f.on { background: var(--plane); border-color: var(--border); color: var(--text); }
+.cmt-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 10px 14px; }
+.cmt-empty { padding: 28px 20px; font-size: 13px; color: var(--text-3); text-align: center; }
+.cmt-item { padding: 10px 11px; margin-top: 8px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--chat-bg); }
+.cmt-item.resolved { opacity: 0.55; }
+.cmt-head { display: flex; align-items: center; gap: 8px; }
+.cmt-loc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: none; background: transparent; color: #3b82f6; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.cmt-loc:hover { text-decoration: underline; }
+.cmt-time { flex: none; font-size: 11px; color: var(--text-3); }
+.cmt-ex { margin: 8px 0 0; padding: 4px 8px; border-left: 2px solid var(--border); color: var(--text-3); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 72px; overflow: hidden; }
+.cmt-text { margin-top: 8px; font-size: 13px; line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cmt-acts { margin-top: 8px; display: flex; gap: 6px; }
+.cmt-acts button { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.cmt-acts button:hover { background: var(--hover); color: var(--text); }
+.cmt-acts button.danger:hover { color: #e0603f; border-color: #e0603f; }
+/* 顶栏评论胶囊 active 态（.wk-ico 无 on 态；用 inset 描边避免边框改变尺寸致顶栏微跳） */
+#wk-tb-comment.on { background: var(--chat-bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+/* 原文评论标记（阅读态）：被批注的行/块加暖色底 + 左侧竖条；已解决 = 中性灰淡显。
+   命中元素既有块级（md 标题/引用/列表项）也有行内（段落行 span、代码行 span），故只用
+   background + inset 横条（不改盒模型，宽高零变化）。 */
+.cmt-mark { background: color-mix(in srgb, #e8b73c 26%, transparent); box-shadow: inset 2px 0 0 #d9a52f; border-radius: 3px; }
+.cmt-mark-res { background: color-mix(in srgb, var(--text-3) 15%, transparent); box-shadow: inset 2px 0 0 var(--border); }
+.cmt-flash { animation: cmtFlash 1.2s ease-out; }
+@keyframes cmtFlash {
+  0%, 55% { background: color-mix(in srgb, #e8b73c 55%, transparent); }
+  100% { background: color-mix(in srgb, #e8b73c 26%, transparent); }
+}
+
+/* 选区「添加评论」浮层（浅色，与 .quote-pop 同族；2026-10-06） */
+.cmt-pop {
+  position: fixed; z-index: 80; width: 300px; max-width: calc(100vw - 16px);
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; border-radius: 14px;
+  background: #fff; border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: rowMenuIn 0.12s ease-out;
+}
+.cmp-loc { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp-ex { margin: 0; padding: 4px 8px; border-left: 2px solid rgba(0, 0, 0, 0.12); color: #6b7280; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 84px; overflow: auto; }
+.cmp-in { width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; padding: 8px 10px; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 10px; outline: none; font: inherit; font-size: 13px; color: #1f2328; background: #fff; }
+.cmp-in:focus { border-color: #4176e6; }
+.cmp-in::placeholder { color: #9aa1a9; }
+.cmp-bar { display: flex; justify-content: flex-end; gap: 8px; }
+.cmp-bar button { height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.1); background: #fff; color: #1f2328; font: inherit; font-size: 13px; cursor: pointer; }
+.cmp-bar button:hover { background: rgba(0, 0, 0, 0.05); }
+.cmp-bar .cmp-ok { background: #4176e6; border-color: #4176e6; color: #fff; }
+.cmp-bar .cmp-ok:hover { background: #679efe; }
 
 /* ============ 助手三态（2026-09-27，与 Pj18 preview 的三态助手对齐） ============
    同一张 #session-card 的三个形态，靠类切换 + 内联几何，**绝不搬 DOM**（卡里挂着模块级 const 的
@@ -2326,9 +2468,11 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 
 /* 悬浮卡：脱流（position:absolute，包含块 = #chat-area ⇒ 坐标全用主区局部系，键盘整页平移、
    侧栏开合都不必换算视口）。left/top/width/height 由 work.js placeAssistFloat 写内联。
-   z-index 15：高于主区各栏，低于 .wk-file-open 的编辑区覆盖层（20，手机端点文件要看内容）。 */
-#session-card.wk-assist-float {
+   z-index 15：高于下沉区与预览列，低于更靠前的浮层。
+   白卡底/圆角必须在此显式给回（且选择器带 #chat-area.work 前缀压过下沉清零规则的特指度）。 */
+#chat-area.work > #session-card.wk-assist-float {
   position: absolute; z-index: 15; margin: 0; min-width: 0;
+  background: var(--chat-bg); border-radius: var(--radius);
   border: 1px solid var(--border); box-shadow: var(--shadow);
 }
 /* 收敛输入栏：壳透明无边框，形状全由 .wk-assist-pill 自己给。
@@ -2364,7 +2508,6 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-assist-pill:hover .wap-arrow { background: #679efe; }
 
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
-.wk-ed-back { display: none; }
 .wk-ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .wk-ed-body::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -2409,18 +2552,14 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-hl .hl-li { color: #ea580c; }
 .wk-ed-hl .hl-hr { color: var(--text-3); }
 
-/* 手机端（≤720px）：两栏不成立——常态只显示助手，点文件时编辑区以覆盖层全屏打开（返回键收起） */
+/* 手机端（≤720px）：grid 三列不成立 → 退化为单列 flex（顶栏 + 下沉格），预览列与分界条不出
+   （开关状态照常持久化，回宽屏即恢复）。tab 切换天然覆盖「点文件看内容」的场景。 */
 @media (max-width: 720px) {
-  #chat-area.work { flex-direction: column; }
-  #chat-area.work > .work-gutter { display: none; } /* 窄屏两栏不成立，分界条不出（开关状态照常持久化） */
-  #chat-area.work > #work-editor { display: none; }
-  #chat-area.work > #session-card { flex: 1; }
-  #chat-area.work.wk-file-open > #work-editor {
-    display: flex; position: absolute; inset: 2px; z-index: 20; margin: 0; border-radius: var(--radius);
-  }
-  /* 窄屏三栏不成立：预览栏不出（开关状态照常持久化，回宽屏即恢复） */
-  #chat-area.work.wk-preview > #work-preview { display: none; }
-  .wk-ed-back { display: inline-flex; }
+  #chat-area.work { display: flex; flex-direction: column; }
+  #chat-area.work > .work-gutter { display: none; }
+  #chat-area.work > #work-preview { display: none; }
+  #chat-area.work.wk-show-chat > #session-card { flex: 1 1 auto; }
+  #chat-area.work.wk-show-file > #work-editor { flex: 1 1 auto; }
 }
 
 /* 轮次导航轨（2026-10-02 dsh TurnNavigator 移植）：会话区右侧一列短线刻度，每格=一个轮次。
@@ -2430,12 +2569,12 @@ body.wk-assist-dragging iframe { pointer-events: none; }
    手机竖屏（≤640px）隐藏（平板竖屏 768–834 保留）。 */
 .turn-rail { position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 28px; z-index: 7; cursor: pointer; touch-action: none; }
 .turn-rail[hidden] { display: none; }
-.tr-scroller { max-height: min(420px, 62vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.tr-scroller::-webkit-scrollbar { display: none; }
-.tr-marks { position: relative; padding: 6px 0; }
-.tr-mark { position: relative; display: block; width: 100%; height: 10px; padding: 0; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
+/* 轨道**永不滚动**：刻度纵向 flex 均分，装不下时按比例压细（max-height 约束 → flex-shrink），
+   故任意多轮次都一屏可见——手指滑动纯逐格预览，不会再有「轨道自己上下滚」把刻度带走。 */
+.tr-marks { position: relative; display: flex; flex-direction: column; max-height: min(420px, 62vh); padding: 6px 0; }
+.tr-mark { position: relative; flex: 0 1 auto; display: block; width: 100%; height: 10px; min-height: 0; padding: 0; border: 0; border-radius: 8px; background: transparent; cursor: pointer; }
 .tr-mark::before {
-  content: ''; position: absolute; top: 50%; right: 0; width: 20px; height: 2px; border-radius: 2px;
+  content: ''; position: absolute; top: 50%; right: 0; width: 20px; height: min(2px, 62%); border-radius: 2px;
   background: var(--border); transform: translateY(-50%) scaleX(0.6); transform-origin: right center;
   transition: transform 0.14s ease, background-color 0.14s ease;
 }

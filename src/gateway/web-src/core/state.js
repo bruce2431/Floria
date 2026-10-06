@@ -34,25 +34,30 @@ import { ctx } from '../inputbar/ctx-meter.js'
   const state = { mode: 'list', pt: 'projects', panelOpen: false, panelPinned: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
     // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
-    // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
-    // wkPreview = 个性化工作区（第三栏，渲染当前项目预览，见 sidebar/work.js renderWorkPreview）。
-    // wkAssistMode = 助手栏形态（'side'=靠栏，主区一栏 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
+    // workProj/workFile = 当前项目与打开的文件（项目内相对路径）；wkPreview = 预览列（最右，常驻）。
+    // wkMainTab = 下沉区当前 tab（'chat' 助手 / 'file' 编辑区），同时只显一个；
+    // wkAssist = 聊天 tab 是否在场（全局，不按项目分槽）；wkPrevW = 预览列宽 px（拖分界条调，见 work.js applyWorkCols）。
+    // wkAssistMode = 助手形态（'side'=靠栏 = 聊天 tab 内容 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
     // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
-    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
+    wkMainTab: 'chat', wkPrevW: 420,
+    // wkChats = 下沉区打开的聊天 tab 开放集（浏览器 tab 模型）：条目 = 会话 hash，或 'new'（空对话 /
+    // 首页的哨兵键）。真源，随 saveWork 持久化；增/删/切换唯一口 = sidebar/work.js（wkEnsureTab /
+    // wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
+    wkChats: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // wkEdit = 编辑区模式（false=阅读（渲染/pre），true=源码编辑）。跨文件记忆（打开下一个文件沿用同一模式），
     // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
     wkEdit: false,
-    // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
-    // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
-    wkFlex: { editor: 1, assist: 1, preview: 1 },
-    // wkPanes = 视图浮层四开关（编辑区/助手/预览/侧边栏）按项目分槽：<项目 label> → 四开关取值。
-    // 无槽 = 用 WK_PANES_DEF（与上面 state 初值同源）；未选项目（workProj 空）不落槽——那时开关只是
-    // 当前会话内的即时值。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
-    wkPanes: {} }
+    // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
+    // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
+    wkPanes: {},
+    // wkPvTab = 右栏（#work-preview）当前 tab：'preview'（项目预览，默认）| 'comments'（评论面板，
+    // 2026-10-06）。全局一份（不按项目分槽），随 saveWork 持久化；判定/落地唯一处 = sidebar/work.js applyPvTab。
+    wkPvTab: 'preview' }
 
-  // 四开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
-  const WK_PANES_DEF = { editor: true, assist: true, workspace: false, sidebar: false }
+  // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
+  const WK_PANES_DEF = { workspace: true, sidebar: false }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -83,26 +88,24 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
     } catch { /* 忽略 */ }
   }
-  // 四开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
+  // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
   // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
   function stashWorkPanes() {
     if (!state.workProj) return
-    state.wkPanes[state.workProj] = { editor: !!state.wkEditor, assist: !!state.wkAssist, workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+    state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
   }
-  // 槽 → 四开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
+  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
   // applySidebarPin）负责——纯函数不许碰 DOM。
   function loadWorkPanes(label) {
     const s = (label && state.wkPanes[label]) || null
     const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
-    state.wkEditor = val('editor')
-    state.wkAssist = val('assist')
     state.wkPreview = val('workspace')
     state.panelPinned = val('sidebar')
   }
-  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽
   function saveWork() {
-    stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex, wkEdit: !!state.wkEdit })
+    stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkChats: state.wkChats, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkEdit: !!state.wkEdit, wkPvTab: state.wkPvTab })
   }
   function loadWork() {
     try {
@@ -116,13 +119,15 @@ import { ctx } from '../inputbar/ctx-meter.js'
       if (d.wkPanes && typeof d.wkPanes === 'object') {
         for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
       }
-      loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
+      loadWorkPanes(state.workProj) // 两开关 = 恢复项目的槽（无槽回落缺省）
+      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
+      if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
+      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((k) => typeof k === 'string' && k)
+      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
       if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
-      if (d.wkFlex && typeof d.wkFlex === 'object') {
-        for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
-      }
+      if (d.wkPvTab === 'preview' || d.wkPvTab === 'comments') state.wkPvTab = d.wkPvTab
     } catch { /* 忽略 */ }
   }
   let ALL = []

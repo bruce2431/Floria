@@ -299,6 +299,15 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 **`POST /gateway/file/write`**（2026-10-05，work 编辑区写回侧，[web-ui.md](web-ui.md) §54）body `{label, path, content, baseMtime?}` → `writeProjectFile(projRoot, path, content, baseMtime)`。**只改已存在文件的内容，不新建/不删除**；`path` 越界与空 `path` → **403**，不存在或为目录 → **404**。**乐观并发（不静默覆盖）**：给了 `baseMtime` 即与当前 `statSync().mtimeMs` **精确比对**（非区间容差），不等 → **409 `conflict`**（磁盘已被外部改动，调用方须显式处置）；不给则强制覆盖。成功 → `{ok, path, mtime}`（新 mtime = 下次保存的基线）。body 上限 `MAX_FILE_WRITE_BYTES = 4 MB`（对齐读侧，超限 413）。**读侧配套**：`GET /gateway/file` 新增 `ETag: "<mtimeMs>"` + `Last-Modified`（ETag 用毫秒级 mtime——`Last-Modified` 只有秒级、无法表达同一秒内两次写），编辑区即以此作基线回传。
 
-- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清）。
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清；评论读写 10 例见 §17）。
+
+## 17. 项目评论批注端点（`/gateway/comments`，2026-10-06）
+
+work 右栏评论 tab + 选区「添加评论」的存取侧（[web-ui.md](web-ui.md) §55）。存 `<项目根>/.claude/comments.json`，结构 `{version:1, comments:[...]}`，`comment = {id, path, l0, l1, excerpt, body, author, createdAt, resolved}`。
+
+- **`GET /gateway/comments?label=`** → `{comments:[...]}`。仅命中 `scope==='project'` 的项目，未找到 → **404**。读 `readProjectComments(projRoot)`：缺文件 / 坏 JSON / 顶层非对象 / `comments` 非数组 → 一律静默返回 `[]`；数组内非对象元素被过滤。
+- **`POST /gateway/comments`** body `{label, comments:[]}` → `writeProjectComments(projRoot, comments)`。**每次整份替换**（前端是唯一写入方，改内存副本后整份回写，不做增量合并）；`comments` 非数组 → **400**；成功 `{ok:true, count}`。写入**建 `.claude/` 目录且 create-if-missing**（`writeProjectFile` 只改已存在文件、不新建，故评论另设端点）。
+- 与文件树写端点同构：只解析 `label` 找项目根，语义/防护在导出纯函数里，端点即「纯函数结果码 → HTTP 码」直译；受 `/gateway/*` token/cookie 校验保护。
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（评论段 10 例：空读、写+计数、落 `.claude/comments.json`、回读、整份替换、非数组 400、非对象元素过滤、坏 JSON / 顶层非对象 → 空、两端点存在且转译结果码；临时树 `os.tmpdir()` 自清）。
 
 **读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款）现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按相对路径读盘，`.claude/images/` 仅是普通路径。**`label` 不做 scope 筛选**：项目会话 `label`=项目名（解析到项目根），全局根会话 `label`=`全局根 · 散装对话`（解析到工作区根）——两者标签空间不重叠（项目 label 是目录名、不含 `·`），故全局会话同样能取图。单图受 `GET /gateway/file` 的 4 MB 上限约束。

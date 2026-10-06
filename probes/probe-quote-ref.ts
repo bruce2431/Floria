@@ -350,10 +350,10 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
 // ---- 5. 编辑区行号唯一来源 = DOM 行锚（渲染期落 data-l）----
 // 反例（已根治）：拿「渲染后的选中文本」回查 markdown 原文——渲染把 `**`/`` ` ``/链接等格式符丢了，
 // 选中一旦跨在格式符边界上（如「收尾必做清单：」对 `**收尾必做清单**：`）indexOf 必然 -1 ⇒ 行号丢失。
+// 注：v3.17.0 起 work 编辑区引入源码编辑，wkEdText 转为 textarea 缓冲真源（合法状态源）；
+// 行锚不变量收敛为「markdown 预览渲染必传 'data-l'」——quote.js 侧仍不读 wkEdText（见 §4）。
 const work = read(resolve(SRC, 'sidebar/work.js'))
-if (!work.includes('wkEdText')) ok('work.js 已退役原文缓存 wkEdText（少一个状态源）')
-else bad('work.js 仍留 wkEdText —— 与行锚双轨')
-if (/mdHtml\(text, 'data-l'\)/.test(work)) ok("work.js 渲染 markdown 预览时传行锚（mdHtml(text, 'data-l')）")
+if (/mdHtml\([A-Za-z_$][\w$]*,\s*'data-l'\)/.test(work)) ok("work.js 渲染 markdown 预览时传行锚（mdHtml(<src>, 'data-l')）")
 else bad('work.js 的 markdown 预览未落行锚')
 if (/\[data-l\]|querySelector\('pre\.wk-code'\)/.test(q) && /QUOTE_LINE_ATTR = 'data-l'/.test(q)) ok('quote.js 行锚常量与纯文本偏移两条路径并存')
 else bad('quote.js 未按 data-l 取行')

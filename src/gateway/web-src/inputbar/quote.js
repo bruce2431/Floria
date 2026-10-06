@@ -5,6 +5,7 @@ import { esc, inputEl, messagesEl, state } from '../core/state.js'
 import { findSession } from '../core/sessions.js'
 import { quoteActions } from '../views/registry.js'
 import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'
+import { openCommentComposer } from '../sidebar/comments.js'
 import { gwSend, syncGwSend } from './send.js'
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
@@ -179,9 +180,14 @@ import { gwSend, syncGwSend } from './send.js'
   // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
   const QUOTE_BUILTIN_ID = 'ai-edit'
-  function quoteActionRows() {
+  // 「添加评论」（2026-10-06）：只对**文件选区**在场——评论对象 = 文件 + 行范围（kind:'file'），
+  // 回复/PDF 选区没有文件位置可锚。落地 = sidebar/comments.js 的 openCommentComposer（另一条内置动作，
+  // 不进 AI 编辑的输入栏链）。同 id 申报行同样被略过（与 ai-edit 一致：内置优先）。
+  const QUOTE_COMMENT_ID = 'comment'
+  function quoteActionRows(snap) {
     const rows = [{ id: QUOTE_BUILTIN_ID, title: '使用 AI 编辑', builtin: true }]
-    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID) rows.push(a)
+    if (snap && snap.kind === 'file' && snap.file) rows.push({ id: QUOTE_COMMENT_ID, title: '添加评论', icon: 'msg', builtin: true })
+    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID && a.id !== QUOTE_COMMENT_ID) rows.push(a)
     return rows
   }
   function quoteActionRowHtml(a) {
@@ -203,7 +209,7 @@ import { gwSend, syncGwSend } from './send.js'
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
-      quoteActionRows().map(quoteActionRowHtml).join('') +
+      quoteActionRows(snap).map(quoteActionRowHtml).join('') +
       '<div class="qp-bar">' +
         '<input class="qp-in" type="text" placeholder="对这段说点什么…" aria-label="引用说明" />' +
         '<button type="button" class="qp-send" title="发送" aria-label="发送"></button>' +
@@ -222,6 +228,7 @@ import { gwSend, syncGwSend } from './send.js'
       b.addEventListener('click', () => {
         const id = b.dataset.qact
         if (id === QUOTE_BUILTIN_ID) quoteStash(snap)
+        else if (id === QUOTE_COMMENT_ID) { closeQuotePop(); openCommentComposer(snap) }
         else quoteRunAction(id, snap)
       }),
     )

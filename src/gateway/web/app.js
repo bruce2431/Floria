@@ -229,25 +229,30 @@
   const state = { mode: 'list', pt: 'projects', panelOpen: false, panelPinned: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
     // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
-    // workProj/workFile = 当前项目与只读打开的文件（项目内相对路径）；wkEditor/wkAssist = 主区两栏开关；
-    // wkPreview = 个性化工作区（第三栏，渲染当前项目预览，见 sidebar/work.js renderWorkPreview）。
-    // wkAssistMode = 助手栏形态（'side'=靠栏，主区一栏 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
+    // workProj/workFile = 当前项目与打开的文件（项目内相对路径）；wkPreview = 预览列（最右，常驻）。
+    // wkMainTab = 下沉区当前 tab（'chat' 助手 / 'file' 编辑区），同时只显一个；
+    // wkAssist = 聊天 tab 是否在场（全局，不按项目分槽）；wkPrevW = 预览列宽 px（拖分界条调，见 work.js applyWorkCols）。
+    // wkAssistMode = 助手形态（'side'=靠栏 = 聊天 tab 内容 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
     // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
-    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkEditor: true, wkAssist: true, wkPreview: false,
+    sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
+    wkMainTab: 'chat', wkPrevW: 420,
+    // wkChats = 下沉区打开的聊天 tab 开放集（浏览器 tab 模型）：条目 = 会话 hash，或 'new'（空对话 /
+    // 首页的哨兵键）。真源，随 saveWork 持久化；增/删/切换唯一口 = sidebar/work.js（wkEnsureTab /
+    // wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
+    wkChats: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // wkEdit = 编辑区模式（false=阅读（渲染/pre），true=源码编辑）。跨文件记忆（打开下一个文件沿用同一模式），
     // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
     wkEdit: false,
-    // wkFlex = work 主区三栏的 flex-grow（拖分界条调宽，见 sidebar/work.js applyWorkFlex）；任意相邻
-    // 可见栏之间拖动时只重分配这两栏的 grow，其余栏不受影响。
-    wkFlex: { editor: 1, assist: 1, preview: 1 },
-    // wkPanes = 视图浮层四开关（编辑区/助手/预览/侧边栏）按项目分槽：<项目 label> → 四开关取值。
-    // 无槽 = 用 WK_PANES_DEF（与上面 state 初值同源）；未选项目（workProj 空）不落槽——那时开关只是
-    // 当前会话内的即时值。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
-    wkPanes: {} }
+    // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
+    // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
+    wkPanes: {},
+    // wkPvTab = 右栏（#work-preview）当前 tab：'preview'（项目预览，默认）| 'comments'（评论面板，
+    // 2026-10-06）。全局一份（不按项目分槽），随 saveWork 持久化；判定/落地唯一处 = sidebar/work.js applyPvTab。
+    wkPvTab: 'preview' }
 
-  // 四开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
-  const WK_PANES_DEF = { editor: true, assist: true, workspace: false, sidebar: false }
+  // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
+  const WK_PANES_DEF = { workspace: true, sidebar: false }
 
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -278,26 +283,24 @@
       if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
     } catch { /* 忽略 */ }
   }
-  // 四开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
+  // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
   // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
   function stashWorkPanes() {
     if (!state.workProj) return
-    state.wkPanes[state.workProj] = { editor: !!state.wkEditor, assist: !!state.wkAssist, workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+    state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
   }
-  // 槽 → 四开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
+  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
   // applySidebarPin）负责——纯函数不许碰 DOM。
   function loadWorkPanes(label) {
     const s = (label && state.wkPanes[label]) || null
     const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
-    state.wkEditor = val('editor')
-    state.wkAssist = val('assist')
     state.wkPreview = val('workspace')
     state.panelPinned = val('sidebar')
   }
-  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两栏开关
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽
   function saveWork() {
-    stashWorkPanes() // 四开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkFlex: state.wkFlex, wkEdit: !!state.wkEdit })
+    stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkChats: state.wkChats, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkEdit: !!state.wkEdit, wkPvTab: state.wkPvTab })
   }
   function loadWork() {
     try {
@@ -311,13 +314,15 @@
       if (d.wkPanes && typeof d.wkPanes === 'object') {
         for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
       }
-      loadWorkPanes(state.workProj) // 四开关 = 恢复项目的槽（无槽回落缺省）
+      loadWorkPanes(state.workProj) // 两开关 = 恢复项目的槽（无槽回落缺省）
+      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
+      if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
+      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((k) => typeof k === 'string' && k)
+      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
       if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
-      if (d.wkFlex && typeof d.wkFlex === 'object') {
-        for (const k of ['editor', 'assist', 'preview']) if (typeof d.wkFlex[k] === 'number' && d.wkFlex[k] > 0) state.wkFlex[k] = d.wkFlex[k]
-      }
+      if (d.wkPvTab === 'preview' || d.wkPvTab === 'comments') state.wkPvTab = d.wkPvTab
     } catch { /* 忽略 */ }
   }
   let ALL = []
@@ -1438,6 +1443,7 @@ function setSessionCwd(v) { sessionCwd = v }
       r.hash = sess ? hashOf(sess) : r.hash
     }
     state.currentHash = r.name === 'session' ? r.hash : ''
+    syncWorkTabs() // work 模式：把当前路由并入聊天 tab 开放集并重渲顶栏（chat 模式空跑）
     renderRecent()
     if (r.name === 'home') renderHome()
     // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进
@@ -4791,20 +4797,23 @@ function setFirstSendHash(v) { firstSendHash = v }
   renderMgrTabs()
 
   // ---------- work 模式侧栏（Prism 式） ----------
-  // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
-  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
-  // 另按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽（见 selectProject）。
+  // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
+  // wkPreview / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
+  // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
-  // 主区：sbMode=work → #chat-area 加 .work（flex-direction:row），#work-editor 与 #session-card
-  // 并排成两栏；两栏开关只控制显隐，**至少保留一栏**（全关会让主区空白，属无效态）。
-  // 与「管理/预览卡」互斥：那两者是 chat 模式的视图，route.js 进入 mgr/preview 时会调 setSbMode('chat')。
+  // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 预览列）。下沉区顶部一条
+  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚（命名
+  // = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
+  // 文件）；预览列常驻最右（开关只控显隐）。不变量 = 聊天 / 文件 / 预览 **至少一栏在场**，唯一判定点
+  // applyPanes。与「管理/预览卡」互斥：route.js 进 mgr/preview 时 setSbMode('chat')。
 
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
+  const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
@@ -4847,7 +4856,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('chat-panel').hidden = on
     $('work-panel').hidden = !on
     chatArea.classList.toggle('work', on)
-    if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open', 'wk-preview')
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) {
@@ -4861,12 +4869,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
   }
 
-  // 浮层各开关的真源：编辑区/助手 = work 主区栏，预览 = 第三栏（个性化工作区），
-  // 侧边栏 = 侧栏是否**被主动打开**（state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen
-  // ——后者含左缘悬停预览式唤出，那种瞬时露出不是「界面常在」，开关不该跟亮。
+  // 浮层两开关的真源：预览 = 第三列（个性化工作区），侧边栏 = 侧栏是否**被主动打开**
+  // （state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen——后者含左缘悬停预览式唤出，
+  // 那种瞬时露出不是「界面常在」，开关不该跟亮。
   function paneOn(k) {
-    if (k === 'editor') return state.wkEditor
-    if (k === 'assist') return state.wkAssist
     if (k === 'workspace') return state.wkPreview
     return !!state.panelPinned
   }
@@ -4885,110 +4891,166 @@ function setFirstSendHash(v) { firstSendHash = v }
     setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
   }
 
-  // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
-  // 三栏都算数——只看编辑区+助手会让「预览还开着时关掉助手」被误判成全关（2026-09-26 实报）。
+  // 下沉区当前显示的内容（唯一判定）：助手靠栏时按 wkMainTab（要看文件且确有文件才给 file，
+  // 否则回 chat）；助手脱流（float/slim）时它不在下沉格里 ⇒ 有文件顶上来、没有就空。'' = 下沉格空。
+  function wkShownTab() {
+    if (wkAssistInFlow()) return state.wkMainTab === 'file' && state.workFile ? 'file' : 'chat'
+    return state.workFile ? 'file' : ''
+  }
+
+  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats，条目 = 会话 hash 或 WK_NEW_TAB。
+  // 激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。增/删/渲染的唯一口都在本模块。
+  const wkActiveKey = () => state.currentHash || WK_NEW_TAB
+  const wkKeyHash = (key) => (key === WK_NEW_TAB ? '' : key)
+  const wkTabName = (key) => {
+    if (key === WK_NEW_TAB) return '新对话'
+    const s = findSession(key)
+    return (s && s.title) || '未命名会话'
+  }
+  function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 关一枚 tab（× 只从顶栏移除，不删会话）。激活项被关 → 切右邻 / 左邻；一枚不剩且文件 tab 与预览
+  // 都不在场 → 保底重开空对话 tab（守「聊天 / 文件 / 预览至少一栏在场」不变量）。
+  function wkCloseTab(key) {
+    const i = state.wkChats.indexOf(key)
+    if (i < 0) return
+    const active = wkActiveKey() === key
+    state.wkChats.splice(i, 1)
+    if (!active) { applyPanes(); saveWork(); return }
+    const next = state.wkChats[i] != null ? state.wkChats[i] : state.wkChats[i - 1]
+    if (next != null) {
+      navigate(next === WK_NEW_TAB ? '#/' : '#/' + encodeURIComponent(next))
+      applyPanes(); saveWork(); return
+    }
+    state.wkAssist = false // 聊天 tab 全关：收起聊天栏（文件 / 预览还在即可）
+    if (state.sbMode === 'work' && !state.workFile && !state.wkPreview) {
+      state.wkAssist = true
+      wkEnsureTab(WK_NEW_TAB)
+      navigate('#/')
+    }
+    applyPanes(); saveWork()
+  }
+  // 路由落地后并入开放集并重渲顶栏（唯一外部入口，chat/route.js 调）：仅 work + 聊天栏在场时插手。
+  function syncWorkTabs() {
+    if (state.sbMode !== 'work' || !state.wkAssist) return
+    wkEnsureTab(wkActiveKey())
+    renderTopbar()
+  }
+
+  // 布局落地（不变量判定唯一处 + 各布局类的唯一写口）：聊天 tab / 文件 tab / 预览至少一个在场，
+  // 全无 → 强制开助手（聊天 tab，唯一还能承载内容的常驻件）。判定仍是这一处。
   function applyPanes() {
     if (state.sbMode === 'work') {
-      // 不变量（2026-09-27 随助手脱流更新）：**编辑区 / 预览至少一栏**——助手悬浮或收成输入栏时不占列，
-      // 不能再用它兜底。全关 → 强制打开编辑区（唯一还能承载内容的常驻栏）。判定仍是这一处。
-      if (!state.wkEditor && !state.wkPreview && !wkAssistInFlow()) {
-        state.wkEditor = true
+      if (!state.wkAssist && !state.workFile && !state.wkPreview) {
+        state.wkAssist = true
+        state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      chatArea.classList.toggle('hide-editor', !state.wkEditor)
-      chatArea.classList.toggle('hide-assist', !state.wkAssist)
+      if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      const shown = wkShownTab()
+      chatArea.classList.toggle('wk-show-chat', shown === 'chat')
+      chatArea.classList.toggle('wk-show-file', shown === 'file')
       chatArea.classList.toggle('wk-preview', !!state.wkPreview)
+    } else {
+      chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
     syncPaneRows()
-    applyWorkFlex()
+    applyWorkCols()
+    renderTopbar()
+    applyPvTab()
   }
 
-  // ---------- 主区栏宽（分界条拖拽，参考 Pj18 preview 的 #divider/#divider-chat）----------
-  // 栏宽真源 = state.wkFlex（三栏各自的 flex-grow，basis 0 ⇒ 宽 ∝ grow），拖某条缝只重分配它左右
-  // 相邻两可见栏的 grow、其余不动。缝显隐同理按「左右是否都有可见栏」实时判定，故任意相邻可见栏之间
-  // 恒有且只有一条缝（栏隐藏时夹着它的缝自动消失，不会出现两条挨着的空缝）。
-  const PANE_EL = { editor: () => $('work-editor'), assist: () => $('session-card'), preview: () => $('work-preview') }
-  function paneEl(k) { return PANE_EL[k]() }
-  // 助手脱流（float / slim）时它不在 flex 流里，但仍 offsetWidth>0 —— 若不排除，预览列与浮卡之间会凭空
-  // 多出一条分界条（nearPane 把浮卡当右邻）。in-flow 判据由 wkAssistInFlow 单点给（见「助手三态」段）。
-  function paneVisible(el) {
-    if (el === sessionCard) return wkAssistInFlow()
-    return !!el && el.offsetWidth > 0 && getComputedStyle(el).display !== 'none'
-  }
-  // 沿 DOM 序找 el 左/右第一个可见栏（跳过非栏兄弟与隐藏栏）；dir = -1 左 / +1 右。
-  // 只认主区三栏（paneKey 查表），不认 `#chat-area` 的其它槽级兄弟：`#gate-screen`（token 门全屏浮层，
-  // 满尺寸、display 非 none）会被 paneVisible 判成可见栏，令分界条 g1 误配有右邻 → 门后凭空多一条
-  // 7px 假缝（门已 hidden 但 applyWorkFlex 不再重跑）；`#menu-btn` 等绝对定位件同理。
-  function nearPane(g, dir) {
-    const key = dir < 0 ? 'previousElementSibling' : 'nextElementSibling'
-    for (let el = g[key]; el; el = el[key]) {
-      if (!paneKey(el)) continue
-      if (paneVisible(el)) return el
+  // 右栏（#work-preview）tab 落地（唯一处）：'preview'（预览帧）/ 'comments'（评论面板）互斥显隐。
+  // 状态源 = state.wkPvTab（persist）；预览帧的**挂载**由 renderWorkPreview 负责，本函数只管 tab UI 与
+  // 面板显隐。胶囊（#wk-tb-comment）的 active 态也在此同步。
+  function applyPvTab() {
+    const on = state.wkPvTab === 'comments'
+    const pv = $('work-preview')
+    if (pv) {
+      pv.classList.toggle('pv-comments', on)
+      pv.querySelectorAll('.wk-pv-tab').forEach((b) => b.classList.toggle('on', (b.dataset.wkpv === 'comments') === on))
     }
-    return null
+    const body = $('wk-pv-body')
+    if (body) body.hidden = on
+    const cm = $('wk-cmt')
+    if (cm) cm.hidden = !on
+    const cap = $('wk-tb-comment')
+    if (cap) cap.classList.toggle('on', on)
   }
-  function paneKey(el) {
-    for (const k of Object.keys(PANE_EL)) if (paneEl(k) === el) return k
-    return ''
+
+  // 切 tab（唯一入口）：预览 tab → 挂预览帧；评论 tab → 拉/渲评论面板。saveWork 持久化。
+  function setPvTab(tab) {
+    state.wkPvTab = tab === 'comments' ? 'comments' : 'preview'
+    applyPvTab()
+    if (state.wkPvTab === 'preview') renderWorkPreview()
+    else {
+      cmtLoad(state.workProj)
+      cmtRender()
+    }
+    saveWork()
   }
-  function applyWorkFlex() {
+
+  // 顶栏「评论」胶囊：点开右栏并切到评论 tab；已在评论 tab 时再点 → 回预览 tab（不关右栏）。
+  function toggleComments() {
+    const back = state.wkPreview && state.wkPvTab === 'comments'
+    state.wkPreview = true // 胶囊点击恒确保右栏在场（未开则开）
+    state.wkPvTab = back ? 'preview' : 'comments'
+    applyPanes() // 右栏在场落地（列宽 + tab 渲染 + applyPvTab）
+    setPvTab(state.wkPvTab)
+  }
+
+  // 顶栏 tab 条（唯一渲染口）：[+] [聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
+  // 命名用会话标题（空对话 = 「新对话」）；active = 当前路由命中项（wkActiveKey），与下沉区显示同源
+  // （wkShownTab，点浮起后胶囊自然熄、文件 pill 亮）。文件 pill 不变。× 关 tab 由点击委托处理。
+  function renderTopbar() {
+    const box = $('wk-tb-tabs')
+    if (!box) return
+    if (state.sbMode !== 'work') { if (box.innerHTML) box.innerHTML = ''; return }
+    const shown = wkShownTab()
+    const active = wkActiveKey()
+    const parts = []
+    if (state.wkAssist) {
+      for (const key of state.wkChats) {
+        const name = esc(wkTabName(key))
+        parts.push(`<button class="wk-tb-pill${shown === 'chat' && key === active ? ' on' : ''}" data-wkchat="${esc(key)}" title="${name}"><span class="wk-tb-name">${name}</span><span class="wk-tb-x" title="关闭">×</span></button>`)
+      }
+    }
+    if (state.workFile) {
+      parts.push(`<button class="wk-tb-pill${shown === 'file' ? ' on' : ''}" data-wktb="file"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name">${esc(baseOf(state.workFile))}</span></button>`)
+    }
+    const html = parts.join('')
+    if (box.innerHTML !== html) box.innerHTML = html
+  }
+
+  // ---------- 主区列宽（分界条拖拽，参考 Pj18 preview 的 #divider）----------
+  // 只剩一条分界条：下沉区 ↔ 预览列。列宽真源 = state.wkPrevW（预览列 px，写进 CSS 变量 --wk-pw 落 grid）。
+  // 分界条显隐 = 预览在场（.wk-preview 类由 applyPanes 落，CSS 同步收窄成单列模板）。
+  function applyWorkCols() {
     const on = state.sbMode === 'work'
-    // 去重：两条缝被一段「全隐藏」的栏隔开时（如 preview 关、editor 与助手分列 g1/g2 两侧），
-    // 二者的左右可见栏会是同一对 → 只保留靠左那条，否则会并排出现两条空缝。
-    let lastL = null
-    document.querySelectorAll('#chat-area > .work-gutter').forEach((g) => {
-      const L = nearPane(g, -1)
-      const R = L && nearPane(g, 1)
-      const show = on && !!L && !!R && L !== lastL
-      g.classList.toggle('on', show)
-      if (show) lastL = L
-    })
-    // grow 归一化（唯一写口）：把**可见 in-flow 栏**的 grow 按比例缩放到总和 1 再落内联 flex。
-    // flex 规范：grow 总和 < 1 时只分配该比例的剩余空间、余下留白——wkFlex 存的是拖拽时「一对栏和不变」
-    // 的比例权重，隐藏掉另一栏后可见栏 grow 可 < 1，于是助手卡右侧空出一条 --plane 空白带（2026-09-29 实报：
-    // 仅编辑区关/预览关 + 助手在流时复现，gap = (1−Σgrow)×自由宽）。归一化保持栏宽比例不变，且任意
-    // 可见子集都填满容器。不可见栏（display:none / 助手脱流）不参与求和，也不落内联 flex。
-    const vis = Object.keys(PANE_EL).filter((k) => { const el = paneEl(k); return el && paneVisible(el) })
-    const sum = vis.reduce((s, k) => s + (state.wkFlex[k] || 1), 0)
-    for (const k of Object.keys(PANE_EL)) {
-      const el = paneEl(k)
-      if (!el) continue
-      // 非 work 模式必须清掉内联 flex：#session-card 在 chat 模式是唯一视图卡（.view-card 的 flex:1）。
-      // 助手脱流时同样清掉——absolute 定位已脱出 flex 流，留着内联 flex 只会误导下一处读它的人。
-      const inFlow = k !== 'assist' || wkAssistInFlow()
-      if (on && inFlow && vis.includes(k)) el.style.flex = `${(state.wkFlex[k] || 1) / sum} 1 0`
-      else el.style.removeProperty('flex')
-    }
-    applyAssistMode() // 栏宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）
+    document.querySelectorAll('#chat-area > .work-gutter').forEach((g) => g.classList.toggle('on', on && !!state.wkPreview))
+    if (on) chatArea.style.setProperty('--wk-pw', state.wkPrevW + 'px')
+    else chatArea.style.removeProperty('--wk-pw')
+    applyAssistMode() // 列宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）
   }
 
-  // 拖动一条缝：按指针在「左栏左缘 → 右栏右缘」区间的占比 p 重分配两栏 grow（和不变）。
-  // 每侧留 PANE_MIN 像素地板——拖不到把某栏挤成 0（窄屏时地板自动收窄，不会算出负区间）。
-  const PANE_MIN = 180
+  // 拖动分界条：只改预览列宽（条往左拉 = 预览变宽），左侧下沉区自适应吃掉余量。
+  // 地板 WK_PREV_MIN；上限 = 主区宽的 70%（拖不出一屏只剩预览）。
+  const WK_PREV_MIN = 260
+  const WK_PREV_MAX_RATIO = 0.7
   function bindGutter(g) {
     g.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return
-      const L = nearPane(g, -1)
-      const R = nearPane(g, 1)
-      if (!L || !R) return
-      const kL = paneKey(L)
-      const kR = paneKey(R)
-      if (!kL || !kR) return
-      const box = L.getBoundingClientRect()
-      const right = R.getBoundingClientRect().right
-      const w = right - box.left
-      if (w <= 0) return
-      const sum = (state.wkFlex[kL] || 1) + (state.wkFlex[kR] || 1)
-      const floor = Math.min(PANE_MIN, w / 3)
+      const prev = $('work-preview')
+      const main = chatArea.getBoundingClientRect()
+      if (!prev || main.width <= 0) return
+      const right = prev.getBoundingClientRect().right
+      const maxW = Math.max(WK_PREV_MIN, Math.round(main.width * WK_PREV_MAX_RATIO))
       g.setPointerCapture(e.pointerId)
       g.classList.add('dragging')
       document.body.classList.add('wk-resizing')
       e.preventDefault()
       const move = (ev) => {
-        const p = Math.max(floor, Math.min(w - floor, ev.clientX - box.left)) / w
-        state.wkFlex[kL] = p * sum
-        state.wkFlex[kR] = (1 - p) * sum
-        applyWorkFlex()
+        state.wkPrevW = Math.max(WK_PREV_MIN, Math.min(maxW, Math.round(right - ev.clientX)))
+        applyWorkCols()
       }
       g.addEventListener('pointermove', move)
       const done = () => {
@@ -5002,15 +5064,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     })
   }
 
+
   // ---------- 助手三态（2026-09-27，与 Pj18 preview 的三态助手对齐） ----------
-  // 同一张 #session-card 的三个形态：'side'（靠栏，占主区一栏 = 现状）/ 'float'（悬浮卡，脱流不占列）/
+  // 同一张 #session-card 的三个形态：'side'（靠栏 = 聊天 tab 的内容，占下沉格）/ 'float'（悬浮卡，脱流不占格）/
   // 'slim'（收敛成底部输入栏）。形态类落在卡上（.wk-assist-float / .wk-assist-slim），可见性与几何的
   // 静态部分全由 CSS 给（web/styles.css「助手三态」段），本模块只写类 + 内联定位。
   // **绝不 reparent**：卡里挂着 core/state.js 模块级 const 引用的 messagesEl / inputWrap / charEl 单例，
   // 搬 DOM 会丢消息流与输入草稿（Pj18 #chat-pane 的同款约束）。
-  // 锚点 = 首个可见的 in-flow 主区栏（编辑区 → 预览列 → 整个 #chat-area）：编辑区在场就锚它（主阅读面，
-  // 且浮卡压编辑列时预览列完整可见）；编辑区关掉只剩预览时锚预览；两栏都不在（脱流且另一栏也关）兜整区。
-  // 不能照搬 Pj18「恒锚编辑列」——work 有第二个主角列，编辑区不在时必须有确定的下一档，不能锚到 0 宽的东西。
+  // 锚点 = 当前可见的下沉内容栏（文件 tab 的 #work-editor）→ 整个 #chat-area；预览列固定最右不参与。
   // 坐标一律在 #chat-area 局部系算：#app 在键盘态被 transform（body.kb-open），position:fixed 的视口
   // 坐标会整体漂走，故用 absolute + #chat-area（position:relative）作包含块，左右上下全数相减。
   const WK_ASSIST_PAD = 8      // 浮卡/输入栏与锚栏左右各留的白
@@ -5027,7 +5088,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   function wkAssistMode() {
     return state.wkAssistMode === 'float' || state.wkAssistMode === 'slim' ? state.wkAssistMode : 'side'
   }
-  // in-flow = 助手是否占着主区一栏（靠栏且开着）。不变量判定、分界条显隐、flex 落点三处共用这一条判据。
+  // in-flow = 助手是否占着下沉格（靠栏且开着）。wkShownTab 判定、三态几何两处共用这一条判据。
   function wkAssistInFlow() {
     return !!state.wkAssist && wkAssistMode() === 'side'
   }
@@ -5035,12 +5096,13 @@ function setFirstSendHash(v) { firstSendHash = v }
     const b = chatArea.getBoundingClientRect()
     return b.width > 0 ? b : null
   }
+  // 锚点 = 当前可见的下沉内容栏（文件 tab 的 #work-editor）→ 整个 #chat-area。预览列固定最右、
+  // 不再作锚（浮卡不会压到它）；#work-editor 仅在文件 tab 正在显示时有宽（够宽才算「正在看的栏」）。
   function wkAssistAnchor() {
-    for (const id of ['work-editor', 'work-preview']) {
-      const el = $(id)
-      if (!el) continue
+    const el = $('work-editor')
+    if (el) {
       const r = el.getBoundingClientRect()
-      if (r.width > 120) return r // 够宽才算「正在看的栏」，否则跳过（栏被关/未挂时不锚它）
+      if (r.width > 120) return r
     }
     return wkAssistBase()
   }
@@ -5183,7 +5245,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     return wkProjGroups().some((g) => g.label === label && g.hasPreview)
   }
   function renderWorkPreview() {
-    const el = $('work-preview')
+    if (state.wkPvTab !== 'preview') return // 评论 tab 在场：预览帧不渲染（切回预览 tab 时 setPvTab 会再调）
+    const el = $('wk-pv-body')
     if (!el || !state.wkPreview || !state.workProj) return
     const f = el.querySelector('.preview-frame')
     if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
@@ -5205,24 +5268,31 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   function setPane(k, on) {
     if (k === 'sidebar') {
-      // 侧栏开合不走「至少保留一栏」判定——那是主区两栏之间的约束，与侧栏无关。
+      // 侧栏开合不走「至少保留一栏」判定——那是主区内容的约束，与侧栏无关。
       // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
-      saveWork() // 四开关之一：归档进工作项目的槽
+      saveWork() // 两开关之一：归档进工作项目的槽
       return
     }
     if (k === 'workspace') {
       state.wkPreview = on
       applyPanes()
       saveWork()
-      renderWorkPreview() // 开：挂当前项目预览；关：停在这里（帧留着，CSS 隐藏），重开零重载
+      // 开：当前 tab 为预览则挂预览帧，为评论则拉/渲评论面板；关：停在这里（帧留着，CSS 隐藏），重开零重载
+      if (on && state.wkPvTab === 'comments') {
+        cmtLoad(state.workProj)
+        cmtRender()
+      } else renderWorkPreview()
       return
     }
-    if (k === 'editor') state.wkEditor = on
-    else state.wkAssist = on
-    applyPanes() // 「至少保留一栏」由 applyPanes 统一兜底（含预览栏）
-    saveWork()
+    // 助手开关（浮层已不含助手行；只剩助手头部的 × 走到这里）：关掉后若下沉格再没有别的可显，
+    // 由 applyPanes 的不变量兜底（强制留一栏 + toast）。
+    if (k === 'assist') {
+      state.wkAssist = on
+      applyPanes()
+      saveWork()
+    }
   }
 
   // ---------- 侧栏渲染 ----------
@@ -5380,22 +5450,26 @@ function setFirstSendHash(v) { firstSendHash = v }
     hideWkPops()
     if (!label || label === state.workProj) return
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
-    stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
+    stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
     loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
     state.workFile = ''
+    state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     wkOpen.clear()
     wkFilter = ''
     const fi = $('wk-find-input')
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
-    applyPanes() // 四开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
+    applyPanes() // 两开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
+    cmtInvalidate() // 评论按项目分库：旧项目副本作废（下一行 cmtLoad 重拉，评论 tab 与原文标记共用）
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
+    cmtLoad(label) // 原文标记也需要当前项目的评论（不止评论 tab）；拉到后 cmtApplyMarks 自动补标
+    cmtRender()
     syncWorkExtCards()
     await loadProjectTree(label)
   }
@@ -5457,11 +5531,12 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
+    cmtLoad(state.workProj) // 评论恢复态补拉（评论 tab 与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
     syncWorkExtCards() // 外部卡申报同上：与树/编辑区/预览同一条补拉链
-    // 布局落地（栏显隐 + 栏宽内联 flex）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
-    // （启动 + token 门解锁后各一次），而栏宽要靠元素实测宽算（applyWorkFlex 的 paneVisible）——
-    // 门/首帧里量不到宽时，这里给第二次落地机会，用户的栏宽不必靠「再动一下开关」才回来。
+    // 布局落地（tab 显隐 + 列宽 + 顶栏）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
+    // （启动 + token 门解锁后各一次），门/首帧里 DOM 还没量到时这里给第二次落地机会。
     applyPanes()
+    cmtRender() // 评论面板空态/加载态跟着工作项目落地（needToken 未解锁时上面 cmtLoad 早退）
   }
 
   // ---------- 编辑区（主区左栏：阅读 / 源码编辑，仿 Obsidian 源码+阅读双模） ----------
@@ -5478,11 +5553,56 @@ function setFirstSendHash(v) { firstSendHash = v }
   let wkEdTimer = 0
   let wkEdSaving = false
   let wkEdConflict = false
+  let wkCmtScrollId = '' // 评论面板定位跳转待消费的评论 id（渲染完原文标记后滚到该行）
 
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
   }
   const wkEdTa = () => document.querySelector('#wk-ed-body .wk-ed-ta')
+
+  // ---------- 评论标记（阅读态原文打标，2026-10-06） ----------
+  // 读态把每条评论的行范围 l0..l1 落到原文：纯文本逐行 <span data-l>、markdown 各块/段落行锚 data-l
+  // （core/markdown.js mdHtml 第二参）。命中即加 .cmt-mark（未解决）/.cmt-mark-res（已解决）+ data-cmt-id。
+  // 编辑态（透明 textarea 载体）无法内联打标，标记只存在于阅读态——与选区引用同口径（编辑态本就屏蔽）。
+  function wkCodeHtml(text) {
+    // 逐行落锚：换行并入该行 span（pre 内不留裸 '\n' 文本节点），选区端点才能上溯到 data-l
+    // （inputbar/quote.js quoteLineOf 依赖 data-l；纯文本偏移链改锚后依旧精确且更好）。
+    const lines = String(text).split('\n')
+    let out = ''
+    for (let i = 0; i < lines.length; i++) {
+      const t = i < lines.length - 1 ? lines[i] + '\n' : lines[i]
+      out += `<span class="wk-ln" data-l="${i + 1}">${esc(t)}</span>`
+    }
+    return out
+  }
+  function cmtApplyMarks() {
+    const body = $('wk-ed-body')
+    if (!body) return
+    body.querySelectorAll('.cmt-mark').forEach((el) => {
+      el.classList.remove('cmt-mark', 'cmt-mark-res', 'cmt-mark-open')
+      el.removeAttribute('data-cmt-id')
+    })
+    const marks = cmtRangesFor(state.workFile)
+    if (marks.length) {
+      body.querySelectorAll('[data-l]').forEach((el) => {
+        const ln = Number(el.getAttribute('data-l'))
+        if (!ln) return
+        const hit = marks.find((m) => ln >= m.l0 && ln <= m.l1)
+        if (!hit) return
+        el.classList.add('cmt-mark', hit.resolved ? 'cmt-mark-res' : 'cmt-mark-open')
+        el.setAttribute('data-cmt-id', hit.id)
+      })
+    }
+    if (wkCmtScrollId) {
+      const t = body.querySelector(`[data-cmt-id="${wkCmtScrollId}"]`)
+      wkCmtScrollId = ''
+      if (t) {
+        t.scrollIntoView({ block: 'center' })
+        t.classList.add('cmt-flash')
+        setTimeout(() => t.classList.remove('cmt-flash'), 1200)
+      }
+    }
+  }
 
   // ---------- 源码着色（编辑态语法高亮；仿编辑器源码模式） ----------
   // 不变量：着色层 `.wk-ed-hl` 与 textarea 逐字叠放、同步滚动；token **只改 color**——禁字重/字形/字号，
@@ -5675,9 +5795,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       // markdown 阅读态带行锚（data-l）：选中引用据此取选区首尾所在源行（inputbar/quote.js quoteEditorLines）
       body.innerHTML = `<div class="wk-ed-md md">${mdHtml(wkEdText, 'data-l')}</div>`
     } else {
-      body.innerHTML = `<pre class="wk-code">${esc(wkEdText)}</pre>`
+      body.innerHTML = `<pre class="wk-code">${wkCodeHtml(wkEdText)}</pre>`
     }
     applyEdMode()
+    cmtApplyMarks() // 评论标记：被批注的行加高亮（阅读态；编辑态 textarea 载体无法内联打标）
     wkEdState()
   }
 
@@ -5849,24 +5970,11 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!p) return
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
-    // 编辑区被开关关掉时点文件 = 明确要看内容 → 自动把编辑区打开（不静默什么都不发生）
-    if (!state.wkEditor) {
-      state.wkEditor = true
-      applyPanes()
-    }
+    state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
     saveWork()
+    applyPanes()
     renderWorkBody()
     renderEditor()
-    // 手机端两栏不成立：编辑区以覆盖层打开（.wk-file-open 由 CSS 接管），返回键收起
-    if (isMobile()) {
-      chatArea.classList.add('wk-file-open')
-      $('work-panel').hidden = true
-    }
-  }
-
-  function closeWorkFile() {
-    chatArea.classList.remove('wk-file-open')
-    if (state.sbMode === 'work') $('work-panel').hidden = false
   }
 
   // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
@@ -5902,6 +6010,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         await loadProjectTree(state.workProj)
         renderEditor()
         renderWorkBody()
+        applyPanes() // 顶栏文件名 pill 跟着新路径重渲
         toast('已重命名为「' + data.name + '」')
       },
     })
@@ -5922,6 +6031,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       await loadProjectTree(state.workProj)
       renderEditor()
       renderWorkBody()
+      applyPanes() // 删掉当前打开的文件 → 文件 tab 退场、下沉格切回聊天/空
       toast('已移入 ' + data.trash)
     } catch (e) {
       toast('删除失败：' + (e.message || e))
@@ -5950,16 +6060,22 @@ function setFirstSendHash(v) { firstSendHash = v }
   function newWorkChat() {
     // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
     // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
-    // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 两栏布局照样成立；
+    // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 主区布局照样成立；
     // 模式互斥只对 mgr/preview 两张视图卡生效（route.js 内那一处 setSbMode('chat')）。
+    state.wkMainTab = 'chat' // 新建聊天 = 要看聊天 → 聊天 tab 顶上来、助手靠回栏
+    state.wkAssist = true
+    state.wkAssistMode = 'side'
+    wkEnsureTab(WK_NEW_TAB) // 空对话占自己一枚胶囊
     navigate('#/')
+    applyPanes()
+    saveWork()
     if (isMobile()) setPanel(false)
   }
 
   // ---------- 事件 ----------
   function mountWork() {
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
-    document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区两条分界条
+    document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区一条分界条（下沉区 ↔ 预览）
     // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。
     const bindIco = (id, fn) => {
       const b = $(id)
@@ -5982,7 +6098,51 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
-    $('wk-ed-back').innerHTML = I.collapse
+    $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
+    $('wk-tb-comment').innerHTML = I.msg // 顶栏评论胶囊图标（气泡，与「引用自会话」同族）
+    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时确保右栏切到评论 tab /
+    // 评论增删改后重绘原文标记）
+    cmtSetHooks({
+      openFile: (p, id) => {
+        wkCmtScrollId = id || ''
+        openWorkFile(p) // 打开 + 渲染后由 cmtApplyMarks 消费 wkCmtScrollId 滚到被批注行
+      },
+      ensurePane: () => {
+        state.wkPreview = true
+        applyPanes()
+        setPvTab('comments')
+      },
+      refreshMarks: cmtApplyMarks,
+    })
+    cmtMount()
+    // 下沉区顶栏 tab：[+] = 新建聊天；两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
+    $('wk-tb-new').addEventListener('click', () => newWorkChat())
+    $('wk-tb-comment').addEventListener('click', () => toggleComments())
+    // 右栏 tab（预览 / 评论）：唯一切换口 = setPvTab（渲染 + 持久化都在其内）
+    $('wk-pv-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-wkpv]')
+      if (b) setPvTab(b.dataset.wkpv)
+    })
+    $('wk-tb-tabs').addEventListener('click', (e) => {
+      const cap = e.target.closest('[data-wkchat]')
+      if (cap) {
+        if (e.target.closest('.wk-tb-x')) { wkCloseTab(cap.dataset.wkchat); return } // × = 关这枚 tab
+        // 点胶囊 = 明确要看这个会话：助手在场且靠回栏（浮起/收敛先靠回），再切到该会话路由
+        state.wkMainTab = 'chat'
+        state.wkAssist = true
+        state.wkAssistMode = 'side'
+        const hash = wkKeyHash(cap.dataset.wkchat)
+        if (state.currentHash !== hash) navigate(hash ? '#/' + encodeURIComponent(hash) : '#/')
+        applyPanes() // 形态 + 顶栏 active 一并落地（applyWorkCols 内 applyAssistMode 收口）
+        saveWork()
+        return
+      }
+      const b = e.target.closest('[data-wktb]')
+      if (!b || b.dataset.wktb !== 'file') return
+      state.wkMainTab = 'file'
+      applyPanes()
+      saveWork()
+    })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')
     if (wap) wap.innerHTML = I.dshSend
@@ -6081,13 +6241,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       const s = e.target.closest('.sess-item')
       if (s && s.dataset.hash) {
+        wkEnsureTab(s.dataset.hash) // 显式打开一个会话 = 顶栏占一枚胶囊
         // 与侧栏会话条目同语义（recent.js bindSessClicks）：已在该会话内不重复 navigate
         if (s.dataset.hash !== state.currentHash) navigate('#/' + encodeURIComponent(s.dataset.hash))
+        applyPanes() // 新胶囊 + active 落地
+        saveWork()
         if (isMobile()) setPanel(false)
         return
       }
     })
-    $('wk-ed-back').addEventListener('click', closeWorkFile)
     // 编辑区：阅读/编辑切换按钮 + Ctrl+S 保存 / Ctrl+E 切模式（绑在 #work-editor 上，编辑态才命中）
     $('wk-ed-mode').addEventListener('click', () => wkSetEdit(!state.wkEdit))
     $('work-editor').addEventListener('keydown', (e) => {
@@ -6112,10 +6274,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view')) $('wk-view-pop').hidden = true
       if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
-    // 窗口跨越手机断点时收起覆盖层：两栏本身能重新排开，覆盖层留着会挡住助手
-    window.addEventListener('resize', () => {
-      if (!isMobile() && chatArea.classList.contains('wk-file-open')) closeWorkFile()
-    })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') workAutoTick()
@@ -6132,6 +6290,298 @@ function setFirstSendHash(v) { firstSendHash = v }
     mountWork()
     applySbMode()
   }
+
+  // ---------- 项目评论批注（work 右栏评论 tab） ----------
+  // 一条评论 = 文件路径 + 行范围（l0/l1）+ 选中原文摘录（excerpt）+ 正文（body），锚点来自
+  // inputbar/quote.js 的 quoteSnapOfRange（kind:'file'）快照。存储 <项目根>/.claude/comments.json，
+  // 读写走网关 /gateway/comments（localGateway.ts 的 readProjectComments/writeProjectComments）。
+  // 前端为唯一写入方、每次**全量替换**（拉回 → 改内存副本 → 整份回写；列表规模小，避免增量合并歧义）。
+  //
+  // 与 work.js 解耦（不 import，回调注册）：work.js 在 mountWork 里调 cmtSetHooks 注册
+  //   openFile   = 点评论定位 → 打开文件（openWorkFile）
+  //   ensurePane = 选区「添加评论」时确保右栏在场且切到评论 tab
+  // quote.js 只 import openCommentComposer（选区浮窗「添加评论」行 → 本模块浮层）。
+  // 类名一律 cmt* 前缀：全部模块顶层声明共享一个 IIFE 作用域（见 probe-web-module-scope）。
+  let cmtList = []        // 当前项目评论（服务端权威副本）
+  let cmtProj = ''        // cmtList 归属项目 label
+  let cmtLoaded = false    // cmtList 是否已为 cmtProj 拉取成功
+  let cmtLoading = false
+  let cmtErr = ''
+  let cmtFilter = 'all'   // 'all' | 'open'（只看未解决）
+  let cmtPop = null       // 选区「添加评论」浮层
+  let cmtMounted = false
+  let cmtOpenFile = null
+  let cmtEnsurePane = null
+  let cmtRefreshMarks = null
+
+  function cmtSetHooks(h) {
+    if (!h) return
+    if (typeof h.openFile === 'function') cmtOpenFile = h.openFile
+    if (typeof h.ensurePane === 'function') cmtEnsurePane = h.ensurePane
+    if (typeof h.refreshMarks === 'function') cmtRefreshMarks = h.refreshMarks
+  }
+
+  // 渲染同步：面板 + 原文标记（work.js 阅读态按 cmtRangesFor 打标的唯一重绘入口）
+  function cmtAfterChange() {
+    cmtRender()
+    if (cmtRefreshMarks) cmtRefreshMarks()
+  }
+
+  // 供 work.js 在原文（阅读态）打标记：当前项目内、指定文件的评论行范围（1 基源行号）
+  function cmtRangesFor(path) {
+    const p = String(path || '').replace(/\\/g, '/')
+    if (!p || !cmtProj) return []
+    return cmtList
+      .filter(
+        (c) =>
+          c && typeof c === 'object' &&
+          String(c.path || '').replace(/\\/g, '/') === p &&
+          Number(c.l1) >= 1,
+      )
+      .map((c) => ({
+        id: String(c.id || ''),
+        l0: Number(c.l0) || 1,
+        l1: Number(c.l1) || Number(c.l0) || 1,
+        resolved: !!c.resolved,
+      }))
+  }
+
+  // 换项目 / 退 work：作废内存副本（下次 cmtLoad 重新拉）
+  function cmtInvalidate() {
+    cmtList = []
+    cmtProj = ''
+    cmtLoaded = false
+    cmtLoading = false
+    cmtErr = ''
+    if (cmtRefreshMarks) cmtRefreshMarks() // 换项目：清掉上一项目的原文标记
+  }
+
+  function cmtId() {
+    return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+  }
+  function cmtFmtTime(iso) {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    const p = (n) => String(n).padStart(2, '0')
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  }
+
+  async function cmtFetch(proj) {
+    if (!proj || needToken()) {
+      cmtLoading = false
+      return
+    }
+    cmtLoading = true
+    cmtErr = ''
+    cmtRender()
+    try {
+      const res = await fetch(apiUrl('/gateway/comments?label=' + encodeURIComponent(proj)))
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '加载失败')
+      cmtList = (Array.isArray(data.comments) ? data.comments : []).filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      cmtProj = proj
+      cmtLoaded = true
+    } catch (e) {
+      cmtErr = e.message || String(e)
+      cmtLoaded = false
+    } finally {
+      cmtLoading = false
+      cmtAfterChange()
+    }
+  }
+
+  // 已有当前项目副本就直接用（免重复请求）；换项目才拉
+  async function cmtLoad(proj) {
+    if (!proj) {
+      cmtInvalidate()
+      cmtRender()
+      return
+    }
+    if (cmtLoaded && proj === cmtProj) return
+    await cmtFetch(proj)
+  }
+
+  // 整份回写（唯一写口）：cmtList 当前值 → 服务端。失败 toast 并返回 false（调用方决定是否回滚内存副本）。
+  async function cmtSave() {
+    const proj = state.workProj
+    if (!proj) return false
+    try {
+      const res = await fetch(apiUrl('/gateway/comments'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: proj, comments: cmtList }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
+      return true
+    } catch (e) {
+      toast('评论保存失败：' + (e.message || e))
+      return false
+    }
+  }
+
+  // 内存副本改 → 渲染 → 回写；回写失败回滚（不静默丢改动）
+  async function cmtMutate(fn) {
+    const prev = cmtList
+    fn()
+    cmtAfterChange()
+    if (!(await cmtSave())) {
+      cmtList = prev
+      cmtAfterChange()
+    }
+  }
+
+  async function cmtAdd(proj, entry) {
+    if (!proj) return false
+    if (!(cmtLoaded && cmtProj === proj)) await cmtFetch(proj)
+    if (cmtProj !== proj) return false
+    cmtList.push(entry)
+    cmtAfterChange()
+    if (!(await cmtSave())) {
+      cmtList = cmtList.filter((c) => c !== entry)
+      cmtAfterChange()
+      return false
+    }
+    return true
+  }
+
+  // ---------- 评论面板渲染（#wk-cmt，work.js setPvTab('comments') 调）----------
+  function cmtCmp(a, b) {
+    const pa = String(a.path || '')
+    const pb = String(b.path || '')
+    if (pa !== pb) return pa < pb ? -1 : 1
+    return (Number(a.l0) || 0) - (Number(b.l0) || 0)
+  }
+  function cmtItemHtml(c) {
+    const n0 = Number(c.l0) || 0
+    const n1 = Number(c.l1) || 0
+    const loc = esc(String(c.path || '')) + (n0 ? ':' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') : '')
+    return '<div class="cmt-item' + (c.resolved ? ' resolved' : '') + '" data-cid="' + esc(String(c.id || '')) + '">' +
+      '<div class="cmt-head">' +
+        '<button type="button" class="cmt-loc" data-cmtloc="' + esc(String(c.path || '')) + '">' + loc + '</button>' +
+        '<span class="cmt-time">' + esc(cmtFmtTime(c.createdAt)) + '</span>' +
+      '</div>' +
+      (c.excerpt ? '<blockquote class="cmt-ex">' + esc(String(c.excerpt)) + '</blockquote>' : '') +
+      '<div class="cmt-text">' + esc(String(c.body || '')) + '</div>' +
+      '<div class="cmt-acts">' +
+        '<button type="button" data-cmtact="resolve">' + (c.resolved ? '重开' : '解决') + '</button>' +
+        '<button type="button" class="danger" data-cmtact="del">删除</button>' +
+      '</div>' +
+    '</div>'
+  }
+  function cmtRender() {
+    const el = $('wk-cmt')
+    if (!el) return
+    if (!state.workProj) {
+      el.innerHTML = '<div class="cmt-empty">未选择项目</div>'
+      return
+    }
+    if (cmtLoading) {
+      el.innerHTML = '<div class="cmt-empty">加载中…</div>'
+      return
+    }
+    if (cmtErr) {
+      el.innerHTML = '<div class="cmt-empty">' + esc(cmtErr) + '</div>'
+      return
+    }
+    const open = cmtList.filter((c) => !c.resolved).length
+    const head =
+      '<div class="cmt-filters">' +
+        '<button type="button" class="cmt-f' + (cmtFilter === 'all' ? ' on' : '') + '" data-cmtf="all">全部 ' + cmtList.length + '</button>' +
+        '<button type="button" class="cmt-f' + (cmtFilter === 'open' ? ' on' : '') + '" data-cmtf="open">未解决 ' + open + '</button>' +
+      '</div>'
+    const list = (cmtFilter === 'open' ? cmtList.filter((c) => !c.resolved) : cmtList).slice().sort(cmtCmp)
+    const body = list.length
+      ? list.map(cmtItemHtml).join('')
+      : '<div class="cmt-empty">' + (cmtList.length ? '没有未解决的评论' : '还没有评论。在文件里选中内容后添加。') + '</div>'
+    el.innerHTML = head + '<div class="cmt-list">' + body + '</div>'
+  }
+
+  // 面板事件委托（一次）：容器 innerHTML 整体重渲，逐条绑定会被抹掉
+  function cmtMount() {
+    const el = $('wk-cmt')
+    if (!el || cmtMounted) return
+    cmtMounted = true
+    el.addEventListener('click', (e) => {
+      const f = e.target.closest('[data-cmtf]')
+      if (f) {
+        cmtFilter = f.dataset.cmtf === 'open' ? 'open' : 'all'
+        cmtRender()
+        return
+      }
+      const loc = e.target.closest('[data-cmtloc]')
+      if (loc) {
+        const item = loc.closest('[data-cid]')
+        if (cmtOpenFile) cmtOpenFile(loc.dataset.cmtloc, item ? item.dataset.cid : '')
+        return
+      }
+      const act = e.target.closest('[data-cmtact]')
+      const item = act && act.closest('[data-cid]')
+      if (!item) return
+      const c = cmtList.find((x) => String(x.id) === item.dataset.cid)
+      if (!c) return
+      if (act.dataset.cmtact === 'resolve') cmtMutate(() => { c.resolved = !c.resolved })
+      else if (act.dataset.cmtact === 'del') cmtMutate(() => { cmtList = cmtList.filter((x) => x !== c) })
+    })
+  }
+
+  // ---------- 选区「添加评论」浮层（quote.js 的「添加评论」行 → 这里）----------
+  function cmtClosePop() {
+    if (cmtPop) { cmtPop.remove(); cmtPop = null }
+  }
+  function openCommentComposer(snap) {
+    if (!snap || snap.kind !== 'file' || !snap.file) return
+    if (cmtEnsurePane) cmtEnsurePane() // 落点可见：右栏切到评论 tab（注释提交后立刻在列表里看到）
+    cmtClosePop()
+    const pop = document.createElement('div')
+    pop.className = 'cmt-pop'
+    const n0 = Number(snap.l0) || 0
+    const n1 = Number(snap.l1) || 0
+    const loc = esc(snap.file) + (n0 ? ' · ' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') + ' 行' : '')
+    pop.innerHTML =
+      '<div class="cmp-loc">' + loc + '</div>' +
+      '<blockquote class="cmp-ex">' + esc(String(snap.text || '').slice(0, 300)) + '</blockquote>' +
+      '<textarea class="cmp-in" placeholder="添加评论…" rows="3"></textarea>' +
+      '<div class="cmp-bar"><button type="button" class="cmp-cancel">取消</button><button type="button" class="cmp-ok">评论</button></div>'
+    document.body.appendChild(pop)
+    const r = snap.rect || { left: 0, bottom: 0 }
+    const w = pop.offsetWidth
+    const h = pop.offsetHeight
+    pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
+    pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
+    const ta = pop.querySelector('.cmp-in')
+    ta.focus()
+    pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮层内按下不算「点外部」
+    pop.querySelector('.cmp-cancel').addEventListener('click', cmtClosePop)
+    const submit = async () => {
+      const body = ta.value.trim()
+      if (!body) { ta.focus(); return }
+      const entry = {
+        id: cmtId(),
+        path: snap.file,
+        l0: n0,
+        l1: n1,
+        excerpt: String(snap.text || '').slice(0, 300),
+        body,
+        author: 'me',
+        createdAt: new Date().toISOString(),
+        resolved: false,
+      }
+      cmtClosePop()
+      if (await cmtAdd(snap.proj || state.workProj, entry)) toast('已添加评论')
+    }
+    pop.querySelector('.cmp-ok').addEventListener('click', submit)
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() }
+      else if (e.key === 'Escape') { e.preventDefault(); cmtClosePop() }
+    })
+    cmtPop = pop
+  }
+
+  // 点浮层外 / 滚动 / Esc → 关（fixed 浮层会漂离锚点；与 quote.js 浮窗同策略）
+  document.addEventListener('mousedown', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() })
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cmtPop) cmtClosePop() })
+  window.addEventListener('scroll', () => { if (cmtPop) cmtClosePop() }, { passive: true, capture: true })
 
   // ---------- 事件绑定 ----------
   // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
@@ -9623,9 +10073,14 @@ function setGateVerified(v) { gateVerified = v }
   // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
   const QUOTE_BUILTIN_ID = 'ai-edit'
-  function quoteActionRows() {
+  // 「添加评论」（2026-10-06）：只对**文件选区**在场——评论对象 = 文件 + 行范围（kind:'file'），
+  // 回复/PDF 选区没有文件位置可锚。落地 = sidebar/comments.js 的 openCommentComposer（另一条内置动作，
+  // 不进 AI 编辑的输入栏链）。同 id 申报行同样被略过（与 ai-edit 一致：内置优先）。
+  const QUOTE_COMMENT_ID = 'comment'
+  function quoteActionRows(snap) {
     const rows = [{ id: QUOTE_BUILTIN_ID, title: '使用 AI 编辑', builtin: true }]
-    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID) rows.push(a)
+    if (snap && snap.kind === 'file' && snap.file) rows.push({ id: QUOTE_COMMENT_ID, title: '添加评论', icon: 'msg', builtin: true })
+    for (const a of quoteActions()) if (a.id !== QUOTE_BUILTIN_ID && a.id !== QUOTE_COMMENT_ID) rows.push(a)
     return rows
   }
   function quoteActionRowHtml(a) {
@@ -9647,7 +10102,7 @@ function setGateVerified(v) { gateVerified = v }
     const pop = document.createElement('div')
     pop.className = 'quote-pop'
     pop.innerHTML =
-      quoteActionRows().map(quoteActionRowHtml).join('') +
+      quoteActionRows(snap).map(quoteActionRowHtml).join('') +
       '<div class="qp-bar">' +
         '<input class="qp-in" type="text" placeholder="对这段说点什么…" aria-label="引用说明" />' +
         '<button type="button" class="qp-send" title="发送" aria-label="发送"></button>' +
@@ -9666,6 +10121,7 @@ function setGateVerified(v) { gateVerified = v }
       b.addEventListener('click', () => {
         const id = b.dataset.qact
         if (id === QUOTE_BUILTIN_ID) quoteStash(snap)
+        else if (id === QUOTE_COMMENT_ID) { closeQuotePop(); openCommentComposer(snap) }
         else quoteRunAction(id, snap)
       }),
     )
@@ -9754,9 +10210,8 @@ function setGateVerified(v) { gateVerified = v }
   const RAIL_RESP_MAX = 120 // 预览回复封顶
   const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 带内最后一个锚 = 当前轮
   const RAIL_NARROW = 640 // 窄于此宽隐藏刻度（手机竖屏；平板竖屏 768–834 保留）
-  const RAIL_BUILD = 'rail-t4-2026.10.05' // 构建标记：dataset.build 可核验跑的是哪版
+  const RAIL_BUILD = 'rail-t5-2026.10.05' // 构建标记：dataset.build 可核验跑的是哪版
   const RAIL_TOUCH_GUARD = 600 // 触屏后忽略「兼容鼠标 hover」事件的窗口（ms）——webkit 触摸完必补发一条 pointermove:mouse
-  const RAIL_SCRUB_EDGE = 26 // 滑动时手指进入轨上下缘该距离内自动滚轨（px）
 
   let railItems = [] // [{ key, el, prompt, response }]（文档序）
   let railKeys = '' // 结构指纹（各轮 key 拼接）：变化才重建刻度
@@ -9767,9 +10222,6 @@ function setGateVerified(v) { gateVerified = v }
   let railPtrTouch = false // 最近一次 pointerdown 的真实指针类型（click.pointerType 在 webkit 恒 mouse，不可用）
   let railTouchAt = 0 // 最近一次触屏交互时刻：用于屏蔽紧随其后的兼容鼠标 hover 事件
   let railScrub = false // 触屏滑动进行中（pointerdown 起、pointerup 止）
-  let railScrubRaf = null // 滑动边缘自动滚轨的 rAF 句柄
-  let railScrubX = 0 // 滑动中手指视口坐标（用于 elementFromPoint 定位刻度 + 判边缘）
-  let railScrubY = 0
 
   // 元素正文（优先 .body，滤掉 who/图片/文件标签文本）
   function railText(el) {
@@ -9829,34 +10281,7 @@ function setGateVerified(v) { gateVerified = v }
     return m && nav.contains(m) ? m : null
   }
 
-  // 滑动到轨上下缘时自动滚轨（可见刻度装不下整段轮次时仍能滑到远处）；每帧滚一点并重取指下刻度。
-  function railScrubTick(nav) {
-    railScrubRaf = null
-    if (!railScrub) return
-    const scroller = nav.querySelector('.tr-scroller')
-    const r = scroller.getBoundingClientRect()
-    let dy = 0
-    if (railScrubY < r.top + RAIL_SCRUB_EDGE) dy = -Math.ceil((r.top + RAIL_SCRUB_EDGE - railScrubY) / 3)
-    else if (railScrubY > r.bottom - RAIL_SCRUB_EDGE) dy = Math.ceil((railScrubY - (r.bottom - RAIL_SCRUB_EDGE)) / 3)
-    if (dy) {
-      const before = scroller.scrollTop
-      scroller.scrollTop = before + dy
-      if (scroller.scrollTop !== before) {
-        const m = railMarkAt(nav, railScrubX, railScrubY)
-        if (m) railSetPreview(nav, m.dataset.key)
-      }
-    }
-    if (railScrub) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
-  }
-
-  function railScrubStart(nav) {
-    railScrub = true
-    if (railScrubRaf == null) railScrubRaf = requestAnimationFrame(() => railScrubTick(nav))
-  }
-  function railScrubStop() {
-    railScrub = false
-    if (railScrubRaf != null) { cancelAnimationFrame(railScrubRaf); railScrubRaf = null }
-  }
+  // 轨道不滚动（刻度 flex 均分压进一屏），滑动纯逐格预览、不产生任何轨道位移。
 
   function railBind(nav) {
     // 真实指针类型只看 pointerdown（capture）：click.pointerType 在 webkit 恒 mouse，判不出触屏。
@@ -9865,9 +10290,7 @@ function setGateVerified(v) { gateVerified = v }
       railPtrTouch = e.pointerType === 'touch'
       if (!railPtrTouch) return
       railTouchAt = Date.now()
-      railScrubX = e.clientX
-      railScrubY = e.clientY
-      railScrubStart(nav)
+      railScrub = true
       const m = e.target.closest ? e.target.closest('.tr-mark') : null
       if (m) railSetPreview(nav, m.dataset.key)
     }, true)
@@ -9883,8 +10306,6 @@ function setGateVerified(v) { gateVerified = v }
     nav.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'touch') { onHover(e); return }
       if (!railScrub) return
-      railScrubX = e.clientX
-      railScrubY = e.clientY
       const m = railMarkAt(nav, e.clientX, e.clientY)
       if (m) railSetPreview(nav, m.dataset.key) // 手指不在刻度上时保留上一格（滑过空隙不闪断）
     })
@@ -9894,14 +10315,14 @@ function setGateVerified(v) { gateVerified = v }
     // 触屏松开 = 跳到当前预览轮（滑动手势的落点）。
     nav.addEventListener('pointerup', (e) => {
       if (e.pointerType !== 'touch' || !railScrub) return
-      railScrubStop()
+      railScrub = false
       const key = railPreviewKey
       if (key != null) { railSetPreview(nav, null); railJump(key) }
     })
     // 手势被系统打断（来电/多指等）＝取消，不跳。
     nav.addEventListener('pointercancel', (e) => {
       if (e.pointerType !== 'touch') return
-      railScrubStop()
+      railScrub = false
       railSetPreview(nav, null)
     })
     nav.addEventListener('click', (e) => {
@@ -9933,7 +10354,7 @@ function setGateVerified(v) { gateVerified = v }
     return railPreviewKey == null ? -1 : railItems.findIndex((it) => it.key === railPreviewKey)
   }
 
-  // 只标态（不整重建）——滚动/预览/内容刷新都走此路
+  // 只标态（不整重建）——滚动/预览/内容刷新都走此路。轨道不滚动，无「保持刻度可见」位移逻辑。
   function railPaint(nav) {
     const marks = nav.querySelectorAll('.tr-mark')
     const pIdx = railPreviewIndex()
@@ -9941,15 +10362,6 @@ function setGateVerified(v) { gateVerified = v }
       m.classList.toggle('tr-active', i === railActiveIdx)
       m.classList.toggle('tr-hot', i === pIdx) // 注意：类名不可用 tr-preview——那是预览卡自己的类，撞名会让刻度按钮命中卡片样式
     })
-    // 当前刻度留在轨内可视（预览中优先保预览轮，否则保当前轮；手动算，禁 scrollIntoView——会外溢滚动祖先链）
-    const scroller = nav.querySelector('.tr-scroller')
-    const act = marks[pIdx >= 0 ? pIdx : railActiveIdx]
-    if (act) {
-      const top = act.offsetTop
-      const h = scroller.clientHeight
-      if (top < scroller.scrollTop) scroller.scrollTop = top
-      else if (top + act.offsetHeight > scroller.scrollTop + h) scroller.scrollTop = top + act.offsetHeight - h
-    }
   }
 
   // 刻度 DOM 仅在轮次集合变化时重建；建完不 paint（由 railRefresh 统一 paint）

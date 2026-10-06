@@ -8,23 +8,27 @@ import { ALL, chatArea, esc, isMobile, loadWork, loadWorkPanes, saveWork, sessio
 import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
 import { currentCardId, hydrateExtCards } from '../views/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
+import { cmtInvalidate, cmtLoad, cmtMount, cmtRangesFor, cmtRender, cmtSetHooks } from './comments.js'
 import { renderProjSeat } from '../inputbar/commands.js'
 import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.js'
   // ---------- work 模式侧栏（Prism 式） ----------
-  // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkEditor / wkAssist
-  // （localStorage floria-ui-v1 持久化，见 saveWork/loadWork）；视图浮层四开关（编辑区/助手/预览/侧边栏）
-  // 另按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽（见 selectProject）。
+  // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
+  // wkPreview / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
+  // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
-  // 主区：sbMode=work → #chat-area 加 .work（flex-direction:row），#work-editor 与 #session-card
-  // 并排成两栏；两栏开关只控制显隐，**至少保留一栏**（全关会让主区空白，属无效态）。
-  // 与「管理/预览卡」互斥：那两者是 chat 模式的视图，route.js 进入 mgr/preview 时会调 setSbMode('chat')。
+  // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 预览列）。下沉区顶部一条
+  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚（命名
+  // = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
+  // 文件）；预览列常驻最右（开关只控显隐）。不变量 = 聊天 / 文件 / 预览 **至少一栏在场**，唯一判定点
+  // applyPanes。与「管理/预览卡」互斥：route.js 进 mgr/preview 时 setSbMode('chat')。
 
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
+  const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
@@ -67,7 +71,6 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     $('chat-panel').hidden = on
     $('work-panel').hidden = !on
     chatArea.classList.toggle('work', on)
-    if (!on) chatArea.classList.remove('hide-editor', 'hide-assist', 'wk-file-open', 'wk-preview')
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) {
@@ -81,12 +84,10 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     }
   }
 
-  // 浮层各开关的真源：编辑区/助手 = work 主区栏，预览 = 第三栏（个性化工作区），
-  // 侧边栏 = 侧栏是否**被主动打开**（state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen
-  // ——后者含左缘悬停预览式唤出，那种瞬时露出不是「界面常在」，开关不该跟亮。
+  // 浮层两开关的真源：预览 = 第三列（个性化工作区），侧边栏 = 侧栏是否**被主动打开**
+  // （state.panelPinned，见 recent.js setPanel）。不用 state.panelOpen——后者含左缘悬停预览式唤出，
+  // 那种瞬时露出不是「界面常在」，开关不该跟亮。
   function paneOn(k) {
-    if (k === 'editor') return state.wkEditor
-    if (k === 'assist') return state.wkAssist
     if (k === 'workspace') return state.wkPreview
     return !!state.panelPinned
   }
@@ -105,110 +106,166 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
   }
 
-  // 主区栏开关落地（不变量判定唯一处）：编辑区/助手/预览三栏至少一栏可见，全关 → 强制回助手栏。
-  // 三栏都算数——只看编辑区+助手会让「预览还开着时关掉助手」被误判成全关（2026-09-26 实报）。
+  // 下沉区当前显示的内容（唯一判定）：助手靠栏时按 wkMainTab（要看文件且确有文件才给 file，
+  // 否则回 chat）；助手脱流（float/slim）时它不在下沉格里 ⇒ 有文件顶上来、没有就空。'' = 下沉格空。
+  function wkShownTab() {
+    if (wkAssistInFlow()) return state.wkMainTab === 'file' && state.workFile ? 'file' : 'chat'
+    return state.workFile ? 'file' : ''
+  }
+
+  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats，条目 = 会话 hash 或 WK_NEW_TAB。
+  // 激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。增/删/渲染的唯一口都在本模块。
+  const wkActiveKey = () => state.currentHash || WK_NEW_TAB
+  const wkKeyHash = (key) => (key === WK_NEW_TAB ? '' : key)
+  const wkTabName = (key) => {
+    if (key === WK_NEW_TAB) return '新对话'
+    const s = findSession(key)
+    return (s && s.title) || '未命名会话'
+  }
+  function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 关一枚 tab（× 只从顶栏移除，不删会话）。激活项被关 → 切右邻 / 左邻；一枚不剩且文件 tab 与预览
+  // 都不在场 → 保底重开空对话 tab（守「聊天 / 文件 / 预览至少一栏在场」不变量）。
+  function wkCloseTab(key) {
+    const i = state.wkChats.indexOf(key)
+    if (i < 0) return
+    const active = wkActiveKey() === key
+    state.wkChats.splice(i, 1)
+    if (!active) { applyPanes(); saveWork(); return }
+    const next = state.wkChats[i] != null ? state.wkChats[i] : state.wkChats[i - 1]
+    if (next != null) {
+      navigate(next === WK_NEW_TAB ? '#/' : '#/' + encodeURIComponent(next))
+      applyPanes(); saveWork(); return
+    }
+    state.wkAssist = false // 聊天 tab 全关：收起聊天栏（文件 / 预览还在即可）
+    if (state.sbMode === 'work' && !state.workFile && !state.wkPreview) {
+      state.wkAssist = true
+      wkEnsureTab(WK_NEW_TAB)
+      navigate('#/')
+    }
+    applyPanes(); saveWork()
+  }
+  // 路由落地后并入开放集并重渲顶栏（唯一外部入口，chat/route.js 调）：仅 work + 聊天栏在场时插手。
+  function syncWorkTabs() {
+    if (state.sbMode !== 'work' || !state.wkAssist) return
+    wkEnsureTab(wkActiveKey())
+    renderTopbar()
+  }
+
+  // 布局落地（不变量判定唯一处 + 各布局类的唯一写口）：聊天 tab / 文件 tab / 预览至少一个在场，
+  // 全无 → 强制开助手（聊天 tab，唯一还能承载内容的常驻件）。判定仍是这一处。
   function applyPanes() {
     if (state.sbMode === 'work') {
-      // 不变量（2026-09-27 随助手脱流更新）：**编辑区 / 预览至少一栏**——助手悬浮或收成输入栏时不占列，
-      // 不能再用它兜底。全关 → 强制打开编辑区（唯一还能承载内容的常驻栏）。判定仍是这一处。
-      if (!state.wkEditor && !state.wkPreview && !wkAssistInFlow()) {
-        state.wkEditor = true
+      if (!state.wkAssist && !state.workFile && !state.wkPreview) {
+        state.wkAssist = true
+        state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      chatArea.classList.toggle('hide-editor', !state.wkEditor)
-      chatArea.classList.toggle('hide-assist', !state.wkAssist)
+      if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      const shown = wkShownTab()
+      chatArea.classList.toggle('wk-show-chat', shown === 'chat')
+      chatArea.classList.toggle('wk-show-file', shown === 'file')
       chatArea.classList.toggle('wk-preview', !!state.wkPreview)
+    } else {
+      chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
     syncPaneRows()
-    applyWorkFlex()
+    applyWorkCols()
+    renderTopbar()
+    applyPvTab()
   }
 
-  // ---------- 主区栏宽（分界条拖拽，参考 Pj18 preview 的 #divider/#divider-chat）----------
-  // 栏宽真源 = state.wkFlex（三栏各自的 flex-grow，basis 0 ⇒ 宽 ∝ grow），拖某条缝只重分配它左右
-  // 相邻两可见栏的 grow、其余不动。缝显隐同理按「左右是否都有可见栏」实时判定，故任意相邻可见栏之间
-  // 恒有且只有一条缝（栏隐藏时夹着它的缝自动消失，不会出现两条挨着的空缝）。
-  const PANE_EL = { editor: () => $('work-editor'), assist: () => $('session-card'), preview: () => $('work-preview') }
-  function paneEl(k) { return PANE_EL[k]() }
-  // 助手脱流（float / slim）时它不在 flex 流里，但仍 offsetWidth>0 —— 若不排除，预览列与浮卡之间会凭空
-  // 多出一条分界条（nearPane 把浮卡当右邻）。in-flow 判据由 wkAssistInFlow 单点给（见「助手三态」段）。
-  function paneVisible(el) {
-    if (el === sessionCard) return wkAssistInFlow()
-    return !!el && el.offsetWidth > 0 && getComputedStyle(el).display !== 'none'
-  }
-  // 沿 DOM 序找 el 左/右第一个可见栏（跳过非栏兄弟与隐藏栏）；dir = -1 左 / +1 右。
-  // 只认主区三栏（paneKey 查表），不认 `#chat-area` 的其它槽级兄弟：`#gate-screen`（token 门全屏浮层，
-  // 满尺寸、display 非 none）会被 paneVisible 判成可见栏，令分界条 g1 误配有右邻 → 门后凭空多一条
-  // 7px 假缝（门已 hidden 但 applyWorkFlex 不再重跑）；`#menu-btn` 等绝对定位件同理。
-  function nearPane(g, dir) {
-    const key = dir < 0 ? 'previousElementSibling' : 'nextElementSibling'
-    for (let el = g[key]; el; el = el[key]) {
-      if (!paneKey(el)) continue
-      if (paneVisible(el)) return el
+  // 右栏（#work-preview）tab 落地（唯一处）：'preview'（预览帧）/ 'comments'（评论面板）互斥显隐。
+  // 状态源 = state.wkPvTab（persist）；预览帧的**挂载**由 renderWorkPreview 负责，本函数只管 tab UI 与
+  // 面板显隐。胶囊（#wk-tb-comment）的 active 态也在此同步。
+  function applyPvTab() {
+    const on = state.wkPvTab === 'comments'
+    const pv = $('work-preview')
+    if (pv) {
+      pv.classList.toggle('pv-comments', on)
+      pv.querySelectorAll('.wk-pv-tab').forEach((b) => b.classList.toggle('on', (b.dataset.wkpv === 'comments') === on))
     }
-    return null
+    const body = $('wk-pv-body')
+    if (body) body.hidden = on
+    const cm = $('wk-cmt')
+    if (cm) cm.hidden = !on
+    const cap = $('wk-tb-comment')
+    if (cap) cap.classList.toggle('on', on)
   }
-  function paneKey(el) {
-    for (const k of Object.keys(PANE_EL)) if (paneEl(k) === el) return k
-    return ''
+
+  // 切 tab（唯一入口）：预览 tab → 挂预览帧；评论 tab → 拉/渲评论面板。saveWork 持久化。
+  function setPvTab(tab) {
+    state.wkPvTab = tab === 'comments' ? 'comments' : 'preview'
+    applyPvTab()
+    if (state.wkPvTab === 'preview') renderWorkPreview()
+    else {
+      cmtLoad(state.workProj)
+      cmtRender()
+    }
+    saveWork()
   }
-  function applyWorkFlex() {
+
+  // 顶栏「评论」胶囊：点开右栏并切到评论 tab；已在评论 tab 时再点 → 回预览 tab（不关右栏）。
+  function toggleComments() {
+    const back = state.wkPreview && state.wkPvTab === 'comments'
+    state.wkPreview = true // 胶囊点击恒确保右栏在场（未开则开）
+    state.wkPvTab = back ? 'preview' : 'comments'
+    applyPanes() // 右栏在场落地（列宽 + tab 渲染 + applyPvTab）
+    setPvTab(state.wkPvTab)
+  }
+
+  // 顶栏 tab 条（唯一渲染口）：[+] [聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
+  // 命名用会话标题（空对话 = 「新对话」）；active = 当前路由命中项（wkActiveKey），与下沉区显示同源
+  // （wkShownTab，点浮起后胶囊自然熄、文件 pill 亮）。文件 pill 不变。× 关 tab 由点击委托处理。
+  function renderTopbar() {
+    const box = $('wk-tb-tabs')
+    if (!box) return
+    if (state.sbMode !== 'work') { if (box.innerHTML) box.innerHTML = ''; return }
+    const shown = wkShownTab()
+    const active = wkActiveKey()
+    const parts = []
+    if (state.wkAssist) {
+      for (const key of state.wkChats) {
+        const name = esc(wkTabName(key))
+        parts.push(`<button class="wk-tb-pill${shown === 'chat' && key === active ? ' on' : ''}" data-wkchat="${esc(key)}" title="${name}"><span class="wk-tb-name">${name}</span><span class="wk-tb-x" title="关闭">×</span></button>`)
+      }
+    }
+    if (state.workFile) {
+      parts.push(`<button class="wk-tb-pill${shown === 'file' ? ' on' : ''}" data-wktb="file"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name">${esc(baseOf(state.workFile))}</span></button>`)
+    }
+    const html = parts.join('')
+    if (box.innerHTML !== html) box.innerHTML = html
+  }
+
+  // ---------- 主区列宽（分界条拖拽，参考 Pj18 preview 的 #divider）----------
+  // 只剩一条分界条：下沉区 ↔ 预览列。列宽真源 = state.wkPrevW（预览列 px，写进 CSS 变量 --wk-pw 落 grid）。
+  // 分界条显隐 = 预览在场（.wk-preview 类由 applyPanes 落，CSS 同步收窄成单列模板）。
+  function applyWorkCols() {
     const on = state.sbMode === 'work'
-    // 去重：两条缝被一段「全隐藏」的栏隔开时（如 preview 关、editor 与助手分列 g1/g2 两侧），
-    // 二者的左右可见栏会是同一对 → 只保留靠左那条，否则会并排出现两条空缝。
-    let lastL = null
-    document.querySelectorAll('#chat-area > .work-gutter').forEach((g) => {
-      const L = nearPane(g, -1)
-      const R = L && nearPane(g, 1)
-      const show = on && !!L && !!R && L !== lastL
-      g.classList.toggle('on', show)
-      if (show) lastL = L
-    })
-    // grow 归一化（唯一写口）：把**可见 in-flow 栏**的 grow 按比例缩放到总和 1 再落内联 flex。
-    // flex 规范：grow 总和 < 1 时只分配该比例的剩余空间、余下留白——wkFlex 存的是拖拽时「一对栏和不变」
-    // 的比例权重，隐藏掉另一栏后可见栏 grow 可 < 1，于是助手卡右侧空出一条 --plane 空白带（2026-09-29 实报：
-    // 仅编辑区关/预览关 + 助手在流时复现，gap = (1−Σgrow)×自由宽）。归一化保持栏宽比例不变，且任意
-    // 可见子集都填满容器。不可见栏（display:none / 助手脱流）不参与求和，也不落内联 flex。
-    const vis = Object.keys(PANE_EL).filter((k) => { const el = paneEl(k); return el && paneVisible(el) })
-    const sum = vis.reduce((s, k) => s + (state.wkFlex[k] || 1), 0)
-    for (const k of Object.keys(PANE_EL)) {
-      const el = paneEl(k)
-      if (!el) continue
-      // 非 work 模式必须清掉内联 flex：#session-card 在 chat 模式是唯一视图卡（.view-card 的 flex:1）。
-      // 助手脱流时同样清掉——absolute 定位已脱出 flex 流，留着内联 flex 只会误导下一处读它的人。
-      const inFlow = k !== 'assist' || wkAssistInFlow()
-      if (on && inFlow && vis.includes(k)) el.style.flex = `${(state.wkFlex[k] || 1) / sum} 1 0`
-      else el.style.removeProperty('flex')
-    }
-    applyAssistMode() // 栏宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）
+    document.querySelectorAll('#chat-area > .work-gutter').forEach((g) => g.classList.toggle('on', on && !!state.wkPreview))
+    if (on) chatArea.style.setProperty('--wk-pw', state.wkPrevW + 'px')
+    else chatArea.style.removeProperty('--wk-pw')
+    applyAssistMode() // 列宽/显隐变了 → 悬浮卡跟着重锚（分界条拖拽、开关栏、切模式都经这里）
   }
 
-  // 拖动一条缝：按指针在「左栏左缘 → 右栏右缘」区间的占比 p 重分配两栏 grow（和不变）。
-  // 每侧留 PANE_MIN 像素地板——拖不到把某栏挤成 0（窄屏时地板自动收窄，不会算出负区间）。
-  const PANE_MIN = 180
+  // 拖动分界条：只改预览列宽（条往左拉 = 预览变宽），左侧下沉区自适应吃掉余量。
+  // 地板 WK_PREV_MIN；上限 = 主区宽的 70%（拖不出一屏只剩预览）。
+  const WK_PREV_MIN = 260
+  const WK_PREV_MAX_RATIO = 0.7
   function bindGutter(g) {
     g.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return
-      const L = nearPane(g, -1)
-      const R = nearPane(g, 1)
-      if (!L || !R) return
-      const kL = paneKey(L)
-      const kR = paneKey(R)
-      if (!kL || !kR) return
-      const box = L.getBoundingClientRect()
-      const right = R.getBoundingClientRect().right
-      const w = right - box.left
-      if (w <= 0) return
-      const sum = (state.wkFlex[kL] || 1) + (state.wkFlex[kR] || 1)
-      const floor = Math.min(PANE_MIN, w / 3)
+      const prev = $('work-preview')
+      const main = chatArea.getBoundingClientRect()
+      if (!prev || main.width <= 0) return
+      const right = prev.getBoundingClientRect().right
+      const maxW = Math.max(WK_PREV_MIN, Math.round(main.width * WK_PREV_MAX_RATIO))
       g.setPointerCapture(e.pointerId)
       g.classList.add('dragging')
       document.body.classList.add('wk-resizing')
       e.preventDefault()
       const move = (ev) => {
-        const p = Math.max(floor, Math.min(w - floor, ev.clientX - box.left)) / w
-        state.wkFlex[kL] = p * sum
-        state.wkFlex[kR] = (1 - p) * sum
-        applyWorkFlex()
+        state.wkPrevW = Math.max(WK_PREV_MIN, Math.min(maxW, Math.round(right - ev.clientX)))
+        applyWorkCols()
       }
       g.addEventListener('pointermove', move)
       const done = () => {
@@ -222,15 +279,14 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     })
   }
 
+
   // ---------- 助手三态（2026-09-27，与 Pj18 preview 的三态助手对齐） ----------
-  // 同一张 #session-card 的三个形态：'side'（靠栏，占主区一栏 = 现状）/ 'float'（悬浮卡，脱流不占列）/
+  // 同一张 #session-card 的三个形态：'side'（靠栏 = 聊天 tab 的内容，占下沉格）/ 'float'（悬浮卡，脱流不占格）/
   // 'slim'（收敛成底部输入栏）。形态类落在卡上（.wk-assist-float / .wk-assist-slim），可见性与几何的
   // 静态部分全由 CSS 给（web/styles.css「助手三态」段），本模块只写类 + 内联定位。
   // **绝不 reparent**：卡里挂着 core/state.js 模块级 const 引用的 messagesEl / inputWrap / charEl 单例，
   // 搬 DOM 会丢消息流与输入草稿（Pj18 #chat-pane 的同款约束）。
-  // 锚点 = 首个可见的 in-flow 主区栏（编辑区 → 预览列 → 整个 #chat-area）：编辑区在场就锚它（主阅读面，
-  // 且浮卡压编辑列时预览列完整可见）；编辑区关掉只剩预览时锚预览；两栏都不在（脱流且另一栏也关）兜整区。
-  // 不能照搬 Pj18「恒锚编辑列」——work 有第二个主角列，编辑区不在时必须有确定的下一档，不能锚到 0 宽的东西。
+  // 锚点 = 当前可见的下沉内容栏（文件 tab 的 #work-editor）→ 整个 #chat-area；预览列固定最右不参与。
   // 坐标一律在 #chat-area 局部系算：#app 在键盘态被 transform（body.kb-open），position:fixed 的视口
   // 坐标会整体漂走，故用 absolute + #chat-area（position:relative）作包含块，左右上下全数相减。
   const WK_ASSIST_PAD = 8      // 浮卡/输入栏与锚栏左右各留的白
@@ -247,7 +303,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   function wkAssistMode() {
     return state.wkAssistMode === 'float' || state.wkAssistMode === 'slim' ? state.wkAssistMode : 'side'
   }
-  // in-flow = 助手是否占着主区一栏（靠栏且开着）。不变量判定、分界条显隐、flex 落点三处共用这一条判据。
+  // in-flow = 助手是否占着下沉格（靠栏且开着）。wkShownTab 判定、三态几何两处共用这一条判据。
   function wkAssistInFlow() {
     return !!state.wkAssist && wkAssistMode() === 'side'
   }
@@ -255,12 +311,13 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     const b = chatArea.getBoundingClientRect()
     return b.width > 0 ? b : null
   }
+  // 锚点 = 当前可见的下沉内容栏（文件 tab 的 #work-editor）→ 整个 #chat-area。预览列固定最右、
+  // 不再作锚（浮卡不会压到它）；#work-editor 仅在文件 tab 正在显示时有宽（够宽才算「正在看的栏」）。
   function wkAssistAnchor() {
-    for (const id of ['work-editor', 'work-preview']) {
-      const el = $(id)
-      if (!el) continue
+    const el = $('work-editor')
+    if (el) {
       const r = el.getBoundingClientRect()
-      if (r.width > 120) return r // 够宽才算「正在看的栏」，否则跳过（栏被关/未挂时不锚它）
+      if (r.width > 120) return r
     }
     return wkAssistBase()
   }
@@ -403,7 +460,8 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     return wkProjGroups().some((g) => g.label === label && g.hasPreview)
   }
   function renderWorkPreview() {
-    const el = $('work-preview')
+    if (state.wkPvTab !== 'preview') return // 评论 tab 在场：预览帧不渲染（切回预览 tab 时 setPvTab 会再调）
+    const el = $('wk-pv-body')
     if (!el || !state.wkPreview || !state.workProj) return
     const f = el.querySelector('.preview-frame')
     if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
@@ -425,24 +483,31 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
 
   function setPane(k, on) {
     if (k === 'sidebar') {
-      // 侧栏开合不走「至少保留一栏」判定——那是主区两栏之间的约束，与侧栏无关。
+      // 侧栏开合不走「至少保留一栏」判定——那是主区内容的约束，与侧栏无关。
       // pin = 主动打开，鼠标移出侧栏不自动收（悬停预览式收起只属左缘唤出）。行状态真源见 paneOn。
       setPanel(on, { pin: on })
       applyPanes()
-      saveWork() // 四开关之一：归档进工作项目的槽
+      saveWork() // 两开关之一：归档进工作项目的槽
       return
     }
     if (k === 'workspace') {
       state.wkPreview = on
       applyPanes()
       saveWork()
-      renderWorkPreview() // 开：挂当前项目预览；关：停在这里（帧留着，CSS 隐藏），重开零重载
+      // 开：当前 tab 为预览则挂预览帧，为评论则拉/渲评论面板；关：停在这里（帧留着，CSS 隐藏），重开零重载
+      if (on && state.wkPvTab === 'comments') {
+        cmtLoad(state.workProj)
+        cmtRender()
+      } else renderWorkPreview()
       return
     }
-    if (k === 'editor') state.wkEditor = on
-    else state.wkAssist = on
-    applyPanes() // 「至少保留一栏」由 applyPanes 统一兜底（含预览栏）
-    saveWork()
+    // 助手开关（浮层已不含助手行；只剩助手头部的 × 走到这里）：关掉后若下沉格再没有别的可显，
+    // 由 applyPanes 的不变量兜底（强制留一栏 + toast）。
+    if (k === 'assist') {
+      state.wkAssist = on
+      applyPanes()
+      saveWork()
+    }
   }
 
   // ---------- 侧栏渲染 ----------
@@ -600,22 +665,26 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     hideWkPops()
     if (!label || label === state.workProj) return
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
-    stashWorkPanes() // 旧项目的四开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
+    stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
     loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
     state.workFile = ''
+    state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     wkOpen.clear()
     wkFilter = ''
     const fi = $('wk-find-input')
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
-    applyPanes() // 四开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
+    applyPanes() // 两开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
+    cmtInvalidate() // 评论按项目分库：旧项目副本作废（下一行 cmtLoad 重拉，评论 tab 与原文标记共用）
     renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
+    cmtLoad(label) // 原文标记也需要当前项目的评论（不止评论 tab）；拉到后 cmtApplyMarks 自动补标
+    cmtRender()
     syncWorkExtCards()
     await loadProjectTree(label)
   }
@@ -677,11 +746,12 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
+    cmtLoad(state.workProj) // 评论恢复态补拉（评论 tab 与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
     syncWorkExtCards() // 外部卡申报同上：与树/编辑区/预览同一条补拉链
-    // 布局落地（栏显隐 + 栏宽内联 flex）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
-    // （启动 + token 门解锁后各一次），而栏宽要靠元素实测宽算（applyWorkFlex 的 paneVisible）——
-    // 门/首帧里量不到宽时，这里给第二次落地机会，用户的栏宽不必靠「再动一下开关」才回来。
+    // 布局落地（tab 显隐 + 列宽 + 顶栏）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
+    // （启动 + token 门解锁后各一次），门/首帧里 DOM 还没量到时这里给第二次落地机会。
     applyPanes()
+    cmtRender() // 评论面板空态/加载态跟着工作项目落地（needToken 未解锁时上面 cmtLoad 早退）
   }
 
   // ---------- 编辑区（主区左栏：阅读 / 源码编辑，仿 Obsidian 源码+阅读双模） ----------
@@ -698,11 +768,56 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   let wkEdTimer = 0
   let wkEdSaving = false
   let wkEdConflict = false
+  let wkCmtScrollId = '' // 评论面板定位跳转待消费的评论 id（渲染完原文标记后滚到该行）
 
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
   }
   const wkEdTa = () => document.querySelector('#wk-ed-body .wk-ed-ta')
+
+  // ---------- 评论标记（阅读态原文打标，2026-10-06） ----------
+  // 读态把每条评论的行范围 l0..l1 落到原文：纯文本逐行 <span data-l>、markdown 各块/段落行锚 data-l
+  // （core/markdown.js mdHtml 第二参）。命中即加 .cmt-mark（未解决）/.cmt-mark-res（已解决）+ data-cmt-id。
+  // 编辑态（透明 textarea 载体）无法内联打标，标记只存在于阅读态——与选区引用同口径（编辑态本就屏蔽）。
+  function wkCodeHtml(text) {
+    // 逐行落锚：换行并入该行 span（pre 内不留裸 '\n' 文本节点），选区端点才能上溯到 data-l
+    // （inputbar/quote.js quoteLineOf 依赖 data-l；纯文本偏移链改锚后依旧精确且更好）。
+    const lines = String(text).split('\n')
+    let out = ''
+    for (let i = 0; i < lines.length; i++) {
+      const t = i < lines.length - 1 ? lines[i] + '\n' : lines[i]
+      out += `<span class="wk-ln" data-l="${i + 1}">${esc(t)}</span>`
+    }
+    return out
+  }
+  function cmtApplyMarks() {
+    const body = $('wk-ed-body')
+    if (!body) return
+    body.querySelectorAll('.cmt-mark').forEach((el) => {
+      el.classList.remove('cmt-mark', 'cmt-mark-res', 'cmt-mark-open')
+      el.removeAttribute('data-cmt-id')
+    })
+    const marks = cmtRangesFor(state.workFile)
+    if (marks.length) {
+      body.querySelectorAll('[data-l]').forEach((el) => {
+        const ln = Number(el.getAttribute('data-l'))
+        if (!ln) return
+        const hit = marks.find((m) => ln >= m.l0 && ln <= m.l1)
+        if (!hit) return
+        el.classList.add('cmt-mark', hit.resolved ? 'cmt-mark-res' : 'cmt-mark-open')
+        el.setAttribute('data-cmt-id', hit.id)
+      })
+    }
+    if (wkCmtScrollId) {
+      const t = body.querySelector(`[data-cmt-id="${wkCmtScrollId}"]`)
+      wkCmtScrollId = ''
+      if (t) {
+        t.scrollIntoView({ block: 'center' })
+        t.classList.add('cmt-flash')
+        setTimeout(() => t.classList.remove('cmt-flash'), 1200)
+      }
+    }
+  }
 
   // ---------- 源码着色（编辑态语法高亮；仿编辑器源码模式） ----------
   // 不变量：着色层 `.wk-ed-hl` 与 textarea 逐字叠放、同步滚动；token **只改 color**——禁字重/字形/字号，
@@ -895,9 +1010,10 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       // markdown 阅读态带行锚（data-l）：选中引用据此取选区首尾所在源行（inputbar/quote.js quoteEditorLines）
       body.innerHTML = `<div class="wk-ed-md md">${mdHtml(wkEdText, 'data-l')}</div>`
     } else {
-      body.innerHTML = `<pre class="wk-code">${esc(wkEdText)}</pre>`
+      body.innerHTML = `<pre class="wk-code">${wkCodeHtml(wkEdText)}</pre>`
     }
     applyEdMode()
+    cmtApplyMarks() // 评论标记：被批注的行加高亮（阅读态；编辑态 textarea 载体无法内联打标）
     wkEdState()
   }
 
@@ -1069,24 +1185,11 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     if (!p) return
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
-    // 编辑区被开关关掉时点文件 = 明确要看内容 → 自动把编辑区打开（不静默什么都不发生）
-    if (!state.wkEditor) {
-      state.wkEditor = true
-      applyPanes()
-    }
+    state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
     saveWork()
+    applyPanes()
     renderWorkBody()
     renderEditor()
-    // 手机端两栏不成立：编辑区以覆盖层打开（.wk-file-open 由 CSS 接管），返回键收起
-    if (isMobile()) {
-      chatArea.classList.add('wk-file-open')
-      $('work-panel').hidden = true
-    }
-  }
-
-  function closeWorkFile() {
-    chatArea.classList.remove('wk-file-open')
-    if (state.sbMode === 'work') $('work-panel').hidden = false
   }
 
   // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
@@ -1122,6 +1225,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
         await loadProjectTree(state.workProj)
         renderEditor()
         renderWorkBody()
+        applyPanes() // 顶栏文件名 pill 跟着新路径重渲
         toast('已重命名为「' + data.name + '」')
       },
     })
@@ -1142,6 +1246,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       await loadProjectTree(state.workProj)
       renderEditor()
       renderWorkBody()
+      applyPanes() // 删掉当前打开的文件 → 文件 tab 退场、下沉格切回聊天/空
       toast('已移入 ' + data.trash)
     } catch (e) {
       toast('删除失败：' + (e.message || e))
@@ -1170,16 +1275,22 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   function newWorkChat() {
     // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
     // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
-    // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 两栏布局照样成立；
+    // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 主区布局照样成立；
     // 模式互斥只对 mgr/preview 两张视图卡生效（route.js 内那一处 setSbMode('chat')）。
+    state.wkMainTab = 'chat' // 新建聊天 = 要看聊天 → 聊天 tab 顶上来、助手靠回栏
+    state.wkAssist = true
+    state.wkAssistMode = 'side'
+    wkEnsureTab(WK_NEW_TAB) // 空对话占自己一枚胶囊
     navigate('#/')
+    applyPanes()
+    saveWork()
     if (isMobile()) setPanel(false)
   }
 
   // ---------- 事件 ----------
   function mountWork() {
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
-    document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区两条分界条
+    document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区一条分界条（下沉区 ↔ 预览）
     // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。
     const bindIco = (id, fn) => {
       const b = $(id)
@@ -1202,7 +1313,51 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
-    $('wk-ed-back').innerHTML = I.collapse
+    $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
+    $('wk-tb-comment').innerHTML = I.msg // 顶栏评论胶囊图标（气泡，与「引用自会话」同族）
+    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时确保右栏切到评论 tab /
+    // 评论增删改后重绘原文标记）
+    cmtSetHooks({
+      openFile: (p, id) => {
+        wkCmtScrollId = id || ''
+        openWorkFile(p) // 打开 + 渲染后由 cmtApplyMarks 消费 wkCmtScrollId 滚到被批注行
+      },
+      ensurePane: () => {
+        state.wkPreview = true
+        applyPanes()
+        setPvTab('comments')
+      },
+      refreshMarks: cmtApplyMarks,
+    })
+    cmtMount()
+    // 下沉区顶栏 tab：[+] = 新建聊天；两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
+    $('wk-tb-new').addEventListener('click', () => newWorkChat())
+    $('wk-tb-comment').addEventListener('click', () => toggleComments())
+    // 右栏 tab（预览 / 评论）：唯一切换口 = setPvTab（渲染 + 持久化都在其内）
+    $('wk-pv-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-wkpv]')
+      if (b) setPvTab(b.dataset.wkpv)
+    })
+    $('wk-tb-tabs').addEventListener('click', (e) => {
+      const cap = e.target.closest('[data-wkchat]')
+      if (cap) {
+        if (e.target.closest('.wk-tb-x')) { wkCloseTab(cap.dataset.wkchat); return } // × = 关这枚 tab
+        // 点胶囊 = 明确要看这个会话：助手在场且靠回栏（浮起/收敛先靠回），再切到该会话路由
+        state.wkMainTab = 'chat'
+        state.wkAssist = true
+        state.wkAssistMode = 'side'
+        const hash = wkKeyHash(cap.dataset.wkchat)
+        if (state.currentHash !== hash) navigate(hash ? '#/' + encodeURIComponent(hash) : '#/')
+        applyPanes() // 形态 + 顶栏 active 一并落地（applyWorkCols 内 applyAssistMode 收口）
+        saveWork()
+        return
+      }
+      const b = e.target.closest('[data-wktb]')
+      if (!b || b.dataset.wktb !== 'file') return
+      state.wkMainTab = 'file'
+      applyPanes()
+      saveWork()
+    })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')
     if (wap) wap.innerHTML = I.dshSend
@@ -1301,13 +1456,15 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       }
       const s = e.target.closest('.sess-item')
       if (s && s.dataset.hash) {
+        wkEnsureTab(s.dataset.hash) // 显式打开一个会话 = 顶栏占一枚胶囊
         // 与侧栏会话条目同语义（recent.js bindSessClicks）：已在该会话内不重复 navigate
         if (s.dataset.hash !== state.currentHash) navigate('#/' + encodeURIComponent(s.dataset.hash))
+        applyPanes() // 新胶囊 + active 落地
+        saveWork()
         if (isMobile()) setPanel(false)
         return
       }
     })
-    $('wk-ed-back').addEventListener('click', closeWorkFile)
     // 编辑区：阅读/编辑切换按钮 + Ctrl+S 保存 / Ctrl+E 切模式（绑在 #work-editor 上，编辑态才命中）
     $('wk-ed-mode').addEventListener('click', () => wkSetEdit(!state.wkEdit))
     $('work-editor').addEventListener('keydown', (e) => {
@@ -1332,10 +1489,6 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
       if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view')) $('wk-view-pop').hidden = true
       if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
-    // 窗口跨越手机断点时收起覆盖层：两栏本身能重新排开，覆盖层留着会挡住助手
-    window.addEventListener('resize', () => {
-      if (!isMobile() && chatArea.classList.contains('wk-file-open')) closeWorkFile()
-    })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') workAutoTick()
@@ -1359,5 +1512,6 @@ export {
   ensureWork,
   initWork,
   setSbMode,
+  syncWorkTabs,
   workScopeOk,
 }

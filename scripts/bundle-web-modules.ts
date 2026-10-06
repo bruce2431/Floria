@@ -46,6 +46,10 @@ const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] =
   // work 模式侧栏（2026-09-25）：区间号同为 2932 只作执行序排序 —— 依赖 views/registry.js 的
   // showCard（work 主区两栏与视图卡互斥）与 core/state.js 的 state/chatArea/#work-* 元素，故排其后。
   { file: 'sidebar/work.js', ranges: [[2932, 2932]], first: ['  // ---------- work 模式侧栏（Prism 式） ----------'] },
+  // 项目评论批注（2026-10-06）：区间号同 2932 只作执行序排序 —— 排在 work.js 之后（其 setPvTab/ensureWork
+  // 调本模块的 cmtLoad/cmtRender/cmtMount），排在 quote.js（5352，其「添加评论」行动调 openCommentComposer）
+  // 与启动序列（5379）之前。本模块顶层只注册三个 document/window 监听（均自带守卫），无跨模块顶层执行码。
+  { file: 'sidebar/comments.js', ranges: [[2932, 2932]], first: ['  // ---------- 项目评论批注（work 右栏评论 tab） ----------'] },
   { file: '__app__', ranges: [[2933, 3011], [5379, 5398]], first: ['  // ---------- 事件绑定 ----------', '  // ---------- 启动 ----------'] },
   { file: 'inputbar/ctx-meter.js', ranges: [[3012, 3303]], first: ['  // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------'] },
   { file: 'core/gateway.js', ranges: [[3304, 3420], [4154, 4161], [4969, 5047], [5352, 5378]], first: ['  // ---------- 网关模式（SubPj2 私有化网关）----------', '  function setConn(on, label) {', '  function connect() {', '  function initGateway() {'] },

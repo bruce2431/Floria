@@ -4,8 +4,9 @@
 //      唯一真源 = core/state.js newSessionProject()——任何消费点直读 state.newProject 都会漏。
 //   ② 助手栏范围：work 模式下助手栏只展示工作项目的会话（别的项目的会话路径→退回该项目新对话空态），
 //      唯一判定点 = sidebar/work.js workScopeOk()，路由渲染/切模式/切项目三处入口共用。
-//   ③ 助手三态（2026-09-27）：主区「至少一栏」不变量就地改判「编辑区 / 预览至少一栏」（助手可脱流为
-//      悬浮卡 / 收敛输入栏），唯一判定点仍是 applyPanes；脱流助手不得被 paneVisible 当成 in-flow 栏。
+//   ③ 下沉区 tab + 助手三态（2026-10-06）：不变量 = **聊天 tab / 文件 tab / 预览至少一个在场**
+//      （助手可脱流为悬浮卡 / 收敛输入栏），唯一判定点仍 applyPanes；下沉格当前显示谁 = wkShownTab()。
+//      预览列固定最右（列宽 state.wkPrevW），助手脱流不得被当成在场内容。
 // 附带断言：空态底栏宽度随包含块（会话卡）收缩——.g-stage 宽度基准不得是 vw（否则 work 两栏下
 // stage 溢出被卡裁掉，底栏与「发送消息」占位一并被裁）。
 // 用法：bun run ./probe-work-scope.ts   （输出 pass/fail，末行 N/M）
@@ -94,20 +95,21 @@ ok('E1 产物内 projSeatLocked 定义唯一', count(appJs, /function projSeatLo
 ok('E1 产物内 workScopeOk 定义唯一', count(appJs, /function workScopeOk\(/g) === 1)
 ok('E2 产物含 work 范围守卫调用点（含 renderSession 一处）', count(appJs, /workScopeOk\(/g) >= 3)
 
-// ---------- ⑥ 助手三态（2026-09-27：靠栏 / 悬浮卡 / 收敛输入栏）----------
-// 不变量就地更新：主区「至少一栏」改判 **编辑区 / 预览至少一栏**（助手脱流时不占列，不能再用它兜底），
-// 唯一判定点仍是 applyPanes；脱流助手不得被当成 in-flow 栏（否则预览列与浮卡间会冒出幽灵分界条）。
+// ---------- ⑥ 下沉区 tab + 助手三态（靠栏 / 悬浮卡 / 收敛输入栏）----------
+// 不变量：**聊天 tab / 文件 tab / 预览至少一个在场**（助手脱流时不占下沉格，不能再用它兜底），
+// 唯一判定点仍是 applyPanes；下沉格显示谁 = wkShownTab()（靠栏按 wkMainTab，脱流则文件顶上来或空）。
 const inFlow = body(workJs, 'function wkAssistInFlow()')
 ok('F1 in-flow 判据唯一（助手开着 && 形态 = side）', /state\.wkAssist && wkAssistMode\(\) === 'side'/.test(inFlow), inFlow.replace(/\s+/g, ' ').slice(0, 120))
 const ap = body(workJs, 'function applyPanes()')
-ok('F1 不变量 = 编辑区 / 预览至少一栏（判据用 wkAssistInFlow）', /!state\.wkEditor && !state\.wkPreview && !wkAssistInFlow\(\)/.test(ap))
-ok('F1 旧判据（!wkEditor && !wkAssist && !wkPreview）已清除', !/!state\.wkEditor && !state\.wkAssist && !state\.wkPreview/.test(workJs))
-const pv = body(workJs, 'function paneVisible(')
-ok('F2 脱流助手不算 in-flow 栏（无幽灵分界条）', pv.includes('el === sessionCard') && pv.includes('wkAssistInFlow()'))
+ok('F1 不变量 = 聊天 tab / 文件 tab / 预览至少一个在场', /!state\.wkAssist && !state\.workFile && !state\.wkPreview/.test(ap))
+ok('F1 旧判据（!wkEditor && !wkPreview && !wkAssistInFlow）已清除', !/!state\.wkEditor && !state\.wkPreview && !wkAssistInFlow\(\)/.test(workJs))
+const shown = body(workJs, 'function wkShownTab()')
+ok('F2 下沉格判据 wkShownTab（靠栏按 wkMainTab / 脱流文件顶上 / 否则空）', shown.includes('wkAssistInFlow()') && shown.includes("state.wkMainTab === 'file'") && /return state\.workFile \? 'file' : ''/.test(shown), shown.replace(/\s+/g, ' ').slice(0, 140))
+ok('F2 旧多栏选择器（paneVisible / nearPane / paneKey / PANE_EL）已清除', !/function paneVisible\(|function nearPane\(|function paneKey\(|const PANE_EL/.test(workJs))
 const aam = body(workJs, 'function applyAssistMode()')
 ok('F3 三态唯一写口 applyAssistMode（类 + 内联几何）', aam.includes('wk-assist-float') && aam.includes('wk-assist-slim'))
 
-ok('F3 applyWorkFlex 末尾重锚（栏宽变化后调 applyAssistMode）', body(workJs, 'function applyWorkFlex()').includes('applyAssistMode()'))
+ok('F3 applyWorkCols 末尾重锚（预览列宽变化后调 applyAssistMode）', body(workJs, 'function applyWorkCols()').includes('applyAssistMode()'))
 // 横向只有一个写口：两态共用 wkPlaceAssistBox 写「左缘 + 宽」；CSS 里不得再出现自居中（双写口 = 双重位移）
 const pab = body(workJs, 'function wkPlaceAssistBox(')
 ok('F3b 两态横向几何同源（wkPlaceAssistBox 写左缘 + 宽）', pab.includes("sessionCard.style.left") && pab.includes("sessionCard.style.width") && body(workJs, 'function wkPlaceAssistFloat()').includes('wkPlaceAssistBox(') && body(workJs, 'function wkPlaceAssistSlim()').includes('wkPlaceAssistBox('))
@@ -165,26 +167,80 @@ ok('G1 mouseleave 收起判据读 panelPinned（悬停唤出可收）', /if \(!s
 ok('G1 state.js 有 panelPinned 初始位', /panelPinned: false/.test(stateJs))
 ok('G1 浮层行同步定义唯一 + 两处调用', count(appJs, /function syncPaneRows\(/g) === 1 && count(appJs, /syncPaneRows\(\)/g) >= 2)
 
-// ---------- ⑪ 视图浮层四开关按项目分槽（2026-09-28）----------
-// 不变量：四开关（编辑区/助手/预览/侧边栏）是**项目级**状态——切项目换槽（有槽用槽，无槽回落缺省），
+// ---------- ⑪ 视图浮层两开关按项目分槽（2026-10-06 由四开关收为两开关）----------
+// 不变量：两开关（预览/侧边栏）是**项目级**状态——切项目换槽（有槽用槽，无槽回落缺省），
 // 尚未选项目时不落槽。读写各一个口：stashWorkPanes（saveWork 内调）/ loadWorkPanes（loadWork 与切项目调）。
-ok('H1 state.js 有 wkPanes 槽 + 四开关缺省表', /wkPanes: \{\}/.test(stateJs) && /const WK_PANES_DEF = \{ editor: true, assist: true, workspace: false, sidebar: false \}/.test(stateJs))
+// 编辑区/助手退场：编辑区在场 ⇔ workFile 非空，助手在场 ⇔ wkAssist（均全局，不按项目分槽）。
+ok('H1 state.js 有 wkPanes 槽 + 两开关缺省表', /wkPanes: \{\}/.test(stateJs) && /const WK_PANES_DEF = \{ workspace: true, sidebar: false \}/.test(stateJs))
 const stash = body(stateJs, 'function stashWorkPanes()')
 ok('H1 归档唯一口：未选项目不落槽', stash.includes('if (!state.workProj) return') && /state\.wkPanes\[state\.workProj\] = \{/.test(stash))
 const lwp = body(stateJs, 'function loadWorkPanes(')
-ok('H1 读槽唯一口：无槽回落缺省（四键逐一）', lwp.length > 0 && /typeof s\[k\] === 'boolean' \? s\[k\] : WK_PANES_DEF\[k\]/.test(lwp) && ['editor', 'assist', 'workspace', 'sidebar'].every((k) => lwp.includes(`val('${k}')`)))
+ok('H1 读槽唯一口：无槽回落缺省（两键逐一）', lwp.length > 0 && /typeof s\[k\] === 'boolean' \? s\[k\] : WK_PANES_DEF\[k\]/.test(lwp) && ['workspace', 'sidebar'].every((k) => lwp.includes(`val('${k}')`)))
 ok('H1 saveWork 归档后与其余 work 状态同一次 patch', body(stateJs, 'function saveWork()').includes('stashWorkPanes()') && /wkPanes: state\.wkPanes/.test(body(stateJs, 'function saveWork()')))
-ok('H1 loadWork 读槽表 + 按恢复项目落四开关', /state\.wkPanes\[k\] = v/.test(body(stateJs, 'function loadWork()')) && body(stateJs, 'function loadWork()').includes('loadWorkPanes(state.workProj)'))
-ok('H1 旧全局扁平字段（wkEditor/wkAssist/wkPreview 顶层持久化）已清除', !/d\.wkEditor|d\.wkAssist\b|d\.wkPreview|wkEditor: state\.wkEditor/.test(stateJs))
+ok('H1 loadWork 读槽表 + 按恢复项目落两开关', /state\.wkPanes\[k\] = v/.test(body(stateJs, 'function loadWork()')) && body(stateJs, 'function loadWork()').includes('loadWorkPanes(state.workProj)'))
+ok('H1 旧全局扁平字段 wkEditor 已清除', !/wkEditor/.test(stateJs))
+ok('H1 新全局字段（wkAssist/wkMainTab/wkPrevW）顶层持久化往返', /wkAssist: !!state\.wkAssist/.test(stateJs) && stateJs.includes('wkMainTab: state.wkMainTab') && stateJs.includes('wkPrevW: state.wkPrevW') && /typeof d\.wkAssist === 'boolean'/.test(stateJs) && /d\.wkMainTab === 'chat'/.test(stateJs) && /typeof d\.wkPrevW === 'number'/.test(stateJs))
 const sp = body(workJs, 'async function selectProject(')
 ok('H2 切项目：先归档旧项目（早于 workProj 赋值）', sp.includes('stashWorkPanes()') && sp.indexOf('stashWorkPanes()') < sp.indexOf('state.workProj = label'))
-ok('H2 切项目：换槽后落地四开关（loadWorkPanes → applyPanes）', sp.indexOf('loadWorkPanes(label)') > sp.indexOf('state.workProj = label') && sp.indexOf('applyPanes()') > sp.indexOf('loadWorkPanes(label)'))
+ok('H2 切项目：换槽后落地两开关（loadWorkPanes → applyPanes）', sp.indexOf('loadWorkPanes(label)') > sp.indexOf('state.workProj = label') && sp.indexOf('applyPanes()') > sp.indexOf('loadWorkPanes(label)'))
 ok('H2 侧栏开合按新项目槽恢复（applySidebarPin 在切项目链内）', sp.includes('applySidebarPin()'))
 const asp = body(workJs, 'function applySidebarPin()')
 ok('H3 侧栏恢复走 setPanel（侧栏开合唯一口），移动端不恢复', asp.includes('setPanel(!!state.panelPinned, { pin: !!state.panelPinned })') && asp.includes('if (isMobile()) return'))
 ok('H3 进 work 模式接线（applySbMode 的 on 分支调 applySidebarPin）', body(workJs, 'function applySbMode()').includes('applySidebarPin()'))
 ok('H3 浮层「侧边栏」开关落盘（setPane sidebar 分支 saveWork）', body(workJs, 'function setPane(').split("if (k === 'sidebar')")[1]?.split('return')[0]?.includes('saveWork()') === true)
 ok('H4 产物 app.js 内两个新口定义唯一', count(appJs, /function stashWorkPanes\(/g) === 1 && count(appJs, /function loadWorkPanes\(/g) === 1 && count(appJs, /function applySidebarPin\(/g) === 1)
+
+// ---------- ⑫ work 布局改版：下沉区顶栏 tab + CSS Grid 三列 + 预览常驻最右（2026-10-06）----------
+// 侧栏填充按模式分：chat = 透明卡壳（几何保留、透出底板 --plane，主区会话白卡成对比）；
+// work = 白卡并与主区拼成同一张（:has(#panel.work) 覆盖背景）。
+// 形态：work 区是**一整张白卡**（#sidebar.open 与 #chat-area.work 等底同色、中缝零间距），
+// 卡中间「挖」一个圆角矩形当**下沉洞**（顶栏格 + 内容格拼成，底色 --plane、四周留 8px 白边）；
+// 预览默认开、固定最右列（#chat-area.work 白卡的一部分）。
+// 顶栏 [＋][聊天][文件名] pill 由 renderTopbar 单口渲染，active 与下沉区实际显示同源（wkShownTab）。
+ok('I1 index.html 含顶栏结构（.wk-topbar / #wk-tb-new / #wk-tb-tabs）', ['wk-topbar', 'wk-tb-new', 'wk-tb-tabs'].every((c) => idx.includes(c)))
+ok('I1 index.html 旧链清除（#wk-ed-back 已删）', !idx.includes('wk-ed-back'))
+ok('I1 视图浮层两行（预览 / 侧边栏，四行退场）', ['data-wkpane="workspace"', 'data-wkpane="sidebar"'].every((c) => idx.includes(c)) && !idx.includes('data-wkpane="editor"') && !idx.includes('data-wkpane="assist"'))
+const rt = body(workJs, 'function renderTopbar()')
+ok('I2 renderTopbar active 与下沉显示同源（读 wkShownTab）', rt.includes('wkShownTab()') && rt.includes('wk-tb-pill'))
+ok('I2 顶栏 tab 数据键 data-wktb（点文件切 wkMainTab=file）', body(workJs, 'function mountWork()').includes('data-wktb') && workJs.includes("state.wkMainTab = 'file'"))
+ok('I2 顶栏 + 按钮接线 newWorkChat（新建聊天唯一口）', mw.includes("$('wk-tb-new')") && mw.includes('newWorkChat()'))
+ok('I3 CSS Grid 三列（下沉区 | 7px 分界条 | --wk-pw 预览列）', /#chat-area\.work \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: minmax\(0, 1fr\) 7px var\(--wk-pw, 420px\)/.test(styles))
+ok('I3 预览关 → 单列退化（:not(.wk-preview)）', /#chat-area\.work:not\(\.wk-preview\) \{ grid-template-columns: minmax\(0, 1fr\)/.test(styles))
+ok('I3 下沉区 tab 显隐类（.wk-show-chat / .wk-show-file）', /\.wk-show-chat > #session-card/.test(styles) && /\.wk-show-file > #work-editor/.test(styles))
+ok('I3 顶栏 pill 样式（.wk-tb-pill + .on 高亮）', /\.wk-tb-pill \{/.test(styles) && /\.wk-tb-pill\.on \{/.test(styles))
+ok('I3 一整张白卡：主区白底 + 外留 2px 缝 + 右半圆角', /#chat-area\.work \{[\s\S]*?margin: 2px 2px 2px 0;[\s\S]*?background: var\(--chat-bg\);[\s\S]*?border-radius: 0 var\(--radius\) var\(--radius\) 0/.test(styles))
+ok('I3 侧栏与主区拼成同一张白卡（右缝归零 + 右角不圆 + work 白底）', /#sidebar\.open:has\(#panel\.work\) \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
+ok('I3 chat 侧栏透明卡壳（open 态几何保留 + 透明填充，外留 2px 缝）', /#sidebar\.open \{ width: calc\(var\(--panel-w\) \+ 4px\); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent/.test(styles))
+ok('I3 下沉洞上半（顶栏格 --plane + 8px 边距 + 上圆角）', /#chat-area\.work > \.wk-topbar \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 8px 8px 0;[\s\S]*?border-radius: var\(--radius\) var\(--radius\) 0 0/.test(styles))
+ok('I3 下沉洞下半（内容格 --plane + 下圆角，浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 0 8px 8px;[\s\S]*?border-radius: 0 0 var\(--radius\) var\(--radius\)/.test(styles))
+ok('I3 角色图承载面透明（.g-stage 无白底，防 re-框成白方块）', /\.g-stage \{[\s\S]*?background: transparent/.test(styles))
+ok('I3 预览保持白卡（.wk-preview > #work-preview 显形）', /#chat-area\.work\.wk-preview > #work-preview \{ display: flex/.test(styles))
+ok('I4 旧链 CSS 清除（.wk-file-open 覆盖层 / .wk-ed-back 已删）', !/\.wk-file-open/.test(styles) && !/\.wk-ed-back/.test(styles))
+ok('I4 旧链 JS 清除（applyWorkFlex / wkFlex / PANE_EL 已删）', !/applyWorkFlex|state\.wkFlex|const PANE_EL/.test(workJs))
+ok('I4 旧链 work.js 清除（.wk-file-open / #wk-ed-back 已删）', !/wk-file-open|wk-ed-back/.test(workJs))
+ok('I4 state.js 删 wkFlex/wkEditor + 加 wkMainTab/wkPrevW 初值', !/wkFlex|wkEditor/.test(stateJs) && /wkMainTab: 'chat'/.test(stateJs) && /wkPrevW: 420/.test(stateJs))
+ok('I5 预览列宽单写口 applyWorkCols（写 CSS 变量 --wk-pw）', body(workJs, 'function applyWorkCols()').includes("setProperty('--wk-pw'") && /state\.wkPrevW = Math\.max\(WK_PREV_MIN/.test(body(workJs, 'function bindGutter(')))
+ok('I5 分界条只剩一条（index.html 单一 .work-gutter）', (idx.match(/class="work-gutter"/g) || []).length === 1)
+ok('I6 产物 app.js 含新口定义唯一（wkShownTab / renderTopbar / applyWorkCols）', count(appJs, /function wkShownTab\(/g) === 1 && count(appJs, /function renderTopbar\(/g) === 1 && count(appJs, /function applyWorkCols\(/g) === 1)
+ok('I6 产物 app.js 旧口清除（applyWorkFlex / closeWorkFile / wk-file-open）', !/function applyWorkFlex\(|function closeWorkFile\(|wk-file-open/.test(appJs))
+
+// ---------- ⑬ 顶栏会话胶囊：开放集（浏览器 tab 模型）（2026-10-06）----------
+// 真源 state.wkChats（条目 = 会话 hash 或 'new' 哨兵）；顶栏一条一枚、命名用会话标题、× 只从顶栏移除
+// 不删会话（wkCloseTab）；路由落地由 syncWorkTabs 并入；活跃项 = 当前路由（wkActiveKey）。
+const closeBody = body(workJs, 'function wkCloseTab(')
+ok('J1 state.js wkChats 初值 + saveWork 落盘 + loadWork 恢复（字符串数组）', /wkChats: \[\]/.test(stateJs) && stateJs.includes('wkChats: state.wkChats') && /Array\.isArray\(d\.wkChats\)/.test(stateJs))
+ok('J2 work.js 胶囊口四件定义唯一（wkActiveKey / wkEnsureTab / wkCloseTab / syncWorkTabs）', count(workJs, /const wkActiveKey = /g) === 1 && count(workJs, /function wkEnsureTab\(/g) === 1 && count(workJs, /function wkCloseTab\(/g) === 1 && count(workJs, /function syncWorkTabs\(/g) === 1)
+ok('J2 活跃键 = 当前路由（currentHash，空 ⇒ WK_NEW_TAB）', /wkActiveKey = \(\) => state\.currentHash \|\| WK_NEW_TAB/.test(workJs) && workJs.includes("const WK_NEW_TAB = 'new'"))
+ok('J3 renderTopbar 渲多胶囊（遍历 wkChats + data-wkchat + .wk-tb-x）', rt.includes('for (const key of state.wkChats)') && rt.includes('data-wkchat=') && rt.includes('wk-tb-x'))
+ok('J3 胶囊命名用会话标题（wkTabName 读 findSession(...).title）', /wkTabName[\s\S]{0,160}findSession/.test(workJs) && /\(s && s\.title\)/.test(workJs) && workJs.includes("return '新对话'"))
+ok('J4 × 只从顶栏移除不删会话（wkCloseTab 无 closeSession/delete）', !/closeSession|deleteSession|DELETE/.test(closeBody))
+ok('J4 × 关 tab 接线（wk-tb-x → wkCloseTab）', body(workJs, 'function mountWork()').includes("closest('.wk-tb-x')") && body(workJs, 'function mountWork()').includes('wkCloseTab('))
+ok('J4 聊天胶囊点击接线（data-wkchat → 切路由 + 靠回栏）', body(workJs, 'function mountWork()').includes("closest('[data-wkchat]')"))
+ok('J5 applyPanes 保开放集含当前 tab（wkEnsureTab(wkActiveKey())）', body(workJs, 'function applyPanes()').includes('wkEnsureTab(wkActiveKey())'))
+ok('J5 work 侧栏点会话入开放集（sess-item 分支 wkEnsureTab）', /closest\('\.sess-item'\)[\s\S]{0,200}wkEnsureTab\(s\.dataset\.hash\)/.test(workJs))
+ok('J5 syncWorkTabs 导出且在 route.js 调用', /export \{[\s\S]*?syncWorkTabs[\s\S]*?\}/.test(workJs) && routeJs.includes('syncWorkTabs()'))
+ok('J6 CSS 关闭钮样式（.wk-tb-x + hover）', /\.wk-tb-x \{/.test(styles) && /\.wk-tb-x:hover \{/.test(styles))
+ok('J6 产物 app.js 胶囊口定义唯一', count(appJs, /function wkCloseTab\(/g) === 1 && count(appJs, /function syncWorkTabs\(/g) === 1 && appJs.includes('data-wkchat'))
 
 console.log(`\n${pass}/${fail}`)
 process.exit(fail ? 1 : 0)

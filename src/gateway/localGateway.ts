@@ -1080,6 +1080,58 @@ export function writeProjectFile(projRoot: string, rel: string, content: string,
   return { ok: true, path: rel.replace(/\\/g, '/').replace(/^\/+/, ''), mtime: statSync(abs).mtimeMs }
 }
 
+/**
+ * 项目内文件批注（2026-10-06 work 评论功能）。存储 <projRoot>/.claude/comments.json，单一真源；
+ * 前端为唯一写入方、每次全量替换（列表规模小，全量写避免并发合并歧义）。与 writeProjectFile 不同，
+ * 这里**允许新建**（comments.json 是本功能专有文件，不存在于文件树上——walkProjectTree 跳 dot 项）。
+ * readProjectComments 缺失 / 坏 JSON / 顶层非对象 → []（不抛：GET 每次请求都跑，抛＝网关 500）。
+ */
+export type ProjectComment = {
+  id: string
+  path: string
+  l0: number
+  l1: number
+  excerpt: string
+  body: string
+  author: string
+  createdAt: string
+  resolved: boolean
+}
+
+export function commentsFilePath(projRoot: string): string {
+  return join(projRoot, '.claude', 'comments.json')
+}
+
+export function readProjectComments(projRoot: string): ProjectComment[] {
+  try {
+    const p = commentsFilePath(projRoot)
+    if (!existsSync(p) || !statSync(p).isFile()) return []
+    const raw = JSON.parse(readFileSync(p, 'utf8')) as unknown
+    const list = raw && typeof raw === 'object' && Array.isArray((raw as { comments?: unknown }).comments)
+      ? ((raw as { comments: unknown[] }).comments)
+      : null
+    if (!list) return []
+    return list.filter((c): c is ProjectComment => !!c && typeof c === 'object' && !Array.isArray(c))
+  } catch {
+    return []
+  }
+}
+
+export function writeProjectComments(
+  projRoot: string,
+  comments: unknown[],
+): { ok: true; count: number } | { ok: false; code: number; error: string } {
+  const list = Array.isArray(comments) ? comments.filter((c) => !!c && typeof c === 'object' && !Array.isArray(c)) : null
+  if (!list) return { ok: false, code: 400, error: 'invalid comments' }
+  try {
+    mkdirSync(join(projRoot, '.claude'), { recursive: true })
+    writeFileSync(commentsFilePath(projRoot), JSON.stringify({ version: 1, comments: list }, null, 2), 'utf8')
+    return { ok: true, count: list.length }
+  } catch {
+    return { ok: false, code: 500, error: 'write failed' }
+  }
+}
+
 
 function findProjects(root: string): ProjectInfo[] {
   const groups: ProjectInfo[] = []
@@ -2484,6 +2536,41 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       )
       if (!wOut.ok) sendJson(res, wOut.code, { error: wOut.error })
       else sendJson(res, 200, wOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内评论批注：GET /gateway/comments?label= → {comments:[...]}；
+  // POST /gateway/comments {label, comments:[...]} → 全量替换（2026-10-06 work 评论功能）。
+  // 存储 <项目根>/.claude/comments.json，读写语义全在 read/writeProjectComments（纯函数，探针直测）。
+  // 只认 scope==='project'（评论属项目，不落全局根散装区）。受上方 /gateway/* token 校验保护。
+  if (req.method === 'GET' && url.pathname === '/gateway/comments') {
+    const cLabel = url.searchParams.get('label') || ''
+    const cProj = findProjects(root).find((g) => g.scope === 'project' && g.label === cLabel)
+    if (!cProj) {
+      sendJson(res, 404, { error: 'project not found' })
+      return
+    }
+    sendJson(res, 200, { comments: readProjectComments(resolve(cProj.dir, '..', '..')) })
+    return
+  }
+  if (req.method === 'POST' && url.pathname === '/gateway/comments') {
+    try {
+      const cb = await readReportBody(req)
+      const cProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof cb.label === 'string' ? cb.label : ''),
+      )
+      if (!cProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const cOut = writeProjectComments(
+        resolve(cProj.dir, '..', '..'),
+        Array.isArray(cb.comments) ? cb.comments : [],
+      )
+      if (!cOut.ok) sendJson(res, cOut.code, { error: cOut.error })
+      else sendJson(res, 200, cOut)
     } catch (e) {
       sendError(res, e)
     }

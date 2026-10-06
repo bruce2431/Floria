@@ -15,10 +15,13 @@
   --active: #e9e9ec;
   --selected: #e4e4ea; /* 会话列表选中行底（比 --active 更深，2026-10-06） */
   /* 浮起面（悬停扶起 tab / 长按扶起文件行）：独立于 --bg 的抬升面令牌。浅色=白卡压底板，
-     夜晚底板是 #000，沿用 --bg(#161616) 会与底板糊在一起、黑影也失效，故单列一套。 */
+     夜晚底板是 #000，沿用 --bg(#161616) 会与底板糊在一起、黑影也失效，故单列一套。
+     2026-10-06 用户报「白天浮起同样不明显」：白天底板是 --plane(#ececf1 灰)，白卡只高出 19 级明度，
+     原 #e2e2e6 描边 + 0.12 投影读不出「抬升」——改为深色描边 + 双层投影，与夜晚（底#000/浮#2e2e2e
+     +18%亮描边+0.8投影）取同等对比强度。 */
   --float-bg: #ffffff;
-  --float-line: #e2e2e6;
-  --float-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  --float-line: rgba(0, 0, 0, 0.14);
+  --float-shadow: 0 10px 26px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
@@ -1795,8 +1798,11 @@ body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /
 }
 .sess-item:hover { background: var(--hover); }
 /* 被选中会话（2026-10-06 用户报「chat 模式选中不明显」，同日二轮定案）：原本只有 --active(#e9e9ec)
-   一层淡底，与 hover(--hover #f2f2f4) 几乎分不出。取「更深底(专值 --selected，不改全局 --active
-   以免连带动 mtab/mgr-tab 等)+标题加粗」两处辨识；**左侧 3px 蓝条已撤**（用户「小蓝色边框不要」）。 */
+   一层淡底，与 hover(--hover #f2f2f4) 几乎分不出。取「专属底色(专值 --selected，不改全局 --active
+   以免连带动 mtab/mgr-tab 等)+标题加粗」两处辨识；**左侧 3px 蓝条已撤**（用户「小蓝色边框不要」）。
+   2026-10-06 三轮（用户「chat 白天下还是灰色的底子」）：单一 --selected(#e4e4ea) 只在 work 白天
+   （宿主=白卡）读得出；chat 白天宿主是 --plane(#ececf1 灰)，#e4e4ea 只深 8 级＝糊在灰底里。
+   故按宿主换向分派（见下方「白天模式行底换向」）。 */
 .sess-item.on { background: var(--selected); }
 .sess-item.on .title { font-weight: 600; }
 /* 会话列表文字统一浅灰（2026-10-06 用户「所有文字改为浅灰色」，暗色下白字刺眼）：只作用侧栏会话列表
@@ -2013,9 +2019,16 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
    z-index 60 盖过主区与列表普通行。 */
 /* 浮起面在 work 白天模式下的换向（2026-10-06 用户报「work 日照模式 tab 浮起同样被盖住」）：
    work 侧栏是白卡（--chat-bg），白底上再浮白卡 = 看不出浮起、选中样式被盖住；白天模式改取底板灰
-   --plane，与 chat 模式（灰底浮白卡）互为正负。夜晚两种模式的宿主都是深底，浮卡统一取更亮的抬升面
+   --plane，与 chat 模式（灰底浮白卡）互为正负。描边/投影不另设，随 :root 白天令牌（深色描边+双层投影）
+   ——两个方向的浮起靠同一份边影强度读出来。夜晚两种模式的宿主都是深底，浮卡统一取更亮的抬升面
    （见 html[data-theme="dark"] 的 --float-* 令牌），故此处只在非夜晚生效。 */
-html:not([data-theme="dark"]) #app.work { --float-bg: var(--plane); --float-line: #d7d7de; }
+html:not([data-theme="dark"]) #app.work { --float-bg: var(--plane); }
+/* 白天模式行底换向（2026-10-06 用户「chat 白天下还是灰色的底子」）：悬停/选中底必须朝**远离宿主**的
+   方向走才看得见。两种模式白天宿主不同——chat 侧栏透明于 #app 底（--plane #ececf1 灰）、work 侧栏是
+   白卡（--chat-bg）——故单一 --selected/--hover 必有一边糊住：chat 宿主灰 ⇒ 取更亮的白；work 宿主白
+   ⇒ 取更暗的灰。夜晚两模式宿主同为深底（#161616），方向一致更亮（--hover #242424 / --selected #303030），
+   整块不动。作用域落 #app（全部消费点都在其内），--selected 全站仅 .sess-item.on 一处消费。 */
+html:not([data-theme="dark"]) #app:not(.work) { --hover: #f4f4f7; --selected: #ffffff; }
 .sess-item.lift {
   background: var(--float-bg); border-radius: 10px;
   box-shadow: 0 0 0 1px var(--float-line), var(--float-shadow);

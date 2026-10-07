@@ -4,7 +4,9 @@
 
 import { apiUrl, needToken } from '../../../core/gateway.js'
 import { I } from '../../../core/icons.js'
-import { esc, isMobile, saveMgrView, state } from '../../../core/state.js'
+import { state } from '../../../core/state.js'
+import { esc, isMobile } from '../../../core/util.js'
+import { saveMgrView } from '../../../core/storage.js'
 import { viewBody } from '../../registry.js'
 import { mgrColor, MGR_PALETTE } from '../../../sidebar/mgr-data.js'
 import { closePanel } from '../../../core/panel.js'

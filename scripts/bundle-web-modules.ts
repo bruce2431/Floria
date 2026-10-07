@@ -12,7 +12,12 @@ const OUT = './src/gateway/web/app.js'
 const MODULES: { file: string; ranges: [number, number][]; first: string[] }[] = [
   { file: 'core/icons.js', ranges: [[13, 44]], first: ['  // ---------- SVG 图标 ----------'] },
   { file: 'sidebar/mgr-data.js', ranges: [[45, 111]], first: ['  // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------'] },
-  { file: 'core/state.js', ranges: [[112, 159], [274, 286]], first: ['  // ---------- 元素 ----------', '  function toast(msg) {'] },
+  // 2026-10-07：core/state.js 拆为 元素/状态(state.js) + 持久化(storage.js) + 工具/util.js。
+  // ranges 首值仅作执行序排序（数字自定义、互不相同即定序），真实切片靠 first 锚点检索；
+  // 三者区间首值 112/120/130/140/274 与拆分前 state.js 的两段 [112,159]/[274,286] 同序。
+  { file: 'core/state.js', ranges: [[112, 159], [130, 159]], first: ['  // ---------- 元素 ----------', '  let ALL = []'] },
+  { file: 'core/storage.js', ranges: [[120, 159]], first: ['  // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）'] },
+  { file: 'core/util.js', ranges: [[140, 159], [274, 286]], first: ['  // ---------- 工具 ----------', '  function toast(msg) {'] },
   // 侧栏开合核（2026-10-05 自 recent.js setPanel 抽出）：区间号仅作执行序排序（模块内全为函数声明，
   // 顶层无执行码；被 recent.js 与两张卡 neurons/projects 在运行时调用）。
   { file: 'core/panel.js', ranges: [[2932, 2932]], first: ['  // ---------- 侧栏开合核 ----------'] },

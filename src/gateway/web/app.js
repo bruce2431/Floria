@@ -249,7 +249,7 @@
     // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
     wkEdit: false,
     // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
-    // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（下方）。
+    // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（core/storage.js）。
     wkPanes: {},
     // wkPvTab = 右栏（#work-preview）当前 tab：'preview'（项目预览，默认）| 'comments'（评论面板，
     // 2026-10-06）。全局一份（不按项目分槽），随 saveWork 持久化；判定/落地唯一处 = sidebar/work.js applyPvTab。
@@ -257,7 +257,6 @@
 
   // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
   const WK_PANES_DEF = { workspace: true, sidebar: false }
-
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
   // 实现「刷新保持当前界面」（会话/管理/预览三态均可恢复，不再回退初始界面）。
@@ -329,13 +328,17 @@
       if (d.wkPvTab === 'preview' || d.wkPvTab === 'comments') state.wkPvTab = d.wkPvTab
     } catch { /* 忽略 */ }
   }
+
   let ALL = []
-  let timer = null
   // 阶段1 实时同步：SSE 变更驱动的去重/防抖状态
   const live = { es: null, listSig: '', curSig: '', listT: null, sessT: null, lastUserSig: '', pinnedUserSig: '', lastMsgLen: null, lastDataTs: 0, curUuid: null, queueRemote: [], maxImgId: 0, compactFlags: new Map(), turnEndFlags: new Map(), restoredFlags: new Map(), turnBeat: new Map(), txProcStart: 0, localMessages: null, deltaSeq: null, streamText: '', tasks: [], taskOpen: false }
   let connUp = false // 2026-09-07 网关 WS 在线（setConn 维护）：运行态计时 tick 据此标「连接中断」
 
+function setAll(v) { ALL = v }
+function setConnUp(v) { connUp = v }
   // ---------- 工具 ----------
+  let timer = null
+
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
@@ -570,8 +573,6 @@
   // （2026-08-28：+ 命令菜单搜索框 / 模型菜单回填输入栏焦点均被识别为文本输入；桌面不受影响，方向键导航保留）
   const isTouch = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
-function setAll(v) { ALL = v }
-function setConnUp(v) { connUp = v }
   // ---------- 会话映射 ----------
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可

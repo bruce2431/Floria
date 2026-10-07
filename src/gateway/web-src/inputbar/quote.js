@@ -1,7 +1,8 @@
 // 选中文本 → 松开鼠标 → 引用浮窗（2026-09-28）
 
 import { I } from '../core/icons.js'
-import { esc, inputEl, messagesEl, state } from '../core/state.js'
+import { inputEl, messagesEl, state } from '../core/state.js'
+import { esc } from '../core/util.js'
 import { findSession } from '../core/sessions.js'
 import { quoteActions } from '../views/registry.js'
 import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'

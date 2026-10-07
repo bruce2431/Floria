@@ -2,7 +2,7 @@
 
 import { needToken, apiSetModel } from '../../../core/gateway.js'
 import { I } from '../../../core/icons.js'
-import { esc, state, toast } from '../../../core/state.js'
+import { esc, toast } from '../../../core/util.js'
 import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor, modelProviderOf } from '../../../sidebar/mgr-data.js'
   // ---------- 模型卡 ----------
   // 数据源 = 网关 /gateway/models（只读展示 + 设为默认）。modelProviderOf 同被输入栏模型菜单复用（唯一一份）。

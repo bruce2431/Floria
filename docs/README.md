@@ -11,8 +11,8 @@
 | [build.md](build.md) | 构建与 flag | 构建命令/产物规范/前端内嵌打包 cache-busting + 88 个 feature flag 活审计 |
 | [glossary.md](glossary.md) | 术语表 | web/CLI 双前端 UI 实体规范名 ↔ 实际 DOM 码对照 + SSE 信号族 |
 | [core.md](core.md) | 源码核心机制 | 便携配置根/会话平铺/插件双发现/沙箱权限/自愈日志/神经元 NEURON_RAG/会话间协作 |
-| [gateway.md](gateway.md) | 网关服务 | API 前缀/认证配对/mDNS/预览容器/反代/独立会话进程链/审批中继/会话间通信路由 |
-| [web-ui.md](web-ui.md) | web 前端链路 | 路由/首条消息事务链/session-delta/打断收口/两层消息流占位/渲染与交互定案（§1-§32） |
+| [gateway.md](gateway.md) | 网关服务 | API 前缀/认证配对/mDNS/预览容器/反代/独立会话进程链/审批中继/会话间通信路由/神经元可视化与文件树·评论端点 |
+| [web-ui.md](web-ui.md) | web 前端链路 | 路由/首条消息事务链/session-delta/打断收口/两层消息流占位/渲染与交互定案（§1-§57；含视图卡片化 §41-§42、chat/work 双模式 §43、评论批注 §55、夜晚模式 §56、KaTeX §57） |
 
 ## 阅读顺序与优先级
 

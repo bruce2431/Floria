@@ -1,6 +1,7 @@
 // 图片附件（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { toast, esc, state, newSessionProject } from '../core/state.js'
+import { state } from '../core/state.js'
+import { toast, esc, newSessionProject } from '../core/util.js'
 import { I } from '../core/icons.js'
 import { apiUrl } from '../core/gateway.js'
 import { syncGwSend } from './send.js'

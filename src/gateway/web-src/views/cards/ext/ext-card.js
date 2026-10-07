@@ -1,6 +1,6 @@
 // 外部预览卡片（卡片化二期）（2026-10-01 卡片化：views/ → views/cards/；唯一手改处，web/app.js 为生成物）
 
-import { esc } from '../../../core/state.js'
+import { esc } from '../../../core/util.js'
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
   // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，

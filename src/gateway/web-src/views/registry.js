@@ -10,7 +10,9 @@
 // 外部永不获得在宿主 DOM 执行的能力（SPEC-视图卡化 §7 边界）。
 
 import { I } from '../core/icons.js'
-import { chatArea, esc, patchUI, readUI, sessionCard } from '../core/state.js'
+import { chatArea, sessionCard } from '../core/state.js'
+import { esc } from '../core/util.js'
+import { patchUI, readUI } from '../core/storage.js'
 import { sessionCardDef } from './cards/session/session-card.js'
 import { neuronsCardDef } from './cards/neurons/neurons-card.js'
 import { pluginsCardDef } from './cards/plugins/plugins-card.js'

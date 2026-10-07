@@ -3,7 +3,8 @@
 import { hideGate } from './auth.js'
 import { needToken, apiUrl } from './gateway.js'
 import { refreshList } from './live.js'
-import { bodyEl, state, ALL, live, toast } from './state.js'
+import { bodyEl, state, ALL, live } from './state.js'
+import { toast } from './util.js'
 import { saveModelCur, MODEL_CUR, modelUserPicked, setModelUserPicked, renderModelSeat } from '../inputbar/model-select.js'
   // ---------- 会话映射 ----------
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')

@@ -2,7 +2,8 @@
 
 import { stage } from '../chat/stage.js'
 import { deviceHint, showGate, gatePlayTransition, hideGate } from './auth.js'
-import { inputEl, state, toast } from './state.js'
+import { inputEl, state } from './state.js'
+import { toast } from './util.js'
 import { addSystem, takeover, clearTakeover, renderApproval, approvalPending, showApprovalError, sendSubscribe } from '../inputbar/approval.js'
 import { onInputChange } from '../inputbar/mention.js'
 import { syncGwSend } from '../inputbar/send.js'

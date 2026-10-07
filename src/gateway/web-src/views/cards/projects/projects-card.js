@@ -3,7 +3,9 @@
 import { navigate } from '../../../chat/route.js'
 import { I } from '../../../core/icons.js'
 import { hashOf } from '../../../core/sessions.js'
-import { ALL, esc, isMobile, saveMgrView, state } from '../../../core/state.js'
+import { ALL, state } from '../../../core/state.js'
+import { esc, isMobile } from '../../../core/util.js'
+import { saveMgrView } from '../../../core/storage.js'
 import { mgrColor } from '../../../sidebar/mgr-data.js'
 import { closePanel } from '../../../core/panel.js'
   // ---------- 项目卡 ----------

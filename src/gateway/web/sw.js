@@ -1,6 +1,6 @@
 /* 遥测 · 会话查看器 — Service Worker（静态资源缓存 + 离线兜底） */
 /* 2026-08-28 CORE 改绝对路径：SPA 路径路由（/session/<hash>）下 SW scope=/，相对路径等价但显式绝对防歧义 */
-const CACHE = 'floria-v470'
+const CACHE = 'floria-v471'
 // /vendor/katex/*（2026-10-06 公式渲染）：js+css+woff2 字体一并预缓存，保证离线时公式仍可排版
 const CORE = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icon.ico',
   '/vendor/katex/katex.min.js', '/vendor/katex/katex.min.css',

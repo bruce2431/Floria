@@ -1,7 +1,7 @@
 // 预览页注册的侧栏快捷按钮（2026-09-23 SPEC §1.2）（唯一手改处，web/app.js 为生成物）
 
 import { I } from '../core/icons.js'
-import { esc } from '../core/state.js'
+import { esc } from '../core/util.js'
 import { railExtItems, setRailExtItems } from '../views/cards/ext/ext-card.js'
 import { registerExtCards } from '../views/registry.js'
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------

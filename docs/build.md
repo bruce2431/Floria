@@ -23,7 +23,7 @@
 
 ### 1.1 前端内嵌打包与 cache-busting（改 web 前端必读）
 
-前端权威 `src/gateway/web-src/`（22 ESM 模块，`gateway/web/app.js` 为构建生成物勿手改）；构建时 `scripts/gen-web-assets.ts` 递归 base64 内联进 exe（build.ts 每次构建前自动运行），`localGateway.ts` 内嵌优先、磁盘 public 仅兜底（项目根优先 + 便携根兜底）。**前端改动必须重新构建 exe 才生效**（无磁盘热重载）；**cache-busting**：index.html 资源引用带版本号 `?v=N`（styles.css/app.js），每次前端改动同步 bump 该号（+ sw.js CACHE），浏览器强制下载新版绕过 HTTP 缓存（资源引用为绝对路径，见 [gateway.md](gateway.md) pushState 路由章节）；**注意：前端从未注册 Service Worker**（web/ 目录无 serviceWorker 代码，sw.js 是死文件，浏览器不跑它——更新可靠靠 cache-busting 而非 sw）。**bytecode exe 内嵌资产不可 grep**（字符串经编码），验证资产版本用 `curl http://127.0.0.1:8124/sw.js` 与 `/app.js`。
+前端权威 `src/gateway/web-src/`（40 ESM 模块，`gateway/web/app.js` 为构建生成物勿手改；模块边界是源码组织、拼接时 import/export 全剥除，见 [web-ui.md](web-ui.md) §12）；构建时 `scripts/gen-web-assets.ts` 递归 base64 内联进 exe（build.ts 每次构建前自动运行），`localGateway.ts` 内嵌优先、磁盘 public 仅兜底（项目根优先 + 便携根兜底）。**前端改动必须重新构建 exe 才生效**（无磁盘热重载）；**cache-busting**：index.html 资源引用带版本号 `?v=N`（styles.css/app.js），每次前端改动同步 bump 该号（+ sw.js CACHE），浏览器强制下载新版绕过 HTTP 缓存（资源引用为绝对路径，见 [gateway.md](gateway.md) pushState 路由章节）；**注意：前端从未注册 Service Worker**（web/ 目录无 serviceWorker 代码，sw.js 是死文件，浏览器不跑它——更新可靠靠 cache-busting 而非 sw）。**bytecode exe 内嵌资产不可 grep**（字符串经编码），验证资产版本用 `curl http://127.0.0.1:8124/sw.js` 与 `/app.js`。
 
 ## 2. Feature Flags 活审计
 

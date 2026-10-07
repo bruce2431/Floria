@@ -3,7 +3,8 @@
 import { navigate } from '../chat/route.js'
 import { I } from '../core/icons.js'
 import { hashOf, sorted } from '../core/sessions.js'
-import { bubblePop, overlay, sInput, esc, isMobile } from '../core/state.js'
+import { bubblePop, overlay, sInput } from '../core/state.js'
+import { esc, isMobile } from '../core/util.js'
 import { setPanel, itemHtml } from './recent.js'
   // ---------- 气泡弹层 ----------
   function renderBubble() {

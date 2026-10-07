@@ -1,13 +1,14 @@
 // 瞬态/落定渲染 + 审批卡 + 提问卡 + 回合态（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { TOOL_NAMES, fmtDur, CHEV, ICON_COPY, messagesHtml, pendingUserMsgs, statusFlags, fileCardsHtml } from '../chat/messages.js'
+import { TOOL_NAMES, fmtDur, CHEV, ICON_COPY, pendingUserMsgs, statusFlags, fileCardsHtml } from '../chat/messages.js'
 import { renderHome, renderSession } from '../chat/route.js'
 import { scrollBottom, stage, stageFollow, stageSync, appendMsg } from '../chat/stage.js'
 import { gws } from '../core/gateway.js'
 import { I } from '../core/icons.js'
 import { refreshSession, bindLiveFoldTimer } from '../core/live.js'
 import { mdHtml } from '../core/markdown.js'
-import { messagesEl, inputWrap, inputBarEl, inputEl, sendBtn, state, live, connUp, esc, toast } from '../core/state.js'
+import { messagesEl, inputWrap, inputBarEl, inputEl, sendBtn, state, live, connUp } from '../core/state.js'
+import { esc, toast } from '../core/util.js'
 import { renderUserText, stripQuoteBodies } from './mention.js'
 import { syncGwSend } from './send.js'
 import { firstSendHash } from '../sidebar/recent.js'

@@ -2,7 +2,8 @@
 // 唯一手改处，web/app.js 为生成物）
 
 import { gToken } from '../../../core/gateway.js'
-import { esc, state } from '../../../core/state.js'
+import { state } from '../../../core/state.js'
+import { esc } from '../../../core/util.js'
 import { clearExtCards, clearQuoteActions, deactivateCard, openCard, registerExtCards, registerQuoteActions, viewBody } from '../../registry.js'
 import { clearRailExt } from '../ext/ext-card.js'
   // ---------- 预览卡 ----------

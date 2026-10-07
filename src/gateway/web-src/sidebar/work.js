@@ -13,20 +13,23 @@ import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } 
 import { cmtInvalidate, cmtLoad, cmtMount, cmtRangesFor, cmtRender, cmtSetHooks } from './comments.js'
 import { renderProjSeat } from '../inputbar/commands.js'
 import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.js'
+import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkToolDefs, wkToolNormId } from './work-tools.js'
 /* @module sidebar/work.js */
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
-  // wkPreview / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
+  // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
   // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
-  // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 预览列）。下沉区顶部一条
-  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚（命名
-  // = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
-  // 文件）；预览列常驻最右（开关只控显隐）。不变量 = 聊天 / 文件 / 预览 **至少一栏在场**，唯一判定点
-  // applyPanes。与「管理/预览卡」互斥：route.js 进 mgr/preview 时 setSbMode('chat')。
+  // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 右栏卡）。下沉区顶部一条
+  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚
+  // （命名 = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
+  // 文件）；右栏（#work-preview，与下沉区同属 #chat-area 三列之一）两态由 state.wkPvTab 定：'' = 预览态
+  // （挂项目预览帧）/ 工具 id = 工具态（顶 tab 条 + 该工具 pane，注册表 sidebar/work-tools.js），顶栏
+  // 「工具栏」胶囊切这两态（工具态时变「关闭」）。不变量 = 聊天 / 文件 / 右栏 **至少一栏在场**，唯一
+  // 判定点 applyPanes。与「管理/预览卡」互斥：route.js 进 mgr/preview 时 setSbMode('chat')。
 
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
@@ -155,8 +158,10 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     return state.workFile ? 'file' : ''
   }
 
-  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats，条目 = 会话 hash 或 WK_NEW_TAB。
-  // 激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。增/删/渲染的唯一口都在本模块。
+  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats。**纯运行时、不持久化、按项目重置**
+  // （2026-10-07 用户定案）——切换工作项目即清空（见 selectProject），故他项目的会话胶囊绝不残留。
+  // 条目 = 会话 hash 或 WK_NEW_TAB。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
+  // 增/删/渲染的唯一口都在本模块。
   const wkActiveKey = () => state.currentHash || WK_NEW_TAB
   const wkKeyHash = (key) => (key === WK_NEW_TAB ? '' : key)
   const wkTabName = (key) => {
@@ -231,43 +236,109 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     applyPvTab()
   }
 
-  // 右栏（#work-preview）tab 落地（唯一处）：'preview'（预览帧）/ 'comments'（评论面板）互斥显隐。
-  // 状态源 = state.wkPvTab（persist）；预览帧的**挂载**由 renderWorkPreview 负责，本函数只管 tab UI 与
-  // 面板显隐。胶囊（#wk-tb-comment）的 active 态也在此同步。
-  function applyPvTab() {
-    const on = state.wkPvTab === 'comments'
-    const pv = $('work-preview')
-    if (pv) {
-      pv.classList.toggle('pv-comments', on)
-      pv.querySelectorAll('.wk-pv-tab').forEach((b) => b.classList.toggle('on', (b.dataset.wkpv === 'comments') === on))
-    }
-    const body = $('wk-pv-body')
-    if (body) body.hidden = on
-    const cm = $('wk-cmt')
-    if (cm) cm.hidden = !on
-    const cap = $('wk-tb-comment')
-    if (cap) cap.classList.toggle('on', on)
+  // 预览帧是否需要在场（判定唯一处）：栏在场 且 无宿主 pane 工具遮挡。预览态与帧工具态都要帧在场
+  // （帧工具的内容就活在帧里，见 applyPvTab 的 body 显隐规则）；宿主 pane 工具（评论）独占右栏、帧不必挂。
+  // renderWorkPreview 的渲入门与 syncWorkExtCards 的补拉门（帧不在场才补拉）都以它为准。
+  function wkFrameNeeded() {
+    if (!state.wkPreview) return false
+    const t = state.wkPvTab ? wkToolDef(state.wkPvTab) : null
+    return !t || !t.pane
   }
 
-  // 切 tab（唯一入口）：预览 tab → 挂预览帧；评论 tab → 拉/渲评论面板。saveWork 持久化。
-  function setPvTab(tab) {
-    state.wkPvTab = tab === 'comments' ? 'comments' : 'preview'
-    applyPvTab()
-    if (state.wkPvTab === 'preview') renderWorkPreview()
-    else {
-      cmtLoad(state.workProj)
-      cmtRender()
+  // 右栏 UI 落地（唯一处，纯渲染、不挂帧）：预览态 → 显 #wk-pv-body、隐 tab 条与全部工具 pane；
+  // 工具态 → 隐预览帧、显 tab 条（active = state.wkPvTab）+ 该注册工具 pane（其余 pane 恒隐）。
+  // 顶栏「工具栏」胶囊跟着走：预览态 = 「工具栏」+ 插件图标（点入工具态），工具态 = 「关闭」+ ✕
+  // （点回预览态）。未注册的 wkPvTab（旧持久化值 / 工具被摘）落成「无 pane 在场」，切一次 tab 即归一。
+  function applyPvTab() {
+    const id = state.wkPvTab
+    const tool = id ? wkToolDef(id) : null
+    const bar = $('wk-pv-tabs')
+    if (bar) bar.hidden = !tool
+    document.querySelectorAll('#work-preview .wk-pv-tab').forEach((b) => b.classList.toggle('on', !!tool && b.dataset.wkpv === id))
+    for (const t of wkToolDefs()) {
+      const el = t.pane ? $(t.pane) : null
+      if (el) el.hidden = !tool || t.id !== id
     }
+    // 预览帧只在「无工具或宿主 pane 工具」工具态下让位：帧工具（无 pane）内容由预览页自管，
+    // 预览帧必须留在场（否则帧被卸载 → 预览页内的面板也一起没了）。
+    const body = $('wk-pv-body')
+    if (body) body.hidden = !!tool && !!tool.pane
+    const cap = $('wk-tb-tool')
+    if (!cap) return
+    cap.classList.toggle('on', !!tool)
+    cap.title = tool ? '关闭' : '工具栏'
+    const ico = cap.querySelector('.wk-tb-ico')
+    if (ico) ico.innerHTML = tool ? I.dshClose : I.plug
+    const nm = cap.querySelector('.wk-tb-name')
+    if (nm) nm.textContent = tool ? '关闭' : '工具栏'
+  }
+
+  // 切右栏页态（唯一入口）：'' / 未注册 id → 预览态，已注册 id → 工具态。切到工具态顺带确保栏在场
+  // （点 tab 就是要看这栏）。落地后补内容：工具态调该工具的 mount（注册表契约），预览态挂预览帧。
+  function setPvTab(id) {
+    state.wkPreview = true
+    state.wkPvTab = wkToolNormId(id)
+    applyPanes()
+    syncPvContent()
     saveWork()
   }
 
-  // 顶栏「评论」胶囊：点开右栏并切到评论 tab；已在评论 tab 时再点 → 回预览 tab（不关右栏）。
-  function toggleComments() {
-    const back = state.wkPreview && state.wkPvTab === 'comments'
-    state.wkPreview = true // 胶囊点击恒确保右栏在场（未开则开）
-    state.wkPvTab = back ? 'preview' : 'comments'
-    applyPanes() // 右栏在场落地（列宽 + tab 渲染 + applyPvTab）
-    setPvTab(state.wkPvTab)
+  // 页态落地后的内容补挂（唯一处）：预览态 → renderWorkPreview（挂/复挂预览帧）；工具态 → 该工具
+  // 的 mount（无 mount 的工具内容自管，由 pane 元素既有渲染链负责，如评论面板的 cmtLoad/cmtRender）。
+  // 每次落地都把「当前帧工具选中 id」回传预览帧（帧工具内容归预览页自管）。
+  function syncPvContent() {
+    const tool = state.wkPvTab ? wkToolDef(state.wkPvTab) : null
+    notifyFrame(tool && !tool.pane ? tool.id : '')
+    if (tool) {
+      if (tool.mount) tool.mount()
+      return
+    }
+    renderWorkPreview()
+  }
+
+  // 宿主 → 预览帧：回传当前选中的帧工具 id（'' = 回到预览页默认态）。发给 work 右栏当前那枚
+  // .preview-frame（Pj18 等预览页据此开/关自己的面板）。id 去重（同一选中不重复发）；帧不在场
+  // 或 id 未变则跳过，帧重挂/重新申报后由 syncPvContent 再对齐。
+  let wkFrameSentId = null
+  function notifyFrame(id) {
+    if (id === wkFrameSentId) return
+    const f = wkFrame()
+    if (!f || !f.contentWindow) return
+    try { f.contentWindow.postMessage({ type: 'floria-wk-tool-select', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ }
+    wkFrameSentId = id
+  }
+  // work 右栏预览帧（唯一取处）：#wk-pv-body 内那枚 .preview-frame
+  function wkFrame() {
+    const body = $('wk-pv-body')
+    return body ? body.querySelector('.preview-frame') : null
+  }
+
+  // 顶栏「工具栏」胶囊：预览态 → 切工具态（首枚注册工具，即评论）；工具态 → 「关闭」回预览态。
+  function toggleToolbar() {
+    if (state.wkPvTab) {
+      state.wkPvTab = ''
+      applyPanes()
+      syncPvContent() // 回预览态：预览帧按需挂（同项目已挂则不重建）
+      saveWork()
+      return
+    }
+    setPvTab('comments')
+  }
+
+  // 预览帧挂载（唯一处）：内容渲染一律走 preview-card 的 mountPreview（与槽位预览卡同一份后端容器 /
+  // 静态页 / 默认页三级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
+  function hasPreviewOf(label) {
+    return wkProjGroups().some((g) => g.label === label && g.hasPreview)
+  }
+  function renderWorkPreview() {
+    if (!wkFrameNeeded()) return // 宿主 pane 工具态 / 栏不在场：预览帧不渲染（切回时 syncPvContent 再调）
+    const el = $('wk-pv-body')
+    if (!el || !state.workProj) return
+    const f = el.querySelector('.preview-frame')
+    if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
+    clearWkFrameTools() // 帧换文档：上一份预览页申报的工具 tab 失效（不变量同 rail-ext）
+    wkFrameSentId = null
+    mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
 
   // 顶栏 tab 条（唯一渲染口）：[+] [聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
@@ -511,25 +582,12 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     })
   }
 
-  // ---------- 个性化工作区（第三栏：项目预览） ----------
-  // 内容渲染一律走 mgr.js 的 mountPreview（与槽位预览卡同一份后端容器/静态页/默认页三级链），
-  // 本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
-  function hasPreviewOf(label) {
-    return wkProjGroups().some((g) => g.label === label && g.hasPreview)
-  }
-  function renderWorkPreview() {
-    if (state.wkPvTab !== 'preview') return // 评论 tab 在场：预览帧不渲染（切回预览 tab 时 setPvTab 会再调）
-    const el = $('wk-pv-body')
-    if (!el || !state.wkPreview || !state.workProj) return
-    const f = el.querySelector('.preview-frame')
-    if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
-    mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
-  }
-  // 外部卡申报的补拉口（与 ensureWork 的树/编辑区补拉同源）：预览栏开着时由 renderWorkPreview →
-  // mountPreview → syncExtCards 拉；关着时在此补齐——否则刷新后外部卡 tab 缺失、/manage/ext:…
-  // 直进无卡可解析（EXT 是内存表，只落缓存不落盘的话两者都靠「先开一次预览」）。
+  // ---------- 外部卡申报补拉 ----------
+  // 与 ensureWork 的树/编辑区补拉同源。预览帧在场时由 renderWorkPreview → mountPreview → syncExtCards
+  // 顺带拉；预览帧不在场（宿主 pane 工具态 / 右栏关着）时在此补齐——否则刷新后外部卡 tab 缺失、
+  // /manage/ext:… 直进无卡可解析（EXT 是内存表，只落缓存不落盘）。两门互补：帧在场判定 = wkFrameNeeded。
   function syncWorkExtCards() {
-    if (state.workProj && !state.wkPreview) syncExtCards(state.workProj)
+    if (state.workProj && !wkFrameNeeded()) syncExtCards(state.workProj)
   }
 
   function hideWkPops() {
@@ -550,13 +608,12 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     }
     if (k === 'workspace') {
       state.wkPreview = on
+      if (!on) state.wkPvTab = '' // 关栏即回预览态：不留「栏不在场却停在工具态」的悬空页态
       applyPanes()
+      if (on) syncPvContent() // 开栏：预览帧按需挂 / 工具内容按需拉（同项目已挂则不重建）
       saveWork()
-      // 开：当前 tab 为预览则挂预览帧，为评论则拉/渲评论面板；关：停在这里（帧留着，CSS 隐藏），重开零重载
-      if (on && state.wkPvTab === 'comments') {
-        cmtLoad(state.workProj)
-        cmtRender()
-      } else renderWorkPreview()
+      // 评论内容不随开关走：cmtLoad/cmtRender 在选项目（selectProject）与事后补拉（ensureWork）
+      // 两处恒跑（原文标记也需要它），开关只管这一列的显隐。
       return
     }
     // 助手开关（浮层已不含助手行；只剩助手头部的 × 走到这里）：关掉后若下沉格再没有别的可显，
@@ -728,20 +785,21 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
     state.workFile = ''
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
+    state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
     wkOpen.clear()
     wkFilter = ''
     const fi = $('wk-find-input')
     if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
-    applyPanes() // 两开关落地（含「至少保留一栏」判定 + 视图浮层行同步）
+    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
+    applyPanes() // 再落地两开关（含「至少保留一栏」判定 + 视图浮层行同步 + 顶栏按归一后的路由重渲）
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
-    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，退回本项目的新对话
     renderEditor()
     hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
-    cmtInvalidate() // 评论按项目分库：旧项目副本作废（下一行 cmtLoad 重拉，评论 tab 与原文标记共用）
-    renderWorkPreview() // 预览栏跟着换项目（异 label = 换源，mountPreview 内部重建）
-    cmtLoad(label) // 原文标记也需要当前项目的评论（不止评论 tab）；拉到后 cmtApplyMarks 自动补标
+    renderWorkPreview() // 预览帧跟着换项目（异 label = 换源，mountPreview 内部重建；工具态则早退）
+    cmtInvalidate() // 评论按项目分库：旧项目副本作废（下一行 cmtLoad 重拉，评论面板与原文标记共用）
+    cmtLoad(label) // 原文标记也需要当前项目的评论（不止评论面板）；拉到后 cmtApplyMarks 自动补标
     cmtRender()
     syncWorkExtCards()
     await loadProjectTree(label)
@@ -804,8 +862,8 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     renderWorkChrome()
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
-    cmtLoad(state.workProj) // 评论恢复态补拉（评论 tab 与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
-    syncWorkExtCards() // 外部卡申报同上：与树/编辑区/预览同一条补拉链
+    cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
+    syncWorkExtCards() // 外部卡申报同上：与树/编辑区/评论同一条补拉链
     // 布局落地（tab 显隐 + 列宽 + 顶栏）在本链尾再落一次：ensureWork 是 work 一切事后补拉的唯一口
     // （启动 + token 门解锁后各一次），门/首帧里 DOM 还没量到时这里给第二次落地机会。
     applyPanes()
@@ -1388,29 +1446,57 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
     $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
-    $('wk-tb-comment').innerHTML = I.msg // 顶栏评论胶囊图标（气泡，与「引用自会话」同族）
-    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时确保右栏切到评论 tab /
+    // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按页态写（预览态 = 插件图标 + 「工具栏」，工具态 = ✕ +
+    // 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
+    // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
+    // 按需拉+渲）。外部注册 = 任意模块调 registerWkTool 追加，本模块不感知其内容。
+    registerWkTool({
+      id: 'comments',
+      title: '评论',
+      pane: 'wk-cmt',
+      mount: () => {
+        cmtLoad(state.workProj)
+        cmtRender()
+      },
+    })
+    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时切到评论工具页 /
     // 评论增删改后重绘原文标记）
     cmtSetHooks({
       openFile: (p, id) => {
         wkCmtScrollId = id || ''
         openWorkFile(p) // 打开 + 渲染后由 cmtApplyMarks 消费 wkCmtScrollId 滚到被批注行
       },
-      ensurePane: () => {
-        state.wkPreview = true
-        applyPanes()
-        setPvTab('comments')
-      },
+      ensurePane: () => setPvTab('comments'), // 切评论工具页（含开栏 + 拉内容）
       refreshMarks: cmtApplyMarks,
     })
     cmtMount()
     // 下沉区顶栏 tab：[+] = 新建聊天；两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
     $('wk-tb-new').addEventListener('click', () => newWorkChat())
-    $('wk-tb-comment').addEventListener('click', () => toggleComments())
-    // 右栏 tab（预览 / 评论）：唯一切换口 = setPvTab（渲染 + 持久化都在其内）
+    $('wk-tb-tool').addEventListener('click', () => toggleToolbar())
+    // 右栏工具 tab 条：唯一切换口 = setPvTab（渲染 + 内容补挂 + 持久化都在其内）。tab 条由
+    // work-tools.js 的 renderWkToolTabs 重渲 → 事件必须委托在容器上（逐钮绑定会被下次重渲抹掉）。
     $('wk-pv-tabs').addEventListener('click', (e) => {
       const b = e.target.closest('[data-wkpv]')
       if (b) setPvTab(b.dataset.wkpv)
+    })
+    // 预览帧 → 宿主：申报本页的工具 tab（Pj18 等预览页把「编译日志」之类挂进工具栏面板）。沿用既有
+    // iframe↔宿主通道（同 rail-ext / ext-card），凭 e.source 必须就是 work 右栏当前那枚 .preview-frame
+    // 才采纳。字段：{ type:'floria-wk-tool-register', tools:[{ id, title }] }，整份替换（页面最了解自己有什么）。
+    // 帧工具的 pane 由预览页自管（宿主只渲 tab + 回传选中 id，见 syncPvContent/notifyFrame）。
+    addEventListener('message', (e) => {
+      const d = e.data
+      if (!d || d.type !== 'floria-wk-tool-register') return
+      const f = wkFrame()
+      if (!f || f.contentWindow !== e.source) return
+      const tools = (Array.isArray(d.tools) ? d.tools : [])
+        .filter((t) => t && typeof t.id === 'string' && t.id)
+        .map((t) => ({ id: t.id, title: typeof t.title === 'string' ? t.title : t.id, pane: '', mount: null }))
+      registerWkFrameTools(f.dataset.label || '', tools)
+      // 申报集变了：当前 active 若已不存在（被撤的帧工具）→ 回落预览态；否则照旧。
+      if (state.wkPvTab && !wkToolDef(state.wkPvTab)) state.wkPvTab = ''
+      wkFrameSentId = null // 帧重挂/重申报 → 强制再回传一次当前选中
+      applyPanes()
+      notifyFrame(state.wkPvTab && !(wkToolDef(state.wkPvTab) || {}).pane ? state.wkPvTab : '')
     })
     $('wk-tb-tabs').addEventListener('click', (e) => {
       const cap = e.target.closest('[data-wkchat]')

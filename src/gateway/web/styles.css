@@ -1587,8 +1587,9 @@ body.token-gate #input-wrap { display: none; }
    work 白卡（下方 :has 规则，与主区拼成同一张）。width 多出的 4px 被 2px padding 吃掉，内容列宽
    仍是 --panel-w（全局 border-box）；折叠态 width:0 且 padding:0，不留白条。 */
 #sidebar.open { width: calc(var(--panel-w) + 4px); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent; border-radius: var(--radius); overflow: hidden; }
-/* work：侧栏与主区拼成**同一张白卡**（2026-10-06 用户定案）——右边不留缝、右角不圆，
-   与 #chat-area.work（左角不圆）严丝合缝；chat 模式侧栏是透明卡壳（上方规则）。
+/* work：侧栏是**底板上一张白卡**（Prism 式，2026-10-07 用户定案——主区底已改 --plane，两者不再拼同一张白卡）
+   ——右边不留缝、右角不圆（与 #chat-area.work 左角不圆相邻，同一张卡分左右两半的几何保留）；
+   chat 模式侧栏是透明卡壳（上方规则）。
    选择器用模式色钩子 #app.work（同上，applySbMode 落），不再走 :has(#panel.work) 旁路。 */
 #app.work #sidebar.open { margin-right: 0; background: var(--chat-bg); border-radius: var(--radius) 0 0 var(--radius); }
 
@@ -2420,24 +2421,25 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-foot-ico img, .wk-foot-ico svg { width: 18px; height: 18px; border-radius: 4px; display: block; }
 .wk-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
 
-/* ============ work 主区（下沉区 + 顶栏 tab + 预览列，2026-10-06 Prism 式改版） ============
+/* ============ work 主区（下沉区 + 顶栏 tab + 预览卡，2026-10-07 Prism 式改版） ============
    #chat-area.work = grid 两行三列：
      col1/row1   = .wk-topbar（下沉区顶栏 tab 条，work.js renderTopbar 渲 tab）
      col1/row2   = #work-editor（文件 tab）/ #session-card（聊天 tab）二选一（.wk-show-* 类）
      col2/row1-2 = .work-gutter（下沉区 ↔ 预览，唯一一条）
-     col3/row1-2 = #work-preview（常驻最右白卡）
-   下沉视觉：#work-editor / #session-card 在 work 下**无白卡底无 margin**（透出 #app 的 --plane）；
-   预览列保持白卡。预览关 → 列模板收成单列（:not(.wk-preview)），分界条与预览列一并消失。
+     col3/row1-2 = #work-preview（下沉区右侧的白卡，四周 2px 缝浮在底板上）
+   下沉视觉（2026-10-07 用户定案）：**整个 work 主区底 = --plane（即下沉区本体）**，顶栏 tab 与
+   内容格裸落其上；预览列是漂在底板上的**白卡**（圆角 + 2px 缝，故卡片有形状）。左半边 #sidebar.open
+   仍是白卡（Prism 式：底板上一张张卡）。预览关 → 列模板收成单列（:not(.wk-preview)），分界条与预览卡一并消失。
    #work-editor 刻意不用 .view-card：它是 work 常驻栏，带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。 */
 #work-editor { display: none; position: relative; min-height: 0; flex-direction: column; overflow: hidden; }
 #chat-area.work {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7px var(--wk-pw, 420px);
   grid-template-rows: auto minmax(0, 1fr);
-  /* 白卡右半边（左半边 = #sidebar.open，见「左侧侧栏」节）：两者等底同色、中缝零间距。
-     外留 2px 缝露底板（与 .view-card 的 margin 同款）。 */
+  /* 底 = --plane（下沉区本体，2026-10-07 用户定案）；左侧与 #sidebar.open 邻接（左角不圆，
+     不描边/不留缝——同色底板本就连成一片）。 */
   margin: 2px 2px 2px 0;
-  background: var(--chat-bg);
+  background: var(--plane);
   border-radius: 0 var(--radius) var(--radius) 0;
 }
 #chat-area.work:not(.wk-preview) { grid-template-columns: minmax(0, 1fr); }
@@ -2445,16 +2447,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > #work-editor,
 #chat-area.work > #session-card { grid-column: 1; grid-row: 2; min-width: 0; }
 
-/* 下沉洞（2026-10-06 用户定案）＝白卡中「预留的一片圆角矩形」：顶栏格与内容格同底色、
-   同左右边距、上下各半个圆角，两格拼成一个圆角矩形。四边留缝 2px——与 chat 的 .view-card /
-   #session-card 外边距同值（2026-10-06 用户定案「卡片区域间距以 chat 的 2px 为准」）：切模式时
-   卡片边界不再平移，两模式几何同律，只差颜色与组件。
-   底色写 --plane（底板灰）：视觉上就是「卡上挖了个洞露底板」——白卡在底下，涂灰外无他法
-   （CSS 无真正镂空），灰值与底板同源故等价。 */
+/* 顶栏格裸落底板（底 = #chat-area.work 的 --plane，即下沉区本体）：不涂底、不描边、不造卡形。
+   左右 2px 内边距保留——与预览卡四周的 2px 缝同律，切模式时内容左右边界不平移。 */
 #chat-area.work > .wk-topbar {
-  background: var(--plane);
   margin: 2px 2px 0;
-  border-radius: var(--radius) var(--radius) 0 0;
 }
 #chat-area.work > .work-gutter { grid-column: 2; grid-row: 1 / span 2; }
 #chat-area.work > #work-preview { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
@@ -2467,14 +2463,12 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work.wk-show-chat > #session-card { display: flex; }
 #chat-area.work > #session-card.wk-assist-float,
 #chat-area.work > #session-card.wk-assist-slim { display: flex; }
-/* 下沉洞下半：内容格（编辑区 / 会话卡）涂灰 + 下半圆角，与顶栏格拼成同一个圆角矩形。
-   浮卡（.wk-assist-float）/ 收敛条（.wk-assist-slim）是脱流的另一种形态，不参与拼洞，
-   故用 :not() 排除（否则本条特指度会盖掉它们各自的白卡底 / 透明壳）。 */
+/* 内容格（编辑区 / 会话卡）与顶栏格同理：裸落底板，不涂底不造卡形，只留左右/下 2px 内边距。
+   浮卡（.wk-assist-float）/ 收敛条（.wk-assist-slim）是脱流的另一种形态，各自带白卡底 / 透明壳，
+   故用 :not() 排除（否则本条特指度会盖掉它们）。 */
 #chat-area.work > #work-editor,
 #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) {
-  background: var(--plane);
   margin: 0 2px 2px;
-  border-radius: 0 0 var(--radius) var(--radius);
 }
 
 /* 下沉区顶栏 tab 条：[+] [聊天] [文件名]。透明条，pill 自绘（参考 Prism：透明底 + 描边 active）。 */
@@ -2501,23 +2495,28 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .work-gutter:hover::before, .work-gutter.dragging::before { background: var(--border); }
 body.wk-resizing { cursor: col-resize; user-select: none; }
 
-/* 个性化工作区（第三列，预览）：开关 = #wk-view-pop 的「预览」。常驻最右白卡，内容由 mgr.js
-   mountPreview 写进 .preview-shell；关掉即隐藏不销毁（帧留着，重开零重载）。 */
+/* work 右栏卡（第三列，2026-10-07）：**下沉区右侧的一张白卡**——四周 2px 缝 + 圆角，浮在底板
+   （--plane，见上方 grid 规则）上故显形；开关 = 顶栏胶囊 #wk-tb-tool 或视图浮层的「预览」。
+   两态由 state.wkPvTab 定（预览态挂 #wk-pv-body / 工具态显 #wk-pv-tabs + 工具 pane）；
+   关掉即隐藏不销毁（内容留着，重开零重载）。与编辑器/聊天栏同属 #chat-area 三列。 */
 #work-preview { display: none; position: relative; min-height: 0; flex-direction: column; margin: 2px; border-radius: var(--radius); background: var(--chat-bg); overflow: hidden; }
 #chat-area.work.wk-preview > #work-preview { display: flex; }
-
-/* ============ work 右栏 tab（预览 / 评论，2026-10-06）============
-   #work-preview 从「纯预览列」升级为「右栏」：顶一条 tab（.wk-pv-head）+ 两内容区互斥显隐
-   （#wk-pv-body = 预览帧容器，mountPreview 挂这里 / #wk-cmt = 评论面板）。tab 落地唯一处 =
-   work.js applyPvTab/setPvTab；顶栏评论胶囊 #wk-tb-comment 的 active 同源（同在 applyPvTab 落）。 */
-.wk-pv-head { flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
-.wk-pv-tab { height: 28px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font: inherit; font-size: 12.5px; cursor: pointer; }
-.wk-pv-tab:hover { background: var(--hover); color: var(--text-2); }
-.wk-pv-tab.on { background: var(--plane); border-color: var(--border); color: var(--text); }
+/* 页态显隐的唯一静态口：两态互斥（预览帧 ⇄ 工具 pane）。#work-preview [hidden] 带 id 特指度，
+   压过 .wk-pv-body / .wk-cmt 自身的 display —— 显隐只由 work.js applyPvTab 写 hidden 属性决定。 */
+#work-preview [hidden] { display: none; }
+/* 工具页顶 tab 条（Prism 式：纯文字 tab，active = 主色文字 + 下划线；无卡片底、无边框块）。
+   tab 由 work-tools.js renderWkToolTabs 渲（注册序 = tab 序），点击委托在 work.js mountWork。 */
+.wk-pv-tabs { flex: none; display: flex; align-items: center; gap: 18px; padding: 0 14px; height: 42px; border-bottom: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
+.wk-pv-tab { flex: none; height: 100%; padding: 0; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--text-3); font: inherit; font-size: 13px; cursor: pointer; }
+.wk-pv-tab:hover { color: var(--text-2); }
+.wk-pv-tab.on { color: var(--text); border-bottom-color: var(--text); }
+/* 预览态容器（#wk-pv-body）：挂 mountPreview 的三级链产物（.preview-frame / 默认页 / 空态）。 */
 .wk-pv-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+
+/* ============ work 右栏工具 pane：评论（sidebar/comments.js 渲染，显隐归 work.js applyPvTab）============
+   顶栏工具栏胶囊 #wk-tb-tool 的 active/图标/文字跟着页态（state.wkPvTab，落点 = work.js applyPvTab）。 */
 /* 评论面板：顶过滤行 + 可滚列表 */
 .wk-cmt { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.wk-cmt[hidden] { display: none; }
 .cmt-filters { flex: none; display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); }
 .cmt-f { height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-3); font: inherit; font-size: 12px; cursor: pointer; }
 .cmt-f:hover { background: var(--hover); color: var(--text-2); }
@@ -2536,8 +2535,7 @@ body.wk-resizing { cursor: col-resize; user-select: none; }
 .cmt-acts button { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
 .cmt-acts button:hover { background: var(--hover); color: var(--text); }
 .cmt-acts button.danger:hover { color: #e0603f; border-color: #e0603f; }
-/* 顶栏评论胶囊 active 态（.wk-ico 无 on 态；用 inset 描边避免边框改变尺寸致顶栏微跳） */
-#wk-tb-comment.on { background: var(--chat-bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+/* 顶栏工具栏胶囊（#wk-tb-tool）：形 = .wk-tb-pill（与聊天胶囊同款），active = 面板在场（.wk-tb-pill.on）。 */
 /* 原文评论标记（阅读态）：被批注的行/块加暖色底 + 左侧竖条；已解决 = 中性灰淡显。
    命中元素既有块级（md 标题/引用/列表项）也有行内（段落行 span、代码行 span），故只用
    background + inset 横条（不改盒模型，宽高零变化）。 */

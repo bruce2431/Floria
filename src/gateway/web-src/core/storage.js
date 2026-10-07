@@ -48,7 +48,7 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽
   function saveWork() {
     stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkChats: state.wkChats, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkEdit: !!state.wkEdit, wkPvTab: state.wkPvTab })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkEdit: !!state.wkEdit })
   }
   function loadWork() {
     try {
@@ -65,12 +65,15 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
       loadWorkPanes(state.workProj) // 两开关 = 恢复项目的槽（无槽回落缺省）
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
-      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((k) => typeof k === 'string' && k)
+      // wkChats（work 顶栏聊天胶囊开放集）不持久化：纯运行时状态，刷新即空、切项目重置（2026-10-07 定案），
+      // 恢复态一律从空开始，由路由/侧栏操作自然重建。
       if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
+      // wkPvTab（右栏页态：'' = 预览态 / 工具 id）全局一份，不按项目分槽；未注册的旧 id 由
+      // applyPvTab 的 pane 判定自然落成「无 pane 在场」，切一次 tab 即归一（见 work.js setPvTab）。
+      if (typeof d.wkPvTab === 'string') state.wkPvTab = d.wkPvTab
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
       if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
-      if (d.wkPvTab === 'preview' || d.wkPvTab === 'comments') state.wkPvTab = d.wkPvTab
     } catch { /* 忽略 */ }
   }
 

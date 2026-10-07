@@ -8,8 +8,9 @@ import { clearExtCards, clearQuoteActions, deactivateCard, openCard, registerExt
 import { clearRailExt } from '../ext/ext-card.js'
 /* @module views/cards/preview/preview-card.js */
   // ---------- 预览卡 ----------
-  // 槽位预览卡（openProjectPreview，独占主区）；预览渲染器 mountPreview 另被 work 个性化工作区第三栏
-  // 复用（sidebar/work.js），到 iframe 这一层没有第二套代码。
+  // 槽位预览卡（openProjectPreview，独占主区）：与 work 右栏「预览态」（sidebar/work.js
+  // renderWorkPreview）复用同一份 mountPreview——后端容器 / 静态页 / 默认页三级链只有这一处实现。
+  // syncExtCards 另被 sidebar/work.js 的补拉链调（外部卡申报）。
   const previewCardDef = {
     id: 'preview', title: '预览', tip: '项目预览', icon: 'folder', tab: false,
     mount(body, ctx) { mountPreview(body, ctx.payload.label, ctx.payload.hasPreview) },

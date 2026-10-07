@@ -48,9 +48,12 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'views/cards/session/session-card.js', part: 1 },
   // 视图注册表：须排在 core/icons.js(I)、engine/state.js(esc/#chat-area/session-card) 与各卡定义件之后。
   { file: 'views/registry.js', part: 1 },
+  // work 工具页注册表（右栏工具态的水平标签栏）：纯函数声明 + 顶层 const WK_TOOL_DEFS，须在 work.js
+  // 之前（其 mountWork 调 registerWkTool，applyPvTab 调 wkToolDefs/wkToolDef/wkToolNormId）。
+  { file: 'sidebar/work-tools.js', part: 1 },
   // work 模式侧栏：依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。
   { file: 'sidebar/work.js', part: 1 },
-  // 项目评论批注：排在 work.js 之后（其 setPvTab/ensureWork 调本模块），排在启动序列之前。
+  // 项目评论批注：排在 work.js 之后（其 cmtLoad/cmtRender 由 work.js 调），排在启动序列之前。
   { file: 'sidebar/comments.js', part: 1 },
   // 入口（web-src/app.js）：事件绑定段（同区段原含会话壳）与启动序列段。
   { file: '__app__', part: 1 },

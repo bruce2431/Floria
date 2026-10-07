@@ -24,8 +24,8 @@
   <link rel="apple-touch-icon" href="/icon.ico" />
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
-  <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=472" />
-  <link rel="stylesheet" href="/styles.css?v=472" />
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
+  <link rel="stylesheet" href="/styles.css?v=478" />
 </head>
 <body>
 <div id="app">
@@ -178,13 +178,16 @@
          仅已开始的对话（#chat-area.in-session）+ 侧栏折叠（#sidebar 无 .open）+ 宽屏时显示，
          首页新对话不显示；pointer-events:none 不挡交互。
          2026-08-15 临时隐藏中：styles.css #char display:none（代码保留空跑），删除该行即恢复 -->
-    <!-- 下沉区顶栏（2026-10-06）：work 模式主区顶部的 tab 条（参考 Prism）——[+] [聊天] [文件名]。
-         同一时刻只有一个内容在场（聊天 tab / 文件 tab），预览列常驻最右。tab 由 sidebar/work.js
-         的 renderTopbar 动态渲染进 #wk-tb-tabs。grid 放置见 styles.css #chat-area.work。 -->
+    <!-- 下沉区顶栏（2026-10-06）：work 模式主区顶部的 tab 条（参考 Prism）——[+] [聊天] [文件名] [工具栏]。
+         同一时刻只有一个内容在场（聊天 tab / 文件 tab），右栏卡（#work-preview）常驻最右、两态切换。
+         tab 由 sidebar/work.js 的 renderTopbar 动态渲染进 #wk-tb-tabs；末尾胶囊（#wk-tb-tool，与聊天
+         胶囊同 .wk-tb-pill 形）切右栏页态：预览态 = 插件图标 + 「工具栏」（点入工具页），工具态 = ✕ +
+         「关闭」（点回预览态）。图标/文字由 work.js 的 applyPvTab 写（不在此预置）。
+         grid 放置见 styles.css #chat-area.work。 -->
     <div class="wk-topbar" id="wk-topbar">
       <button id="wk-tb-new" class="wk-ico" title="新建聊天" aria-label="新建聊天"></button>
       <div class="wk-tb-tabs" id="wk-tb-tabs"></div>
-      <button id="wk-tb-comment" class="wk-ico" title="评论" aria-label="评论"></button>
+      <button id="wk-tb-tool" class="wk-tb-pill" title="工具栏" aria-label="工具栏"><span class="wk-tb-ico"></span><span class="wk-tb-name">工具栏</span></button>
     </div>
 
     <!-- 工作区编辑区（2026-09-25 work 模式，2026-10-05 加编辑态）：查看/编辑项目内文件 = 「文件 tab」的
@@ -204,16 +207,15 @@
          只剩一条（预览在最右），显隐由 work.js 的 applyPanes 按「预览在场且已展开」判定。 -->
     <div class="work-gutter"></div>
 
-    <!-- 个性化工作区 / 评论（2026-09-26 work 模式第三栏，2026-10-06 加 tab）：由视图浮层的「预览」开关
-         驱动，同一列两个 tab——「预览」= 当前项目的项目预览（/preview/<label>/ 或后端容器），渲染复用
-         mgr.js 的 mountPreview（与槽位预览卡同一份实现），挂进 #wk-pv-body；「评论」= 项目内的文件选区
-         批注列表（sidebar/comments.js 渲染进 #wk-cmt）。tab 落地唯一处 = work.js applyPvTab / setPvTab。
-         同 #work-editor，不用 .view-card —— 它是 work 模式的常驻栏，不是槽位卡。 -->
+    <!-- work 右栏卡（2026-09-26 第三栏；2026-10-07 参考 Prism 定两态，与下沉区同属 #chat-area 三列）：
+         页态真源 = state.wkPvTab（work.js applyPvTab 唯一落）——'' = 预览态（挂 #wk-pv-body，内容由
+         mountPreview 渲，与「项目」视图卡同一份三级链）/ 工具 id = 工具态（#wk-pv-tabs 顶 tab 条 +
+         该工具 pane）。tab 由 work-tools.js 注册表渲染（内部注册序 = tab 序，外部模块可 registerWkTool
+         追加）；pane 互斥显隐也归 applyPvTab。内置工具 = 评论（pane #wk-cmt，sidebar/comments.js 渲）。
+         显隐由顶栏「工具栏」胶囊（#wk-tb-tool）或视图浮层的「预览」开关驱动。
+         同 #work-editor，不用 .view-card —— 它是 work 模式常驻栏，不是槽位卡。 -->
     <section id="work-preview">
-      <div class="wk-pv-head" id="wk-pv-tabs">
-        <button type="button" class="wk-pv-tab on" data-wkpv="preview">预览</button>
-        <button type="button" class="wk-pv-tab" data-wkpv="comments">评论</button>
-      </div>
+      <div class="wk-pv-tabs" id="wk-pv-tabs" hidden></div>
       <div class="wk-pv-body" id="wk-pv-body"></div>
       <div class="wk-cmt" id="wk-cmt" hidden></div>
     </section>
@@ -380,7 +382,7 @@
 <div id="toast" class="toast" hidden></div>
 <!-- KaTeX（2026-10-06）：全局 katex（UMD），须在 app.js 之前加载——core/markdown.js 的公式预扫描
      直接调 katex.renderToString；缺失时该模块跳过公式渲染（$…$ 原样显示），故脚本顺序是硬约束。 -->
-<script src="/vendor/katex/katex.min.js?v=472"></script>
-<script src="/app.js?v=472"></script>
+<script src="/vendor/katex/katex.min.js?v=473"></script>
+<script src="/app.js?v=478"></script>
 </body>
 </html>

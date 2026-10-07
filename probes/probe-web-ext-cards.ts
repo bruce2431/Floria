@@ -89,7 +89,9 @@ ok('I5 回填走同一注册口（不另写第二套建表逻辑）', hydBody.in
 ok('I5 启动恢复接线（work.js initWork 在 loadWork 之后回填）', /loadWork\(\)[\s\S]{0,400}?hydrateExtCards\(state\.workProj\)/.test(workJs))
 ok('I5 切项目回填（selectProject 换槽即换卡）', /state\.workProj = label[\s\S]{0,900}?hydrateExtCards\(label\)/.test(workJs))
 ok('I5 路由直进回填（route.js mgr 分支按 id 里的 label 回填，先于 renderMgr）', /hydrateExtCardId\(r\.mgr\)[\s\S]{0,80}?renderMgr\(\)/.test(routeJs))
-ok('I5 网络权威刷新不落给预览栏独占（ensureWork 补拉链含 syncWorkExtCards）', body(workJs, 'function syncWorkExtCards(').includes("!state.wkPreview) syncExtCards(state.workProj)") && /renderWorkPreview\(\)[\s\S]{0,200}?syncWorkExtCards\(\)/.test(workJs))
+ok('I5 网络权威刷新不落给右栏开关独占（syncWorkExtCards 在预览帧不在场时补拉 + ensureWork 补拉链含它）', body(workJs, 'function syncWorkExtCards(').includes('if (state.workProj && !wkFrameNeeded()) syncExtCards(state.workProj)') && /cmtLoad\(state\.workProj\)[\s\S]{0,200}?syncWorkExtCards\(\)/.test(workJs))
+ok('I5 帧在场判定 = wkFrameNeeded（栏在场且无宿主 pane 工具遮挡；帧工具态帧须留场）', body(workJs, 'function wkFrameNeeded()').includes('return !t || !t.pane'))
+ok('I5 帧工具显隐：宿主 pane 工具才隐预览帧（帧工具内容归预览页自管）', body(workJs, 'function applyPvTab()').includes('if (body) body.hidden = !!tool && !!tool.pane'))
 
 // ---------- I2 只为当前帧作证：两条申报共用同一道门 ----------
 const bridgeBody = body(railExtJs, 'function bindRailExtBridge()')

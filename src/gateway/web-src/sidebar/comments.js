@@ -158,7 +158,8 @@ import { esc, toast } from '../core/util.js'
     return true
   }
 
-  // ---------- 评论面板渲染（#wk-cmt，work.js setPvTab('comments') 调）----------
+  // ---------- 评论面板渲染（#wk-cmt = work 右栏「评论」工具页的 pane，work.js 的 cmtRender 调；
+  // 页态与显隐归 work.js applyPvTab——本模块只管内容，不碰 #wk-cmt 的 hidden）----------
   function cmtCmp(a, b) {
     const pa = String(a.path || '')
     const pb = String(b.path || '')

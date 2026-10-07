@@ -2,10 +2,10 @@
 
 import { route, lastNavHash, navigate } from '../chat/route.js'
 import { stage, progScrollUntil, stageRelease, stageFollow, stageSync } from '../chat/stage.js'
-import { gateSubmit } from '../core/auth.js'
-import { gateAwait, gws } from '../core/gateway.js'
+import { gateSubmit } from '../engine/auth.js'
+import { gateAwait, gws } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../core/state.js'
+import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../engine/state.js'
 import { toast, isMobile } from '../core/util.js'
 import { renderSettle, btnMode } from './approval.js'
 import { cmd, msel, cmdPop, modelPop, modelSeatEl, psel, projPop, projSeatEl, closeProjPop, toggleCmdPop, closeCmdPop, closeRiskModal, cmdMove, cmdSelect } from './commands.js'
@@ -14,6 +14,7 @@ import { mention, closeMentionPop, moveMentionSel, selectMention, removeChip, me
 import { toggleModelPop, closeModelPop, modelEscape, mselMove } from './model-select.js'
 import { gwSend } from './send.js'
 import { setPanel } from '../sidebar/recent.js'
+/* @module inputbar/ctx-meter.js */
   // ---------- 上下文占用指示（2026-08-23 dsh ContextMeter 移植）----------
   // 数据来自 /gateway/session 的 context 字段（网关 readSession 提取最后一条 assistant usage，
   // 除以 getContextWindowForModel 窗口）。无数据（无 usage / 无模型窗口）→ hidden。

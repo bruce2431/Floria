@@ -2,12 +2,12 @@
 
 import { isRealUser, stampMsgIn, charNote, messagesHtml, pendingUserMsgs, addUser, absorbPending, queueClaimAdopt } from './messages.js'
 import { stage, stageRelease, stageFollow, stageStart } from './stage.js'
-import { hideGate } from '../core/auth.js'
+import { hideGate } from '../engine/auth.js'
 import { setChar } from '../core/char.js'
-import { needToken } from '../core/gateway.js'
-import { refreshSession, renderSessionBody, stopLiveFoldTimer, bindLiveFoldTimer } from '../core/live.js'
-import { hashOf, findSession, loadSessions, fetchMessages, applySessionModel } from '../core/sessions.js'
-import { chatArea, sessionCard, messagesEl, inputWrap, state, live } from '../core/state.js'
+import { needToken } from '../engine/gateway.js'
+import { refreshSession, renderSessionBody, stopLiveFoldTimer, bindLiveFoldTimer } from '../engine/live.js'
+import { hashOf, findSession, loadSessions, fetchMessages, applySessionModel } from '../engine/sessions.js'
+import { chatArea, sessionCard, messagesEl, inputWrap, state, live } from '../engine/state.js'
 import { toast } from '../core/util.js'
 import { loadMgrView } from '../core/storage.js'
 import { renderTransient, claimStartTs, syncTurnLive, takeover, clearTakeover, sendSubscribe, renderTaskDock } from '../inputbar/approval.js'
@@ -21,6 +21,7 @@ import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js
 import { setSbMode, syncWorkTabs, workScopeOk } from '../sidebar/work.js'
 import { openProjectPreview } from '../views/cards/preview/preview-card.js'
 import { hydrateExtCardId, openCard } from '../views/registry.js'
+/* @module chat/route.js */
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
   // /preview/* 静态页路径）；hash 路由保留为旧链接/旧缓存页兜底（parseRoute 先 pathname 后 hash）。

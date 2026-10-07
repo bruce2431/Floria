@@ -19,7 +19,7 @@ const j = src.indexOf(END)
 if (i < 0 || j < 0 || j < i) { console.error('❌ 切片标记未命中：底栏任务浮窗区间'); process.exit(1) }
 const body = src.slice(i, j)
 
-// 与 web-src/core/state.js:52 同款 esc（探针注入）
+// 与 web-src/engine/state.js:52 同款 esc（探针注入）
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 // 与 web-src/core/icons.js 同族图标（探针只需可辨识的占位串）

@@ -1,10 +1,11 @@
 // 图片附件（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { state } from '../core/state.js'
+import { state } from '../engine/state.js'
 import { toast, esc, newSessionProject } from '../core/util.js'
 import { I } from '../core/icons.js'
-import { apiUrl } from '../core/gateway.js'
+import { apiUrl } from '../engine/gateway.js'
 import { syncGwSend } from './send.js'
+/* @module inputbar/images.js */
   // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
   // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
   // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl(预览)}。发送时文本拼

@@ -20,7 +20,8 @@
 // MutationObserver（覆盖面重建/增量 append/流式文本），节流（非 debounce——连续流式下 debounce 会饥饿不触发）。
 
 import { stage, topInScroll } from './stage.js'
-import { messagesEl } from '../core/state.js'
+import { messagesEl } from '../engine/state.js'
+/* @module chat/turn-rail.js */
   const RAIL_PROMPT_MAX = 50 // 预览提示词封顶（与 dsh 一致）
   const RAIL_RESP_MAX = 120 // 预览回复封顶
   const RAIL_ACTIVE_BAND = 0.4 // 视口上 40% 带内最后一个锚 = 当前轮

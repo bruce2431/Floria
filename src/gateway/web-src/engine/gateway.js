@@ -3,10 +3,11 @@
 import { stage } from '../chat/stage.js'
 import { deviceHint, showGate, gatePlayTransition, hideGate } from './auth.js'
 import { inputEl, state } from './state.js'
-import { toast } from './util.js'
+import { toast } from '../core/util.js'
 import { addSystem, takeover, clearTakeover, renderApproval, approvalPending, showApprovalError, sendSubscribe } from '../inputbar/approval.js'
 import { onInputChange } from '../inputbar/mention.js'
 import { syncGwSend } from '../inputbar/send.js'
+/* @module engine/gateway.js */
   // ---------- 网关模式（SubPj2 私有化网关）----------
   // 检测 /gateway/health 返回 mode==='gateway' 即启用：composer 可发、WS 双向、工具审批。
   // 只读查看模式（SubPj1 后端）下本块全部不生效。
@@ -183,6 +184,7 @@ import { syncGwSend } from '../inputbar/send.js'
   }
 
 
+/* @module engine/gateway.js #2 */
   function setConn(on, label) {
     setConnUp(!!on) // 2026-09-07 运行态计时行「连接中断」标注的数据源
     const b = $('floria-conn')
@@ -192,6 +194,7 @@ import { syncGwSend } from '../inputbar/send.js'
   }
 
 
+/* @module engine/gateway.js #3 */
   function connect() {
     if (GATEWAY_REVIEW) {
       // 审阅模式（bun 编译 exe）：node:http 的 upgrade 握手在 bun 下 101 无法送达客户端、
@@ -272,6 +275,7 @@ import { syncGwSend } from '../inputbar/send.js'
   // （空态同趴栏 stage，位置一致无缝）。token 错误（onclose 未验证）→ 回门重输。
   // gateVerified 声明已提前到网关模式区（2026-08-28：needToken 依赖）。
 
+/* @module engine/gateway.js #4 */
   function initGateway() {
     gatewayCss()
     // 连接状态徽章已改为 Floria 品牌名后的浅灰小字（index.html #floria-conn），不再动态建 #conn-badge。

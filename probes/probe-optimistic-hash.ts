@@ -17,19 +17,19 @@ function ok(name: string, cond: boolean, detail = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond || !detail ? '' : '  ← ' + detail}`)
 }
 
-const stateJs = await Bun.file(`${SRC}/core/state.js`).text()
+const stateJs = await Bun.file(`${SRC}/engine/state.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const mgrJs = await Bun.file(`${SRC}/sidebar/mgr.js`).text()
 const messagesJs = await Bun.file(`${SRC}/chat/messages.js`).text()
 const approvalJs = await Bun.file(`${SRC}/inputbar/approval.js`).text()
-const liveJs = await Bun.file(`${SRC}/core/live.js`).text()
+const liveJs = await Bun.file(`${SRC}/engine/live.js`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
 
 // 全 web-src（含未列出的模块，防新增模块再引入 null）
 const allSrc = (
   await Promise.all(
-    ['core/state.js', 'chat/route.js', 'sidebar/mgr.js', 'chat/messages.js', 'inputbar/approval.js',
-     'core/live.js', 'inputbar/send.js', 'sidebar/recent.js', 'core/gateway.js', 'core/auth.js',
+    ['engine/state.js', 'chat/route.js', 'sidebar/mgr.js', 'chat/messages.js', 'inputbar/approval.js',
+     'engine/live.js', 'inputbar/send.js', 'sidebar/recent.js', 'engine/gateway.js', 'engine/auth.js',
      'views/cards/neurons/neurons-card.js', 'views/cards/preview/preview-card.js']
       .map((f) => Bun.file(`${SRC}/${f}`).text()),
   )

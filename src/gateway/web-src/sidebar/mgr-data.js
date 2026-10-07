@@ -1,11 +1,12 @@
 // 管理视图数据源（插件/模型）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { hideGate } from '../core/auth.js'
-import { needToken, apiUrl } from '../core/gateway.js'
+import { hideGate } from '../engine/auth.js'
+import { needToken, apiUrl } from '../engine/gateway.js'
 import { loadModelCur, saveModelCur, MODEL_CUR, renderModelSeat } from '../inputbar/model-select.js'
-import { state } from '../core/state.js'
+import { state } from '../engine/state.js'
 import { renderMgrGrid } from '../views/cards/plugins/plugins-card.js'
 import { renderMgrModelList } from '../views/cards/models/models-card.js'
+/* @module sidebar/mgr-data.js */
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
   // 首次进入管理视图 fetch，刷新按钮 force 重新拉取；失败显示错误 + 重试（不回落假数据）。

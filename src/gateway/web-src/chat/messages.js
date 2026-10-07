@@ -3,15 +3,16 @@
 import { scrollBottom, stage, stageStart } from './stage.js'
 import { toolToChar } from '../core/char.js'
 import { I } from '../core/icons.js'
-import { refreshSession, applySegDelta, bindLiveFoldTimer } from '../core/live.js'
+import { refreshSession, applySegDelta, bindLiveFoldTimer } from '../engine/live.js'
 import { mdHtml, setImageSrcResolver } from '../core/markdown.js'
-import { findSession, sessionCwd } from '../core/sessions.js'
-import { messagesEl, state, live } from '../core/state.js'
+import { findSession, sessionCwd } from '../engine/sessions.js'
+import { messagesEl, state, live } from '../engine/state.js'
 import { esc, toast } from '../core/util.js'
 import { renderTransient, claimStartTs, takeover, clearTakeover } from '../inputbar/approval.js'
 import { stripQuoteBodies } from '../inputbar/mention.js'
 import { firstSendHash } from '../sidebar/recent.js'
 import { modelProviderOf } from '../sidebar/mgr-data.js'
+/* @module chat/messages.js */
   // ---------- 消息渲染 ----------
   // AI 生成图取图 URL 解析（2026-10-03）：模型输出 ![](code)（code = 该项目根 .claude/images/ 下的文件名），
   // 把代号拼成网关取图 URL——复用 GET /gateway/file?label=<会话 label>&path=<相对路径>。
@@ -1018,6 +1019,7 @@ import { modelProviderOf } from '../sidebar/mgr-data.js'
   }
 
 
+/* @module chat/messages.js #2 */
   let pendingUserMsgs = []
   function addUser(text, imgs, files) {
     clearTakeover() // 清掉残留的提问/审批 takeover

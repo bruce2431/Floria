@@ -3,15 +3,16 @@
 import { pendingUserMsgs, addUser } from '../chat/messages.js'
 import { navigate, mountInput, flipInput, renderSession } from '../chat/route.js'
 import { stage } from '../chat/stage.js'
-import { GATEWAY, gws } from '../core/gateway.js'
-import { refreshSession } from '../core/live.js'
-import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live } from '../core/state.js'
+import { GATEWAY, gws } from '../engine/gateway.js'
+import { refreshSession } from '../engine/live.js'
+import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live } from '../engine/state.js'
 import { toast, newSessionProject } from '../core/util.js'
-import { sessionCwd, setSessionCwd } from '../core/sessions.js'
+import { sessionCwd, setSessionCwd } from '../engine/sessions.js'
 import { renderTransient, turnLive, setBtnMode } from './approval.js'
 import { pendingImages, pendingFiles, clearPendingImages, clearPendingFiles } from './images.js'
 import { serializeInput, closeMentionPop } from './mention.js'
 import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
+/* @module inputbar/send.js */
   async function gwSend() {
     if (!GATEWAY) return false
     closeMentionPop()

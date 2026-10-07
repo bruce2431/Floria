@@ -33,11 +33,20 @@ const bad = (m: string) => {
 // ---- 1. 模块清单与顺序（真源 = 拼接器 MODULES 表）----
 const bundlerSrc = readFileSync(BUNDLER, 'utf-8')
 const mods: { file: string; order: number }[] = []
-for (const m of bundlerSrc.matchAll(/\{\s*file:\s*'([^']+)',\s*ranges:\s*\[\[(\d+)/g)) {
-  mods.push({ file: m[1], order: Number(m[2]) })
+// 2026-10-07 拼接器换 schema：MODULES（ranges 假行号）→ PIECES（显式有序数组，顺序 = 下标）。
+// 同一文件可被切成多段（part 1..n），抽声明按文件去重，order 取该文件首次出现的段下标。
+const p0 = bundlerSrc.indexOf('const PIECES')
+const p1 = bundlerSrc.indexOf('\n]', p0)
+const piecesSrc = bundlerSrc.slice(p0, p1)
+const seenMod = new Set<string>()
+for (const m of piecesSrc.matchAll(/\{\s*file:\s*'([^']+)',\s*part:\s*(\d+)\s*\}/g)) {
+  const file = m[1]
+  if (seenMod.has(file)) continue
+  seenMod.add(file)
+  mods.push({ file, order: mods.length })
 }
-if (mods.length >= 20) ok(`从拼接器读出 ${mods.length} 个模块区间`)
-else bad(`拼接器 MODULES 表解析异常，只读到 ${mods.length} 个区间`)
+if (mods.length >= 20) ok(`从拼接器 PIECES 读出 ${mods.length} 个模块（按文件去重）`)
+else bad(`拼接器 PIECES 表解析异常，只读到 ${mods.length} 个模块`)
 
 // 拼接器 prelude 注入的名字（见 bundle-web-modules.ts 的 head 拼装）
 const PRELUDE = ['$']

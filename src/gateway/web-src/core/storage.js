@@ -1,6 +1,7 @@
-// 界面状态持久化（localStorage 打补丁读写 + mgrView / work 两族恢复）（2026-10-07 自 core/state.js 拆出；唯一手改处，web/app.js 为生成物）
+// 界面状态持久化（localStorage 打补丁读写 + mgrView / work 两族恢复）（2026-10-07 自 engine/state.js 拆出；唯一手改处，web/app.js 为生成物）
 
-import { state, WK_PANES_DEF } from './state.js'
+import { state, WK_PANES_DEF } from '../engine/state.js'
+/* @module core/storage.js */
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
   // 实现「刷新保持当前界面」（会话/管理/预览三态均可恢复，不再回退初始界面）。

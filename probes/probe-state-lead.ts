@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 const GW = fileURLToPath(new URL('../src/gateway/', import.meta.url))
 let rawMessages = readFileSync(GW + 'web-src/chat/messages.js', 'utf8')
 const styles = readFileSync(GW + 'web/styles.css', 'utf8')
-const liveSrc = readFileSync(GW + 'web-src/core/live.js', 'utf8')
+const liveSrc = readFileSync(GW + 'web-src/engine/live.js', 'utf8')
 
 const NEW_STATE = '${withIcon ? `<span class="t-ico">${THINK_ICON}</span>` : \'\'}'
 const OLD_STATE = "${''}"

@@ -6,13 +6,14 @@
 import { clearSessionSlots, navigate } from '../chat/route.js'
 import { stageRelease } from '../chat/stage.js'
 import { I } from '../core/icons.js'
-import { stopLiveFoldTimer } from '../core/live.js'
-import { sessCmp, sorted } from '../core/sessions.js'
-import { ALL, bodyEl, state } from '../core/state.js'
+import { stopLiveFoldTimer } from '../engine/live.js'
+import { sessCmp, sorted } from '../engine/sessions.js'
+import { ALL, bodyEl, state } from '../engine/state.js'
 import { esc, isMobile } from '../core/util.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { openCard } from '../views/registry.js'
 import { bindSessClicks, itemHtml, setPanel } from './recent.js'
+/* @module sidebar/mgr.js */
   // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。
   function renderMgr() {
     closeMentionPop()

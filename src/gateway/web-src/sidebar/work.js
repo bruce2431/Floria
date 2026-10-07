@@ -1,20 +1,21 @@
 // work 模式侧栏 + 主区编辑区（2026-09-25，参考 Prism）（唯一手改处，web/app.js 为生成物）
 
 import { navigate } from '../chat/route.js'
-import { needToken, apiUrl } from '../core/gateway.js'
+import { needToken, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdHtml } from '../core/markdown.js'
-import { ALL, chatArea, sessionCard, state } from '../core/state.js'
+import { ALL, chatArea, sessionCard, state } from '../engine/state.js'
 import { esc, isMobile, toast } from '../core/util.js'
 import { loadWork, loadWorkPanes, saveWork, stashWorkPanes } from '../core/storage.js'
-import { loadSessions, sessCmp, findSession } from '../core/sessions.js'
+import { loadSessions, sessCmp, findSession } from '../engine/sessions.js'
 import { currentCardId, hydrateExtCards } from '../views/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { cmtInvalidate, cmtLoad, cmtMount, cmtRangesFor, cmtRender, cmtSetHooks } from './comments.js'
 import { renderProjSeat } from '../inputbar/commands.js'
 import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.js'
+/* @module sidebar/work.js */
   // ---------- work 模式侧栏（Prism 式） ----------
-  // 状态源 = core/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
+  // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
   // wkPreview / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
   // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
@@ -47,7 +48,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   }
 
   // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目/全局会话时，
-  // 回该项目的「新对话」空态（新会话的目标项目由 core/state.js newSessionProject 收口，seat 只读）。
+  // 回该项目的「新对话」空态（新会话的目标项目由 engine/state.js newSessionProject 收口，seat 只读）。
   // 调用点 = 进入 work 模式 / 切换工作项目 / 路由渲染会话前（chat/route.js renderSession）。
   // 会话尚未落地（findSession 查无 = 列表未拉或刷新中）时不判——「未知」不等于「别的项目」。
   function workScopeOk(hash) {
@@ -341,7 +342,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   // 同一张 #session-card 的三个形态：'side'（靠栏 = 聊天 tab 的内容，占下沉格）/ 'float'（悬浮卡，脱流不占格）/
   // 'slim'（收敛成底部输入栏）。形态类落在卡上（.wk-assist-float / .wk-assist-slim），可见性与几何的
   // 静态部分全由 CSS 给（web/styles.css「助手三态」段），本模块只写类 + 内联定位。
-  // **绝不 reparent**：卡里挂着 core/state.js 模块级 const 引用的 messagesEl / inputWrap / charEl 单例，
+  // **绝不 reparent**：卡里挂着 engine/state.js 模块级 const 引用的 messagesEl / inputWrap / charEl 单例，
   // 搬 DOM 会丢消息流与输入草稿（Pj18 #chat-pane 的同款约束）。
   // 锚点 = 当前可见的下沉内容栏（文件 tab 的 #work-editor）→ 整个 #chat-area；预览列固定最右不参与。
   // 坐标一律在 #chat-area 局部系算：#app 在键盘态被 transform（body.kb-open），position:fixed 的视口
@@ -793,7 +794,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   }
 
   // work 模式数据补齐（启动进入 / 门后补拉 / 恢复持久化状态三处共用一条路径）。needToken() 未解锁时
-  // loadProjectTree 早退 ⇒ 刷新后恢复的 workProj/workFile 无树、编辑区 401，须由 core/auth.js hideGate
+  // loadProjectTree 早退 ⇒ 刷新后恢复的 workProj/workFile 无树、编辑区 401，须由 engine/auth.js hideGate
   // 的「门后补拉」链再调一次（与 mgr/models/neurons 数据同点，见该文件同名注释）。
   async function ensureWork() {
     renderWorkChrome()
@@ -1342,7 +1343,7 @@ import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.
   }
 
   function newWorkChat() {
-    // 新会话落在当前 work 项目下（落项目由 core/state.js newSessionProject 按工作项目解析，此处不写
+    // 新会话落在当前 work 项目下（落项目由 engine/state.js newSessionProject 按工作项目解析，此处不写
     // state.newProject——目标项目槽只有一个真源，work 模式读工作项目、chat 模式读该槽）。
     // 不切回 chat 模式：#/ 空态由 renderHome() 渲染进会话卡（非视图卡），work 主区布局照样成立；
     // 模式互斥只对 mgr/preview 两张视图卡生效（route.js 内那一处 setSbMode('chat')）。

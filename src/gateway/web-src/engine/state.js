@@ -1,4 +1,5 @@
 // 元素引用 + 界面状态（2026-09-10 web-src 模块化切割自 app.js v287；2026-10-07 工具/设备判定拆至 core/util.js、持久化拆至 core/storage.js；唯一手改处，web/app.js 为生成物）
+/* @module engine/state.js */
   // ---------- 元素 ----------
   const chatArea = $('chat-area')
   const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
@@ -55,6 +56,7 @@
   // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
   const WK_PANES_DEF = { workspace: true, sidebar: false }
 
+/* @module engine/state.js #2 */
   let ALL = []
   // 阶段1 实时同步：SSE 变更驱动的去重/防抖状态
   const live = { es: null, listSig: '', curSig: '', listT: null, sessT: null, lastUserSig: '', pinnedUserSig: '', lastMsgLen: null, lastDataTs: 0, curUuid: null, queueRemote: [], maxImgId: 0, compactFlags: new Map(), turnEndFlags: new Map(), restoredFlags: new Map(), turnBeat: new Map(), txProcStart: 0, localMessages: null, deltaSeq: null, streamText: '', tasks: [], taskOpen: false }

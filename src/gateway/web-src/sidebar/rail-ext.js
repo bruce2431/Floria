@@ -4,6 +4,7 @@ import { I } from '../core/icons.js'
 import { esc } from '../core/util.js'
 import { railExtItems, setRailExtItems } from '../views/cards/ext/ext-card.js'
 import { registerExtCards } from '../views/registry.js'
+/* @module sidebar/rail-ext.js */
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
   // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
   // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道，同 default-preview

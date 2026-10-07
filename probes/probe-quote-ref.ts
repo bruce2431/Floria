@@ -82,16 +82,18 @@ if (!existsSync(QUOTE)) {
 
 // ---- 2. 拼接器登记 + 执行序在启动序列之前 ----
 const bundler = read(resolve(ROOT, 'scripts/bundle-web-modules.ts'))
-const entry = bundler.match(/\{\s*file:\s*'inputbar\/quote\.js',\s*ranges:\s*\[\[(\d+)/)
-if (entry) {
-  ok(`拼接器已登记 inputbar/quote.js（区间号 ${entry[1]}）`)
-  // __app__ 的两个区间：事件绑定（2933）+ 启动（5379）。顶层事件委托须排在启动序列之前。
-  const appRanges = [...bundler.matchAll(/\{\s*file:\s*'__app__',\s*ranges:\s*\[\[(\d+),\s*\d+\],\s*\[(\d+)/g)]
-  const boot = appRanges.length ? Math.max(...appRanges.map((m) => Number(m[2]))) : Infinity
-  if (Number(entry[1]) < boot) ok(`quote.js 排在启动序列（${boot}）之前——顶层事件委托先于启动注册`)
-  else bad(`quote.js 区间号 ${entry[1]} 晚于启动序列 ${boot}`)
+// 2026-10-07 拼接器换 schema：顺序 = PIECES 数组下标（旧 ranges 假行号已删）。
+const at = (f: string, p: number) =>
+  bundler.search(new RegExp(`file:\\s*'${f.replace(/\./g, '\\.')}',\\s*part:\\s*${p}\\b`))
+const entry = at('inputbar/quote.js', 1)
+if (entry >= 0) {
+  ok(`拼接器已登记 inputbar/quote.js（PIECES 第 ${entry} 位）`)
+  // 启动序列 = __app__ part 2（PIECES 恒居末）。顶层事件委托须排在它之前。
+  const boot = at('__app__', 2)
+  if (boot >= 0 && entry < boot) ok(`quote.js 排在启动序列（PIECES 第 ${boot} 位）之前——顶层事件委托先于启动注册`)
+  else bad(`quote.js 位次 ${entry} 晚于启动序列 ${boot}`)
 } else {
-  bad('拼接器 MODULES 未登记 inputbar/quote.js（新模块不会进 app.js）')
+  bad('拼接器 PIECES 未登记 inputbar/quote.js（新模块不会进 app.js）')
 }
 
 // ---- 3. 令牌正则：从源码抽真身来测（不在探针里复刻）----

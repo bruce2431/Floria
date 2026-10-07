@@ -2,12 +2,13 @@
 
 import { navigate } from '../../../chat/route.js'
 import { I } from '../../../core/icons.js'
-import { hashOf } from '../../../core/sessions.js'
-import { ALL, state } from '../../../core/state.js'
+import { hashOf } from '../../../engine/sessions.js'
+import { ALL, state } from '../../../engine/state.js'
 import { esc, isMobile } from '../../../core/util.js'
 import { saveMgrView } from '../../../core/storage.js'
 import { mgrColor } from '../../../sidebar/mgr-data.js'
-import { closePanel } from '../../../core/panel.js'
+import { closePanel } from '../../../engine/panel.js'
+/* @module views/cards/projects/projects-card.js */
   // ---------- 项目卡 ----------
   // 数据源 = 已加载会话 ALL 按 projectLabel 分组（projectScope==='project'），不另起后端接口。
   // 点项目胶囊一律进预览（hash 路由 #preview/<label>），无 rerender 需求。

@@ -40,7 +40,7 @@ import { fileURLToPath } from 'node:url'
 const GW = fileURLToPath(new URL('../src/gateway/', import.meta.url))
 let rawStage = readFileSync(GW + 'web-src/chat/stage.js', 'utf8')
 const routeSrc = readFileSync(GW + 'web-src/chat/route.js', 'utf8')
-const liveSrc = readFileSync(GW + 'web-src/core/live.js', 'utf8')
+const liveSrc = readFileSync(GW + 'web-src/engine/live.js', 'utf8')
 const msgsSrc = readFileSync(GW + 'web-src/chat/messages.js', 'utf8')
 
 const PREFIX = process.argv.includes('--prefix')

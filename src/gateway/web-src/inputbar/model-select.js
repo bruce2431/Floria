@@ -1,13 +1,14 @@
 // 模型选择（状态/seat/menu）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { hideGate } from '../core/auth.js'
-import { needToken, apiSetModel } from '../core/gateway.js'
+import { hideGate } from '../engine/auth.js'
+import { needToken, apiSetModel } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { inputEl, state } from '../core/state.js'
+import { inputEl, state } from '../engine/state.js'
 import { esc, toast, isTouch } from '../core/util.js'
 import { EFFORT_LEVELS, cmd, msel, modelPop, modelSeatEl, closeCmdPop } from './commands.js'
 import { closeMentionPop } from './mention.js'
 import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderOf } from '../sidebar/mgr-data.js'
+/* @module inputbar/model-select.js */
   function modelDir() {
     const pool = ((MODELS && Array.isArray(MODELS.items) ? MODELS.items : []) || [])
       .filter(it => it && typeof it.src === 'string' && it.src.startsWith('凭据池') && it.v)
@@ -55,6 +56,7 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
   // 命令菜单状态（对齐 dsh PopupState：open/status/options/search/active/submitting/confirming/acknowledged/error）
   // 2026-09-09 二轮定案：去 tab 单页分组（上传/技能/引用会话/指令堆放一页）；items=渲染时平铺条目（键盘索引基准）
 
+/* @module inputbar/model-select.js #2 */
   function currentChoice() {
     const id = MODEL_CUR.model || (MODELS && (MODELS.activeModel || (MODELS.model ? String(MODELS.model) : ''))) || ''
     if (!id) return null
@@ -204,7 +206,7 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
     const on = modelPop.querySelector('.option.on')
     if (on) on.scrollIntoView({ block: 'nearest' })
   }
-  // 2026-10-05 apiSetModel 迁 core/gateway.js（网关客户端唯一持有 needToken/apiUrl；卡片去 inputbar 依赖）。
+  // 2026-10-05 apiSetModel 迁 engine/gateway.js（网关客户端唯一持有 needToken/apiUrl；卡片去 inputbar 依赖）。
   function mselChoose() {
     const row = mselRows()[msel.active]
     if (!row) return

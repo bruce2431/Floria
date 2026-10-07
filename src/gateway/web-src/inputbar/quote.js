@@ -1,13 +1,14 @@
 // 选中文本 → 松开鼠标 → 引用浮窗（2026-09-28）
 
 import { I } from '../core/icons.js'
-import { inputEl, messagesEl, state } from '../core/state.js'
+import { inputEl, messagesEl, state } from '../engine/state.js'
 import { esc } from '../core/util.js'
-import { findSession } from '../core/sessions.js'
+import { findSession } from '../engine/sessions.js'
 import { quoteActions } from '../views/registry.js'
 import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'
 import { openCommentComposer } from '../sidebar/comments.js'
 import { gwSend, syncGwSend } from './send.js'
+/* @module inputbar/quote.js */
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
   // 两条链的落地形态不同（用户定案）：文件引用只给位置——模型自己 Read 该文件；回复引用必须带原文——

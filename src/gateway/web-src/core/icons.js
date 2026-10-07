@@ -1,4 +1,5 @@
 // SVG 图标表（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
+/* @module core/icons.js */
   // ---------- SVG 图标 ----------
   const I = {
     logo: '<img class="logo-mark" src="/icon.ico" alt="floria">',

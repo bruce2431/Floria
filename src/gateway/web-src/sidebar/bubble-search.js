@@ -2,10 +2,11 @@
 
 import { navigate } from '../chat/route.js'
 import { I } from '../core/icons.js'
-import { hashOf, sorted } from '../core/sessions.js'
-import { bubblePop, overlay, sInput } from '../core/state.js'
+import { hashOf, sorted } from '../engine/sessions.js'
+import { bubblePop, overlay, sInput } from '../engine/state.js'
 import { esc, isMobile } from '../core/util.js'
 import { setPanel, itemHtml } from './recent.js'
+/* @module sidebar/bubble-search.js */
   // ---------- 气泡弹层 ----------
   function renderBubble() {
     bubblePop.innerHTML = '<div class="b-head">最近会话</div>' + sorted().slice(0, 5).map(itemHtml).join('')

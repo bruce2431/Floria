@@ -6,8 +6,9 @@
 // 复位 currentHash）——registry 切卡时对**离场卡**调用；会话卡是唯一带此钩子的卡（离开会话视图须卸净
 // 会话态，六条 SSE 守卫以 live.curUuid 为前提）。
 
-import { sessionCard } from '../../../core/state.js'
+import { sessionCard } from '../../../engine/state.js'
 import { teardownSessionView } from '../../../chat/route.js'
+/* @module views/cards/session/session-card.js */
   // ---------- 会话卡 ----------
   const sessionCardDef = {
     id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false,

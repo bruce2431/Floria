@@ -10,7 +10,7 @@
 // 外部永不获得在宿主 DOM 执行的能力（SPEC-视图卡化 §7 边界）。
 
 import { I } from '../core/icons.js'
-import { chatArea, sessionCard } from '../core/state.js'
+import { chatArea, sessionCard } from '../engine/state.js'
 import { esc } from '../core/util.js'
 import { patchUI, readUI } from '../core/storage.js'
 import { sessionCardDef } from './cards/session/session-card.js'
@@ -20,6 +20,7 @@ import { projectsCardDef } from './cards/projects/projects-card.js'
 import { modelsCardDef } from './cards/models/models-card.js'
 import { previewCardDef } from './cards/preview/preview-card.js'
 import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-card.js'
+/* @module views/registry.js */
 
   // ---------- 卡片注册表 ----------
   // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例

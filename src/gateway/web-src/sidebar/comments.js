@@ -1,8 +1,9 @@
 // 项目评论批注（2026-10-06 work 右栏评论 tab + 选区「添加评论」浮层）（唯一手改处，web/app.js 为生成物）
 
-import { needToken, apiUrl } from '../core/gateway.js'
-import { state } from '../core/state.js'
+import { needToken, apiUrl } from '../engine/gateway.js'
+import { state } from '../engine/state.js'
 import { esc, toast } from '../core/util.js'
+/* @module sidebar/comments.js */
   // ---------- 项目评论批注（work 右栏评论 tab） ----------
   // 一条评论 = 文件路径 + 行范围（l0/l1）+ 选中原文摘录（excerpt）+ 正文（body），锚点来自
   // inputbar/quote.js 的 quoteSnapOfRange（kind:'file'）快照。存储 <项目根>/.claude/comments.json，

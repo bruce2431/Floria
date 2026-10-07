@@ -2,8 +2,9 @@
 
 import { absorbPending } from './messages.js'
 import { renderHome, renderSession } from './route.js'
-import { messagesEl, live } from '../core/state.js'
+import { messagesEl, live } from '../engine/state.js'
 import { renderTransient } from '../inputbar/approval.js'
+/* @module chat/stage.js */
   function scrollBottom() {
     // 占位在场（回合展示期）→ 两层跟随接管（让位/手势中由 stageFollow 自判）；否则普通吸底
     if (stage.active) { stageFollow(); return }

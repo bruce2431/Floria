@@ -2,14 +2,15 @@
 
 import { I } from '../core/icons.js'
 import { relTime } from '../core/markdown.js'
-import { findSession, hashOf } from '../core/sessions.js'
-import { inputEl, state, ALL } from '../core/state.js'
+import { findSession, hashOf } from '../engine/sessions.js'
+import { inputEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isTouch, newSessionProject } from '../core/util.js'
 import { pendingImages, renderImgPills } from './images.js'
 import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pickItems, pickLabel, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
+/* @module inputbar/commands.js */
   // ---------- 命令菜单 + 模型选择（2026-08-21 dsh 输入栏逻辑移植）----------
   // ⚠️ 数据源 = 本地内置展示数据（⚠️ 非 dsh 真实注册表、非网关接口）：
   // 网关暂无 /gateway/commands 与 /gateway/models，命令列表/模型目录先本地内置供 UI 审阅——
@@ -38,6 +39,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // 全池模型可选（items 内 src 以「凭据池」开头的行，跨商直选由网关自动切供应商）；回落 providerModels → items。
   // 2026-08-22 取代 MOCK_MODEL_DIR（anthropic 上游）。
 
+/* @module inputbar/commands.js #2 */
   const cmd = { open: false, status: 'pending', items: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
   // 模型菜单状态（对齐 dsh ModelSelect Pane：root | model | effort）
   const msel = { open: false, pane: 'root', active: 0 }

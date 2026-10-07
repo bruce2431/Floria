@@ -20,7 +20,7 @@ function ok(name: string, cond: boolean, detail = '') {
 
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const mgrJs = await Bun.file(`${SRC}/sidebar/mgr.js`).text()
-const liveJs = await Bun.file(`${SRC}/core/live.js`).text()
+const liveJs = await Bun.file(`${SRC}/engine/live.js`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
 const swJs = await Bun.file(`${WEB}/sw.js`).text()
 const indexHtml = await Bun.file(`${WEB}/index.html`).text()
@@ -73,7 +73,7 @@ ok(
 )
 
 // ---------- ③ 无第二份内联清单（防再次分叉） ----------
-for (const f of ['chat/route.js', 'sidebar/mgr.js', 'views/cards/neurons/neurons-card.js', 'core/live.js']) {
+for (const f of ['chat/route.js', 'sidebar/mgr.js', 'views/cards/neurons/neurons-card.js', 'engine/live.js']) {
   const t = await Bun.file(`${SRC}/${f}`).text()
   const hits = [...t.matchAll(/live\.(curUuid|deltaSeq|localMessages) = null/g)].length
   const allowed = f === 'chat/route.js' ? 6 : 0 // route.js：clearSessionSlots 3 处 + renderSession 切会话 3 处

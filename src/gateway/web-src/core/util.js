@@ -1,6 +1,7 @@
-// 基础工具（HTML 转义 / toast / 设备判定 / 新会话落项目）（2026-10-07 自 core/state.js 拆出；唯一手改处，web/app.js 为生成物）
+// 基础工具（HTML 转义 / toast / 设备判定 / 新会话落项目）（2026-10-07 自 engine/state.js 拆出；唯一手改处，web/app.js 为生成物）
 
-import { state, toastEl } from './state.js'
+import { state, toastEl } from '../engine/state.js'
+/* @module core/util.js */
   // ---------- 工具 ----------
   let timer = null
 
@@ -8,6 +9,7 @@ import { state, toastEl } from './state.js'
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
 
+/* @module core/util.js #2 */
   function toast(msg) {
     toastEl.textContent = msg
     toastEl.hidden = false

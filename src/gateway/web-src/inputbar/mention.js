@@ -1,14 +1,15 @@
 // @ 提及浮窗 + 输入变化入口（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { messagesHtml, addUser } from '../chat/messages.js'
-import { GATEWAY, gateAwait, apiUrl } from '../core/gateway.js'
+import { GATEWAY, gateAwait, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
-import { findSession, sessionCwd } from '../core/sessions.js'
-import { inputEl, state } from '../core/state.js'
+import { findSession, sessionCwd } from '../engine/sessions.js'
+import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
+/* @module inputbar/mention.js */
   // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
@@ -332,7 +333,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const items = []
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      // sid = 会话转录文件名主干，与会话间协作的寻址键同源（core/sessions.js hashOf = 路由 hash）
+      // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     if (MGR) {

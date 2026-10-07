@@ -106,7 +106,7 @@ const emit = (d: { seq: number; anchorSid: string; messages: DisplayMessage[] } 
   accepted++
   gwSeq = d.seq
   if (collapseAt && at >= collapseAt && firstRecoverAt < 0) firstRecoverAt = at
-  // web 侧应用：定位锚点后整体替换（gateway/web-src/core/live.js session-delta 分支同语义）
+  // web 侧应用：定位锚点后整体替换（gateway/web-src/engine/live.js session-delta 分支同语义）
   const idx = webMirror.findIndex((m) => m.sid && m.sid === d.anchorSid)
   if (idx >= 0) webMirror.splice(idx + 1, webMirror.length, ...d.messages)
   else webMirror.splice(0, webMirror.length, ...d.messages)

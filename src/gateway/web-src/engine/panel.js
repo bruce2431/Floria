@@ -1,6 +1,7 @@
 // 侧栏开合核（2026-10-05 自 sidebar/recent.js setPanel 抽出状态落地）（唯一手改处，web/app.js 为生成物）
 
 import { sidebar, state } from './state.js'
+/* @module engine/panel.js */
   // ---------- 侧栏开合核 ----------
   // 开合落地唯一实现：钉住态 + 可见态 + #sidebar.open + 折叠清拖拽调宽。recent.js 的 setPanel 委托本核
   // （弹层清理 / 行浮窗 / work 视图浮窗行状态留在其包装层）；卡（neurons/projects）只需「无导航收抽屉」

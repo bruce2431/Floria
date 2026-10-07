@@ -1,11 +1,12 @@
 // 预览卡（项目预览 + 外部卡申报同步）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；
 // 唯一手改处，web/app.js 为生成物）
 
-import { gToken } from '../../../core/gateway.js'
-import { state } from '../../../core/state.js'
+import { gToken } from '../../../engine/gateway.js'
+import { state } from '../../../engine/state.js'
 import { esc } from '../../../core/util.js'
 import { clearExtCards, clearQuoteActions, deactivateCard, openCard, registerExtCards, registerQuoteActions, viewBody } from '../../registry.js'
 import { clearRailExt } from '../ext/ext-card.js'
+/* @module views/cards/preview/preview-card.js */
   // ---------- 预览卡 ----------
   // 槽位预览卡（openProjectPreview，独占主区）；预览渲染器 mountPreview 另被 work 个性化工作区第三栏
   // 复用（sidebar/work.js），到 iframe 这一层没有第二套代码。

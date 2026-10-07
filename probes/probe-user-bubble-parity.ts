@@ -32,7 +32,7 @@ const mnJ = mnSrc.indexOf('  // 序列化 contenteditable')
 if (mnI < 0 || mnJ < 0 || mnJ < mnI) { console.error('❌ 切片标记未命中：mention.js 令牌/chip/renderUserText'); process.exit(1) }
 const mnBody = mnSrc.slice(mnI, mnJ)
 
-// 与 web-src/core/state.js 同款 esc（探针注入）
+// 与 web-src/engine/state.js 同款 esc（探针注入）
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 const mod = new Function('esc', `${mnBody}\n${mdBody}\nreturn { renderUserText, mdHtml, mdInline }`)(esc) as {

@@ -1,9 +1,10 @@
 // 模型卡（管理视图「模型」tab）（2026-10-01 卡片化：自 sidebar/mgr.js 迁出；唯一手改处，web/app.js 为生成物）
 
-import { needToken, apiSetModel } from '../../../core/gateway.js'
+import { needToken, apiSetModel } from '../../../engine/gateway.js'
 import { I } from '../../../core/icons.js'
 import { esc, toast } from '../../../core/util.js'
 import { MODELS, MODELS_ERR, MODELS_LOADING, loadModelsData, mgrColor, modelProviderOf } from '../../../sidebar/mgr-data.js'
+/* @module views/cards/models/models-card.js */
   // ---------- 模型卡 ----------
   // 数据源 = 网关 /gateway/models（只读展示 + 设为默认）。modelProviderOf 同被输入栏模型菜单复用（唯一一份）。
   const modelsCardDef = {

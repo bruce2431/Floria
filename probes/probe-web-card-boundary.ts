@@ -20,7 +20,7 @@
  *   - views/cards/projects/projects-card.js → chat/route.js（`navigate`，hash 路由）
  *   - views/cards/session/session-card.js   → chat/route.js（`teardownSessionView`，会话卡=会话视图本体）
  *
- * 第二断言：views/registry.js 的 import ⊆ {core/state.js, core/icons.js, ./cards/*}
+ * 第二断言：views/registry.js 的 import ⊆ {engine/state.js, core/icons.js, ./cards/*}
  *   （registry 是卡片契约唯一入口，不得 import chat/sidebar/inputbar 成 god importer）。
  */
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs'
@@ -48,11 +48,11 @@ const resolveSpec = (fromAbs: string, spec: string) =>
 
 // ---- 白名单 / 例外 ----
 const ALLOW_EXACT = new Set([
-  'core/state.js',
+  'engine/state.js',
   'core/icons.js',
-  'core/sessions.js',
-  'core/gateway.js',
-  'core/panel.js',
+  'engine/sessions.js',
+  'engine/gateway.js',
+  'engine/panel.js',
   'sidebar/mgr-data.js',
   'views/registry.js',
   'views/cards/ext/ext-card.js', // 外部申报域共享底座
@@ -116,7 +116,7 @@ if (!existsSync(REG)) {
   bad(`缺少契约入口 ${logical(REG)}`)
 } else {
   const src = readFileSync(REG, 'utf-8')
-  const regAllow = new Set(['core/state.js', 'core/icons.js'])
+  const regAllow = new Set(['engine/state.js', 'core/icons.js'])
   let n = 0
   for (const m of src.matchAll(IMPORT_RE)) {
     n++

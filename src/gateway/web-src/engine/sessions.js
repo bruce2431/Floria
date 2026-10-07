@@ -4,8 +4,9 @@ import { hideGate } from './auth.js'
 import { needToken, apiUrl } from './gateway.js'
 import { refreshList } from './live.js'
 import { bodyEl, state, ALL, live } from './state.js'
-import { toast } from './util.js'
+import { toast } from '../core/util.js'
 import { saveModelCur, MODEL_CUR, modelUserPicked, setModelUserPicked, renderModelSeat } from '../inputbar/model-select.js'
+/* @module engine/sessions.js */
   // ---------- 会话映射 ----------
   const hashOf = (s) => (s.file || '').replace(/\.jsonl$/, '')
   // 2026-08-28 定案（用户）：URL 用完整会话 hash 不简写 → 精确匹配即可

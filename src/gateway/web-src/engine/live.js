@@ -4,15 +4,16 @@ import { liveFoldBody, isRealUser, isEndStop, fmtDur, stampMsgIn, charNote, last
 import { navigate, renderSession } from '../chat/route.js'
 import { stage, stageFollow, stageStart } from '../chat/stage.js'
 import { hideGate } from './auth.js'
-import { setChar } from './char.js'
+import { setChar } from '../core/char.js'
 import { needToken, apiUrl, setConn } from './gateway.js'
 import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, applySessionModel, withSynthetic } from './sessions.js'
 import { messagesEl, inputEl, bodyEl, state, ALL, live, connUp } from './state.js'
-import { toast } from './util.js'
+import { toast } from '../core/util.js'
 import { renderTransient, renderSettle, claimStartTs, claimTick, syncTurnLive, takeover, clearTakeover, renderTaskDock } from '../inputbar/approval.js'
 import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { firstSendHash, renderRecent } from '../sidebar/recent.js'
+/* @module engine/live.js */
 
   // ---------- 实时同步（阶段1：SSE 监听 jsonl 变化，自动刷新会话/列表）----------
   // 兼容：刷新只替换 messagesEl 内层，折叠开合（含网关实时折叠）与滚动位置尽量保留；

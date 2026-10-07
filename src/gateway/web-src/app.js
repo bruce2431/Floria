@@ -7,22 +7,23 @@
    只读查看：composer 不可发送。 */
 // —— 2026-09-10 模块化切割入口（事件绑定 + 启动序列；其余逻辑在 core/sidebar/inputbar/chat 各模块）——
 import { route, navigate, renderSession, bootHash } from './chat/route.js'
-import { hideGate } from './core/auth.js'
+import { hideGate } from './engine/auth.js'
 import { setChar } from './core/char.js'
-import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './core/gateway.js'
+import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './engine/gateway.js'
 import { I } from './core/icons.js'
-import { initLive } from './core/live.js'
-import { loadSessions } from './core/sessions.js'
-import { inputEl, overlay, sInput, sidebar, state } from './core/state.js'
+import { initLive } from './engine/live.js'
+import { loadSessions } from './engine/sessions.js'
+import { inputEl, overlay, sInput, sidebar, state } from './engine/state.js'
 import { isMobile } from './core/util.js'
 import { saveMgrView } from './core/storage.js'
-import { initViewport } from './core/viewport.js'
+import { initViewport } from './engine/viewport.js'
 import { gwSend } from './inputbar/send.js'
 import { openSearch, renderSearch } from './sidebar/bubble-search.js'
 import { renderProject } from './sidebar/mgr.js'
 import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
 import { initWork, setSbMode } from './sidebar/work.js'
 
+/* @module __app__ */
   // ---------- 事件绑定 ----------
   // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
   //  · #menu-btn 汉堡（左上角，全视口共用一枚）：点击 = 打开并钉住（钉住后鼠标移出侧栏不自动收）
@@ -117,6 +118,7 @@ import { initWork, setSbMode } from './sidebar/work.js'
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('show') })
 
 
+/* @module __app__ #2 */
   // ---------- 启动 ----------
   ;(async () => {
     await detectGateway()

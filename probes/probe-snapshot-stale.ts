@@ -1,10 +1,10 @@
 // 探针：回退快照防御 snapshotStale（2026-09-11 三诊根治「发送瞬间跳到上一条消息」真主链）
-// 跑真实源码：从 web-src/core/live.js 切出 snapshotStale 函数体执行断言；源码结构断言验证
+// 跑真实源码：从 web-src/engine/live.js 切出 snapshotStale 函数体执行断言；源码结构断言验证
 // 门在 refreshSession 中的位置（先于一切副作用与基线赋值）。场景=20260911203904 录像三态重放。
 // 运行：bun probe-snapshot-stale.ts
 import { readFileSync } from 'node:fs'
 
-const SRC = readFileSync(new URL('../src/gateway/web-src/core/live.js', import.meta.url), 'utf8')
+const SRC = readFileSync(new URL('../src/gateway/web-src/engine/live.js', import.meta.url), 'utf8')
 
 let pass = 0
 let fail = 0

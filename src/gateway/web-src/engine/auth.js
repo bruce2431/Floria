@@ -13,11 +13,13 @@ import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
 import { loadNeuronsData } from '../views/cards/neurons/neurons-card.js'
 import { renderRecent } from '../sidebar/recent.js'
 import { ensureWork } from '../sidebar/work.js'
+/* @module engine/auth.js */
   function deviceHint() {
     return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? 'iPad' : ''
   }
 
 
+/* @module engine/auth.js #2 */
   let finishGateTimer = null // 阶段3 停留后 hideGate 的定时器
   let hideGateTimer = null // gate-screen 淡出后隐藏的定时器（hideGate 不再硬切）
   const gateScreen = $('gate-screen')
@@ -25,6 +27,7 @@ import { ensureWork } from '../sidebar/work.js'
   const gCard = $('g-card')
 
 
+/* @module engine/auth.js #3 */
   // ---------- 设备认证配对（2026-08-28，浏览器侧完全删除 token 授权链） ----------
   // 门态显示设备请求码（localStorage 持久，同一设备恒定），轮询 /gateway/activate?code=：
   // PC 端 /server auth add <请求码> 后网关名单命中 → 种 floria_auth cookie → 下轮轮询 200 →

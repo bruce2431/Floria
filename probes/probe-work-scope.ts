@@ -1,7 +1,7 @@
 // probe-work-scope.ts —— work 模式「在项目中工作」不变量探针（只读，2026-09-26）
 // 不变量两条（同一句用户需求的两半，各自有唯一判定点）：
 //   ① 落项目：work 模式下的新会话/新上传的目标项目 = 工作项目（state.workProj），
-//      唯一真源 = core/state.js newSessionProject()——任何消费点直读 state.newProject 都会漏。
+//      唯一真源 = engine/state.js newSessionProject()——任何消费点直读 state.newProject 都会漏。
 //   ② 助手栏范围：work 模式下助手栏只展示工作项目的会话（别的项目的会话路径→退回该项目新对话空态），
 //      唯一判定点 = sidebar/work.js workScopeOk()，路由渲染/切模式/切项目三处入口共用。
 //   ③ 下沉区 tab + 助手三态（2026-10-06）：不变量 = **聊天 tab / 文件 tab / 预览至少一个在场**
@@ -22,13 +22,13 @@ function ok(name: string, cond: boolean, detail = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond || !detail ? '' : '  ← ' + detail}`)
 }
 
-const stateJs = await Bun.file(`${SRC}/core/state.js`).text()
+const stateJs = await Bun.file(`${SRC}/engine/state.js`).text()
 const commandsJs = await Bun.file(`${SRC}/inputbar/commands.js`).text()
 const sendJs = await Bun.file(`${SRC}/inputbar/send.js`).text()
 const imagesJs = await Bun.file(`${SRC}/inputbar/images.js`).text()
 const workJs = await Bun.file(`${SRC}/sidebar/work.js`).text()
 const recentJs = await Bun.file(`${SRC}/sidebar/recent.js`).text()
-const panelJs = await Bun.file(`${SRC}/core/panel.js`).text()
+const panelJs = await Bun.file(`${SRC}/engine/panel.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const styles = await Bun.file(`${WEB}/styles.css`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
@@ -49,7 +49,7 @@ const count = (t: string, re: RegExp) => [...t.matchAll(re)].length
 
 // ---------- ① 落项目真源 ----------
 const nsp = body(stateJs, 'function newSessionProject()')
-ok('A1 newSessionProject 定义于 core/state.js', nsp.length > 0)
+ok('A1 newSessionProject 定义于 engine/state.js', nsp.length > 0)
 ok('A1 规则含 work 分支（sbMode === work → workProj）', /sbMode === 'work' && state\.workProj/.test(nsp), nsp.replace(/\s+/g, ' ').slice(0, 120))
 ok('A1 非 work 分支回落 state.newProject', /:\s*state\.newProject\s*$/m.test(nsp) || /:\s*state\.newProject/.test(nsp))
 ok('A2 send.js 建会话读 newSessionProject()', body(sendJs, 'async function gwSend()').includes('newSessionProject()'))
@@ -154,12 +154,12 @@ ok('F9 产物 app.js 含缺口判据定义唯一', count(appJs, /function wkFloa
 
 // ---------- ⑩ 视图浮层「侧边栏」开关 = 侧栏是否常在（2026-09-28）----------
 // 不变量：开关亮 ⇔ 侧栏被主动打开（钉住）；左缘悬停预览式唤出（瞬时露出、移出即收）不算打开。
-// 判定点 = work.js paneOn('sidebar') 读 state.panelPinned；钉住态 2026-10-05 收归 core/panel.js
+// 判定点 = work.js paneOn('sidebar') 读 state.panelPinned；钉住态 2026-10-05 收归 engine/panel.js
 // applyPanelOpen 单点写（recent.js setPanel 委托之，popup/行状态清理留包装层）。
 const paneOnBody = body(workJs, 'function paneOn(')
 ok('G1 侧边栏开关真源 = state.panelPinned（不含悬停可见态）', paneOnBody.includes('return !!state.panelPinned') && !paneOnBody.includes('state.panelOpen'), paneOnBody.replace(/\s+/g, ' ').slice(-120))
 const applyPanelBody = body(panelJs, 'function applyPanelOpen(')
-ok('G1 applyPanelOpen 写 panelPinned（pin 真源单点，core/panel.js）', /state\.panelPinned = !!open && !!pin/.test(applyPanelBody))
+ok('G1 applyPanelOpen 写 panelPinned（pin 真源单点，engine/panel.js）', /state\.panelPinned = !!open && !!pin/.test(applyPanelBody))
 const setPanelBody = body(recentJs, 'function setPanel(')
 ok('G1 setPanel 委托 applyPanelOpen（不再自写 pin）', setPanelBody.includes('applyPanelOpen(') && !/state\.panelPinned\s*=/.test(setPanelBody))
 ok('G1 setPanel 落地后同步浮层行状态', setPanelBody.includes('syncPaneRows()'))

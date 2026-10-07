@@ -1,5 +1,6 @@
 // 键盘弹出适配（移动端）——唯一真源 visualViewport（本文件是手改处，web/app.js 为生成物）
 import { stageSync } from '../chat/stage.js'
+/* @module engine/viewport.js */
 
   // ---------- 键盘弹出适配（2026-09-19）----------
   // 不变量（五轮定案，用户「整个界面连侧栏一起上下」，要「整页平移」）：应用是一块**刚性板**，

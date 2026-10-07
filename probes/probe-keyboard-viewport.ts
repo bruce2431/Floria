@@ -20,7 +20,7 @@ function ok(name: string, cond: boolean, detail = '') {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond || !detail ? '' : '  ← ' + detail}`)
 }
 
-const viewportJs = await Bun.file(`${SRC}/core/viewport.js`).text()
+const viewportJs = await Bun.file(`${SRC}/engine/viewport.js`).text()
 const appSrc = await Bun.file(`${SRC}/app.js`).text()
 const css = await Bun.file(`${WEB}/styles.css`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
@@ -47,9 +47,16 @@ function lineOf(file: string, needle: string): number {
 }
 
 // ---------- ① 拼接表接线（新模块必须进表，否则不被拼进产物） ----------
-ok('A1 bundle-web-modules 表含 core/viewport.js', /file:\s*'core\/viewport\.js'/.test(bundler))
-ok('A1 viewport 区间排在启动序列（5379）之前（顶层 let 先于 initViewport 调用）',
-  (() => { const m = /file:\s*'core\/viewport\.js',\s*ranges:\s*\[\[(\d+)/.exec(bundler); return !!m && Number(m[1]) < 5379 })())
+ok('A1 bundle-web-modules 表含 engine/viewport.js', /file:\s*'engine\/viewport\.js'/.test(bundler))
+ok('A1 viewport 段排在启动序列之前（顶层 let 先于 initViewport 调用）',
+  (() => {
+    // 2026-10-07 拼接器换 schema：顺序 = PIECES 数组下标（旧 ranges 假行号已删）。
+    const at = (f: string, p: number) =>
+      bundler.search(new RegExp(`file:\\s*'${f.replace(/\./g, '\\.')}',\\s*part:\\s*${p}\\b`))
+    const vp = at('engine/viewport.js', 1)
+    const boot = at('__app__', 2)
+    return vp >= 0 && boot >= 0 && vp < boot
+  })())
 
 // ---------- ② 唯一真源与消费点 ----------
 ok('A2 启动序列调 initViewport（紧随 initLive）', (() => {

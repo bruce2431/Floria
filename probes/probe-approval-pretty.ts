@@ -17,7 +17,7 @@ const i = src.indexOf(START)
 const j = src.indexOf(END)
 if (i < 0 || j < 0 || j < i) { console.error('❌ 切片标记未命中：审批卡正文渲染区间'); process.exit(1) }
 const body = src.slice(i, j)
-// 与 web-src/core/state.js:51 同款 esc（探针注入）
+// 与 web-src/engine/state.js:51 同款 esc（探针注入）
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
 // mdHtml 在真实运行期来自 core/markdown.js（依赖 MENTION_* 等 DOM 侧模块，不宜整段切片）；

@@ -8,10 +8,28 @@ import { ICON_COPY, writeClipboard } from './usage.js'
 /* @module chat/messages/msg-actions.js */
   // 消息复制（DSH MessageIconActions copy 语义）：取消息纯文本（剔除已处理折叠/变更卡/操作行/工具折叠），
   // writeClipboard 成功 → 图标换 check 1s（DSH 同款反馈窗口），失败 toast
+  // 块级标签 → 复制文本补换行。textContent 会把相邻块级元素文本直接拼接（<p>a</p><p>b</p> → "ab"、
+  // <br> 更无文本节点被吞），复制结果丢换行与空行；故按标签补：段落级补空行、列表/表格行补单换行。
+  const COPY_PARA_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'TABLE'])
+  const COPY_LINE_TAGS = new Set(['LI', 'TR', 'UL', 'OL', 'HR'])
+  function copyTextOf(node) {
+    let out = ''
+    const walk = (n) => {
+      if (n.nodeType === 3) { out += n.nodeValue; return }
+      if (n.nodeType !== 1) return
+      if (n.tagName === 'BR') { out += '\n'; return }
+      const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
+      if (sep && out && !out.endsWith('\n')) out += sep
+      n.childNodes.forEach(walk)
+      if (sep && out && !out.endsWith('\n')) out += sep
+    }
+    walk(node)
+    return out
+  }
   function messageCopyText(msgEl) {
     const clone = msgEl.cloneNode(true)
     clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, .chart-bar, .chart-raw, script, style').forEach((el) => el.remove())
-    return (clone.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+    return copyTextOf(clone).replace(/[ \t]+\n/g, '\n').trim()
   }
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('.msg-copy') : null

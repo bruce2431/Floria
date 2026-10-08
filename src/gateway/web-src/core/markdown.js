@@ -81,6 +81,10 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return restoreMath(s)
   }
+  // 单段行内文本 → HTML（mdHtml 行循环里对每行做的事，抽成可独立调用的一口）。
+  // 顺序与 mdHtml 入口一致且不可换：extractMath（原文上抽公式，先于 esc）→ esc → mdInline（末尾 restoreMath）。
+  // 消费者：work.js 编辑区表格 widget 的单元格渲染器（CM.setTableCellRenderer(mdInlineText)）。
+  function mdInlineText(s) { return mdInline(esc(extractMath(String(s == null ? '' : s)))) }
   function mdHtml(src) {
     if (!src) return ''
     const lines = esc(extractMath(String(src))).split('\n')

@@ -1,0 +1,72 @@
+diff --git a/node_modules/codemirror-live-markdown/.bun-tag-235c53d0571682f6 b/.bun-tag-235c53d0571682f6
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/index.js b/dist/index.js
+index dd3f7600d65bbffea50899577da3d982a165ef3c..4c490e4adfc15032e5b74829953cff18a9642e8d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -52133,6 +52133,9 @@ function checkUpdateAction(update) {
+   }
+   return "none";
+ }
++// [floria patch] 行内标记（EmphasisMark/StrikethroughMark/CodeMark）的显隐判据用**父节点范围**，
++// 而非标记自身范围——否则只有光标贴到 `*`/`~`/`` ` `` 上才显码，落在内容中间不显。
++var INLINE_REVEAL_PARENTS = /* @__PURE__ */ new Set(["StrongEmphasis", "Emphasis", "Strikethrough", "InlineCode"]);
+ var SKIP_PARENT_TYPES = /* @__PURE__ */ new Set(["FencedCode", "CodeBlock"]);
+ function isInsideSkippedParent(node) {
+   let parent = node.node.parent;
+@@ -52207,7 +52210,9 @@ var livePreviewPlugin = ViewPlugin.fromClass(
+             );
+           } else {
+             if (node.from >= node.to) return;
+-            const isTouched = shouldShowSource(state, node.from, node.to);
++            const inlineParent = node.node.parent;
++            const revealNode = inlineParent && INLINE_REVEAL_PARENTS.has(inlineParent.name) ? inlineParent : node;
++            const isTouched = shouldShowSource(state, revealNode.from, revealNode.to);
+             const cls = isTouched && !isDrag ? "cm-formatting-inline cm-formatting-inline-visible" : "cm-formatting-inline";
+             decorations.push(
+               Decoration.mark({ class: cls }).range(node.from, node.to)
+@@ -52517,6 +52522,16 @@ function parseMarkdownTable(source3) {
+     rows
+   };
+ }
++// [floria patch] 表格单元格 Markdown 渲染钩子：库原来对 th/td 直接 `textContent = ...`（纯文本），
++// 格子里写的 `**粗体**` / `` `代码` `` / [链接](url) 一律原样显示。宿主经 setTableCellRenderer 注入
++// 行内渲染器（work.js 注入 core/markdown.js 的 mdInlineText），未注入时保持库原本的纯文本行为。
++var tableCellRenderer = null;
++function setTableCellRenderer(fn) { tableCellRenderer = fn }
++function renderTableCell(el, text) {
++  const html = tableCellRenderer ? tableCellRenderer(text) : null;
++  if (html == null) { el.textContent = text; return }
++  el.innerHTML = html;
++}
+ var TableWidget = class extends WidgetType {
+   constructor(data) {
+     super();
+@@ -52550,7 +52565,7 @@ var TableWidget = class extends WidgetType {
+     const headerRow = document.createElement("tr");
+     this.data.headers.forEach((header, idx) => {
+       const th = document.createElement("th");
+-      th.textContent = header;
++      renderTableCell(th, header);
+       if (this.data.alignments[idx]) {
+         th.style.textAlign = this.data.alignments[idx];
+       }
+@@ -52563,7 +52578,7 @@ var TableWidget = class extends WidgetType {
+       const tr = document.createElement("tr");
+       row.forEach((cell, idx) => {
+         const td = document.createElement("td");
+-        td.textContent = cell;
++        renderTableCell(td, cell);
+         if (this.data.alignments[idx]) {
+           td.style.textAlign = this.data.alignments[idx];
+         }
+@@ -54295,6 +54310,6 @@ var editorTheme = EditorView.theme({
+   ".hljs-name": { color: "#22863a" }
+ });
+ 
+-export { blockMathField, checkUpdateAction, clearImageCache, clearMathCache, codeBlockField, collapseOnSelectionFacet, editorTheme, highlightCode, imageField, initHighlighter, isHighlighterAvailable, isLanguageRegistered, linkPlugin, livePreviewPlugin, loadImage, markdownStylePlugin, mathPlugin, mouseSelectingField, preloadImages, registerLanguage, renderMath, resolveImagePath, setMouseSelecting, setTableSourceMode, shouldShowSource, tableEditorField, tableEditorPlugin, tableField };
++export { blockMathField, checkUpdateAction, clearImageCache, clearMathCache, codeBlockField, collapseOnSelectionFacet, editorTheme, highlightCode, imageField, initHighlighter, isHighlighterAvailable, isLanguageRegistered, linkPlugin, livePreviewPlugin, loadImage, markdownStylePlugin, mathPlugin, mouseSelectingField, preloadImages, registerLanguage, renderMath, resolveImagePath, setMouseSelecting, setTableSourceMode, setTableCellRenderer, shouldShowSource, tableEditorField, tableEditorPlugin, tableField };
+ //# sourceMappingURL=index.js.map
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file

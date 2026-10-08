@@ -912,6 +912,9 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     const CM = window.CMLiveMarkdown
     if (!CM) throw new Error('CodeMirror 编辑器未加载（window.CMLiveMarkdown 缺失）')
     wkEdCM = CM
+    // 表格 widget 单元格渲染器：库默认 `td.textContent`（纯文本）会把格内 md 原样吐出，
+    // 注入本工程的行内渲染器（core/markdown.js mdInlineText）⇒ 格内 `**粗**`/`` `码` ``/链接正常渲染。
+    CM.setTableCellRenderer(mdInlineText)
     wkEdProgAnn = CM.Annotation.define()
     wkEdCmtEffect = CM.StateEffect.define()
     const cmtField = CM.StateField.define({
@@ -945,6 +948,42 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     return wkEdView
   }
 
+  // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
+  // 没有 HorizontalRule 项，`---` 在预览里原样显源码。本插件补上——未落光标时给该行加 `.wk-ed-hr` 画横线
+  // 并藏掉字符，光标进入该行（或拖选中）则显源码，与标题/引用的显隐口径一致。
+  function wkEdHrPlugin(CM) {
+    return CM.ViewPlugin.fromClass(class {
+      constructor(view) { this.decorations = this.build(view) }
+      update(u) {
+        if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view)
+      }
+      build(view) {
+        const st = view.state
+        const activeLines = new Set()
+        for (const r of st.selection.ranges) {
+          const a = st.doc.lineAt(r.from).number
+          const b = st.doc.lineAt(r.to).number
+          for (let l = a; l <= b; l++) activeLines.add(l)
+        }
+        const isDrag = st.field(CM.mouseSelectingField, false)
+        const deco = []
+        CM.syntaxTree(st).iterate({
+          enter: (node) => {
+            if (node.name !== 'HorizontalRule') return
+            const line = st.doc.lineAt(node.from)
+            // 光标在该行（或拖选中）= 显源码：不加任何装饰，`---` 原样可编辑
+            if (activeLines.has(line.number) && !isDrag) return
+            // 行装饰必须落在行首（node.from 可能带缩进 ≠ line.from，直接用 node.from 会被 CM 拒收）
+            deco.push(CM.Decoration.line({ class: 'wk-ed-hr' }).range(line.from))
+            if (node.from >= node.to) return
+            deco.push(CM.Decoration.mark({ class: 'wk-ed-hr-hide' }).range(node.from, node.to))
+          },
+        })
+        return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+      }
+    }, { decorations: (v) => v.decorations })
+  }
+
   // 扩展名 → 语言扩展。markdown = Live Preview 全套（语法 + live-preview 装饰 + 公式/表格/链接/代码块）；
   // 代码/纯文本 = 对应语言包 + 基础高亮；无匹配扩展名 = 纯文本（无高亮）。
   function wkEdLangExt(path) {
@@ -954,6 +993,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     const e = m ? m[1].toLowerCase() : ''
     if (/^(md|markdown)$/.test(e)) {
       return [
+        // base=markdownLanguage 本身已含 GFM（commonmark.configure([GFM,…])，Table 在其中）⇒ 不必再传 extensions:[Table]
         CM.markdown({ base: CM.markdownLanguage }),
         CM.collapseOnSelectionFacet.of(true),
         CM.mouseSelectingField,
@@ -964,6 +1004,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
         CM.tableField,
         CM.linkPlugin(),
         ...CM.codeBlockField(),
+        wkEdHrPlugin(CM),
       ]
     }
     const L = wkEdLangFor(CM, e)

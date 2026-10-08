@@ -2491,10 +2491,14 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > #session-card.wk-assist-slim { display: flex; }
 /* 内容格（编辑区 / 会话卡）与顶栏格同理：裸落底板，不涂底不造卡形，只留左右/下 2px 内边距。
    浮卡（.wk-assist-float）/ 收敛条（.wk-assist-slim）是脱流的另一种形态，各自带白卡底 / 透明壳，
-   故用 :not() 排除（否则本条特指度会盖掉它们）。 */
+   故用 :not() 排除（否则本条特指度会盖掉它们）。
+   background 必须显式清零：#session-card 带 .view-card（白卡底 --chat-bg），单靠「不写」会露白卡；
+   置 transparent 后透出 #chat-area.work 的 --plane ⇒ 与 #work-editor 同底（下沉区本体，唯一底源）。 */
 #chat-area.work > #work-editor,
 #chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim) {
   margin: 0 2px 2px;
+  background: transparent;
+  border-radius: 0;
 }
 
 /* 下沉区顶栏 tab 条：[+] [聊天] [文件名]。透明条，pill 自绘（参考 Prism：透明底 + 描边 active）。 */
@@ -2672,6 +2676,35 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 #work-editor .cm-header-2 { font-size: 16px; }
 #work-editor .cm-header-3 { font-size: 15px; }
 #work-editor .cm-header-4, #work-editor .cm-header-5, #work-editor .cm-header-6 { font-size: 14px; }
+/* 水平分隔线（web-src/sidebar/work.js wkEdHrPlugin）：未落光标 = 该行画一条横线 + 藏掉 `---` 字符；
+   光标进入该行/拖选中 = 不加装饰、`---` 原样可编辑。横线绝对定位在该行竖直中线，行高不变。 */
+#work-editor .cm-line.wk-ed-hr { position: relative; }
+#work-editor .cm-line.wk-ed-hr::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--border); pointer-events: none;
+}
+.wk-ed-hr-hide { font-size: 0.01em; opacity: 0; pointer-events: none; }
+/* 表格 widget（库 TableWidget → `.cm-table-widget`）：库自带表线写的是 hsl(var(--border, …))，
+   而本项目 --border 是十六进制（#ececec/#2a2a2a）⇒ hsl() 非法 ⇒ 边框声明在计算值阶段作废、全部无框。
+   此处用项目令牌重写表线/表头底（同样是为 vendored 库的 hsl 假设兜底，与 .cm-header-* 覆盖同源）。 */
+#work-editor .cm-table-widget table { border-collapse: collapse; width: 100%; }
+#work-editor .cm-table-widget th, #work-editor .cm-table-widget td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; }
+#work-editor .cm-table-widget th { background: color-mix(in srgb, var(--text) 7%, transparent); font-weight: 600; }
+/* 代码块 widget（库 CodeBlockWidget → `.cm-codeblock-widget`，光标未入块时整块换成 widget）：
+   库的 <pre> 走 UA `white-space:pre` + `overflow:auto` ⇒ 长行不按窗口换行、块内横滚；而光标入块后
+   库切源码态，那几行是普通 .cm-line（.cm-content 的 break-spaces）会换行 ⇒ 两态换行行为不一致。
+   宿主统一为编辑器口径（EditorView.lineWrapping）：pre-wrap 软换行。底/边同聊天区代码块（--field-2 + --border），
+   替换库的 hsl(var(--muted,…)) 回落值（本项目无 --muted，暗色下会留浅灰底）。 */
+#work-editor .cm-codeblock-widget {
+  margin: 6px 0; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--field-2); overflow: hidden;
+}
+#work-editor .cm-codeblock-widget pre { padding: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#work-editor .cm-codeblock-line {
+  padding: 0 12px; min-height: 0; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text);
+}
+#work-editor .cm-codeblock-copy { top: 6px; right: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
+#work-editor .cm-codeblock-copy:hover { background: var(--hover); }
 .wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
 .wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }

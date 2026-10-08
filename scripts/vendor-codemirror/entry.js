@@ -5,9 +5,9 @@ import {
   EditorState, EditorSelection, Annotation, StateEffect, StateField,
   RangeSetBuilder, Compartment, Prec,
 } from '@codemirror/state'
-import { EditorView, Decoration, keymap, WidgetType } from '@codemirror/view'
+import { EditorView, Decoration, keymap, WidgetType, ViewPlugin } from '@codemirror/view'
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { StreamLanguage, syntaxHighlighting, HighlightStyle } from '@codemirror/language'
+import { StreamLanguage, syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { javascript } from '@codemirror/lang-javascript'
@@ -18,10 +18,9 @@ import { python } from '@codemirror/lang-python'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { yaml } from '@codemirror/legacy-modes/mode/yaml'
 import { stex } from '@codemirror/legacy-modes/mode/stex'
-import { Table } from '@lezer/markdown'
 import {
   collapseOnSelectionFacet, mouseSelectingField, livePreviewPlugin, markdownStylePlugin,
-  editorTheme, shouldShowSource, setMouseSelecting,
+  editorTheme, shouldShowSource, setMouseSelecting, setTableCellRenderer,
   blockMathField, mathPlugin, tableField, tableEditorPlugin, codeBlockField, imageField, linkPlugin,
   initHighlighter, registerLanguage, renderMath,
 } from 'codemirror-live-markdown'
@@ -30,22 +29,20 @@ window.CMLiveMarkdown = {
   // @codemirror/state
   EditorState, EditorSelection, Annotation, StateEffect, StateField, RangeSetBuilder, Compartment, Prec,
   // @codemirror/view
-  EditorView, Decoration, keymap, WidgetType,
+  EditorView, Decoration, keymap, WidgetType, ViewPlugin,
   // @codemirror/commands
   history, defaultKeymap, historyKeymap, indentWithTab,
   // @codemirror/language
-  StreamLanguage, syntaxHighlighting, HighlightStyle,
+  StreamLanguage, syntaxHighlighting, HighlightStyle, syntaxTree,
   // @lezer/highlight
   tags,
   // @codemirror/lang-*
   markdown, markdownLanguage, javascript, json, css, html, python,
   // @codemirror/legacy-modes（StreamLanguage 包装器）
   shell, yaml, stex,
-  // @lezer/markdown
-  Table,
   // codemirror-live-markdown
   collapseOnSelectionFacet, mouseSelectingField, livePreviewPlugin, markdownStylePlugin,
-  editorTheme, shouldShowSource, setMouseSelecting,
+  editorTheme, shouldShowSource, setMouseSelecting, setTableCellRenderer,
   blockMathField, mathPlugin, tableField, tableEditorPlugin, codeBlockField, imageField, linkPlugin,
   initHighlighter, registerLanguage, renderMath,
 }

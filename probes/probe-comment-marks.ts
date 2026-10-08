@@ -31,6 +31,7 @@ const bad = (m: string) => {
 
 const cmt = read('src/gateway/web-src/sidebar/comments.js')
 const work = read('src/gateway/web-src/sidebar/work.js')
+const md = read('src/gateway/web-src/core/markdown.js')
 const css = read('src/gateway/web/styles.css')
 const bundle = read('scripts/bundle-web-modules.ts')
 const idx = read('src/gateway/web/index.html')
@@ -75,8 +76,25 @@ if (/CM\.EditorView\.lineWrapping/.test(work)) ok('work.js 编辑器启用 lineW
 else bad('work.js 编辑器缺 lineWrapping —— 长行不换行')
 if (/wkEdLangComp = new CM\.Compartment\(\)/.test(work) && /function wkEdSetLang\(path\)/.test(work)) ok('work.js 语言 compartment（按扩展名热换语言扩展）')
 else bad('work.js 缺语言 compartment / wkEdSetLang')
-if (/function wkEdLangExt\(path\)/.test(work) && /CM\.markdown\(\{ base: CM\.markdownLanguage \}\)/.test(work)) ok('wkEdLangExt：md 走 Live Preview 全套，其余按扩展名取语言包')
+// base=markdownLanguage 自身即 commonmark.configure([GFM,…])（GFM 已含 Table）⇒ 不另传 extensions，语法树照常有 Table 节点
+if (/function wkEdLangExt\(path\)/.test(work) && /CM\.markdown\(\{ base: CM\.markdownLanguage \}\)/.test(work)) ok('wkEdLangExt：md 走 Live Preview 全套（base=markdownLanguage 自带 GFM 表格），其余按扩展名取语言包')
 else bad('wkEdLangExt 未接 markdown / 语言包')
+if (/function wkEdHrPlugin\(CM\)/.test(work) && /Decoration\.line\(\{ class: 'wk-ed-hr' \}\)/.test(work) && /wkEdHrPlugin\(CM\)/.test(work)) ok('wkEdHrPlugin：HorizontalRule 行走行装饰（库 styleMap 无此项）')
+else bad('缺 HorizontalRule（---）渲染插件')
+if (/\.wk-ed-hr-hide \{/.test(css) && /\.cm-line\.wk-ed-hr::after/.test(css)) ok('styles.css 有 .wk-ed-hr / .wk-ed-hr-hide 样式')
+else bad('styles.css 缺水平线样式')
+// 代码块 widget 换行口径：库 <pre> 是 UA white-space:pre + overflow:auto（不换行），与光标入块后的源码态
+// （.cm-line，break-spaces）不一致 ⇒ 宿主覆盖为 pre-wrap，统一到 EditorView.lineWrapping 口径
+if (/#work-editor \.cm-codeblock-widget pre \{[^}]*white-space: pre-wrap/.test(css) && /#work-editor \.cm-codeblock-widget \{[^}]*var\(--field-2\)/.test(css)) ok('styles.css 代码块 widget 按窗口软换行（pre-wrap）+ 项目令牌底/边（库 hsl(--muted) 假设失效）')
+else bad('代码块 widget 仍不换行（库 pre 的 white-space:pre 未覆盖）或未用项目令牌')
+// vendored cm6 库补丁（scripts/vendor-codemirror/patches/）：行内标记（**加粗** 等）显隐按**父节点范围**判定
+const libPatch = read('scripts/vendor-codemirror/patches/codemirror-live-markdown@0.5.1-alpha.1.patch')
+if (/INLINE_REVEAL_PARENTS/.test(libPatch) && /revealNode\.from/.test(libPatch)) ok('vendored 库补丁：行内标记显隐按父节点范围（光标落在内容中间即整块显码）')
+else bad('vendored 库缺行内显隐补丁（**加粗** 仍需光标贴 * 才显码）')
+// 表格单元格 md 渲染：库 TableWidget.toDOM 原为 th/td `textContent=`（纯文本，格内 md 原样吐出）；
+// 补丁加可注钩子 setTableCellRenderer → work.js 注入 core/markdown.js 的 mdInlineText
+if (/function mdInlineText\(s\)/.test(md) && /CM\.setTableCellRenderer\(mdInlineText\)/.test(work) && /setTableCellRenderer/.test(libPatch) && /renderTableCell/.test(libPatch)) ok('表格单元格 md 渲染：库补 setTableCellRenderer 钩子 + work.js 注入 mdInlineText（格内 **粗体**/`代码`/链接正常渲染）')
+else bad('表格单元格内 md 未渲染（库仍 textContent 直出）')
 if (/wkEdBuildHlStyle/.test(work) && /HighlightStyle\.define/.test(work)) ok('代码高亮 = HighlightStyle（tag → --hl-* CSS 变量，日夜随动）')
 else bad('代码高亮未接 HighlightStyle')
 if (!/wkCodeHtml|wk-ed-ta|wk-ed-hl|state\.wkEdit|applyEdMode/.test(work)) ok('work.js 无两态残留（textarea 编辑 / 阅读态 / 模式按钮全清）')

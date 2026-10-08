@@ -193,9 +193,9 @@ ok('H4 产物 app.js 内两个新口定义唯一', count(appJs, /function stashW
 // ---------- ⑫ work 布局改版：下沉区顶栏 tab + CSS Grid 三列 + 预览常驻最右（2026-10-06）----------
 // 侧栏填充按模式分：chat = 透明卡壳（几何保留、透出底板 --plane，主区会话白卡成对比）；
 // work = 白卡并与主区拼成同一张（模式色钩子 #app.work 覆盖背景，见下方 J 组）。
-// 形态：work 区是**一整张白卡**（#sidebar.open 与 #chat-area.work 等底同色、中缝零间距），
-// 卡中间「挖」一个圆角矩形当**下沉洞**（顶栏格 + 内容格拼成，底色 --plane、四周留 8px 白边）；
-// 预览默认开、固定最右列（#chat-area.work 白卡的一部分）。
+// 形态：work 主区底 = **下沉区本体 --plane**（2026-10-07 起，取代 2026-10-06 的「白卡挖洞」），
+// 顶栏格与内容格裸落底板（内容格的 background 必须显式 transparent 清零 .view-card 白底）；
+// work 侧栏仍是白卡；预览是右侧浮起的白卡。
 // 顶栏 [＋][聊天][文件名] pill 由 renderTopbar 单口渲染，active 与下沉区实际显示同源（wkShownTab）。
 ok('I1 index.html 含顶栏结构（.wk-topbar / #wk-tb-new / #wk-tb-tabs）', ['wk-topbar', 'wk-tb-new', 'wk-tb-tabs'].every((c) => idx.includes(c)))
 ok('I1 index.html 旧链清除（#wk-ed-back 已删）', !idx.includes('wk-ed-back'))
@@ -208,11 +208,11 @@ ok('I3 CSS Grid 三列（下沉区 | 7px 分界条 | --wk-pw 预览列）', /#ch
 ok('I3 预览关 → 单列退化（:not(.wk-preview)）', /#chat-area\.work:not\(\.wk-preview\) \{ grid-template-columns: minmax\(0, 1fr\)/.test(styles))
 ok('I3 下沉区 tab 显隐类（.wk-show-chat / .wk-show-file）', /\.wk-show-chat > #session-card/.test(styles) && /\.wk-show-file > #work-editor/.test(styles))
 ok('I3 顶栏 pill 样式（.wk-tb-pill + .on 高亮）', /\.wk-tb-pill \{/.test(styles) && /\.wk-tb-pill\.on \{/.test(styles))
-ok('I3 一整张白卡：主区白底 + 外留 2px 缝 + 右半圆角', /#chat-area\.work \{[\s\S]*?margin: 2px 2px 2px 0;[\s\S]*?background: var\(--chat-bg\);[\s\S]*?border-radius: 0 var\(--radius\) var\(--radius\) 0/.test(styles))
-ok('I3 侧栏与主区拼成同一张白卡（右缝归零 + 右角不圆 + work 白底）', /#app\.work #sidebar\.open \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
+ok('I3 下沉区本体：主区底 --plane + 外留 2px 缝 + 右半圆角', /#chat-area\.work \{[\s\S]*?margin: 2px 2px 2px 0;[\s\S]*?background: var\(--plane\);[\s\S]*?border-radius: 0 var\(--radius\) var\(--radius\) 0/.test(styles))
+ok('I3 侧栏与主区不再拼同一张白卡（work 侧栏仍白卡 + 右缝归零 + 右角不圆）', /#app\.work #sidebar\.open \{ margin-right: 0; background: var\(--chat-bg\); border-radius: var\(--radius\) 0 0 var\(--radius\)/.test(styles))
 ok('I3 chat 侧栏透明卡壳（open 态几何保留 + 透明填充，外留 2px 缝）', /#sidebar\.open \{ width: calc\(var\(--panel-w\) \+ 4px\); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent/.test(styles))
-ok('I3 下沉洞上半（顶栏格 --plane + 2px 边距 + 上圆角）', /#chat-area\.work > \.wk-topbar \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 2px 2px 0;[\s\S]*?border-radius: var\(--radius\) var\(--radius\) 0 0/.test(styles))
-ok('I3 下沉洞下半（内容格 --plane + 下圆角，浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?background: var\(--plane\);[\s\S]*?margin: 0 2px 2px;[\s\S]*?border-radius: 0 0 var\(--radius\) var\(--radius\)/.test(styles))
+ok('I3 顶栏格裸落底板（无 background + 2px 边距 + 无圆角）', /#chat-area\.work > \.wk-topbar \{\s*\n\s*margin: 2px 2px 0;/.test(styles) && !/#chat-area\.work > \.wk-topbar \{[^}]*background/.test(styles))
+ok('I3 内容格裸落底板（background: transparent 显式清零 .view-card 白底 + 圆角归零 + 浮卡/收敛条 :not 排除）', /#chat-area\.work > #work-editor,\s*\n#chat-area\.work > #session-card:not\(\.wk-assist-float\):not\(\.wk-assist-slim\) \{[\s\S]*?margin: 0 2px 2px;[\s\S]*?background: transparent;[\s\S]*?border-radius: 0;/.test(styles))
 ok('I3 角色图承载面透明（.g-stage 无白底，防 re-框成白方块）', /\.g-stage \{[\s\S]*?background: transparent/.test(styles))
 ok('I3 预览保持白卡（.wk-preview > #work-preview 显形）', /#chat-area\.work\.wk-preview > #work-preview \{ display: flex/.test(styles))
 ok('I4 旧链 CSS 清除（.wk-file-open 覆盖层 / .wk-ed-back 已删）', !/\.wk-file-open/.test(styles) && !/\.wk-ed-back/.test(styles))

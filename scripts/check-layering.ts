@@ -3,6 +3,13 @@
 // 运行（无副作用，只读源码、只打印）：
 //   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts          # 只报告，exit 0
 //   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts --strict # 有违规时 exit 1
+//   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts --graph  # 附加依赖图摘要（度数/层级/按层边数）
+//
+// 规则（复合违规 = 三类之和；--strict 有任一即 exit 1）：
+//   1. 成环：import 图里长度 >1 的强连通分量（Tarjan SCC）。
+//   2. 逆向依赖：低层 import 高层（core 0 → engine 1 → feature 2 → views 3 → app 4）。
+//   3. 卡边界：views/cards/<name>/ 的卡组件不得互相 import（同卡目录内部除外）——
+//      卡只能依赖 Shared Kernel core/* 与 registry 契约，不得依赖兄弟卡组件。
 //
 // 背景：web-src 的 ESM import 在构建时被 bundle-web-modules.ts 剥除拼成单 IIFE，
 // 模块边界只是源码组织、非运行时边界；此脚本把 import 声明变成可校验的约束（纯源码卫生）。
@@ -13,6 +20,7 @@ import { join, relative, resolve, dirname, sep } from 'node:path'
 const ROOT = resolve(import.meta.dir, '..')
 const SRC = join(ROOT, 'src/gateway/web-src')
 const STRICT = process.argv.includes('--strict')
+const GRAPH = process.argv.includes('--graph')
 
 // ── 分层定义（低 → 高）──────────────────────────────────────────
 // 数字越小越底层；允许 import 同层或更低层，禁止 import 更高层（逆向依赖）。
@@ -92,6 +100,25 @@ for (const [from, tos] of edges) {
   }
 }
 
+// ── 违规 3：卡边界（views/cards/** 卡组件不得互相 import）──────
+/** 卡组件模块 → 其卡目录名；非卡模块返回 null。 */
+const CARD_RE = /^views\/cards\/([^/]+)\//
+function cardOf(m: string): string | null {
+  const mm = CARD_RE.exec(m)
+  return mm ? mm[1] : null
+}
+type CardEdge = { from: string; to: string; fromCard: string; toCard: string }
+const cardCross: CardEdge[] = []
+for (const [from, tos] of edges) {
+  const fc = cardOf(from)
+  if (fc === null) continue
+  for (const to of tos) {
+    const tc = cardOf(to)
+    if (tc === null || tc === fc) continue // 同卡目录内部 import 合法
+    cardCross.push({ from, to, fromCard: fc, toCard: tc })
+  }
+}
+
 // ── 违规 2：成环（Tarjan SCC）──────────────────────────────────
 const index = new Map<string, number>()
 const low = new Map<string, number>()
@@ -137,10 +164,48 @@ function exampleCycle(comp: string[]): string[] {
 }
 
 // ── 报告 ────────────────────────────────────────────────────────
-console.log('web-src 分层校验  (nodes=%d  edges=%d)', mods.length,
-  [...edges.values()].reduce((a, s) => a + s.size, 0))
+const edgeCount = [...edges.values()].reduce((a, s) => a + s.size, 0)
+console.log('web-src 分层校验  (nodes=%d  edges=%d)', mods.length, edgeCount)
 console.log('分层: ' + LAYER_NAME.map((n, i) => `${i}=${n}`).join(' → '))
 console.log('')
+
+// ── 依赖图摘要（--graph）────────────────────────────────────────
+if (GRAPH) {
+  const inDeg = new Map<string, number>(mods.map(m => [m, 0]))
+  for (const [, tos] of edges) for (const t of tos) inDeg.set(t, inDeg.get(t)! + 1)
+
+  const layerNameOf = (m: string): string => {
+    const l = layerOf(m)
+    return l === null ? '?' : LAYER_NAME[l]
+  }
+
+  // 层级分布
+  const dist = new Array<number>(LAYER_NAME.length).fill(0)
+  let unlayered = 0
+  for (const m of mods) { const l = layerOf(m); if (l === null) unlayered++; else dist[l]++ }
+
+  // 按层聚合的边数
+  const agg = new Map<string, number>()
+  for (const [from, tos] of edges) {
+    const fname = layerNameOf(from)
+    for (const to of tos) {
+      const k = `${fname} → ${layerNameOf(to)}`
+      agg.set(k, (agg.get(k) ?? 0) + 1)
+    }
+  }
+
+  console.log('【依赖图摘要】')
+  console.log('  层级分布: ' + LAYER_NAME.map((n, i) => `${n}=${dist[i]}`).join('  ') + (unlayered ? `  未分层=${unlayered}` : ''))
+  console.log('  按层聚合边数:')
+  for (const [k, v] of [...agg.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    console.log(`    ${k}: ${v}`)
+  }
+  console.log('  模块度数 (out=出边 / in=入边，按总度降序):')
+  const deg = mods.map(m => ({ m, out: edges.get(m)!.size, in: inDeg.get(m)! }))
+  deg.sort((a, b) => (b.out + b.in) - (a.out + a.in) || a.m.localeCompare(b.m))
+  for (const d of deg) console.log(`    [${layerNameOf(d.m)}] ${d.m}  out=${d.out} in=${d.in}`)
+  console.log('')
+}
 
 console.log(`【成环】依赖环 ${sccs.length} 个`)
 for (const comp of sccs) {
@@ -156,6 +221,13 @@ for (const r of reverse) {
 }
 console.log('')
 
-const bad = sccs.length + reverse.length
-console.log(`合计违规：成环 ${sccs.length} + 逆向依赖 ${reverse.length} = ${bad}`)
+console.log(`【卡边界】卡组件互相 import ${cardCross.length} 条`)
+cardCross.sort((a, b) => a.fromCard.localeCompare(b.fromCard) || a.from.localeCompare(b.from))
+for (const c of cardCross) {
+  console.log(`  • ${c.from} [卡:${c.fromCard}] → ${c.to} [卡:${c.toCard}]`)
+}
+console.log('')
+
+const bad = sccs.length + reverse.length + cardCross.length
+console.log(`合计违规：成环 ${sccs.length} + 逆向依赖 ${reverse.length} + 卡边界 ${cardCross.length} = ${bad}`)
 if (STRICT && bad > 0) process.exit(1)

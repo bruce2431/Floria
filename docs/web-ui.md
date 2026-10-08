@@ -1,7 +1,7 @@
 # web 前端链路定案（web-ui）
 
 > 本文件属 `docs/` 文档库，收录 web 前端（内置网关静态托管页）的**现行链路与不变量**。只写现状，不写逐次缺陷的根因叙事（历史见 git 与神经元 LOG）。
-> 前端唯一手改处 = `src/gateway/web-src/`（40 个 ESM 模块），`src/gateway/web/app.js` 由构建生成、勿手改；改动须 bump `?v=` cache-bust 并重新构建 exe（→ [build.md](build.md) §1.1）。网关服务侧（认证 / mDNS / 预览容器 / 审批中继 / 独立会话进程链）→ [gateway.md](gateway.md)；源码核心机制 → [core.md](core.md)；术语 → [glossary.md](glossary.md)。改动以下任一链路时必须同步更新本文。
+> 前端唯一手改处 = `src/gateway/web-src/`（55 个 ESM 模块），`src/gateway/web/app.js` 由构建生成、勿手改；改动须 bump `?v=` cache-bust 并重新构建 exe（→ [build.md](build.md) §1.1）。网关服务侧（认证 / mDNS / 预览容器 / 审批中继 / 独立会话进程链）→ [gateway.md](gateway.md)；源码核心机制 → [core.md](core.md)；术语 → [glossary.md](glossary.md)。改动以下任一链路时必须同步更新本文。
 
 ## 1. pushState 路径路由
 
@@ -176,7 +176,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 12. 前端模块化架构（web-src/）
 
-**定案**：`src/gateway/web-src/` 下 40 个 ESM 模块（含入口 `app.js`），**web-src/ 是唯一手改处**；构建时 `scripts/build.ts` spawn 自写拼接器 `scripts/bundle-web-modules.ts` 把各模块按 `PIECES` 表的**拼接执行序**拼回单 IIFE 写 `web/app.js`（生成物勿手改）。产物文件名/引用不变，sw CORE、`?v=` cache-bust、gen-web-assets、网关静态路由全链零改动。
+**定案**：`src/gateway/web-src/` 下 55 个 ESM 模块（含入口 `app.js`），**web-src/ 是唯一手改处**；构建时 `scripts/build.ts` spawn 自写拼接器 `scripts/bundle-web-modules.ts` 把各模块按 `PIECES` 表的**拼接执行序**拼回单 IIFE 写 `web/app.js`（生成物勿手改）。产物文件名/引用不变，sw CORE、`?v=` cache-bust、gen-web-assets、网关静态路由全链零改动。
 
 **模块边界是源码组织、非运行时边界（重要）**：拼接器把各模块 body 直接拼进同一 IIFE 闭包，`import`/`export` 一律在拼接时**剥除**——web-src 的 `import { x } from './state.js'` 只是「谁引用谁」的文档，运行时全部落在同一作用域，跨模块互相可见（这也是「引用 `state.js` 的 const → TDZ 崩溃」的由来，见下）。故拆/并/移模块**不改运行时行为**，仅改可读性与 `PIECES` 表条目；行为等价性可用「拼接产物 `web/app.js` 逐字节 diff 为空」证明（2026-10-07 拆 `state.js` → `core/util.js` + `core/storage.js`、core/ 分层出 engine/ 即以此法验证）。
 
@@ -186,12 +186,14 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - `app.js` 入口=import 群 + 事件绑定 + 启动序列
 - `core/`（**叶子**：无状态/无连接/无订阅，可被任意层依赖）：icons（SVG 图标）、util（HTML 转义/toast/设备判定/新会话落项目）、storage（localStorage 读写 + mgrView/work 恢复）、char（角色形象）、markdown（渲染，`mdHtml` 入口）
 - `engine/`（**引擎**：持状态/连接/订阅，或仅向下依赖 core）：state（元素引用/共享可变态/媒体工具）、live（SSE 会话事件）、gateway（WS 连接/审批中继/apiSetModel）、sessions（会话映射/排序）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）、panel（侧栏开合核 `applyPanelOpen`/`closePanel`，见 §53）
-- `sidebar/`：mgr-data（管理视图数据源 + 模型供应商映射）、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）
-- `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、send（gwSend/syncGwSend）
-- `chat/`：route（路由渲染）、messages（消息渲染）、stage（钉顶占位/stage 机制）
+- `sidebar/`：mgr-data（管理视图数据源 + 模型供应商映射）、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）、work（**门面**：原 import 面 + 常量/state/scope）、work/**（work 模式 8 件：work-layout 布局落地 / work-preview 预览帧+页态+顶栏 / work-assist 列宽分界条+助手三态 / work-files 侧栏列表+文件树+自动对账 / work-cm CodeMirror6 引擎 / work-editor 评论标记+renderEditor+读写保存冲突 / work-rows 文件行操作+newWorkChat / work-mount 事件+initWork，见 §43/§54）、work-tools（右栏工具注册表，见 §58）、comments（评论面板，见 §55/§58）
+- `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、quote（编辑器/消息流选区引用浮窗，见 §47）、send（gwSend/syncGwSend）
+- `chat/`：route（路由渲染）、messages（**门面**：工具行/折叠/liveFoldBody/状态判定）、messages/**（消息渲染 6 件：change-card 文件变更卡 / msg-actions 复制+用户气泡体 / icons 内联图标+toolIcon / usage 用量面板+格式化 / renderer messagesHtml+思考行+入场动画 / transient 乐观暂存含 `setPendingUserMsgs` setter）、stage（钉顶占位/stage 机制）、turn-rail（右侧轮次导航轨，见 §49）
 - `views/`：registry（**视图注册表 + 槽位单通道整卡切换**——卡片组件在 `views/cards/<name>/`，tab 的 id/标题/图标/`mount` 单一真源，侧栏 tab 生成、`#mgr/<id>` 路由、卡体渲染三处走同一张 `CARDS` 表 + 唯一入口 `openCard` + 契约出口 `deactivateCard`，见 §41/§53）；`views/cards/`：`ext/preview/plugins/projects/models/neurons/session/<name>-card.js`（七张卡，一卡一目录；第一方卡各自 `mount`；`ext-card.js` = 外部卡 iframe 壳 + 声明过滤器 + 侧栏按钮状态清点，见 §42）
 
 **跨模块可变状态 = SETTERS 机制**：14 个跨模块写入的 let（`ALL`/`connUp`/`gateAwait`/`gateVerified`/`sessionCwd`/`takeover`/`turnLive`/`btnMode`/`MODEL_CUR`/`modelUserPicked`/`pendingUserMsgs`/`firstSendHash`/`lastNavHash`/`approvalPending`）在定义模块尾生成 `export function setX(v){X=v}`，写入方一律调 setter（import 绑定不可赋值=ESM 硬约束）；读跨模块符号走 import（函数级循环 import 安全：hoisting + live binding）。
+
+**分层 / 卡边界校验（探针锚点）**：`scripts/check-layering.ts`——按 core(0)→engine(1)→feature(2)→views(3)→app(4) 五层扫 web-src 静态 import 图，报三类违规：成环（Tarjan SCC）/ 逆向依赖（低层 import 高层）/ **卡边界**（`views/cards/<name>/` 的卡组件不得互相 import，同卡目录内部除外——卡只能依赖 Shared Kernel `core/*` 与 registry 契约）。`--strict` 有任一违规 exit 1，`--graph` 出依赖图摘要（每模块 in/out 度 / 层级分布 / 按层聚合边数）。
 
 ## 13. 排队消息催办：点击排队气泡打断当前思考
 
@@ -618,7 +620,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **resolver 注册**（`chat/messages.js`）：一次性 `setImageSrcResolver((code) => ...)`——取当前会话自带 `projectLabel`（项目会话=项目名，全局根会话=`全局根 · 散装对话`；不按 `projectScope` 筛），拼 `/gateway/file?label=&path=.claude/images/<code>`（复用读端点，见 gateway.md §16）。
 - **CLI 渲染**（`utils/markdown.ts` `formatToken` `case 'image'`）：同一白名单命中 → `createHyperlink(pathToFileURL(join(getCwd(), '.claude', 'images', code)).href, '.claude/images/' + code)`（OSC 8 支持端可点），否则回退 `token.href`。
 - **样式**：`styles.css` `.msg .blocks .md-img`（`max-width: min(100%, 480px)` + 圆角 + `cursor: zoom-in`，lightbox 委托沿用 `.msg-img`）。
-- **权限豁免**：`utils/permissions/filesystem.ts` 的 `.claude/` 子目录豁免表加入 `images`（与 `worktrees`/`preview`/`neturon` 同列），否则 Write 落 `.claude/images/` 被拦。
+- **权限豁免**：`utils/permissions/filesystem.ts` 的 `.claude/` 子目录豁免表（`worktrees`/`preview`/`neturon`/`images`/`temp`）——`images` 使 Write 落 `.claude/images/` 不被拦，`temp` 同理豁免 `.claude/temp/`（项目临时/产出暂存）。
 - **边界**：会话未找到（无 `projectLabel`）resolver 返 null → 不渲染、留原文；单图受 `/gateway/file` 4 MB 上限约束。
 - **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值。
 - **探针锚点**：`probes/probe-md-image.ts`（纯函数：注入 resolver 断言合法代号出 `<img>`、非法/无 resolver 保留原文、XSS 类代号不注入）。

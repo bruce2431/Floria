@@ -29,8 +29,14 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'engine/sessions.js', part: 1 },
   { file: 'engine/live.js', part: 1 },
   { file: 'chat/route.js', part: 1 },
-  // 消息渲染（messages.js）两段之间插入了侧栏/管理/气泡等区段（原 IIFE 物理序）。
+  // 消息渲染拆分（2026-10-08 纯搬迁，保原物理序）：原 chat/messages.js 段1 切为 6 件；
+  // 原节 2 切为 chat/messages/transient.js（见下方 stage.js 之后）。各件先后 = 原段内物理序。
   { file: 'chat/messages.js', part: 1 },
+  { file: 'chat/messages/change-card.js', part: 1 },
+  { file: 'chat/messages/msg-actions.js', part: 1 },
+  { file: 'chat/messages/icons.js', part: 1 },
+  { file: 'chat/messages/usage.js', part: 1 },
+  { file: 'chat/messages/renderer.js', part: 1 },
   { file: 'sidebar/recent.js', part: 1 },
   { file: 'sidebar/rail-ext.js', part: 1 },
   { file: 'sidebar/mgr.js', part: 1 },
@@ -51,8 +57,18 @@ const PIECES: { file: string; part: number }[] = [
   // work 工具页注册表（右栏工具态的水平标签栏）：纯函数声明 + 顶层 const WK_TOOL_DEFS，须在 work.js
   // 之前（其 mountWork 调 registerWkTool，applyPvTab 调 wkToolDefs/wkToolDef/wkToolNormId）。
   { file: 'sidebar/work-tools.js', part: 1 },
-  // work 模式侧栏：依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。
+  // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
+  // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
+  // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。
   { file: 'sidebar/work.js', part: 1 },
+  { file: 'sidebar/work/work-layout.js', part: 1 },
+  { file: 'sidebar/work/work-preview.js', part: 1 },
+  { file: 'sidebar/work/work-assist.js', part: 1 },
+  { file: 'sidebar/work/work-files.js', part: 1 },
+  { file: 'sidebar/work/work-cm.js', part: 1 },
+  { file: 'sidebar/work/work-editor.js', part: 1 },
+  { file: 'sidebar/work/work-rows.js', part: 1 },
+  { file: 'sidebar/work/work-mount.js', part: 1 },
   // 项目评论批注：排在 work.js 之后（其 cmtLoad/cmtRender 由 work.js 调），排在启动序列之前。
   { file: 'sidebar/comments.js', part: 1 },
   // 入口（web-src/app.js）：事件绑定段（同区段原含会话壳）与启动序列段。
@@ -68,7 +84,8 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'inputbar/model-select.js', part: 2 },
   { file: 'engine/gateway.js', part: 2 },
   { file: 'chat/stage.js', part: 1 },
-  { file: 'chat/messages.js', part: 2 },
+  // 原 chat/messages.js 段2（暂存补投/排队主张）纯搬迁为独立模块。
+  { file: 'chat/messages/transient.js', part: 1 },
   { file: 'inputbar/approval.js', part: 1 },
   { file: 'engine/auth.js', part: 1 },
   { file: 'engine/gateway.js', part: 3 },

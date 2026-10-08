@@ -182,8 +182,12 @@ a { text-decoration: none; color: inherit; }
    由 sidebar/work.js applySbMode() 落。--sunken-bg = 下沉区/内容卡底色（chat = 白卡 --chat-bg，
    work = 底板 --plane）：#composer-mask 等「该跟当前模式底盘同色」的件一律消费本变量——
    新增随模式的颜色只在此加一行，不再各写各的选择器（模式色单一真源）。 */
+/* 2026-10-08 用户定案（根治「work 侧栏和 chat 不一样」）：**底板色本身按模式对调**——
+   chat 底板 = --plane（灰）、work 底板 = --chat-bg（白）。侧栏在两种模式下都**透明**（它就是底板的一部分、
+   不给自己着色，见 #sidebar.open）；个性化的只有「底板色 ↔ 内容卡色」这一对。
+   形态因此对两模式完全同构：通高底板（含侧栏那列）+ 一张内缩 2px 的圆角内容卡（chat 卡白、work 卡灰）。 */
 #app { --sunken-bg: var(--chat-bg); display: flex; height: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); position: relative; background: var(--plane); }
-#app.work { --sunken-bg: var(--plane); }
+#app.work { --sunken-bg: var(--plane); background: var(--chat-bg); }
 /* 整页平移本体（键盘在场才落这条规则：transform 非 none 会让 #app 成为 fixed 后代的包含块，
    #img-lightbox / #drop-overlay / .toast 的 inset 会改基准——无键盘时保持原基准不动） */
 body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
@@ -1608,16 +1612,21 @@ body.token-gate #input-wrap { display: none; }
   width: 0; background: transparent; padding: 0;
   transition: width 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), padding 0.28s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.35s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.3s ease, visibility 0.3s;
 }
-/* 展开态 = 一张圆角卡**壳**（2026-10-06 用户定案）：几何（圆角 / 外边距 / 2px 内边距）保留，
-   填充按模式分——chat 透明（透出底板 --plane，侧栏内容直接落底板，主区会话白卡与底板成对比）；
-   work 白卡（下方 :has 规则，与主区拼成同一张）。width 多出的 4px 被 2px padding 吃掉，内容列宽
-   仍是 --panel-w（全局 border-box）；折叠态 width:0 且 padding:0，不留白条。 */
-#sidebar.open { width: calc(var(--panel-w) + 4px); padding: 2px; height: auto; margin: 2px 0 2px 2px; background: transparent; border-radius: var(--radius); overflow: hidden; }
-/* work：侧栏是**底板上一张白卡**（Prism 式，2026-10-07 用户定案——主区底已改 --plane，两者不再拼同一张白卡）
-   ——右边不留缝、右角不圆（与 #chat-area.work 左角不圆相邻，同一张卡分左右两半的几何保留）；
-   chat 模式侧栏是透明卡壳（上方规则）。
-   选择器用模式色钩子 #app.work（同上，applySbMode 落），不再走 :has(#panel.work) 旁路。 */
-#app.work #sidebar.open { margin-right: 0; background: var(--chat-bg); border-radius: var(--radius) 0 0 var(--radius); }
+/* 展开态 = **通高平面列，无自身形状**（2026-10-08 用户定案「侧栏没有自身形状」落实）：只有宽度 +
+   内容内边距 + **填充按模式分**（见下方 #app.work 规则）——chat 透明（透出底板 --plane，侧栏内容直接落
+   底板），work 白（--chat-bg）。**刻意不给圆角 / 外边距**：侧栏壳一旦带卡形几何，chat 下被透明填掉看不见、
+   work 下被白填出来就成「一张浮起的小白卡」——同一份几何两种可见性 = 两模式看着不一样（2026-10-08 用户
+   实报「侧栏怎么成一个卡片了」）。width 多出的 4px 被 2px padding 吃掉，内容列宽仍是 --panel-w（全局
+   border-box）；折叠态 width:0 且 padding:0，不留白条。 */
+#sidebar.open { width: calc(var(--panel-w) + 4px); padding: 2px; background: transparent; overflow: hidden; }
+/* 2026-10-08 根治（用户「侧栏怎么成了一个卡片了」+「除了颜色有个性化，形态是一样的」）：
+   侧栏**在两种模式下都不着色**——它是底板的一部分，work 的「白」来自 `#app.work` 的底板色
+   （见上条），不来自任何 `#app.work #sidebar.open` 覆盖。任何「按模式给侧栏加 fill / 加几何」的
+   规则都会让侧栏读成一张独立的卡（chat 下被透明掩住、work 下被白填出来），即「改一个另一个不一样」
+   的根源。历史覆盖（2026-10-06 拼白卡 margin-right:0 + 左圆角；2026-10-08 基线自带 margin + 四角圆）
+   已整条删除。 */
+
+
 
 /* 预览页注册的侧栏快捷按钮样式（2026-09-23 SPEC §6.4，契约见 sidebar/rail-ext.js）。
    挂载点 #rail-ext 随折叠带在 2026-09-25 撤除，注册链与样式保留待命——落地位置定了接回即可。 */
@@ -2000,8 +2009,8 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
     margin: 0; /* 桌面卡的 2px 浮缝在抽屉上不适用（贴屏缘） */
   }
   #sidebar.open { transform: none; box-shadow: none; }
-  /* 手机：主区是整屏，白卡拼缝/外缝一律退场（#app 本就地圆角 0、无留边） */
-  #app.work #sidebar.open { border-radius: 0 var(--radius) var(--radius) 0; }
+  /* 手机：主区是整屏，白卡拼缝/外缝一律退场（#app 本就地圆角 0、无留边）。侧栏抽屉几何由上方
+     `#sidebar, #sidebar.open` 基线统一给（chat/work 一份，不再有 work 专属覆盖——2026-10-08 收回分叉）。 */
   #chat-area.work { margin: 0; border-radius: 0; }
   #chat-area.work > .wk-topbar { margin: 2px 2px 0; }
   #chat-area.work > #work-editor,
@@ -2462,11 +2471,12 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7px var(--wk-pw, 420px);
   grid-template-rows: auto minmax(0, 1fr);
-  /* 底 = --plane（下沉区本体，2026-10-07 用户定案）；左侧与 #sidebar.open 邻接（左角不圆，
-     不描边/不留缝——同色底板本就连成一片）。 */
-  margin: 2px 2px 2px 0;
+  /* 2026-10-08 根治：work 内容区 = 与 chat 的 `.view-card` **同构的圆角卡**（四周 2px 缝 + 四角圆），
+     只是底色与底板对调——chat：底板灰 + 卡白；work：底板白（#app.work）+ 卡灰（--plane）。
+     四周 2px 缝里露出白底板 ⇒ 侧栏那列的白与内容卡四周的白连成一整片，底板（含侧栏）把内容卡包住。 */
+  margin: 2px;
   background: var(--plane);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: var(--radius);
 }
 #chat-area.work:not(.wk-preview) { grid-template-columns: minmax(0, 1fr); }
 #chat-area.work > .wk-topbar { grid-column: 1; grid-row: 1; }

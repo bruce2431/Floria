@@ -39,34 +39,13 @@ import { gwSend, syncGwSend } from './send.js'
   function quoteBase(p) {
     return String(p || '').split('/').pop()
   }
-  // 编辑区行号唯一来源 = DOM 本身：
-  //  · 纯文本预览（pre.wk-code）是**原样**文本，Range 起点/终点的字符偏移换算行号，精确到行；
-  //  · markdown 预览渲染成 HTML（**格式符已丢、文本经过变换**，拿渲染文本回查原文必然对不上——
-  //    「**加粗**：」这类选中就跨在格式符边界上），故行号由渲染期落下的行锚 `data-l` 提供
-  //    （core/markdown.js mdHtml 第二参数，每源行一个锚）。
+  // 编辑区行号唯一来源 = CodeMirror 文档：整篇恒渲染为编辑器（无渲染 DOM 行锚、无 textarea），
+  // Range 端点经 posAtDOM 反查源行号（sidebar/work.js wkEdQuoteLines，同处一个 IIFE 作用域可直接按名调用）。
   // 拿不到 → null（令牌退化为纯路径，不编造行号）。
-  const QUOTE_LINE_ATTR = 'data-l'
-  function quoteLineOf(node) {
-    let el = node && node.nodeType === 1 ? node : node && node.parentElement
-    while (el) {
-      const v = el.getAttribute && el.getAttribute(QUOTE_LINE_ATTR)
-      if (v) return Number(v)
-      el = el.parentElement
-    }
-    return 0
-  }
   function quoteEditorLines(range) {
     const body = $('wk-ed-body')
-    const pre = body && body.querySelector('pre.wk-code')
-    const n = pre && pre.firstChild
-    if (n && n.nodeType === 3 && range.startContainer === n) {
-      const s = range.startOffset
-      const e = range.endContainer === n ? range.endOffset : n.nodeValue.length
-      return [n.nodeValue.slice(0, s).split('\n').length, n.nodeValue.slice(0, e).split('\n').length]
-    }
-    const a = quoteLineOf(range.startContainer)
-    const b = quoteLineOf(range.endContainer)
-    return a && b ? [Math.min(a, b), Math.max(a, b)] : null
+    if (body && body.querySelector('.wk-ed-cm')) return wkEdQuoteLines(range)
+    return null
   }
   // 快照构造的唯一入口，**两条来源共用**（桌面 mouseup 现场取选区 / 触屏引擎收编的选区）：
   // 入参恒为 Range，不读 window.getSelection —— 触屏那条路的 Range 是程序化设回的，与「当前选区」同源但
@@ -81,10 +60,7 @@ import { gwSend, syncGwSend } from './send.js'
     const rect = range.getBoundingClientRect()
     const inEditor = el.closest('#work-editor')
     if (inEditor) {
-      // 编辑态（源码 textarea）不弹引用浮窗：textarea 内部选区不进 window.getSelection()，且编辑时拖选
-      // 是常规操作，弹窗会不断打断。阅读态行为不变（#work-editor.editing 由 sidebar/work.js applyEdMode 落）。
-      if (inEditor.classList.contains('editing')) return null
-      // 空态提示行 / 未打开文件：没有可引用的文件位置
+      // 未打开文件（空态提示行）：没有可引用的文件位置
       if (!state.workFile) return null
       const lines = quoteEditorLines(range)
       return { kind: 'file', text, rect, file: state.workFile, proj: state.workProj, l0: lines && lines[0], l1: lines && lines[1] }
@@ -327,7 +303,6 @@ export {
   quoteEditorLines,
   quoteFrameBySource,
   quoteFrameRect,
-  quoteLineOf,
   quoteRunAction,
   quoteSnapOf,
   quoteSnapOfRange,

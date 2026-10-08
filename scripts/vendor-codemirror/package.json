@@ -1,0 +1,22 @@
+{
+  "name": "floria-vendor-codemirror",
+  "private": true,
+  "type": "module",
+  "description": "CodeMirror 6 + codemirror-live-markdown 的 vendored 打包 scratch 工程（仅供 scripts/gen-codemirror-vendor.ts 使用，产物提交为 src/gateway/web/vendor/codemirror/live-markdown.js）",
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.9",
+    "@codemirror/lang-javascript": "^6.2.3",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/lang-python": "^6.1.7",
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/legacy-modes": "^6.4.2",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.1",
+    "@lezer/highlight": "^1.2.1",
+    "@lezer/markdown": "^1.4.0",
+    "codemirror-live-markdown": "0.5.1-alpha.1"
+  }
+}

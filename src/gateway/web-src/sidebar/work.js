@@ -3,7 +3,6 @@
 import { navigate } from '../chat/route.js'
 import { needToken, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { mdHtml } from '../core/markdown.js'
 import { ALL, chatArea, sessionCard, state } from '../engine/state.js'
 import { esc, isMobile, toast } from '../core/util.js'
 import { loadWork, loadWorkPanes, saveWork, stashWorkPanes } from '../core/storage.js'
@@ -870,162 +869,245 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     cmtRender() // 评论面板空态/加载态跟着工作项目落地（needToken 未解锁时上面 cmtLoad 早退）
   }
 
-  // ---------- 编辑区（主区左栏：阅读 / 源码编辑，仿 Obsidian 源码+阅读双模） ----------
-  // 阅读态 = 原只读行为（图片 <img> / markdown 经 mdHtml 渲染（带 data-l 行锚）/ 其它文本 <pre>）。
-  // 编辑态 = 原生 <textarea>（本工程零依赖、无法引入 CodeMirror/Monaco）。模式真源 = state.wkEdit
-  // （跨文件记忆 + localStorage 持久化）；#work-editor.editing 类在编辑态落，供 inputbar/quote.js 屏蔽引用浮窗。
+  // ---------- 编辑区（主区左栏） ----------
+  // 所有可编辑文本文件（markdown 与代码/纯文本一视同仁）都是常驻 CodeMirror 6 编辑器：整篇恒可编辑，
+  // 无阅读/编辑两态、无模式按钮；markdown 走 Obsidian 式 Live Preview（光标所在块就地显源码标记），
+  // 其余按扩展名加载语言高亮——长行按窗口软换行（EditorView.lineWrapping）。库 codemirror-live-markdown
+  // 与各语言包以 vendored 全局脚本 window.CMLiveMarkdown 提供（复用已 vendored 的全局 katex 渲染公式）。
+  // 真源 = EditorView.state.doc（wkEdText 仅作上次落盘基线）。图片 <img> / 不可编辑文件仍走各自只读分支。
   // 保存 = 停止输入 1s 自动（去抖）+ Ctrl+S 立即；写回带 ETag 基线 wkEdMtime，外部改过 → 409，不静默覆盖。
-  // 图片 / 二进制 / 超 4 MB 文件不可编辑（工具栏按钮隐藏，仍走阅读态）。
   let wkEdFile = ''     // 已载入编辑缓冲的路径（与 wkEdMeta/wkEdText 同拍）；'' = 未载入
-  let wkEdMeta = null   // { isImg, isMd, editable, msg? }；null = 未载入
-  let wkEdText = ''     // 当前文件正文（编辑态 = textarea 缓冲真源）
+  let wkEdMeta = null   // { isImg, editable, msg? }；null = 未载入
+  let wkEdText = ''     // 上次落盘/读入的文件正文（实时真源在 wkEdView.state.doc；保存基线）
   let wkEdMtime = null  // 读侧 ETag 解析的 mtime（毫秒），写回冲突基线；null = 无
   let wkEdDirty = false
   let wkEdTimer = 0
   let wkEdSaving = false
   let wkEdConflict = false
   let wkCmtScrollId = '' // 评论面板定位跳转待消费的评论 id（渲染完原文标记后滚到该行）
+  // CodeMirror 6（2026-10-07）：全生命周期只建一次 EditorView，跨文件复用（切文件只换文档 + 热换语言）。
+  let wkEdCM = null       // window.CMLiveMarkdown（建 view 时缓存；缺失即显式报错，不静默降级）
+  let wkEdView = null     // EditorView 实例；null = 尚未创建
+  let wkEdHost = null     // EditorView 的包裹 div（作为挂载单元在 #wk-ed-body 内换父）
+  let wkEdProgAnn = null  // Annotation：标记「程序性改文档」，updateListener 据此区分用户编辑
+  let wkEdCmtEffect = null // StateEffect<marks[]>：把评论行范围送进编辑器装饰器
+  let wkEdCmtMarks = []   // 最近一次评论标记数据（建 view 时回填/重挂用）
+  let wkEdLangComp = null // Compartment：按文件扩展名热换语言扩展（markdown Live Preview / 代码语言 / 纯文本）
+  let wkEdHlStyle = null  // HighlightStyle：代码语法高亮（tag → --hl-* CSS 变量，日夜随动）
+  let wkEdPendingDoc = null // 待灌入编辑器的新文档（readFile 置位；renderEdBody 消费后清空）——避免重渲时用陈旧基线覆盖用户编辑
 
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
   }
-  const wkEdTa = () => document.querySelector('#wk-ed-body .wk-ed-ta')
-
-  // ---------- 评论标记（阅读态原文打标，2026-10-06） ----------
-  // 读态把每条评论的行范围 l0..l1 落到原文：纯文本逐行 <span data-l>、markdown 各块/段落行锚 data-l
-  // （core/markdown.js mdHtml 第二参）。命中即加 .cmt-mark（未解决）/.cmt-mark-res（已解决）+ data-cmt-id。
-  // 编辑态（透明 textarea 载体）无法内联打标，标记只存在于阅读态——与选区引用同口径（编辑态本就屏蔽）。
-  function wkCodeHtml(text) {
-    // 逐行落锚：换行并入该行 span（pre 内不留裸 '\n' 文本节点），选区端点才能上溯到 data-l
-    // （inputbar/quote.js quoteLineOf 依赖 data-l；纯文本偏移链改锚后依旧精确且更好）。
-    const lines = String(text).split('\n')
-    let out = ''
-    for (let i = 0; i < lines.length; i++) {
-      const t = i < lines.length - 1 ? lines[i] + '\n' : lines[i]
-      out += `<span class="wk-ln" data-l="${i + 1}">${esc(t)}</span>`
-    }
-    return out
+  // 当前正文真源文本 = 编辑器文档（无编辑器则回退基线）。
+  function wkEdDocText() {
+    return wkEdView ? wkEdView.state.doc.toString() : wkEdText
   }
-  function cmtApplyMarks() {
-    const body = $('wk-ed-body')
-    if (!body) return
-    body.querySelectorAll('.cmt-mark').forEach((el) => {
-      el.classList.remove('cmt-mark', 'cmt-mark-res', 'cmt-mark-open')
-      el.removeAttribute('data-cmt-id')
+
+  // ---------- 编辑区 CodeMirror 6 编辑器 ----------
+  // 惰性建 view（全生命周期一次）：默认键位/历史 + 按文件热换的语言 compartment（markdown Live Preview 或
+  // 代码语言）+ 软换行 + 库自带主题 + 本项目主题（CSS 变量，日夜随动）+ 评论行装饰 field + 文档变更监听。
+  function wkEdEnsureView() {
+    if (wkEdView) return wkEdView
+    const CM = window.CMLiveMarkdown
+    if (!CM) throw new Error('CodeMirror 编辑器未加载（window.CMLiveMarkdown 缺失）')
+    wkEdCM = CM
+    wkEdProgAnn = CM.Annotation.define()
+    wkEdCmtEffect = CM.StateEffect.define()
+    const cmtField = CM.StateField.define({
+      create: () => CM.Decoration.none,
+      update: (deco, tr) => {
+        let next = deco.map(tr.changes)
+        for (const e of tr.effects) if (e.is(wkEdCmtEffect)) next = wkEdBuildCmtDeco(e.value, tr.state)
+        return next
+      },
     })
-    const marks = cmtRangesFor(state.workFile)
-    if (marks.length) {
-      body.querySelectorAll('[data-l]').forEach((el) => {
-        const ln = Number(el.getAttribute('data-l'))
-        if (!ln) return
-        const hit = marks.find((m) => ln >= m.l0 && ln <= m.l1)
-        if (!hit) return
-        el.classList.add('cmt-mark', hit.resolved ? 'cmt-mark-res' : 'cmt-mark-open')
-        el.setAttribute('data-cmt-id', hit.id)
-      })
+    wkEdHost = document.createElement('div')
+    wkEdHost.className = 'wk-ed-cm'
+    wkEdLangComp = new CM.Compartment()
+    wkEdHlStyle = wkEdBuildHlStyle(CM)
+    const st = CM.EditorState.create({
+      doc: '',
+      extensions: [
+        CM.history(),
+        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap]),
+        CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
+        wkEdLangComp.of(wkEdLangExt('')),
+        CM.editorTheme,
+        wkEdThemeSpec(CM),
+        CM.EditorView.updateListener.of(wkEdOnUpdate),
+        cmtField,
+      ],
+    })
+    wkEdView = new CM.EditorView({ state: st, parent: wkEdHost })
+    if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
+    try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
+    return wkEdView
+  }
+
+  // 扩展名 → 语言扩展。markdown = Live Preview 全套（语法 + live-preview 装饰 + 公式/表格/链接/代码块）；
+  // 代码/纯文本 = 对应语言包 + 基础高亮；无匹配扩展名 = 纯文本（无高亮）。
+  function wkEdLangExt(path) {
+    const CM = wkEdCM
+    if (!CM) return []
+    const m = /\.([a-z0-9]+)$/i.exec(path || '')
+    const e = m ? m[1].toLowerCase() : ''
+    if (/^(md|markdown)$/.test(e)) {
+      return [
+        CM.markdown({ base: CM.markdownLanguage }),
+        CM.collapseOnSelectionFacet.of(true),
+        CM.mouseSelectingField,
+        CM.livePreviewPlugin,
+        CM.markdownStylePlugin,
+        CM.mathPlugin,
+        CM.blockMathField,
+        CM.tableField,
+        CM.linkPlugin(),
+        ...CM.codeBlockField(),
+      ]
     }
-    if (wkCmtScrollId) {
-      const t = body.querySelector(`[data-cmt-id="${wkCmtScrollId}"]`)
-      wkCmtScrollId = ''
-      if (t) {
-        t.scrollIntoView({ block: 'center' })
-        t.classList.add('cmt-flash')
-        setTimeout(() => t.classList.remove('cmt-flash'), 1200)
+    const L = wkEdLangFor(CM, e)
+    return L ? [L, CM.syntaxHighlighting(wkEdHlStyle)] : []
+  }
+  // 代码语法高亮样式：tag → 项目 CSS 变量（--hl-*）⇒ 日夜随动，无需重建。会话消息/旁白不受影响
+  // （只作用于编辑器）。
+  function wkEdBuildHlStyle(CM) {
+    const t = CM.tags
+    const c = (v) => ({ color: `var(${v})` })
+    return CM.HighlightStyle.define([
+      { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.operatorKeyword, t.modifier, t.self], ...c('--hl-kw') },
+      { tag: [t.string, t.special(t.string), t.regexp, t.character], ...c('--hl-str') },
+      { tag: [t.number, t.bool, t.null, t.atom], ...c('--hl-num') },
+      { tag: [t.comment, t.lineComment, t.blockComment, t.docComment, t.meta], ...c('--hl-com') },
+      { tag: t.heading, ...c('--hl-h') },
+      { tag: t.strong, ...c('--hl-b') },
+      { tag: t.emphasis, ...c('--hl-i') },
+      { tag: [t.link, t.url], ...c('--hl-link') },
+      { tag: [t.monospace, t.quote], ...c('--hl-code') },
+      { tag: [t.typeName, t.className, t.namespace, t.labelName], ...c('--hl-type') },
+      { tag: [t.function(t.variableName), t.function(t.propertyName)], ...c('--hl-fn') },
+      { tag: [t.propertyName, t.attributeName, t.definition(t.propertyName)], ...c('--hl-attr') },
+      { tag: [t.operator, t.punctuation, t.bracket, t.separator], ...c('--hl-op') },
+    ])
+  }
+  // 代码族语言包（@codemirror/lang-* 直取；legacy-modes 经 StreamLanguage 包装）。
+  function wkEdLangFor(CM, e) {
+    if (e === 'json') return CM.json()
+    if (/^(js|mjs|cjs|jsx)$/.test(e)) return CM.javascript()
+    if (/^(ts|tsx|mts|cts)$/.test(e)) return CM.javascript({ typescript: true })
+    if (/^(css|scss|less)$/.test(e)) return CM.css()
+    if (/^(html|htm|xml|svg|vue)$/.test(e)) return CM.html()
+    if (e === 'py') return CM.python()
+    if (/^(sh|bash|zsh)$/.test(e)) return CM.StreamLanguage.define(CM.shell)
+    if (/^(yaml|yml|toml|ini|conf)$/.test(e)) return CM.StreamLanguage.define(CM.yaml)
+    if (/^(tex|latex|sty|cls|bib)$/.test(e)) return CM.StreamLanguage.define(CM.stex)
+    return null
+  }
+  // 热换语言（切文件时调，compartment reconfigure 不触碰文档与撤销历史）。
+  function wkEdSetLang(path) {
+    if (!wkEdView) return
+    wkEdView.dispatch({ effects: wkEdLangComp.reconfigure(wkEdLangExt(path)) })
+  }
+
+  // 本项目主题：用项目 CSS 变量（--text/--bg/--mono/--accent），日夜切换自动随动（不重建）。
+  function wkEdThemeSpec(CM) {
+    return CM.EditorView.theme({
+      '&': { fontSize: '12.5px', lineHeight: '1.6', color: 'var(--text)', backgroundColor: 'transparent', margin: '0' },
+      '&.cm-editor': { height: '100%' },
+      '.cm-scroller': { fontFamily: 'var(--mono)', overflow: 'auto' },
+      '.cm-content': { fontFamily: 'var(--mono)', padding: '16px 20px', caretColor: 'var(--accent)' },
+      '.cm-line': { padding: '0' },
+      '&.cm-focused': { outline: 'none' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
+      '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
+        backgroundColor: 'color-mix(in srgb, var(--accent) 25%, transparent)',
+      },
+    })
+  }
+
+  // 用户编辑 vs 程序性改文档：docChanged 且无 progAnn ⇒ 记为脏并起去抖保存。
+  function wkEdOnUpdate(update) {
+    if (!update.docChanged) return
+    for (const tr of update.transactions) if (tr.annotation(wkEdProgAnn)) return
+    wkEdDirty = true
+    wkEdState()
+    wkEdScheduleSave()
+  }
+  // 去抖自动保存（冲突未决时暂停，交 Ctrl+S 显式处置，避免覆盖外部改动）。
+  function wkEdScheduleSave() {
+    if (wkEdConflict) return
+    if (wkEdTimer) clearTimeout(wkEdTimer)
+    wkEdTimer = setTimeout(() => { wkEdTimer = 0; wkEdSave({}) }, WK_SAVE_MS)
+  }
+
+  // 把编辑器文档设为 text（相等则跳过；否则带 progAnn 程序性 dispatch，不触发脏标记）。
+  function wkEdSetDoc(text) {
+    if (!wkEdView) return
+    const cur = wkEdView.state.doc.toString()
+    if (cur === text) return
+    wkEdView.dispatch({ changes: { from: 0, to: cur.length, insert: text }, annotations: wkEdProgAnn.of(true) })
+  }
+
+  // 评论行装饰：给 l0..l1 源行加 line decoration（RangeSetBuilder 必须按 from 升序、去重）。
+  function wkEdBuildCmtDeco(marks, st) {
+    const CM = wkEdCM
+    const doc = st.doc
+    const b = new CM.RangeSetBuilder()
+    const seen = new Set()
+    for (const m of (marks || []).slice().sort((a, x) => a.l0 - x.l0)) {
+      const l0 = Math.max(1, Math.min(m.l0, doc.lines))
+      const l1 = Math.max(l0, Math.min(m.l1, doc.lines))
+      for (let n = l0; n <= l1; n++) {
+        if (seen.has(n)) continue
+        seen.add(n)
+        const from = doc.line(n).from
+        b.add(from, from, CM.Decoration.line({ class: 'cmt-mark ' + (m.resolved ? 'cmt-mark-res' : 'cmt-mark-open') }))
       }
     }
+    return b.finish()
   }
 
-  // ---------- 源码着色（编辑态语法高亮；仿编辑器源码模式） ----------
-  // 不变量：着色层 `.wk-ed-hl` 与 textarea 逐字叠放、同步滚动；token **只改 color**——禁字重/字形/字号，
-  // 任何字形差异都会让两层字宽/换行错位（排版同源由 styles.css 的 .wk-ed-hl / .wk-ed-ta 两条规则保证）。
-  // 着色只写进 aria-hidden 的着色层；textarea 文本透明（caret-color 可见）、选区背景半透明透出着色。
-  const WK_HL_KW = {
-    js: ' const let var function return if else for while do switch case break continue new class extends super import export from default async await yield try catch finally throw typeof instanceof in of delete void this null undefined true false static get set ',
-    py: ' def class return if elif else for while import from as pass break continue with try except finally raise lambda yield global nonlocal and or not in is None True False async await del assert ',
-    sh: ' if then else elif fi for while do done case esac function return local export echo cd exit set unset source ',
-    yaml: ' true false null yes no on off ',
-    css: '', html: '',
-  }
-  // 扩展名 → 语言键；'' = 纯文本（仅转义，不上色）
-  function wkEdLang(p) {
-    const m = /\.([a-z0-9]+)$/i.exec(p || '')
-    const e = m ? m[1].toLowerCase() : ''
-    if (/^(md|markdown)$/.test(e)) return 'md'
-    if (e === 'json') return 'json'
-    if (/^(js|mjs|cjs|jsx|ts|tsx)$/.test(e)) return 'js'
-    if (/^(css|scss|less)$/.test(e)) return 'css'
-    if (/^(html|htm|xml|svg|vue)$/.test(e)) return 'html'
-    if (e === 'py') return 'py'
-    if (/^(sh|bash|zsh)$/.test(e)) return 'sh'
-    if (/^(yaml|yml|toml|ini|conf)$/.test(e)) return 'yaml'
-    return ''
-  }
-  // 扫描切片：命中段转义后包 span（cls 返回 '' 则不包），未命中段仅转义——字符零增删，与 textarea 逐字对齐。
-  function wkHlScan(text, re, cls) {
-    let out = '', last = 0
-    re.lastIndex = 0
-    let m
-    while ((m = re.exec(text))) {
-      if (m.index > last) out += esc(text.slice(last, m.index))
-      const k = cls(m[0])
-      out += k ? `<span class="${k}">${esc(m[0])}</span>` : esc(m[0])
-      last = re.lastIndex
-      if (m.index === re.lastIndex) re.lastIndex++
-    }
-    return out + esc(text.slice(last))
-  }
-  // 代码族两套注释：# 行注释（py/sh/yaml）与 //、/* */、<!-- -->（css/js/html）——css 用 # 会误伤 #id 选择器
-  const WK_HL_RE_SLASH = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|<!--[\s\S]*?-->|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`|\b0x[0-9a-fA-F]+\b|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
-  const WK_HL_RE_HASH = /#[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d[\d_]*(?:\.\d+)?\b|[A-Za-z_$][\w$]*/g
-  function wkHlCodeCls(lang) {
-    const kw = WK_HL_KW[lang] || ''
-    return (t) => {
-      if (t.startsWith('/*') || t.startsWith('//') || t.startsWith('#') || t.startsWith('<!--')) return 'hl-com'
-      if (t[0] === '"' || t[0] === "'" || t[0] === '`') return 'hl-str'
-      const c = t.charCodeAt(0)
-      if (c >= 48 && c <= 57) return 'hl-num'
-      return kw.indexOf(' ' + t + ' ') >= 0 ? 'hl-kw' : ''
+  // 滚动到源行 n 并给该行闪标（评论跳转）
+  function wkEdScrollToLine(n) {
+    if (!wkEdView) return
+    const from = wkEdView.state.doc.line(Math.max(1, Math.min(n, wkEdView.state.doc.lines))).from
+    wkEdView.dispatch({ selection: { anchor: from }, effects: wkEdCM.EditorView.scrollIntoView(from, { y: 'center' }) })
+    const node = wkEdView.domAtPos(from).node
+    const el = node && node.nodeType === 3 ? node.parentElement : node
+    const line = el && el.closest ? el.closest('.cm-line') : null
+    if (line) {
+      line.classList.add('cmt-flash')
+      setTimeout(() => line.classList.remove('cmt-flash'), 1200)
     }
   }
-  const WK_HL_RE_MD = /```[\s\S]*?```|`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|\[[^\]\n]*\]\([^)\n]*\)|^#{1,6}[ \t].*$|^>[ \t].*$|^(?:[-*+]|\d+\.)[ \t]|^(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm
-  function wkHlMdCls(t) {
-    if (t[0] === '`') return 'hl-code'
-    if (t[0] === '*' && t[1] === '*') return 'hl-b'
-    if (t[0] === '_' && t[1] === '_') return 'hl-b'
-    if (t[0] === '*' || t[0] === '_') return 'hl-i'
-    if (t[0] === '[') return 'hl-link'
-    if (t[0] === '#') return 'hl-h'
-    if (t[0] === '>') return 'hl-quote'
-    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(t)) return 'hl-hr'
-    return 'hl-li'
+
+  // 选区 → 源行号区间 [l0,l1]（供 inputbar/quote.js 引用浮窗取行号；比渲染 DOM 爬锚更准）。
+  function wkEdQuoteLines(range) {
+    if (!wkEdView || !range) return null
+    try {
+      const a = wkEdView.posAtDOM(range.startContainer, range.startOffset)
+      const b = wkEdView.posAtDOM(range.endContainer, range.endOffset)
+      if (a < 0 || b < 0) return null
+      const d = wkEdView.state.doc
+      return [d.lineAt(Math.min(a, b)).number, d.lineAt(Math.max(a, b)).number]
+    } catch (e) {
+      return null
+    }
   }
-  const WK_HL_RE_JSON = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/g
-  function wkHlJsonCls(t) {
-    if (t[0] === '"') return 'hl-str'
-    if (t[0] === 't' || t[0] === 'f' || t[0] === 'n') return 'hl-kw'
-    return 'hl-num'
-  }
-  function wkHlHtml(text, lang) {
-    if (lang === 'md') return wkHlScan(text, WK_HL_RE_MD, wkHlMdCls)
-    if (lang === 'json') return wkHlScan(text, WK_HL_RE_JSON, wkHlJsonCls)
-    if (lang === 'py' || lang === 'sh' || lang === 'yaml') return wkHlScan(text, WK_HL_RE_HASH, wkHlCodeCls(lang))
-    if (lang) return wkHlScan(text, WK_HL_RE_SLASH, wkHlCodeCls(lang))
-    return esc(text)
-  }
-  // 着色重绘：写着色层 innerHTML 后回填 scroll（innerHTML 重置滚动），rAF 合帧——输入期每帧至多绘一次
-  let wkEdPaintQ = false
-  function wkEdPaint() {
-    const ta = wkEdTa()
-    const hl = document.querySelector('#wk-ed-body .wk-ed-hl')
-    if (!ta || !hl) return
-    hl.innerHTML = wkHlHtml(ta.value, wkEdLang(state.workFile))
-    hl.scrollTop = ta.scrollTop
-    hl.scrollLeft = ta.scrollLeft
-  }
-  function wkEdPaintSoon() {
-    if (wkEdPaintQ) return
-    wkEdPaintQ = true
-    requestAnimationFrame(() => { wkEdPaintQ = false; wkEdPaint() })
+
+  // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
+  // 每条评论的行范围 l0..l1 落成 CodeMirror 行装饰：未解决 .cmt-mark-open / 已解决 .cmt-mark-res。
+  function cmtApplyMarks() {
+    if (!wkEdView) return
+    const marks = cmtRangesFor(state.workFile)
+    wkEdCmtMarks = marks
+    wkEdView.dispatch({ effects: wkEdCmtEffect.of(marks) })
+    if (wkCmtScrollId) {
+      const id = wkCmtScrollId
+      wkCmtScrollId = ''
+      const hit = marks.find((m) => m.id === id)
+      if (hit) wkEdScrollToLine(Math.min(hit.l0, wkEdView.state.doc.lines))
+    }
   }
 
   // 顶部「保存态」文本落地（唯一写点）：conflict > saving > dirty > 空。传 (txt, cls) 则原样落。
@@ -1039,19 +1121,6 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     el.textContent = txt || ''
     el.classList.toggle('dirty', cls === 'dirty')
     el.classList.toggle('conflict', cls === 'conflict')
-  }
-
-  // 模式类 + 工具栏按钮落地（编辑态唯一判定点）：不可编辑（图/二进制/超限）恒阅读态、按钮隐藏。
-  function applyEdMode() {
-    const on = !!state.workFile && !!wkEdMeta && !wkEdMeta.isImg && wkEdMeta.editable
-    const editing = !!(on && state.wkEdit)
-    const ed = $('work-editor')
-    if (ed) ed.classList.toggle('editing', editing)
-    const btn = $('wk-ed-mode')
-    if (!btn) return
-    btn.hidden = !on
-    btn.innerHTML = editing ? I.dshBook : I.dshEdit
-    btn.title = editing ? '阅读' : '编辑'
   }
 
   function renderEditor() {
@@ -1083,11 +1152,13 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     wkEdMtime = null
     wkEdDirty = false
     wkEdConflict = false
+    wkEdPendingDoc = null
+    wkEdCmtMarks = []
+    if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
     }
-    applyEdMode()
     wkEdState('')
   }
 
@@ -1096,40 +1167,24 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     if (!body || !wkEdMeta) return
     if (wkEdMeta.isImg) {
       body.innerHTML = `<div class="wk-ed-img"><img src="${esc(fileUrl(state.workFile))}" alt="${esc(state.workFile)}" /></div>`
-      applyEdMode()
       return
     }
     if (!wkEdMeta.editable) {
       body.innerHTML = `<div class="wk-ed-empty">${esc(wkEdMeta.msg || '不支持预览')}</div>`
-      applyEdMode()
       return
     }
-    if (state.wkEdit) {
-      // 编辑态 = 着色层 <div class="wk-ed-hl">（aria-hidden，只读展示）+ 透明文本 textarea 叠放；
-      // textarea 自身滚动，scroll 事件回填着色层 scrollTop/Left 保持逐字对齐。textarea 用 DOM 属性赋值
-      // （不走 innerHTML 转义：value 不需 HTML 转义，且要保住原始引号/实体）。
-      const wrap = document.createElement('div')
-      wrap.className = 'wk-ed-wrap'
-      const hl = document.createElement('div')
-      hl.className = 'wk-ed-hl'
-      hl.setAttribute('aria-hidden', 'true')
-      const ta = document.createElement('textarea')
-      ta.className = 'wk-ed-ta'
-      ta.spellcheck = false
-      ta.value = wkEdText
-      wrap.append(hl, ta)
-      body.replaceChildren(wrap)
-      wkEdPaint() // 首次着色（写在 replaceChildren 后，二者已挂载）
-      ta.addEventListener('scroll', () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft })
-      ta.focus()
-    } else if (wkEdMeta.isMd) {
-      // markdown 阅读态带行锚（data-l）：选中引用据此取选区首尾所在源行（inputbar/quote.js quoteEditorLines）
-      body.innerHTML = `<div class="wk-ed-md md">${mdHtml(wkEdText, 'data-l')}</div>`
-    } else {
-      body.innerHTML = `<pre class="wk-code">${wkCodeHtml(wkEdText)}</pre>`
+    // 可编辑文本（含 md）：常驻 CodeMirror 6 编辑器。把 host 挂回 body 并测量（body 可能被别的渲染重建过
+    // 子节点）；仅当 readFile 置了 wkEdPendingDoc（新文件）才换文档 + 热换语言，否则保留编辑器现状
+    // （重渲不得用陈旧基线覆盖用户未保存的编辑）。
+    const view = wkEdEnsureView()
+    body.replaceChildren(wkEdHost)
+    if (wkEdPendingDoc !== null) {
+      wkEdSetLang(state.workFile)
+      wkEdSetDoc(wkEdPendingDoc)
+      wkEdPendingDoc = null
     }
-    applyEdMode()
-    cmtApplyMarks() // 评论标记：被批注的行加高亮（阅读态；编辑态 textarea 载体无法内联打标）
+    requestAnimationFrame(() => view.requestMeasure())
+    cmtApplyMarks() // 评论标记：被批注的行加高亮
     wkEdState()
   }
 
@@ -1140,7 +1195,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     wkEdConflict = false
     if (IMG_EXT.test(p)) {
       wkEdFile = p
-      wkEdMeta = { isImg: true, isMd: false, editable: false }
+      wkEdMeta = { isImg: true, editable: false }
       wkEdText = ''
       wkEdMtime = null
       renderEdBody()
@@ -1154,7 +1209,6 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
         wkEdFile = p
         wkEdMeta = {
           isImg: false,
-          isMd: false,
           editable: false,
           msg:
             res.status === 413
@@ -1170,7 +1224,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
       const looksText = /^text\/|json|javascript|typescript|xml|svg|x-sh|csv|yaml/.test(ct) || MD_EXT.test(p)
       if (!looksText) {
         wkEdFile = p
-        wkEdMeta = { isImg: false, isMd: false, editable: false, msg: `二进制文件（${ct || '未知类型'}），不支持预览` }
+        wkEdMeta = { isImg: false, editable: false, msg: `二进制文件（${ct || '未知类型'}），不支持预览` }
         renderEdBody()
         return
       }
@@ -1181,24 +1235,15 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
       if (!Number.isFinite(mtime)) mtime = null
       wkEdFile = p
       wkEdText = text
-      wkEdMeta = { isImg: false, isMd: MD_EXT.test(p), editable: true }
+      wkEdMeta = { isImg: false, editable: true }
       wkEdMtime = mtime
       wkEdDirty = false
+      wkEdPendingDoc = text // 新文档灌入编辑器 + 热换语言（renderEdBody 消费）
       renderEdBody()
     } catch (e) {
       if (seq !== edSeq) return
       body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
     }
-  }
-
-  // 模式切换（阅读 ⇄ 编辑）：离开编辑态前先把 textarea 现值收进缓冲并 flush 保存（防丢字），再重渲。
-  async function wkSetEdit(on) {
-    on = !!on
-    if (on === state.wkEdit) return
-    if (!on) await wkEdFlush()
-    state.wkEdit = on
-    saveWork()
-    renderEdBody()
   }
 
   // 强制重拉磁盘版本（冲突「取消」分支 / 需放弃本地改动时用）
@@ -1209,28 +1254,12 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     await readFile(p)
   }
 
-  function wkEdInput() {
-    const ta = wkEdTa()
-    if (ta) wkEdText = ta.value
-    wkEdDirty = true
-    wkEdPaintSoon() // 着色层随输入重绘（rAF 合帧）
-    wkEdState()
-    if (wkEdConflict) return // 冲突未决：暂停自动保存，交 Ctrl+S 显式处置（避免覆盖外部改动）
-    if (wkEdTimer) clearTimeout(wkEdTimer)
-    wkEdTimer = setTimeout(() => {
-      wkEdTimer = 0
-      wkEdSave({})
-    }, WK_SAVE_MS)
-  }
-
   // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘（交互式——冲突时弹处置框）
   async function wkEdFlush() {
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
     }
-    const ta = wkEdTa()
-    if (ta) wkEdText = ta.value
     if (!wkEdDirty || wkEdConflict) return
     await wkEdSave({ interactive: true })
   }
@@ -1240,8 +1269,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     const force = !!(opts && opts.force)
     const interactive = !!(opts && opts.interactive)
     if (!state.workFile || !state.workProj || wkEdSaving) return
-    const ta = wkEdTa()
-    if (ta) wkEdText = ta.value
+    wkEdText = wkEdDocText() // 落盘 payload = 当前真源（编辑器文档）
     if (!wkEdDirty && !force) return
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
@@ -1263,8 +1291,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
         const data = await res.json().catch(() => ({}))
         if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
         if (typeof data.mtime === 'number') wkEdMtime = data.mtime
-        const fresh = wkEdTa()
-        wkEdDirty = !!(fresh && fresh.value !== wkEdText) // 保存期间又改了 → 留脏，下面续排程
+        wkEdDirty = wkEdDocText() !== wkEdText // 保存期间又改了 → 留脏，下面续排程
       }
     } catch (e) {
       wkEdSaving = false
@@ -1280,8 +1307,8 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
       toast('文件已被外部修改，未自动覆盖（Ctrl+S 可覆盖）')
       return
     }
-    if (wkEdDirty) wkEdInput()
-    else wkEdState()
+    wkEdState()
+    if (wkEdDirty) wkEdScheduleSave() // 保存期间又改了 → 续排程（wkEdState 先落地「未保存」）
   }
 
   // 冲突处置（用户显式保存时）：确定 = 用当前内容覆盖；取消 = 放弃编辑、重载磁盘版本。绝静默二选一。
@@ -1630,22 +1657,13 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
         return
       }
     })
-    // 编辑区：阅读/编辑切换按钮 + Ctrl+S 保存 / Ctrl+E 切模式（绑在 #work-editor 上，编辑态才命中）
-    $('wk-ed-mode').addEventListener('click', () => wkSetEdit(!state.wkEdit))
+    // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
-      const k = e.key.toLowerCase()
-      if (k === 's') {
+      if (e.key.toLowerCase() === 's') {
         e.preventDefault()
         wkEdSave({ interactive: true })
-      } else if (k === 'e') {
-        e.preventDefault()
-        wkSetEdit(!state.wkEdit)
       }
-    })
-    // textarea 整块由 renderEdBody 重建 → input 委托在容器上
-    $('wk-ed-body').addEventListener('input', (e) => {
-      if (e.target && e.target.classList.contains('wk-ed-ta')) wkEdInput()
     })
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）

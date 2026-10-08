@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 /**
- * probe-comment-marks —— 评论「原文标记」结构不变量（2026-10-06）
+ * probe-comment-marks —— 评论「原文标记」结构不变量（2026-10-06，2026-10-07 改编辑器装饰器）
  *
- * 目标：评论不只列在右栏，还要**落回原文**——被批注的行/块在阅读态有可见标记。
+ * 目标：评论不只列在右栏，还要**落回原文**——被批注的行在编辑区有可见标记。
  * 结构锁点（只读源码，不启 DOM）：
  *   1) comments.js 是标记的唯一数据源：导出 cmtRangesFor（按 path + l0/l1），
  *      评论增删改后经 cmtAfterChange 回调 refreshMarks 让 work.js 重绘标记。
- *   2) work.js 阅读态渲染末尾调 cmtApplyMarks：md 用 mdHtml 的 data-l 行锚、
- *      纯文本走 wkCodeHtml 逐行落 data-l span；命中行加 .cmt-mark / .cmt-mark-res + data-cmt-id。
- *   3) 定位回跳：面板点定位 → openFile(path, id) → work.js 记 wkCmtScrollId → 渲染完滚到该行。
+ *   2) 编辑区（所有可编辑文本文件）恒为 CodeMirror 6：work.js 渲染末尾调 cmtApplyMarks，
+ *      经 wkEdCmtEffect → StateField → Decoration.line 把命中行加 .cmt-mark / .cmt-mark-res。
+ *   3) 定位回跳：面板点定位 → openFile(path, id) → work.js 记 wkCmtScrollId →
+ *      渲染完经 wkEdScrollToLine → EditorView.scrollIntoView 滚到该行 + 闪标。
  *   4) styles.css 有对应样式；cache-bust 两处同值。
  */
 import { readFileSync } from 'fs'
@@ -47,31 +48,47 @@ else bad('cmtSetHooks 未接 refreshMarks')
 if (/cmtOpenFile\(loc\.dataset\.cmtloc, item \? item\.dataset\.cid : ''\)/.test(cmt)) ok('面板定位把评论 id 一并交给 openFile（回跳能滚到该行）')
 else bad('面板定位未传评论 id')
 
-// ---- 2. work.js：阅读态打标 ----
+// ---- 2. work.js：编辑器行装饰器打标 ----
 if (/import \{[^}]*cmtRangesFor[^}]*\} from '\.\/comments\.js'/.test(work)) ok('work.js import cmtRangesFor（标记单一数据源）')
 else bad('work.js 未 import cmtRangesFor')
-if (/function cmtApplyMarks\(/.test(work)) ok('work.js 定义 cmtApplyMarks（据行范围给 [data-l] 加类）')
+if (/function cmtApplyMarks\(/.test(work)) ok('work.js 定义 cmtApplyMarks（把评论行范围送进编辑器装饰器）')
 else bad('work.js 缺 cmtApplyMarks')
-if (/function wkCodeHtml\(/.test(work) && /data-l="\$\{i \+ 1\}"/.test(work)) ok('work.js 纯文本阅读态逐行落 data-l span（wkCodeHtml）')
-else bad('work.js 纯文本阅读态未逐行落锚 —— 代码视图打不了标')
-if (/body\.innerHTML = `<pre class="wk-code">\$\{wkCodeHtml\(wkEdText\)\}<\/pre>`/.test(work)) ok('renderEdBody 代码分支改用 wkCodeHtml(WkEdText)')
-else bad('renderEdBody 代码分支未接 wkCodeHtml')
-if (/cmtApplyMarks\(\) \/\/ 评论标记/.test(work)) ok('阅读态渲染末尾调用 cmtApplyMarks（md 与纯文本共用）')
+if (/function wkEdBuildCmtDeco\(marks, st\)/.test(work) && /Decoration\.line\(\{ class: 'cmt-mark ' \+ \(m\.resolved/.test(work)) ok('评论标记 = Decoration.line（升序 + 未解决/已解决两态类）')
+else bad('评论标记未接编辑器行装饰器')
+if (/wkEdCmtEffect\.of\(marks\)/.test(work) && /e\.is\(wkEdCmtEffect\)/.test(work)) ok('标记经 StateEffect → StateField 落装饰（cmtApplyMarks → wkEdCmtEffect）')
+else bad('评论标记未接 StateEffect/StateField')
+if (/wkEdCmtEffect\.of\(marks\)/.test(work) && /wkEdView\.dispatch/.test(work)) ok('cmtApplyMarks 经 wkEdView.dispatch 送标记（无 DOM [data-l] 走法）')
+else bad('cmtApplyMarks 未走编辑器 dispatch')
+if (/function wkEdScrollToLine\(/.test(work) && /EditorView\.scrollIntoView/.test(work)) ok('定位回跳：wkEdScrollToLine → scrollIntoView + 闪标')
+else bad('缺定位回跳（wkEdScrollToLine）')
+if (/cmtApplyMarks\(\) \/\/ 评论标记/.test(work)) ok('阅读态渲染末尾调用 cmtApplyMarks')
 else bad('阅读态渲染未调 cmtApplyMarks')
-if (/classList\.add\('cmt-mark', hit\.resolved \? 'cmt-mark-res' : 'cmt-mark-open'\)/.test(work)) ok('命中行加 .cmt-mark / .cmt-mark-res（未解决/已解决两态）')
-else bad('命中的行未区分未解决/已解决类')
-if (/setAttribute\('data-cmt-id', hit\.id\)/.test(work)) ok('命中行落 data-cmt-id（回跳定位锚）')
-else bad('命中行未落 data-cmt-id')
 if (/refreshMarks: cmtApplyMarks/.test(work)) ok('mountWork 注册 refreshMarks 钩子（评论变更 → 重绘标记）')
 else bad('mountWork 未注册 refreshMarks')
-if (/wkCmtScrollId/.test(work) && /scrollIntoView\(\{ block: 'center' \}\)/.test(work)) ok('定位回跳：wkCmtScrollId 消费时 scrollIntoView（滚到被批注行）')
+if (/wkCmtScrollId/.test(work) && /wkEdView\.state\.doc\.lines/.test(work)) ok('定位回跳：wkCmtScrollId 消费时行号夹取 + scrollIntoView')
 else bad('缺定位回跳滚动')
 if (/cmtLoad\(state\.workProj\) \/\/ 评论恢复态补拉/.test(work) && /cmtLoad\(label\) \/\/ 原文标记也需要当前项目的评论/.test(work)) ok('ensureWork / selectProject 恒拉评论（原文标记不只评论 tab 才需要）')
 else bad('原文标记场景未恒拉评论数据')
 
-// ---- 3. 样式 + 拼接注册 + cache-bust ----
+// ---- 3. 编辑区统一为 CodeMirror 6（所有可编辑文本文件；两态已撤） ----
+if (/CM\.EditorView\.lineWrapping/.test(work)) ok('work.js 编辑器启用 lineWrapping（长行按窗口软换行）')
+else bad('work.js 编辑器缺 lineWrapping —— 长行不换行')
+if (/wkEdLangComp = new CM\.Compartment\(\)/.test(work) && /function wkEdSetLang\(path\)/.test(work)) ok('work.js 语言 compartment（按扩展名热换语言扩展）')
+else bad('work.js 缺语言 compartment / wkEdSetLang')
+if (/function wkEdLangExt\(path\)/.test(work) && /CM\.markdown\(\{ base: CM\.markdownLanguage \}\)/.test(work)) ok('wkEdLangExt：md 走 Live Preview 全套，其余按扩展名取语言包')
+else bad('wkEdLangExt 未接 markdown / 语言包')
+if (/wkEdBuildHlStyle/.test(work) && /HighlightStyle\.define/.test(work)) ok('代码高亮 = HighlightStyle（tag → --hl-* CSS 变量，日夜随动）')
+else bad('代码高亮未接 HighlightStyle')
+if (!/wkCodeHtml|wk-ed-ta|wk-ed-hl|state\.wkEdit|applyEdMode/.test(work)) ok('work.js 无两态残留（textarea 编辑 / 阅读态 / 模式按钮全清）')
+else bad('work.js 仍有两态残留（wkCodeHtml / wk-ed-ta / wk-ed-hl / state.wkEdit / applyEdMode）')
+if (/body\.replaceChildren\(wkEdHost\)/.test(work)) ok('renderEdBody：可编辑文本一律挂 CodeMirror 宿主')
+else bad('renderEdBody 未统一挂 CodeMirror 宿主')
+
+// ---- 4. 样式 + 拼接注册 + cache-bust ----
 if (/\.cmt-mark \{/.test(css) && /\.cmt-mark-res \{/.test(css) && /\.cmt-flash \{/.test(css)) ok('styles.css 有 .cmt-mark / .cmt-mark-res / .cmt-flash')
 else bad('styles.css 缺评论标记样式')
+if (/--hl-kw:/.test(css) && /\.wk-ed-cm \{/.test(css)) ok('styles.css 有 --hl-* 高亮令牌 + .wk-ed-cm 宿主样式')
+else bad('styles.css 缺 --hl-* 令牌 / .wk-ed-cm 样式')
 if (/sidebar\/comments\.js/.test(bundle)) ok('bundle-web-modules 已注册 sidebar/comments.js')
 else bad('bundle-web-modules 未注册 comments.js')
 const vCss = /styles\.css\?v=(\d+)/.exec(idx)?.[1]

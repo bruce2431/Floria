@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=478" />
+  <link rel="stylesheet" href="/styles.css?v=484" />
 </head>
 <body>
 <div id="app">
@@ -190,15 +190,14 @@
       <button id="wk-tb-tool" class="wk-tb-pill" title="工具栏" aria-label="工具栏"><span class="wk-tb-ico"></span><span class="wk-tb-name">工具栏</span></button>
     </div>
 
-    <!-- 工作区编辑区（2026-09-25 work 模式，2026-10-05 加编辑态）：查看/编辑项目内文件 = 「文件 tab」的
-         内容，与 #session-card（聊天 tab 内容）在同一格（下沉区 col1/row2）二选一显示。刻意不用
-         .view-card 类——它是 work 模式的常驻栏，若带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。
-         #wk-ed-mode = 阅读/编辑切换（图标 + 点击由 sidebar/work.js 注入）；#wk-ed-save = 保存态文本。 -->
+    <!-- 工作区编辑区（2026-09-25 work 模式）：查看/编辑项目内文件 = 「文件 tab」的内容，与
+         #session-card（聊天 tab 内容）在同一格（下沉区 col1/row2）二选一显示。刻意不用 .view-card 类——
+         它是 work 模式的常驻栏，若带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。
+         正文由 sidebar/work.js 挂 CodeMirror 6 编辑器（恒可编辑）；#wk-ed-save = 保存态文本。 -->
     <section id="work-editor">
       <div class="wk-ed-head">
         <span id="wk-ed-path" class="wk-ed-path"></span>
         <span id="wk-ed-save" class="wk-ed-save"></span>
-        <button id="wk-ed-mode" class="wk-ico" title="编辑" hidden></button>
       </div>
       <div class="wk-ed-body" id="wk-ed-body"></div>
     </section>
@@ -383,6 +382,9 @@
 <!-- KaTeX（2026-10-06）：全局 katex（UMD），须在 app.js 之前加载——core/markdown.js 的公式预扫描
      直接调 katex.renderToString；缺失时该模块跳过公式渲染（$…$ 原样显示），故脚本顺序是硬约束。 -->
 <script src="/vendor/katex/katex.min.js?v=473"></script>
-<script src="/app.js?v=478"></script>
+<!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
+     （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
+<script src="/vendor/codemirror/live-markdown.js?v=1"></script>
+<script src="/app.js?v=484"></script>
 </body>
 </html>

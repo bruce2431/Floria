@@ -47,9 +47,6 @@
     // wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
     wkChats: [],
     wkAssistMode: 'side', wkAssistH: 430,
-    // wkEdit = 编辑区模式（false=阅读（渲染/pre），true=源码编辑）。跨文件记忆（打开下一个文件沿用同一模式），
-    // 全局一份（不按项目分槽，同 wkAssistMode）；见 sidebar/work.js renderEditor/wkSetEdit。
-    wkEdit: false,
     // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
     // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（core/storage.js）。
     wkPanes: {} }

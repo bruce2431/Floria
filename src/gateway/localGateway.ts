@@ -953,6 +953,18 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 }
 
+/**
+ * 未知扩展名的文本嗅探（git 同款启发式）：前 8 KB 内出现 NUL 字节判二进制。
+ * 无 NUL = 文本 → 落 `text/plain; charset=utf-8`。这是 `/gateway/file` 内容分类的唯一兜底点：
+ * MIME 表覆盖到的扩展名以其为准，其余（.tex/.py/Makefile/Dockerfile 等）由此定型，
+ * 使 work 编辑区的「文本/二进制」门不再因扩展名未登记而把源码挡成二进制。
+ */
+export function sniffBinary(buf: Buffer): boolean {
+  const n = Math.min(buf.length, 8192)
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true
+  return false
+}
+
 // ============================================================================
 // 会话列表 / 读取（基于便携根扫描；逻辑对齐旧 gateway.mjs）
 // ============================================================================
@@ -2463,8 +2475,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       sendJson(res, 413, { error: 'too large' })
       return
     }
-    const fType = MIME[extname(fAbs)] ?? 'application/octet-stream'
     const fMtime = statSync(fAbs).mtimeMs
+    const fBuf = readFileSync(fAbs)
+    const fType = MIME[extname(fAbs)] ?? (sniffBinary(fBuf) ? 'application/octet-stream' : 'text/plain; charset=utf-8')
     // ETag = 毫秒级 mtime（Last-Modified 只有秒级、不足以表达同一秒内的两次写）；work 编辑区记它作
     // 冲突基线，写回时带回由 writeProjectFile 精确比对（见该函数）。
     res.writeHead(200, {
@@ -2473,7 +2486,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       ETag: `"${fMtime}"`,
       'Last-Modified': new Date(fMtime).toUTCString(),
     })
-    res.end(readFileSync(fAbs))
+    res.end(fBuf)
     return
   }
   // 项目内文件 / 目录重命名：POST /gateway/file/rename {label, path, name} → 同目录改名（2026-09-27）

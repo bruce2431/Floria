@@ -51,6 +51,21 @@
   --danger-soft: #fef6f6; --danger-fg: #b91c1c;
   --ok-soft: #f6fbf7;    --ok-fg: #15803d;
   --accent-hover: #f7faff; --accent-sel: #eff5ff;
+  /* 代码语法高亮（编辑区 CodeMirror 6，2026-10-07）：tag → 令牌，暗色在 html[data-theme="dark"] 覆盖。
+     供 sidebar/work.js wkEdBuildHlStyle 的 HighlightStyle 以 var() 引用（日夜随动，无需重建编辑器）。 */
+  --hl-kw: #8b5cf6;    /* 关键字 / 修饰符 / self */
+  --hl-str: #16a34a;   /* 字符串 / 正则 / 字符 */
+  --hl-num: #d97706;   /* 数字 / 布尔 / null / atom */
+  --hl-com: var(--text-3); /* 注释 / meta */
+  --hl-h: #3b82f6;     /* 标题 */
+  --hl-b: #db2777;     /* 加粗 */
+  --hl-i: #0891b2;     /* 斜体 */
+  --hl-link: #2563eb;  /* 链接 / URL */
+  --hl-code: #ea580c;  /* 行内代码 / 引用 */
+  --hl-type: #0d9488;  /* 类型 / 类 / 命名空间 */
+  --hl-fn: #7c3aed;    /* 函数名 */
+  --hl-attr: #b45309;  /* 属性 / 特性名 */
+  --hl-op: var(--text-2); /* 运算符 / 标点 */
 }
 
 /* 夜晚模式（2026-10-06）：配色参考 Prism（prism.openai.com 实机截图采样——画布 #000 / 面 #161616 /
@@ -95,6 +110,18 @@ html[data-theme="dark"] {
   --danger-soft: #341a1a; --danger-fg: #f87171;
   --ok-soft: #14261a;    --ok-fg: #4ade80;
   --accent-hover: #17233c; --accent-sel: #1c2a48;
+  /* 暗底上重调高亮——提亮低对比的绿/橙/蓝，紫/粉/青保持同一色相家族 */
+  --hl-kw: #a78bfa;
+  --hl-str: #4ade80;
+  --hl-num: #fbbf24;
+  --hl-h: #60a5fa;
+  --hl-b: #f472b6;
+  --hl-i: #22d3ee;
+  --hl-link: #60a5fa;
+  --hl-code: #fb923c;
+  --hl-type: #2dd4bf;
+  --hl-fn: #c4b5fd;
+  --hl-attr: #fcd34d;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -786,29 +813,28 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .ask-fold summary::-webkit-details-marker { display: none; }
 .ask-fold .ask-body { margin: 2px 0 2px 0; }
 
-/* ── Markdown 渲染（对话文本，作用于 .body 内的 mdHtml 输出；2026-09-25 起 .wk-ed-md 同款——
-   work 主区编辑区渲染 .md 文件时用同一份 mdHtml 输出，两处必须同一套排版） ── */
-.msg .body .p, .wk-ed-md .p { margin: 0; }
-.msg .body p, .wk-ed-md p { margin: 3px 0; }
-.msg .body h1, .msg .body h2, .msg .body h3, .msg .body h4,
-.wk-ed-md h1, .wk-ed-md h2, .wk-ed-md h3, .wk-ed-md h4 { margin: 14px 0 4px; font-weight: 700; color: var(--text); line-height: 1.4; }
-.msg .body h1, .wk-ed-md h1 { font-size: 17px; }
-.msg .body h2, .wk-ed-md h2 { font-size: 16px; }
-.msg .body h3, .wk-ed-md h3 { font-size: 15px; }
-.msg .body h4, .wk-ed-md h4 { font-size: 14px; }
-.msg .body ul, .msg .body ol, .wk-ed-md ul, .wk-ed-md ol { margin: 4px 0; padding-left: 20px; }
-.msg .body li, .wk-ed-md li { margin: 2px 0; }
-.msg .body blockquote, .wk-ed-md blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding: 2px 10px; color: var(--text-2); }
-.msg .body hr, .wk-ed-md hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
-.msg .body a, .wk-ed-md a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.msg .body a:hover, .wk-ed-md a:hover { color: var(--text-2); }
+/* ── Markdown 渲染（对话文本，作用于 .body 内的 mdHtml 输出；work md 编辑区改用 CodeMirror 后
+   这套只服务会话消息/旁白/思考正文；编辑区排版由 .wk-ed-cm + 库 editorTheme 负责） ── */
+.msg .body .p { margin: 0; }
+.msg .body p { margin: 3px 0; }
+.msg .body h1, .msg .body h2, .msg .body h3, .msg .body h4 { margin: 14px 0 4px; font-weight: 700; color: var(--text); line-height: 1.4; }
+.msg .body h1 { font-size: 17px; }
+.msg .body h2 { font-size: 16px; }
+.msg .body h3 { font-size: 15px; }
+.msg .body h4 { font-size: 14px; }
+.msg .body ul, .msg .body ol { margin: 4px 0; padding-left: 20px; }
+.msg .body li { margin: 2px 0; }
+.msg .body blockquote { border-left: 3px solid var(--border); margin: 4px 0; padding: 2px 10px; color: var(--text-2); }
+.msg .body hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.msg .body a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.msg .body a:hover { color: var(--text-2); }
 /* 2026-08-31：旁白（.done-think）/思考正文（.tr-body）也走 mdHtml，inline code/围栏代码块样式一并对齐
    （此前只挂 .msg .body，旁白里 `feedConfigs.tsx` 等只有 UA 默认等宽、无灰底） */
-.msg .body code, .done-think code, .tr-body code, .wk-ed-md code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-.msg .body .code-block, .done-think .code-block, .tr-body .code-block, .wk-ed-md .code-block { position: relative; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--field-2); }
-.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre, .wk-ed-md .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
-.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code, .wk-ed-md .code-block code { background: transparent; padding: 0; font-size: inherit; }
-.msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang, .wk-ed-md .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+.msg .body code, .done-think code, .tr-body code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+.msg .body .code-block, .done-think .code-block, .tr-body .code-block { position: relative; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--field-2); }
+.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
+.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code { background: transparent; padding: 0; font-size: inherit; }
+.msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
 /* 2026-09-12：嵌入式图表（```chart 双段围栏）——web 渲染 %%html 段进 sandbox iframe（opaque origin，
    高度由 iframe 内 BOOT postMessage 上报、messages.js 按 e.source 设高；上限 60vh 超出内部滚动），
    「源码」按钮切原文（.as-src）。%%ascii 段仅供 CLI，web 弃用。普通 ```html 围栏不受影响 */
@@ -823,10 +849,10 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .chart-embed.as-src .chart-raw { display: block; }
 /* 2026-09-04：md-table 作用域同步扩展到 .done-think/.tr-body（08-31 code 对齐漏了表格，
    旁白/思考正文里的表格此前以裸 table 渲染=无边框无内距，视觉等同未渲染） */
-.msg .body .md-table, .done-think .md-table, .tr-body .md-table, .wk-ed-md .md-table { margin: 6px 0; overflow-x: auto; }
-.msg .body .md-table table, .done-think .md-table table, .tr-body .md-table table, .wk-ed-md .md-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
-.msg .body .md-table th, .msg .body .md-table td, .done-think .md-table th, .done-think .md-table td, .tr-body .md-table th, .tr-body .md-table td, .wk-ed-md .md-table th, .wk-ed-md .md-table td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: normal; word-break: break-word; }
-.msg .body .md-table th, .done-think .md-table th, .tr-body .md-table th, .wk-ed-md .md-table th { background: var(--rail-bg); font-weight: 600; }
+.msg .body .md-table, .done-think .md-table, .tr-body .md-table { margin: 6px 0; overflow-x: auto; }
+.msg .body .md-table table, .done-think .md-table table, .tr-body .md-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
+.msg .body .md-table th, .msg .body .md-table td, .done-think .md-table th, .done-think .md-table td, .tr-body .md-table th, .tr-body .md-table td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; white-space: normal; word-break: break-word; }
+.msg .body .md-table th, .done-think .md-table th, .tr-body .md-table th { background: var(--rail-bg); font-weight: 600; }
 
 .msg-system { text-align: center; color: var(--text-3); font-size: 12px; padding: 2px 24px 10px; }
 
@@ -2636,55 +2662,23 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .wk-ed-body::-webkit-scrollbar { width: 8px; height: 8px; }
 .wk-ed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-.wk-code { margin: 0; padding: 16px 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text); white-space: pre; }
-.wk-ed-md { padding: 16px 20px; }
+/* 编辑区（CodeMirror 6，2026-10-07）：所有可编辑文本文件挂 .wk-ed-cm 宿主，md 走 Live Preview、
+   代码按扩展名高亮。字号/配色与本项目 .msg .body 同源（库自带 editorTheme 用 em/hsl 变量，
+   这里以 #work-editor 前缀覆盖为项目度量）。 */
+.wk-ed-cm { height: 100%; }
+.wk-ed-cm .cm-editor { height: 100%; background: transparent; }
+.wk-ed-cm .cm-scroller { font-family: var(--mono); }
+#work-editor .cm-header-1 { font-size: 17px; color: var(--text); }
+#work-editor .cm-header-2 { font-size: 16px; }
+#work-editor .cm-header-3 { font-size: 15px; }
+#work-editor .cm-header-4, #work-editor .cm-header-5, #work-editor .cm-header-6 { font-size: 14px; }
 .wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
 .wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }
-/* 保存态文本（#wk-ed-save）+ 源码编辑 textarea（2026-10-05 编辑区编辑功能）。
-   保存态：无脏/无冲突时不显字；脏=次色、冲突=警示色。ta 用 absolute 铺满 .wk-ed-body（父 position:relative），
-   自身滚动；排版与 .wk-code 同源（mono / 12.5px / 1.6 / 16px 20px padding）——两态切换视觉零跳动。 */
+/* 保存态文本（#wk-ed-save）：无脏/无冲突时不显字；脏=次色、冲突=警示色。 */
 .wk-ed-save { flex: none; font-size: 12.5px; color: var(--text-3); }
 .wk-ed-save.dirty { color: var(--text-2); }
 .wk-ed-save.conflict { color: #e0603f; }
-/* 两层叠放：.wk-ed-hl 着色层（只读展示）+ .wk-ed-ta 透明文本 textarea（真源、自身滚动）。
-   两规则排版必须逐字同源（font/mono、12.5px、1.6、16px 20px padding、pre-wrap、break-word、tab-size 2）
-   ——任何一处不同都会让两层错位。token 只改 color（禁字重/字形），故 .wk-ed-hl 内 span 不改字体度量。 */
-.wk-ed-wrap { position: absolute; inset: 0; overflow: hidden; }
-.wk-ed-hl {
-  position: absolute; inset: 0; margin: 0; padding: 16px 20px; box-sizing: border-box;
-  overflow: hidden; pointer-events: none; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text);
-}
-.wk-ed-ta {
-  position: absolute; inset: 0; box-sizing: border-box; margin: 0; padding: 16px 20px;
-  border: none; outline: none; resize: none; background: transparent; color: transparent; caret-color: var(--text);
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.6; tab-size: 2;
-  white-space: pre-wrap; overflow-wrap: break-word;
-}
-.wk-ed-ta::selection { background: color-mix(in srgb, var(--text) 24%, transparent); }
-.wk-ed-hl .hl-kw { color: #8b5cf6; }
-.wk-ed-hl .hl-str { color: #16a34a; }
-.wk-ed-hl .hl-num { color: #d97706; }
-.wk-ed-hl .hl-com { color: var(--text-3); }
-.wk-ed-hl .hl-h { color: #3b82f6; }
-.wk-ed-hl .hl-b { color: #db2777; }
-.wk-ed-hl .hl-i { color: #0891b2; }
-.wk-ed-hl .hl-code { color: #ea580c; }
-.wk-ed-hl .hl-link { color: #2563eb; text-decoration: underline; }
-.wk-ed-hl .hl-quote { color: var(--text-3); }
-.wk-ed-hl .hl-li { color: #ea580c; }
-.wk-ed-hl .hl-hr { color: var(--text-3); }
-/* 夜晚模式：暗底上重调一组高亮色——提亮低对比的绿/橙/蓝，紫/粉/青保持同一色相家族 */
-html[data-theme="dark"] .wk-ed-hl .hl-kw { color: #a78bfa; }
-html[data-theme="dark"] .wk-ed-hl .hl-str { color: #4ade80; }
-html[data-theme="dark"] .wk-ed-hl .hl-num { color: #fbbf24; }
-html[data-theme="dark"] .wk-ed-hl .hl-h { color: #60a5fa; }
-html[data-theme="dark"] .wk-ed-hl .hl-b { color: #f472b6; }
-html[data-theme="dark"] .wk-ed-hl .hl-i { color: #22d3ee; }
-html[data-theme="dark"] .wk-ed-hl .hl-code { color: #fb923c; }
-html[data-theme="dark"] .wk-ed-hl .hl-link { color: #60a5fa; }
-html[data-theme="dark"] .wk-ed-hl .hl-li { color: #fb923c; }
 
 /* 手机端（≤720px）：grid 三列不成立 → 退化为单列 flex（顶栏 + 下沉格），预览列与分界条不出
    （开关状态照常持久化，回宽屏即恢复）。tab 切换天然覆盖「点文件看内容」的场景。 */

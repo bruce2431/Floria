@@ -48,7 +48,7 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽
   function saveWork() {
     stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkEdit: !!state.wkEdit })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH })
   }
   function loadWork() {
     try {
@@ -73,7 +73,6 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
       if (typeof d.wkPvTab === 'string') state.wkPvTab = d.wkPvTab
       if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
       if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
-      if (typeof d.wkEdit === 'boolean') state.wkEdit = d.wkEdit
     } catch { /* 忽略 */ }
   }
 

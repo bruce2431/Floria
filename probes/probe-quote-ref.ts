@@ -9,7 +9,8 @@
  *  - chip 类名复用：引用 chip 必须是 `.mention`（× 删除与退格删除由 ctx-meter.js 的既有委托按此类处理）；
  *  - 令牌互斥：QUOTE_REF_RE 只认「引用」，MENTION_PATH_RE 只认「目录|文件」，两者不得互相吞；
  *  - 回显成对：renderUserText（乐观态）与 mdInline（落盘态）两个入口都要接 QUOTE_REF_RE；
- *  - 行号唯一来源 = DOM：编辑区纯文本走 Range 字符偏移、markdown 预览走渲染期落下的 data-l 行锚
+ *  - 行号唯一来源 = 编辑器/DOM：非 md 编辑区纯文本走 Range 字符偏移、markdown 预览走 data-l 行锚；
+ *    md 编辑区（CodeMirror 6 Live Preview）走编辑器文档 posAtDOM 反查源行号（wkEdQuoteLines）
  *    （**不得**拿渲染后的选中文本回查原文——格式符已丢，跨格式符边界必然找不到）；
  *  - 引用原文块只给模型看：回复/PDF 两族原文包在令牌块里，三个渲染入口渲染前必须剥块（气泡里只剩胶囊）；
  *  - PDF 引用（第三族）：位置 = 路径 + 页码，原文同样进消息；QUOTE_PDF_RE 与 QUOTE_REF_RE /
@@ -349,37 +350,26 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
   else bad('网关侧字段校验缺失')
 }
 
-// ---- 5. 编辑区行号唯一来源 = DOM 行锚（渲染期落 data-l）----
-// 反例（已根治）：拿「渲染后的选中文本」回查 markdown 原文——渲染把 `**`/`` ` ``/链接等格式符丢了，
-// 选中一旦跨在格式符边界上（如「收尾必做清单：」对 `**收尾必做清单**：`）indexOf 必然 -1 ⇒ 行号丢失。
-// 注：v3.17.0 起 work 编辑区引入源码编辑，wkEdText 转为 textarea 缓冲真源（合法状态源）；
-// 行锚不变量收敛为「markdown 预览渲染必传 'data-l'」——quote.js 侧仍不读 wkEdText（见 §4）。
+// ---- 5. 编辑区行号唯一来源 = CodeMirror 文档（所有可编辑文本文件统一编辑器）----
+// 反例（已根治）：拿「渲染后的选中文本」回查原文——渲染把 `**`/`` ` ``/链接等格式符丢了，
+// 选中一旦跨在格式符边界上 indexOf 必然 -1 ⇒ 行号丢失。
+// 2026-10-07：编辑区统一为 CodeMirror 6（md 走 Live Preview、其余按扩展名高亮），行号不再来自渲染期
+// data-l 行锚或纯文本字符偏移，而由编辑器文档经 posAtDOM 反查（work.js wkEdQuoteLines）。
 const work = read(resolve(SRC, 'sidebar/work.js'))
-if (/mdHtml\([A-Za-z_$][\w$]*,\s*'data-l'\)/.test(work)) ok("work.js 渲染 markdown 预览时传行锚（mdHtml(<src>, 'data-l')）")
-else bad('work.js 的 markdown 预览未落行锚')
-if (/\[data-l\]|querySelector\('pre\.wk-code'\)/.test(q) && /QUOTE_LINE_ATTR = 'data-l'/.test(q)) ok('quote.js 行锚常量与纯文本偏移两条路径并存')
-else bad('quote.js 未按 data-l 取行')
-if (/function quoteLineOf\(/.test(q) && /quoteLineOf\(range\.startContainer\)/.test(q)) ok('quote.js 由选区容器向上取行锚（quoteLineOf）')
-else bad('quote.js 缺 quoteLineOf —— 选区 → 行号链断开')
-if (/const a = quoteLineOf/.test(q) && /Math\.min\(a, b\)/.test(q)) ok('选区首尾两行归一（min/max），跨行选中也不会倒挂')
-else bad('quote.js 未对选区首尾行归一')
-// markdown.js：lineAttr 为可选第二参数，默认不带锚（会话消息渲染不受影响）
-if (/function mdHtml\(src, lineAttr\)/.test(md) && /const la = \(n\) => \(lineAttr/.test(md)) ok('mdHtml 第二参数 = 行锚属性名（不传 = 现状）')
-else bad('mdHtml 未接 lineAttr —— 行锚无处落')
-for (const [name, re] of [
-  ['标题 h1-h4', /<h\$\{h\[1\]\.length\}\$\{la\(i \+ 1\)\}>/],
-  ['引用块 blockquote', /<blockquote\$\{la\(i \+ 1\)\}>/],
-  ['列表项 li', /<li\$\{la\(i \+ 1\)\}>/],
-  ['分隔线 hr', /<hr\$\{la\(i \+ 1\)\}>/],
-  ['表格行 tr', /<tr\$\{la\(i \+ 1\)\}>/],
-  ['段落逐行 span', /para\.push\(lw\(i \+ 1,/],
-  ['代码块逐行 span', /codeBuf\.map\(\(l, k\) => lw\(codeNums\[k\], l\)\)/],
-] as [string, RegExp][]) {
-  if (re.test(md)) ok(`行锚覆盖${name}`)
-  else bad(`行锚缺${name}（该处选中取不到行号）`)
-}
-if (/codeNums\.push\(i \+ 1\)/.test(md)) ok('代码块记源行号（codeNums）')
-else bad('代码块未记源行号 —— 围栏内选中取不到行')
+if (/function wkEdQuoteLines\(range\)/.test(work) && /posAtDOM\(/.test(work) && /lineAt\(/.test(work)) ok('work.js：选区行号 = CodeMirror posAtDOM → 源行号（wkEdQuoteLines）')
+else bad('work.js 缺 wkEdQuoteLines —— 选区 → 行号链断开')
+if (!/mdHtml\([^)]*data-l/.test(work)) ok('work.js 不再经 mdHtml 落行锚（编辑区已改 CodeMirror）')
+else bad('work.js 仍在 mdHtml 传行锚 —— 旧渲染路径未清')
+if (/function mdHtml\(src\)/.test(md)) ok('mdHtml 已收单参（lineAttr 行锚子系统移除）')
+else bad('mdHtml 仍带 lineAttr —— 旧行锚子系统未清')
+if (!/data-l0|const la = \(n\)|const lr = \(a, b\)|para\.push\(lw\(|codeNums/.test(md)) ok('markdown.js 无 la/lr/lw/行锚残留')
+else bad('markdown.js 仍留行锚 la/lr/lw/codeNums')
+if (/wkEdQuoteLines\(range\)/.test(q)) ok('quote.js 调 wkEdQuoteLines（同一 IIFE 作用域按名调用）')
+else bad('quote.js 未接 wkEdQuoteLines —— 编辑区引用取不到行号')
+if (/body\.querySelector\('\.wk-ed-cm'\)/.test(q)) ok('quote.js 编辑器分支以 .wk-ed-cm 判定（CodeMirror 宿主在场）')
+else bad('quote.js 未以 .wk-ed-cm 判定编辑器分支')
+if (!/QUOTE_LINE_ATTR|quoteLineOf|pre\.wk-code|data-l0|\bdata-l\b/.test(q)) ok('quote.js 已删 DOM 行锚 / 纯文本偏移旧路径（编辑器唯一来源）')
+else bad('quote.js 仍留 DOM 行锚 / 纯文本偏移旧路径')
 if (!/indexOf\(text\)/.test(q)) ok('quote.js 已删「渲染文本回查原文」的启发式')
 else bad('quote.js 仍在用 indexOf 回查原文（跨格式符必失败）')
 
@@ -450,24 +440,13 @@ if (existsSync(APP)) {
     const fn = new Function('esc', 'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE', 'QUOTE_PDF_RE', 'mentionChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'quotePdfChipHtml', `${body}\nreturn mdHtml`)
     const render = fn(escStub, never, never, never, never, QREPLY || never, QPDF || never, (k: string, v: string) => v, (p: string) => p, replyChip || ((p: string) => p), pdfChip || ((p: string) => p)) as (s: string, a?: string) => string
     const src = '# 标题\n\n**加粗**：正文\n第二行\n\n- 项一\n- 项二\n\n```\ncode1\ncode2\n```\n'
-    html = render(src, 'data-l')
-    const want = [
-      [3, '<span data-l="3">'],      // 段落首行（含加粗）
-      [4, '<span data-l="4">'],      // 段落次行
-      [1, '<h1 data-l="1">'],
-      [6, '<li data-l="6">'],
-      [10, '<span data-l="10">'],    // 代码块首行
-      [11, '<span data-l="11">'],
-    ] as [number, string][]
+    html = render(src)
+    if (!/data-l/.test(html)) ok('mdHtml 输出零行锚（行锚子系统已随 CodeMirror 改造移除）')
+    else bad('mdHtml 仍落 data-l —— 旧行锚子系统未清')
+    const frags = ['<h1>标题</h1>', '<strong>加粗</strong>', '<li>项一</li>', '<div class="code-block">', '<pre><code>code1']
     let okAll = true
-    for (const [n, frag] of want) if (!html.includes(frag)) { okAll = false; bad(`行锚缺失：第 ${n} 行未落 ${frag}`) }
-    if (okAll) ok('行锚落点逐一对应源行号（段落逐行 / 标题 / 列表 / 代码块）')
-    // 回归靶：渲染文本「加粗：」跨在 `**` 边界上 —— 旧法（回查原文）必 -1，行锚法必得 3
-    if (src.indexOf('加粗：') === -1) ok('回归靶成立：`**加粗**：` 的渲染文本回查原文为 -1（旧法必丢行号）')
-    else bad('回归靶失效：该文本竟能回查到原文（用例需更新）')
-    const m = html.match(/<span data-l="(\d+)">(?:(?!<span data-l)[\s\S])*?加粗/)
-    if (m && m[1] === '3') ok('同一选区经行锚取到第 3 行（新法闭环）')
-    else bad(`行锚未覆盖该段落文本：${m ? m[1] : '未命中'}`)
+    for (const f of frags) if (!html.includes(f)) { okAll = false; bad(`mdHtml 未渲染 ${f}`) }
+    if (okAll) ok('mdHtml 结构渲染完好（标题/加粗/列表/代码块）')
     // 回复引用全链：真身 refToken 出「锚点 + 原文块」→ stripQuoteReplyBody 剥块 → 渲染成胶囊。
     // 气泡里既不得有原文，也不得裸露令牌（用户实报「为什么文本信息也在气泡里」）。
     const wrapped = '[@引用回复:12|引用文本功能]\n原文一句\n原文二句\n[/引用回复]'
@@ -492,17 +471,6 @@ if (existsSync(APP)) {
     else bad('PDF 令牌裸露在消息里（渲染入口漏接？）')
   } catch (e) {
     bad(`mdHtml 真身调用失败：${(e as Error).message}`)
-  }
-  // 不传 lineAttr = 现状（会话消息渲染不得带锚）
-  try {
-    const body = md.replace(/^import .*$/gm, '').replace(/^export \{[\s\S]*?^\}$/m, '')
-    // eslint-disable-next-line no-new-func
-    const fn = new Function('esc', 'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE', 'QUOTE_PDF_RE', 'mentionChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'quotePdfChipHtml', `${body}\nreturn mdHtml`)
-    const render = fn(escStub, never, never, never, never, QREPLY || never, QPDF || never, (k: string, v: string) => v, (p: string) => p, replyChip || ((p: string) => p), pdfChip || ((p: string) => p)) as (s: string, a?: string) => string
-    if (!render('# 标题\n\n正文\n').includes('data-l')) ok('不传 lineAttr 时零行锚（会话消息渲染不受影响）')
-    else bad('默认渲染带上了行锚 —— 泄漏到会话消息')
-  } catch (e) {
-    bad(`mdHtml 默认路径调用失败：${(e as Error).message}`)
   }
 }
 

@@ -9,7 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { resolveWithinRoot } from '../src/gateway/localGateway.js'
+import { resolveWithinRoot, sniffBinary } from '../src/gateway/localGateway.js'
 
 const root = join(import.meta.dir, '..')
 const gw = readFileSync(join(root, 'src/gateway/localGateway.ts'), 'utf8')
@@ -52,6 +52,19 @@ ok('只读（无 writeFileSync/mkdirSync/rmSync）', !/writeFileSync|mkdirSync|r
 ok('复用 listOneLevel（不另立排除表）', /listOneLevel\(qAbs\)/.test(fsBranch))
 ok('越界 → 403', /if \(!qAbs\) \{\s*sendJson\(res, 403/.test(fsBranch))
 ok('非目录 → 404', /'not a directory'/.test(fsBranch))
+
+// /gateway/file 的文本嗅探（MIME 未覆盖扩展名的兜底分类）：源码/TeX 等文本不得被判二进制
+ok('纯 ASCII 文本 → 非二进制', sniffBinary(Buffer.from('\\documentclass{article}\\n')) === false)
+ok('UTF-8 中文文本 → 非二进制', sniffBinary(Buffer.from('公式 $E=mc^2$ 注释 % x\\n', 'utf8')) === false)
+ok('含 NUL 字节 → 二进制', sniffBinary(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x41])) === true)
+{
+  const big = Buffer.concat([Buffer.from('x'.repeat(9000)), Buffer.from([0x00])])
+  ok('NUL 只在 8 KB 之后 → 判文本（同 git 启发式）', sniffBinary(big) === false)
+}
+{
+  const nul = Buffer.concat([Buffer.from('abc'), Buffer.from([0x00]), Buffer.from('def')])
+  ok('前 8 KB 内 NUL → 二进制', sniffBinary(nul) === true)
+}
 
 console.log(`\n${pass}/${pass + fail}`)
 if (fail) process.exit(1)

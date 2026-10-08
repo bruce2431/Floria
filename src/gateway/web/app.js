@@ -5979,18 +5979,18 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEdView.dispatch({ effects: wkEdLangComp.reconfigure(wkEdLangExt(path)) })
   }
 
-  // 本项目主题：用项目 CSS 变量（--text/--bg/--mono/--accent），日夜切换自动随动（不重建）。
+  // 本项目主题：用项目 CSS 变量（--text/--bg/--mono），日夜切换自动随动（不重建）。
   function wkEdThemeSpec(CM) {
     return CM.EditorView.theme({
       '&': { fontSize: '12.5px', lineHeight: '1.6', color: 'var(--text)', backgroundColor: 'transparent', margin: '0' },
       '&.cm-editor': { height: '100%' },
       '.cm-scroller': { fontFamily: 'var(--mono)', overflow: 'auto' },
-      '.cm-content': { fontFamily: 'var(--mono)', padding: '16px 20px', caretColor: 'var(--accent)' },
+      '.cm-content': { fontFamily: 'var(--mono)', padding: '16px 20px', caretColor: 'var(--text)' },
       '.cm-line': { padding: '0' },
       '&.cm-focused': { outline: 'none' },
-      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--text)' },
       '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
-        backgroundColor: 'color-mix(in srgb, var(--accent) 25%, transparent)',
+        backgroundColor: 'color-mix(in srgb, var(--text) 24%, transparent)',
       },
     })
   }

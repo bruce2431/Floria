@@ -194,6 +194,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **跨模块可变状态 = SETTERS 机制**：14 个跨模块写入的 let（`ALL`/`connUp`/`gateAwait`/`gateVerified`/`sessionCwd`/`takeover`/`turnLive`/`btnMode`/`MODEL_CUR`/`modelUserPicked`/`pendingUserMsgs`/`firstSendHash`/`lastNavHash`/`approvalPending`）在定义模块尾生成 `export function setX(v){X=v}`，写入方一律调 setter（import 绑定不可赋值=ESM 硬约束）；读跨模块符号走 import（函数级循环 import 安全：hoisting + live binding）。
 
 **分层 / 卡边界校验（探针锚点）**：`scripts/check-layering.ts`——按 core(0)→engine(1)→feature(2)→views(3)→app(4) 五层扫 web-src 静态 import 图，报三类违规：成环（Tarjan SCC）/ 逆向依赖（低层 import 高层）/ **卡边界**（`views/cards/<name>/` 的卡组件不得互相 import，同卡目录内部除外——卡只能依赖 Shared Kernel `core/*` 与 registry 契约）。`--strict` 有任一违规 exit 1，`--graph` 出依赖图摘要（每模块 in/out 度 / 层级分布 / 按层聚合边数）。
+**违规基线（`BASELINE` 表，键 `"from → to"`）**：跨层依赖经人工评审后分两档登记——`kind='例外'`（合理跨层依赖：共享原语/契约，永不计入违规）、`kind='待治理'`（已知跨层依赖，修法＝契约下沉/接口化、无行为变更，已排期、不阻塞 `--strict`）；**未登记在 BASELINE 的跨层依赖才算「真违规」**，`--strict` 仅对真违规（未声明的成环/逆向/卡边界）exit 1。声明但未命中任何违规的条目会告警（防基线腐化：边修好/改名后须同步删除）。
 
 ## 13. 排队消息催办：点击排队气泡打断当前思考
 

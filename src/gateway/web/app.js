@@ -5394,7 +5394,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
 
-  // 顶栏 tab 条（唯一渲染口）：[+] [聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
+  // 顶栏 tab 条（唯一渲染口）：[聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
   // 命名用会话标题（空对话 = 「新对话」）；active = 当前路由命中项（wkActiveKey），与下沉区显示同源
   // （wkShownTab，点浮起后胶囊自然熄、文件 pill 亮）。文件 pill 不变。× 关 tab 由点击委托处理。
   function renderTopbar() {
@@ -6524,10 +6524,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       const b = $(id)
       if (b) b.addEventListener('click', fn)
     }
-    bindIco('wk-assist-slim', () => setAssistMode('slim'))
-    bindIco('wk-assist-float', () => setAssistMode('float'))
-    bindIco('wk-assist-dock', () => setAssistMode('side'))
-    bindIco('wk-assist-close', () => setPane('assist', false))
     bindIco('wk-assist-pill', () => setAssistMode('float'))
     bindAssistGrip()
     // 主区尺寸变化 → 重锚悬浮卡：ResizeObserver 一把覆盖分界条拖拽、侧栏开合、窗口缩放、栏开关
@@ -6544,7 +6540,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     window.addEventListener('resize', positionMsThumb)
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
-    $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
     // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按页态写（预览态 = 插件图标 + 「工具栏」，工具态 = ✕ +
     // 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
     // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
@@ -6569,8 +6564,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       refreshMarks: cmtApplyMarks,
     })
     cmtMount()
-    // 下沉区顶栏 tab：[+] = 新建聊天；两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
-    $('wk-tb-new').addEventListener('click', () => newWorkChat())
+    // 顶栏两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
     $('wk-tb-tool').addEventListener('click', () => toggleToolbar())
     // 右栏工具 tab 条：唯一切换口 = setPvTab（渲染 + 内容补挂 + 持久化都在其内）。tab 条由
     // work-tools.js 的 renderWkToolTabs 重渲 → 事件必须委托在容器上（逐钮绑定会被下次重渲抹掉）。

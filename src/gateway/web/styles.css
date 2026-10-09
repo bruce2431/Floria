@@ -2491,6 +2491,21 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > .wk-topbar {
   margin: 2px 2px 0;
 }
+/* 上半区渐隐板（2026-10-09，镜像 #composer-mask）：贴在**内容格顶部**（标签页 tab 条正下方），
+   使卡内内容滚到顶栏下沿时自然淡出。底栏板贴卡底、本板贴卡顶——方向镜像。
+   高度定 18px：前 9px 实心盖住卡顶 padding，其下 9px 为渐隐区。
+   底色用 --sunken-bg（模式色钩子，work=--plane / chat=白卡），0 端走 color-mix 保色相避免发灰。
+   仅正常靠栏态（排除浮卡/收敛——那两态卡自身有白底/透明壳，色源不同）；
+   z-index:3 高过消息流、低于 #char(4)/#input-wrap(5)；卡自带 overflow:hidden 故板裁在卡内；
+   pointer-events:none 不挡交互。 */
+#chat-area.work > #session-card:not(.wk-assist-float):not(.wk-assist-slim)::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 18px;
+  background: linear-gradient(180deg,
+    var(--sunken-bg) 0,
+    var(--sunken-bg) 9px,
+    color-mix(in srgb, var(--sunken-bg) 0%, transparent) 18px);
+  pointer-events: none; z-index: 3;
+}
 #chat-area.work > .work-gutter { grid-column: 2; grid-row: 1 / span 2; }
 #chat-area.work > #work-preview { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
 
@@ -2514,7 +2529,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   border-radius: 0;
 }
 
-/* 下沉区顶栏 tab 条：[+] [聊天] [文件名]。透明条，pill 自绘（参考 Prism：透明底 + 描边 active）。 */
+/* 下沉区顶栏 tab 条：[聊天] [文件名]。透明条，pill 自绘（参考 Prism：透明底 + 描边 active）。 */
 .wk-topbar { display: none; align-items: center; gap: 6px; padding: 6px 10px 2px; min-width: 0; }
 #chat-area.work > .wk-topbar { display: flex; }
 .wk-tb-tabs { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
@@ -2528,7 +2543,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* 聊天胶囊右端的关闭钮（×）：只从顶栏移除该 tab，不删会话。 */
 .wk-tb-x { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: -5px; border-radius: 4px; color: var(--text-3); font-size: 15px; line-height: 1; }
 .wk-tb-x:hover { background: var(--border); color: var(--text); }
-#wk-tb-new { flex: none; }
 
 /* 分界条：拖动改预览列宽（work.js bindGutter）；.on 由 applyWorkCols 判定（预览在场）。
    缝本身占 7px，视觉线是 ::before（hover / 拖拽中显形）。 */
@@ -2614,16 +2628,8 @@ body.wk-resizing { cursor: col-resize; user-select: none; }
    同一张 #session-card 的三个形态，靠类切换 + 内联几何，**绝不搬 DOM**（卡里挂着模块级 const 的
    messagesEl / inputWrap / charEl 单例，搬走会丢消息流与输入草稿）。状态类落在卡上、work 门控落在
    #chat-area 上，故形态切换的可见性全由这两处类决定（无第二份 JS 显隐）：
-     side（靠栏，现状）/ .wk-assist-float（悬浮卡，脱流）/ .wk-assist-slim（收敛输入栏） */
-.wk-assist-head { display: none; position: relative; z-index: 2; flex: none; height: 40px; align-items: center; justify-content: space-between; padding: 0 8px 0 15px; border-bottom: 1px solid var(--border-soft); }
-#chat-area.work #session-card:not(.wk-assist-slim) > .wk-assist-head { display: flex; }
-.wk-assist-title { font-size: 13px; font-weight: 600; letter-spacing: 0.5px; color: var(--text-2); }
-.wk-assist-acts { display: flex; gap: 2px; }
-/* 三态按钮逐态露出：默认全藏，靠态只给「浮起」，悬浮态给「收成输入栏 / 靠回栏」；关掉恒在 */
-#wk-assist-slim, #wk-assist-dock, #wk-assist-float { display: none; }
-#session-card.wk-assist-float #wk-assist-slim,
-#session-card.wk-assist-float #wk-assist-dock { display: inline-flex; }
-#chat-area.work #session-card:not(.wk-assist-float) #wk-assist-float { display: inline-flex; }
+     side（靠栏，现状）/ .wk-assist-float（悬浮卡，脱流）/ .wk-assist-slim（收敛输入栏）。
+     助手头部（.wk-assist-head，三态切换入口）已移除：形态不再有 UI 切换口，恒为 side。 */
 /* 高度把手：只有悬浮态露出（宽由锚栏宽给定，故只 ns 方向可拖）；touch-action:none 让触屏拖拽
    不被滚动手势抢走（iPad 上必须能用） */
 .wk-assist-grip { display: none; position: absolute; left: 0; top: 0; width: 14px; height: 14px; cursor: ns-resize; touch-action: none; }
@@ -2651,7 +2657,6 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   margin: 0; min-width: 0; height: auto;
   background: transparent; border: none; box-shadow: none; overflow: visible;
 }
-#session-card.wk-assist-slim > .wk-assist-head,
 #session-card.wk-assist-slim > .wk-assist-grip,
 #session-card.wk-assist-slim > #char,
 #session-card.wk-assist-slim > #chat-scroll,
@@ -2685,10 +2690,12 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-cm { height: 100%; }
 .wk-ed-cm .cm-editor { height: 100%; background: transparent; }
 .wk-ed-cm .cm-scroller { font-family: var(--mono); }
+/* 标题/加粗/斜体：库内主题给的是 hsl(var(--foreground, 220 9% 9%))——本项目不定义 --foreground ⇒ 回落近黑，
+   暗色下不可读。统一回到正文色，只留字重/字形区分（见下方「Live Preview 主题兜底」）。 */
 #work-editor .cm-header-1 { font-size: 17px; color: var(--text); }
-#work-editor .cm-header-2 { font-size: 16px; }
-#work-editor .cm-header-3 { font-size: 15px; }
-#work-editor .cm-header-4, #work-editor .cm-header-5, #work-editor .cm-header-6 { font-size: 14px; }
+#work-editor .cm-header-2 { font-size: 16px; color: var(--text); }
+#work-editor .cm-header-3 { font-size: 15px; color: var(--text); }
+#work-editor .cm-header-4, #work-editor .cm-header-5, #work-editor .cm-header-6 { font-size: 14px; color: var(--text); }
 /* 水平分隔线（web-src/sidebar/work.js wkEdHrPlugin）：未落光标 = 该行画一条横线 + 藏掉 `---` 字符；
    光标进入该行/拖选中 = 不加装饰、`---` 原样可编辑。横线绝对定位在该行竖直中线，行高不变。 */
 #work-editor .cm-line.wk-ed-hr { position: relative; }
@@ -2718,6 +2725,33 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 }
 #work-editor .cm-codeblock-copy { top: 6px; right: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
 #work-editor .cm-codeblock-copy:hover { background: var(--hover); }
+/* Live Preview（vendor 库 live-markdown.js）主题兜底（2026-10-09 根修）：库内置主题的颜色一律写
+   hsl(var(--x, <浅色回落>))，而本项目从不定义 --muted/--foreground/--primary/--background/--md-*
+   （令牌全为十六进制、名字也不同）⇒ 库的**浅色回落值全部生效** = 硬编码浅色主题 ⇒ 黑夜模式白底白字 /
+   深底深字不可读（实报：md 预览行内代码 = 浅灰底白字）。与上方表格/代码块 widget 的兜底同源，
+   此处集中一层按项目令牌覆写库类、日夜随动——勿再分散到各处。 */
+#work-editor .cm-content { caretColor: var(--blue); }
+#work-editor .cm-placeholder { color: var(--text-3); }
+#work-editor .cm-strong, #work-editor .cm-emphasis { color: var(--text); }
+#work-editor .cm-strikethrough { color: var(--text-3); }
+/* 行内代码：库底 hsl(--muted 回落 220 14% 96%)=浅灰 ⇒ 白底白字。改与聊天区行内代码同源（--border-soft）。 */
+#work-editor .cm-code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); }
+/* 链接（含 wikilink / 悬浮卡）：库用 --primary 回落（蓝），改项目蓝令牌，与整体配色一致 */
+#work-editor .cm-link, #work-editor .cm-wikilink,
+#work-editor .cm-link-widget, #work-editor .cm-wikilink-widget { color: var(--blue); }
+/* 格式化标记（** ` # 等）与围栏标记：库用 --muted-foreground 回落 */
+#work-editor .cm-formatting-inline, #work-editor .cm-formatting-block,
+#work-editor .cm-codeblock-fence { color: var(--text-3); }
+/* 图片占位 / 信息 / 错误 */
+#work-editor .cm-image-loading, #work-editor .cm-image-info { background: var(--field-2); color: var(--text-3); }
+#work-editor .cm-image-alt { color: var(--text-3); }
+#work-editor .cm-image-spinner { border-color: color-mix(in srgb, var(--text-3) 30%, transparent); border-top-color: var(--text-3); }
+#work-editor .cm-image-error { background: var(--danger-soft); color: var(--danger-fg); }
+/* 表格 toggle 钮 / 链接悬浮卡 / 数学面板：库用 --background/--border/--foreground 回落 */
+#work-editor .cm-table-toggle { border-color: var(--border); background: var(--bg); color: var(--text-2); }
+#work-editor .cm-link-preview { background: var(--float-bg); border-color: var(--border); }
+#work-editor .cm-math-preview-panel { border: 1px solid var(--border); }
+#work-editor .cm-math-source { color: var(--text); }
 .wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
 .wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }

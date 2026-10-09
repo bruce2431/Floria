@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=500" />
+  <link rel="stylesheet" href="/styles.css?v=508" />
 </head>
 <body>
 <div id="app">
@@ -179,14 +179,13 @@
          仅已开始的对话（#chat-area.in-session）+ 侧栏折叠（#sidebar 无 .open）+ 宽屏时显示，
          首页新对话不显示；pointer-events:none 不挡交互。
          2026-08-15 临时隐藏中：styles.css #char display:none（代码保留空跑），删除该行即恢复 -->
-    <!-- 下沉区顶栏（2026-10-06）：work 模式主区顶部的 tab 条（参考 Prism）——[+] [聊天] [文件名] [工具栏]。
+    <!-- 下沉区顶栏（2026-10-06）：work 模式主区顶部的 tab 条（参考 Prism）——[聊天] [文件名] [工具栏]。
          同一时刻只有一个内容在场（聊天 tab / 文件 tab），右栏卡（#work-preview）常驻最右、两态切换。
          tab 由 sidebar/work.js 的 renderTopbar 动态渲染进 #wk-tb-tabs；末尾胶囊（#wk-tb-tool，与聊天
          胶囊同 .wk-tb-pill 形）切右栏页态：预览态 = 插件图标 + 「工具栏」（点入工具页），工具态 = ✕ +
          「关闭」（点回预览态）。图标/文字由 work.js 的 applyPvTab 写（不在此预置）。
          grid 放置见 styles.css #chat-area.work。 -->
     <div class="wk-topbar" id="wk-topbar">
-      <button id="wk-tb-new" class="wk-ico" title="新建聊天" aria-label="新建聊天"></button>
       <div class="wk-tb-tabs" id="wk-tb-tabs"></div>
       <button id="wk-tb-tool" class="wk-tb-pill" title="工具栏" aria-label="工具栏"><span class="wk-tb-ico"></span><span class="wk-tb-name">工具栏</span></button>
     </div>
@@ -224,25 +223,6 @@
          承载模块级 const 引用的单例 DOM（messagesEl / inputWrap / charEl），不能随卡销毁重建
          → 常驻此处，离开会话视图只切 hidden。槽里同一时刻恰好一张卡：管理/预览卡由注册表按需创建。 -->
     <section id="session-card" class="view-card session">
-      <!-- 助手头部（work 模式专用，2026-09-27）：三态切换 + 关掉。chat 模式与细条态由 CSS 整体藏起，
-           不参与会话卡原有布局。图标 = 内联 SVG（16px 描线，与顶栏/侧栏 .wk-ico 同一套语言）。 -->
-      <div class="wk-assist-head">
-        <span class="wk-assist-title">助手</span>
-        <span class="wk-assist-acts">
-          <button class="wk-ico" id="wk-assist-slim" title="收成输入栏" aria-label="收成输入栏">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.2 8 10.2 12 6.2"/></svg>
-          </button>
-          <button class="wk-ico" id="wk-assist-dock" title="靠回栏" aria-label="靠回栏">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="2.2"/><path d="M9.9 3v10"/></svg>
-          </button>
-          <button class="wk-ico" id="wk-assist-float" title="浮起" aria-label="浮起">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="5.8" width="8.4" height="8.4" rx="2.2"/><path d="M6.6 1.8h5.4a2.2 2.2 0 0 1 2.2 2.2v5.4"/></svg>
-          </button>
-          <button class="wk-ico" id="wk-assist-close" title="关掉助手" aria-label="关掉助手">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 4.2 11.8 11.8M11.8 4.2 4.2 11.8"/></svg>
-          </button>
-        </span>
-      </div>
       <!-- 悬浮卡高度把手（只在悬浮态露出）：左上角，只改高度——宽恒由锚栏宽给定 -->
       <div class="wk-assist-grip" id="wk-assist-grip" title="拖动调整高度"></div>
       <!-- 收敛态 = 一条输入栏（不是胶囊按钮）：点它弹回悬浮卡。同一张助手卡的第三种形态，无第二套发送链 -->
@@ -386,6 +366,6 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=3"></script>
-<script src="/app.js?v=500"></script>
+<script src="/app.js?v=508"></script>
 </body>
 </html>

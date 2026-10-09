@@ -99,8 +99,16 @@
     if (!wkFrameNeeded()) return // 宿主 pane 工具态 / 栏不在场：预览帧不渲染（切回时 syncPvContent 再调）
     const el = $('wk-pv-body')
     if (!el || !state.workProj) return
+    // 项目清单未就绪（token/设备门未解锁时 loadSessions 早退 ⇒ state.projects 为空）：此刻 hasPreview
+    // 不可信，挂 ③ 默认页会粘住真源。等门后补拉的 ensureWork 再入。
+    if (!wkProjGroups().length) return
     const f = el.querySelector('.preview-frame')
-    if (f && f.dataset.label === state.workProj) return // 同项目已挂：交给 mountPreview 的软重入，不重建
+    if (f && f.dataset.label === state.workProj) {
+      // 同项目已挂：一般交给 mountPreview 的软重入不重建（不重载 = 零导航扰动）；唯一例外是当前帧为
+      // ③ 默认页而项目确有 ② 静态预览 —— 首帧 hasPreview 未知时误挂，须重挂让软重入把 src 校正到真源。
+      const cur = f.getAttribute('src') || ''
+      if (!(cur.includes('/default-preview/') && hasPreviewOf(state.workProj))) return
+    }
     clearWkFrameTools() // 帧换文档：上一份预览页申报的工具 tab 失效（不变量同 rail-ext）
     wkFrameSentId = null
     mountPreview(el, state.workProj, hasPreviewOf(state.workProj))

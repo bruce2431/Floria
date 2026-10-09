@@ -1238,33 +1238,39 @@ body.kb-open #input-wrap { transition: none; }
 .mp-nm { font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 70%; }
 .mp-d { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 
-/* 输入栏内的 @ chip（contenteditable 内联，整体可删除，尾随一个空格） */
+/* 输入栏内的 @ chip（contenteditable 内联，整体可删除，尾随一个空格）
+   2026-10-09 用户定案：去灰色胶囊底、蓝字、字号随输入文本（inherit = #input-bar 16px），图标同蓝同尺寸 */
 .mention {
   display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
-  background: var(--border-soft); border-radius: 999px; padding: 1px 4px 1px 2px;
-  font-size: 13px; line-height: 1.5; color: var(--text); white-space: nowrap;
+  background: transparent; border-radius: 999px; padding: 1px 4px 1px 2px;
+  font-size: inherit; line-height: inherit; color: var(--blue); white-space: nowrap;
   user-select: none; cursor: default;
 }
 .mention .m-ic {
-  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text); font-size: 0;
+  color: var(--blue); font-size: 0;
 }
-.mention .m-ic svg { width: 12px; height: 12px; }
+.mention .m-ic svg { width: 16px; height: 16px; }
 .mention .m-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .mention .m-x { color: var(--text-3); font-size: 13px; line-height: 1; padding: 0 2px; cursor: pointer; border-radius: 50%; }
 .mention .m-x:hover { color: var(--text); background: var(--active); }
 
 /* 选中引用 chip（2026-09-28）：输入栏内 .mention.ref 与消息内 .mention-chip.m-ref 同族观感——
-   透明胶囊 + 细描边 + 文件图标 + 「引用自 <文件名>」（用户定案：第一个是文件 icon）。
+   文件图标 + 「引用自 <文件名>」（用户定案：第一个是文件 icon）。
+   2026-10-09 用户定案：同 .mention 走「隐藏胶囊」——去描边底、蓝字、图标同蓝同尺寸、字号随周边文本。
    路径/会话名过长时内层 .mc-t 省略号收口（inline-flex 直挂文本无法 text-overflow）。 */
-.mention.ref { background: transparent; border: 1px solid var(--border); padding: 1px 6px 1px 4px; gap: 5px; }
-.mention.ref .m-ic { width: 14px; height: 14px; color: var(--text-2); }
-.mention.ref .m-ic svg { width: 12px; height: 12px; }
+.mention.ref { background: transparent; border: none; padding: 1px 4px 1px 2px; gap: 4px; color: var(--blue); }
+.mention.ref .m-ic { width: 16px; height: 16px; color: var(--blue); }
+.mention.ref .m-ic svg { width: 16px; height: 16px; }
 .mention.ref .m-nm { max-width: 220px; }
-.msg .mention-chip.m-ref { gap: 5px; max-width: min(100%, 320px); }
-.msg .mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--text-2); }
-.msg .mention-chip.m-ref .mc-ic svg { width: 12px; height: 12px; }
+.msg .mention-chip.m-ref {
+  background: transparent; border: none; padding: 0; border-radius: 0;
+  font-size: inherit; line-height: inherit; color: var(--blue);
+  gap: 4px; max-width: min(100%, 320px);
+}
+.msg .mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--blue); }
+.msg .mention-chip.m-ref .mc-ic svg { width: 1em; height: 1em; }
 .msg .mention-chip.m-ref .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* 消息气泡里渲染的 @ chip（2026-08-15 19:2x 透明胶囊：去图标/背景/阴影，仅细边圆角轮廓 + 名称文本） */

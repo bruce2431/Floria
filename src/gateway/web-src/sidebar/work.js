@@ -37,7 +37,6 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
-  let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
   let wkLoading = false
   let wkErr = ''
   const wkOpen = new Set() // 已展开目录（项目内相对路径）

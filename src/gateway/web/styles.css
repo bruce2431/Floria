@@ -1676,7 +1676,7 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
 .floria-logo { display: flex; align-items: center; gap: 7px; font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: var(--text); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
 #floria-conn { margin-left: 2px; font-size: 12px; font-weight: 400; letter-spacing: 0.2px; color: var(--text-3); }
 .brand-ico { width: 22px; height: 22px; border-radius: 5px; }
-.panel-actions { display: flex; align-items: center; gap: 2px; }
+.panel-actions { display: flex; align-items: center; gap: 2px; position: relative; }
 .act-btn { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--text-2); }
 .act-btn:hover { background: var(--hover); color: var(--text); }
 .act-btn svg { width: 17px; height: 17px; }
@@ -1930,6 +1930,8 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
 .s-row .s-ico svg { width: 15px; height: 15px; }
 .s-row .st { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .s-row .s-prj { flex: 0 0 auto; font-size: 11px; color: var(--text-3); }
+/* work 模式搜索的两张内容面小标题（会话 / 文件，2026-10-08） */
+.s-sec { padding: 10px 10px 2px; font-size: 11px; color: var(--text-3); }
 .no-hit { padding: 16px; text-align: center; font-size: 13px; color: var(--text-3); }
 
 .hidden { display: none !important; }
@@ -2364,11 +2366,11 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-panel, #work-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #chat-panel[hidden], #work-panel[hidden] { display: none; }
 
-/* work 模式隐藏顶栏「搜索会话」入口：work 侧栏自带 🔍（过滤当前 tab），同为放大镜同屏即重复观感。
-   类由 applySbMode() 落在 #panel 上；chat 模式自动复原。 */
-/* work 模式下侧栏折叠入口并入 #wk-view-pop 的「侧边栏」开关（同一个浮层管三栏），
-   故顶栏只留模式 tab；chat 模式没有该浮层，折叠按钮照旧在顶栏 */
-#panel.work #panel-search, #panel.work #panel-collapse { display: none; }
+/* 顶栏三件套（2026-10-08 定案）：🔍搜索 / 🌙日夜 两模式**完全同一个钮、同一位置**（不按模式分叉）；
+   个性化只在第三槽——chat = #panel-collapse（折叠侧栏），work = #wk-view（视图开关，管右栏预览列与
+   侧栏开合）。两钮常驻 DOM，靠下面两条互斥显隐切换（钩子 = applySbMode 落在 #panel 上的 .work 类）。 */
+#panel.work #panel-collapse { display: none; }
+#panel:not(.work) #wk-view { display: none; }
 
 /* ---------- work 侧栏 ---------- */
 .wk-head { display: flex; align-items: center; gap: 2px; padding: 10px 8px 6px 12px; position: relative; }
@@ -2404,8 +2406,8 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wkn-row { display: block; width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
 .wkn-row:hover { background: var(--hover); }
 
-/* 视图开关浮层（触发器已移到项目行右端，浮层随之落下一行） */
-#wk-view-pop { right: 8px; top: calc(100% - 2px); width: 186px; padding: 8px; }
+/* 视图开关浮层（2026-10-08：触发器随三件套移入顶栏 .panel-actions，浮层改挂它右缘正下方） */
+#wk-view-pop { right: 0; top: calc(100% + 4px); width: 186px; padding: 8px; }
 .wkv-title { font-size: 12px; color: var(--text-3); padding: 2px 6px 6px; }
 .wkv-row { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
 .wkv-row:hover { background: var(--hover); }
@@ -2413,11 +2415,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wkv-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: var(--knob); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); transition: transform 0.15s; }
 .wkv-row.on .wkv-sw { background: var(--blue); }
 .wkv-row.on .wkv-sw::after { transform: translateX(13px); }
-
-.wk-find-row { padding: 0 12px 6px; }
-.wk-find-row[hidden] { display: none; }
-.wk-find-row input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; color: var(--text); background: var(--bg); outline: none; }
-.wk-find-row input:focus { border-color: var(--blue); }
 
 .wk-body { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
 .wk-body::-webkit-scrollbar { width: 8px; }

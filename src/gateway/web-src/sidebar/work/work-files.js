@@ -86,19 +86,14 @@
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
   }
 
-  // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；🔍 的提示词随 tab 走——过滤对象不同，
-  // 写死「过滤文件」会在聊天 tab 里给出错位提示（与 #panel-search 的「两个搜索」定案同源）。
-  // 文件 tab 的加号（新建文件/文件夹）待新建写接口定案后接入，届时同一按钮按 tab 分派。
+  // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
+  // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
     const nb = $('wk-new')
     const isChat = wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
     if (pop && isChat) pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
-    const fb = $('wk-find')
-    if (fb) fb.title = isChat ? '过滤聊天' : '过滤文件'
-    const fi = $('wk-find-input')
-    if (fi) fi.placeholder = isChat ? '过滤聊天…' : '过滤文件…'
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -119,39 +114,25 @@
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
-      const f = wkFilter.trim().toLowerCase()
       const list = state.workProj
-        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj)
-            .sort(sessCmp)
-            .filter((s) => !f || String(s.title || '').toLowerCase().includes(f))
+        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj).sort(sessCmp)
         : []
-      const rows = !state.workProj
-        ? '<div class="wk-empty">先在上方选择一个项目</div>'
-        : list.length
-          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
-          : `<div class="wk-empty">${f ? '没有匹配的聊天' : '该项目还没有聊天'}</div>`
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
-      return rows
+      if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
+      return list.length
+        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
+        : '<div class="wk-empty">该项目还没有聊天</div>'
     }
     if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
     if (wkLoading) return '<div class="wk-empty">加载中…</div>'
     if (wkErr) return `<div class="wk-empty">${esc(wkErr)}</div>`
     if (!wkTree || !wkTree.length) return '<div class="wk-empty">项目内没有可列出的文件</div>'
-    const f = wkFilter.trim().toLowerCase()
-    return wkTreeHtml(wkTree, 0, '', f) || '<div class="wk-empty">没有匹配的文件</div>'
+    return wkTreeHtml(wkTree, 0, '') || '<div class="wk-empty">项目内没有可列出的文件</div>'
   }
 
-  // 目录命中判定：过滤词命中自身或任一子孙即保留（否则目录被过滤掉，里面的命中项也没了）
-  function wkNodeHit(n, f) {
-    if (!f) return true
-    if (String(n.name).toLowerCase().includes(f)) return true
-    return (n.children || []).some((c) => wkNodeHit(c, f))
-  }
-
-  function wkTreeHtml(nodes, depth, prefix, f) {
+  function wkTreeHtml(nodes, depth, prefix) {
     let h = ''
     for (const n of nodes || []) {
-      if (!wkNodeHit(n, f)) continue
       const p = prefix ? `${prefix}/${n.name}` : n.name
       const pad = `padding-left:${8 + depth * 13}px`
       if (n.type === 'dir') {
@@ -160,7 +141,7 @@
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
         h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
-        if (open) h += wkTreeHtml(n.children, depth + 1, p, f)
+        if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
         h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
@@ -206,9 +187,6 @@
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
     wkOpen.clear()
-    wkFilter = ''
-    const fi = $('wk-find-input')
-    if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）

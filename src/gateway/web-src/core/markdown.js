@@ -36,7 +36,7 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     const put = (body, block) => {
       const html = renderMath(body, block)
       if (!html) return null
-      mathStore.push(html)
+      mathStore.push({ html, src: body, block })
       const ph = `\u0002${mathStore.length - 1}\u0002`
       return block ? `\n${ph}\n` : ph
     }
@@ -49,7 +49,20 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     return s.replace(/\u0003(\d+)\u0003/g, (_, i) => masked[+i])
   }
   function restoreMath(s) {
-    return mathStore ? s.replace(MATH_PH, (_, i) => mathStore[+i]) : s
+    return mathStore ? s.replace(MATH_PH, (_, i) => mathStore[+i].html) : s
+  }
+  // data-md 复制用：把公式占位符还原成「$$原始 LaTeX$$」（供 md 源码复制），src 未 esc → 需 esc 一次
+  // 才能安全落进属性。s 本身已是 esc 后文本（mdHtml 行循环里），故整体仍为「esc 一次」口径。
+  function phAttr(s) {
+    return mathStore ? String(s).replace(MATH_PH, (_, i) => {
+      const m = mathStore[+i]
+      return m.block ? '$$' + esc(m.src) + '$$' : '$' + esc(m.src) + '$'
+    }) : String(s)
+  }
+  // 块级原始 md 挂载：raw 必须是 mdHtml 入口 esc 之后的文本（公式占位已由 phAttr 还原）。
+  // 属性值经浏览器 DOM 解析解码一次 → el.dataset.md 即原始 md 文本（esc 与解码互相抵消）。
+  function mdAttr(raw) {
+    return raw ? ` data-md="${phAttr(raw)}"` : ''
   }
 
   function mdInline(s) {
@@ -90,10 +103,12 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     const lines = esc(extractMath(String(src))).split('\n')
     let html = ''
     let para = []
+    let paraRaw = [] // 段落原始行（esc 后），供 data-md 还原 md 源码
     const flushPara = () => {
       if (para.length) {
-        html += `<p>${para.join('<br>')}</p>`
+        html += `<p${mdAttr(paraRaw.join('\n'))}>${para.join('<br>')}</p>`
         para = []
+        paraRaw = []
       }
     }
     let inCode = false, codeLang = '', codeBuf = []
@@ -122,12 +137,13 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     const closeCode = (closed) => {
       if (!inCode) return
       const raw = codeBuf.join('\n')
+      const fence = '```' + codeLang + '\n' + raw + '\n```' // data-md：围栏原文重建
       const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
-        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+        html += `<div class="chart-embed"${mdAttr(fence)}><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
       } else {
-        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += `<div class="code-block"${mdAttr(fence)}><pre><code>${raw}</code></pre>${langTag}</div>`
       }
       codeBuf = []; codeLang = ''; inCode = false
     }
@@ -147,42 +163,130 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (inCode) { codeBuf.push(line); continue }
       // 块级公式占位（extractMath 已渲染成 HTML 存 mathStore）：独占一行 → 输出块级容器
       const mblk = /^\u0002(\d+)\u0002$/.exec(t)
-      if (mblk) { flushPara(); closeList(); html += `<div class="math-block">${mathStore[+mblk[1]]}</div>`; continue }
+      if (mblk) { flushPara(); closeList(); const mm = mathStore[+mblk[1]]; html += `<div class="math-block"${mdAttr('$$' + esc(mm.src) + '$$')}>${mm.html}</div>`; continue }
       const h = /^(#{1,4})\s+(.*)$/.exec(t)
-      if (h) { flushPara(); closeList(); html += `<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`; continue }
+      if (h) { flushPara(); closeList(); html += `<h${h[1].length}${mdAttr(t)}>${mdInline(h[2])}</h${h[1].length}>`; continue }
       if (t.startsWith('&gt;')) {
         flushPara(); closeList()
-        html += `<blockquote>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
+        html += `<blockquote${mdAttr(t)}>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
         continue
       }
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
         continue
       }
-      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += '<hr>'; continue }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${mdAttr(t)}>`; continue }
       if (t.startsWith('|') && lines[i + 1] && isSep(lines[i + 1].trim())) {
         flushPara(); closeList()
-        html += `<div class="md-table"><table><thead><tr>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
+        const tbl = [t]
+        let tHtml = `<table><thead><tr>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
         i += 1
+        tbl.push(lines[i])
         while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
           i += 1
-          html += `<tr>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
+          tbl.push(lines[i])
+          tHtml += `<tr>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
         }
-        html += '</tbody></table></div>'
+        tHtml += '</tbody></table>'
+        html += `<div class="md-table"${mdAttr(tbl.join('\n'))}>${tHtml}</div>`
         continue
       }
-      para.push(mdInline(t))
+      para.push(mdInline(t)); paraRaw.push(t)
     }
     flushPara(); closeCode(false); closeList()
     return html
+  }
+
+  // ---------- data-md 消费：复制方向（2026-10-09） ----------
+  // mdHtml 给每个块级元素挂了 data-md=原始 md 片段（见 mdAttr），复制据此还原 md 源码：
+  //  · messageMd(root)  → root 内全部块级 data-md 按序拼接（复制按钮用，root 传该消息 .body）
+  //  · selectionMd(sel) → 选区整块覆盖的块用原文，块内碎片无一一对应关系返回 null（调用方按纯文本降级）
+  // 全局唯一的 copy 拦截在 inputbar/ctx-meter.js，两函数即其判据来源（不再另起监听，避免双监听互相覆盖）。
+  const COPY_PARA_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'TABLE'])
+  const COPY_LINE_TAGS = new Set(['LI', 'TR', 'UL', 'OL', 'HR'])
+  // 降级文本：textContent 会把相邻块级元素文本直接拼接（<p>a</p><p>b</p> → "ab"、<br> 更被吞），
+  // 故按标签补换行——段落级补空行、列表/表格行补单换行。接受元素/DocumentFragment（nodeType 11）。
+  function copyTextOf(node) {
+    let out = ''
+    const walk = (n) => {
+      if (n.nodeType === 3) { out += n.nodeValue; return }
+      if (n.nodeType === 11) { n.childNodes.forEach(walk); return }
+      if (n.nodeType !== 1) return
+      if (n.tagName === 'BR') { out += '\n'; return }
+      const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
+      if (sep && out && !out.endsWith('\n')) out += sep
+      n.childNodes.forEach(walk)
+      if (sep && out && !out.endsWith('\n')) out += sep
+    }
+    walk(node)
+    return out
+  }
+  // 最外层带 data-md 的块（最近的 data-md 祖先即自身 → 嵌套里的顶层块，父块+子块不重复计）
+  function topDataMd(root) {
+    return Array.from(root.querySelectorAll('[data-md]')).filter((el) => el.closest('[data-md]') === el)
+  }
+  // 块间拼接：同属一个列表的相邻 LI 之间单换行，其余块之间空行（保持 md 分块语义）
+  function joinMdBlocks(els, pick) {
+    const parts = []
+    els.forEach((el) => { const piece = pick(el); if (piece) parts.push({ el, piece }) })
+    let out = ''
+    for (let i = 0; i < parts.length; i++) {
+      if (i) out += (parts[i].el.tagName === 'LI' && parts[i - 1].el.tagName === 'LI') ? '\n' : '\n\n'
+      out += parts[i].piece
+    }
+    return out
+  }
+  function messageMd(root) {
+    return root ? joinMdBlocks(topDataMd(root), (el) => el.dataset.md).trim() : ''
+  }
+  // 块内容的起/止边界点：降到最后一级叶子节点。不能用 selectNodeContents——它把边界放在
+  // 元素层 (el,0)/(el,len)，那两点在内容「外侧」，文本选区的边界永远在内容「内侧」，两者
+  // 比较恒不等 ⇒ 覆盖判定必然失败（整段选中也会被当成碎片降级成渲染文本）。
+  function contentEdges(el) {
+    let a = el
+    let b = el
+    while (a.firstChild) a = a.firstChild
+    while (b.lastChild) b = b.lastChild
+    return [[a, 0], [b, b.nodeType === 3 ? b.nodeValue.length : b.childNodes.length]]
+  }
+  // 某块是否被 range 完整覆盖：range 同时覆盖该块的起、止两个内容边界点即算完整（边界贴合含在内）
+  function isCoveredByRange(range, el) {
+    const [[sn, so], [en, eo]] = contentEdges(el)
+    try {
+      return range.isPointInRange(sn, so) && range.isPointInRange(en, eo)
+    } catch (_) { return false }
+  }
+  // 选区与某块的交集片段（碎片降级文本用）：两端各自向块内容边界收拢，越界/异树异常交回 null
+  function intersectFragment(range, el) {
+    const [[sn, so], [en, eo]] = contentEdges(el)
+    try {
+      const startAfter = range.comparePoint(sn, so) === -1  // 选区起点落于块内容起点之后
+      const endWithin = range.comparePoint(en, eo) !== 1    // 选区终点未越过块内容终点
+      const r = document.createRange()
+      r.setStart(startAfter ? range.startContainer : sn, startAfter ? range.startOffset : so)
+      r.setEnd(endWithin ? en : range.endContainer, endWithin ? eo : range.endOffset)
+      return r.cloneContents()
+    } catch (_) { return null }
+  }
+  function selectionMd(sel) {
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
+    const range = sel.getRangeAt(0)
+    const els = topDataMd(document).filter((el) => range.intersectsNode(el))
+    if (!els.length) return null
+    const text = joinMdBlocks(els, (el) => {
+      if (isCoveredByRange(range, el)) return el.dataset.md
+      const frag = intersectFragment(range, el)
+      return frag ? copyTextOf(frag) : ''
+    }).trim()
+    return text || null
   }
 
   function relTime(ms) {
@@ -204,6 +308,8 @@ export {
   MD_MONO,
   mdHtml,
   mdInline,
+  messageMd,
   relTime,
+  selectionMd,
   setImageSrcResolver,
 }

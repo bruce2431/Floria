@@ -392,7 +392,7 @@ function setConnUp(v) { connUp = v }
     const put = (body, block) => {
       const html = renderMath(body, block)
       if (!html) return null
-      mathStore.push(html)
+      mathStore.push({ html, src: body, block })
       const ph = `\u0002${mathStore.length - 1}\u0002`
       return block ? `\n${ph}\n` : ph
     }
@@ -405,7 +405,20 @@ function setConnUp(v) { connUp = v }
     return s.replace(/\u0003(\d+)\u0003/g, (_, i) => masked[+i])
   }
   function restoreMath(s) {
-    return mathStore ? s.replace(MATH_PH, (_, i) => mathStore[+i]) : s
+    return mathStore ? s.replace(MATH_PH, (_, i) => mathStore[+i].html) : s
+  }
+  // data-md 复制用：把公式占位符还原成「$$原始 LaTeX$$」（供 md 源码复制），src 未 esc → 需 esc 一次
+  // 才能安全落进属性。s 本身已是 esc 后文本（mdHtml 行循环里），故整体仍为「esc 一次」口径。
+  function phAttr(s) {
+    return mathStore ? String(s).replace(MATH_PH, (_, i) => {
+      const m = mathStore[+i]
+      return m.block ? '$$' + esc(m.src) + '$$' : '$' + esc(m.src) + '$'
+    }) : String(s)
+  }
+  // 块级原始 md 挂载：raw 必须是 mdHtml 入口 esc 之后的文本（公式占位已由 phAttr 还原）。
+  // 属性值经浏览器 DOM 解析解码一次 → el.dataset.md 即原始 md 文本（esc 与解码互相抵消）。
+  function mdAttr(raw) {
+    return raw ? ` data-md="${phAttr(raw)}"` : ''
   }
 
   function mdInline(s) {
@@ -446,10 +459,12 @@ function setConnUp(v) { connUp = v }
     const lines = esc(extractMath(String(src))).split('\n')
     let html = ''
     let para = []
+    let paraRaw = [] // 段落原始行（esc 后），供 data-md 还原 md 源码
     const flushPara = () => {
       if (para.length) {
-        html += `<p>${para.join('<br>')}</p>`
+        html += `<p${mdAttr(paraRaw.join('\n'))}>${para.join('<br>')}</p>`
         para = []
+        paraRaw = []
       }
     }
     let inCode = false, codeLang = '', codeBuf = []
@@ -478,12 +493,13 @@ function setConnUp(v) { connUp = v }
     const closeCode = (closed) => {
       if (!inCode) return
       const raw = codeBuf.join('\n')
+      const fence = '```' + codeLang + '\n' + raw + '\n```' // data-md：围栏原文重建
       const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
-        html += `<div class="chart-embed"><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+        html += `<div class="chart-embed"${mdAttr(fence)}><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
       } else {
-        html += `<div class="code-block"><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += `<div class="code-block"${mdAttr(fence)}><pre><code>${raw}</code></pre>${langTag}</div>`
       }
       codeBuf = []; codeLang = ''; inCode = false
     }
@@ -503,42 +519,130 @@ function setConnUp(v) { connUp = v }
       if (inCode) { codeBuf.push(line); continue }
       // 块级公式占位（extractMath 已渲染成 HTML 存 mathStore）：独占一行 → 输出块级容器
       const mblk = /^\u0002(\d+)\u0002$/.exec(t)
-      if (mblk) { flushPara(); closeList(); html += `<div class="math-block">${mathStore[+mblk[1]]}</div>`; continue }
+      if (mblk) { flushPara(); closeList(); const mm = mathStore[+mblk[1]]; html += `<div class="math-block"${mdAttr('$$' + esc(mm.src) + '$$')}>${mm.html}</div>`; continue }
       const h = /^(#{1,4})\s+(.*)$/.exec(t)
-      if (h) { flushPara(); closeList(); html += `<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`; continue }
+      if (h) { flushPara(); closeList(); html += `<h${h[1].length}${mdAttr(t)}>${mdInline(h[2])}</h${h[1].length}>`; continue }
       if (t.startsWith('&gt;')) {
         flushPara(); closeList()
-        html += `<blockquote>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
+        html += `<blockquote${mdAttr(t)}>${mdInline(t.replace(/^&gt;\s?/, ''))}</blockquote>`
         continue
       }
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
         continue
       }
-      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += '<hr>'; continue }
+      if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${mdAttr(t)}>`; continue }
       if (t.startsWith('|') && lines[i + 1] && isSep(lines[i + 1].trim())) {
         flushPara(); closeList()
-        html += `<div class="md-table"><table><thead><tr>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
+        const tbl = [t]
+        let tHtml = `<table><thead><tr>` + cells(t).map((c) => `<th>${mdInline(c)}</th>`).join('') + '</tr></thead><tbody>'
         i += 1
+        tbl.push(lines[i])
         while (i + 1 < lines.length && lines[i + 1].trim().startsWith('|')) {
           i += 1
-          html += `<tr>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
+          tbl.push(lines[i])
+          tHtml += `<tr>` + cells(lines[i]).map((c) => `<td>${mdInline(c)}</td>`).join('') + '</tr>'
         }
-        html += '</tbody></table></div>'
+        tHtml += '</tbody></table>'
+        html += `<div class="md-table"${mdAttr(tbl.join('\n'))}>${tHtml}</div>`
         continue
       }
-      para.push(mdInline(t))
+      para.push(mdInline(t)); paraRaw.push(t)
     }
     flushPara(); closeCode(false); closeList()
     return html
+  }
+
+  // ---------- data-md 消费：复制方向（2026-10-09） ----------
+  // mdHtml 给每个块级元素挂了 data-md=原始 md 片段（见 mdAttr），复制据此还原 md 源码：
+  //  · messageMd(root)  → root 内全部块级 data-md 按序拼接（复制按钮用，root 传该消息 .body）
+  //  · selectionMd(sel) → 选区整块覆盖的块用原文，块内碎片无一一对应关系返回 null（调用方按纯文本降级）
+  // 全局唯一的 copy 拦截在 inputbar/ctx-meter.js，两函数即其判据来源（不再另起监听，避免双监听互相覆盖）。
+  const COPY_PARA_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'TABLE'])
+  const COPY_LINE_TAGS = new Set(['LI', 'TR', 'UL', 'OL', 'HR'])
+  // 降级文本：textContent 会把相邻块级元素文本直接拼接（<p>a</p><p>b</p> → "ab"、<br> 更被吞），
+  // 故按标签补换行——段落级补空行、列表/表格行补单换行。接受元素/DocumentFragment（nodeType 11）。
+  function copyTextOf(node) {
+    let out = ''
+    const walk = (n) => {
+      if (n.nodeType === 3) { out += n.nodeValue; return }
+      if (n.nodeType === 11) { n.childNodes.forEach(walk); return }
+      if (n.nodeType !== 1) return
+      if (n.tagName === 'BR') { out += '\n'; return }
+      const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
+      if (sep && out && !out.endsWith('\n')) out += sep
+      n.childNodes.forEach(walk)
+      if (sep && out && !out.endsWith('\n')) out += sep
+    }
+    walk(node)
+    return out
+  }
+  // 最外层带 data-md 的块（最近的 data-md 祖先即自身 → 嵌套里的顶层块，父块+子块不重复计）
+  function topDataMd(root) {
+    return Array.from(root.querySelectorAll('[data-md]')).filter((el) => el.closest('[data-md]') === el)
+  }
+  // 块间拼接：同属一个列表的相邻 LI 之间单换行，其余块之间空行（保持 md 分块语义）
+  function joinMdBlocks(els, pick) {
+    const parts = []
+    els.forEach((el) => { const piece = pick(el); if (piece) parts.push({ el, piece }) })
+    let out = ''
+    for (let i = 0; i < parts.length; i++) {
+      if (i) out += (parts[i].el.tagName === 'LI' && parts[i - 1].el.tagName === 'LI') ? '\n' : '\n\n'
+      out += parts[i].piece
+    }
+    return out
+  }
+  function messageMd(root) {
+    return root ? joinMdBlocks(topDataMd(root), (el) => el.dataset.md).trim() : ''
+  }
+  // 块内容的起/止边界点：降到最后一级叶子节点。不能用 selectNodeContents——它把边界放在
+  // 元素层 (el,0)/(el,len)，那两点在内容「外侧」，文本选区的边界永远在内容「内侧」，两者
+  // 比较恒不等 ⇒ 覆盖判定必然失败（整段选中也会被当成碎片降级成渲染文本）。
+  function contentEdges(el) {
+    let a = el
+    let b = el
+    while (a.firstChild) a = a.firstChild
+    while (b.lastChild) b = b.lastChild
+    return [[a, 0], [b, b.nodeType === 3 ? b.nodeValue.length : b.childNodes.length]]
+  }
+  // 某块是否被 range 完整覆盖：range 同时覆盖该块的起、止两个内容边界点即算完整（边界贴合含在内）
+  function isCoveredByRange(range, el) {
+    const [[sn, so], [en, eo]] = contentEdges(el)
+    try {
+      return range.isPointInRange(sn, so) && range.isPointInRange(en, eo)
+    } catch (_) { return false }
+  }
+  // 选区与某块的交集片段（碎片降级文本用）：两端各自向块内容边界收拢，越界/异树异常交回 null
+  function intersectFragment(range, el) {
+    const [[sn, so], [en, eo]] = contentEdges(el)
+    try {
+      const startAfter = range.comparePoint(sn, so) === -1  // 选区起点落于块内容起点之后
+      const endWithin = range.comparePoint(en, eo) !== 1    // 选区终点未越过块内容终点
+      const r = document.createRange()
+      r.setStart(startAfter ? range.startContainer : sn, startAfter ? range.startOffset : so)
+      r.setEnd(endWithin ? en : range.endContainer, endWithin ? eo : range.endOffset)
+      return r.cloneContents()
+    } catch (_) { return null }
+  }
+  function selectionMd(sel) {
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null
+    const range = sel.getRangeAt(0)
+    const els = topDataMd(document).filter((el) => range.intersectsNode(el))
+    if (!els.length) return null
+    const text = joinMdBlocks(els, (el) => {
+      if (isCoveredByRange(range, el)) return el.dataset.md
+      const frag = intersectFragment(range, el)
+      return frag ? copyTextOf(frag) : ''
+    }).trim()
+    return text || null
   }
 
   function relTime(ms) {
@@ -2129,30 +2233,12 @@ function setLastNavHash(v) { lastNavHash = v }
     btn.classList.toggle('open', !collapsed)
   })
 
-  // 消息复制（DSH MessageIconActions copy 语义）：取消息纯文本（剔除已处理折叠/变更卡/操作行/工具折叠），
-  // writeClipboard 成功 → 图标换 check 1s（DSH 同款反馈窗口），失败 toast
-  // 块级标签 → 复制文本补换行。textContent 会把相邻块级元素文本直接拼接（<p>a</p><p>b</p> → "ab"、
-  // <br> 更无文本节点被吞），复制结果丢换行与空行；故按标签补：段落级补空行、列表/表格行补单换行。
-  const COPY_PARA_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'TABLE'])
-  const COPY_LINE_TAGS = new Set(['LI', 'TR', 'UL', 'OL', 'HR'])
-  function copyTextOf(node) {
-    let out = ''
-    const walk = (n) => {
-      if (n.nodeType === 3) { out += n.nodeValue; return }
-      if (n.nodeType !== 1) return
-      if (n.tagName === 'BR') { out += '\n'; return }
-      const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
-      if (sep && out && !out.endsWith('\n')) out += sep
-      n.childNodes.forEach(walk)
-      if (sep && out && !out.endsWith('\n')) out += sep
-    }
-    walk(node)
-    return out
-  }
+  // 消息复制（2026-10-09 定案：复制「原始 markdown 源码」，非渲染文本）：data-md 的生产与消费同处
+  // core/markdown.js（mdAttr 挂载 / messageMd·selectionMd 消费），此处只做「复制按钮点击 → writeClipboard」。
+  // 复制按钮 = 该条消息 .body 内全部块级 data-md 按序拼接（折叠体/操作条不在 .body 内，天然排除）；
+  // 选区复制（含纯文本降级）由全局唯一的 copy 拦截在 inputbar/ctx-meter.js 承载（勿在此另起监听）。
   function messageCopyText(msgEl) {
-    const clone = msgEl.cloneNode(true)
-    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, .chart-bar, .chart-raw, script, style').forEach((el) => el.remove())
-    return copyTextOf(clone).replace(/[ \t]+\n/g, '\n').trim()
+    return messageMd(msgEl.querySelector('.body'))
   }
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('.msg-copy') : null
@@ -3539,26 +3625,58 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // ---------- 搜索覆盖层 ----------
+  // 2026-10-08 双模式同构（用户定案）：顶栏 🔍 两模式同一个 #panel-search → 本覆盖层，只是**内容按模式限**——
+  // chat = 全部会话；work = 限到当前工作项目（state.workProj），既列该项目的会话、也列该项目的文件
+  // （点文件 = openWorkFile 进编辑区）。弹窗本体（#search-overlay / renderSearch）两模式共用一份，不另起。
+  const searchInWork = () => state.sbMode === 'work' && !!state.workProj
   function openSearch() {
     overlay.classList.add('show')
     sInput.value = ''
+    sInput.placeholder = searchInWork() ? '搜索项目内的会话与文件…' : '搜索全部对话…'
     renderSearch()
+    // work：文件面的数据源是当前项目文件树（wkTree）；未加载则拉一次后重渲
+    if (searchInWork() && !wkTree) loadProjectTree(state.workProj).then(renderSearch)
     setTimeout(() => sInput.focus(), 30)
+  }
+  // 文件树拍平成「项目内相对路径」；目录只用于拼前缀，q 命中 = 整条路径含子串
+  function wkFilePaths(nodes, prefix, q) {
+    const out = []
+    for (const n of nodes || []) {
+      const p = prefix ? `${prefix}/${n.name}` : n.name
+      if (n.type === 'dir') out.push(...wkFilePaths(n.children, p, q))
+      else if (!q || p.toLowerCase().includes(q)) out.push(p)
+    }
+    return out
   }
   function renderSearch() {
     const q = sInput.value.trim().toLowerCase()
+    const inWork = searchInWork()
     const rows = sorted().filter(
-      (s) => !q || s.title.toLowerCase().includes(q) || (s.projectLabel || '').toLowerCase().includes(q),
+      (s) =>
+        (!inWork || (s.projectScope === 'project' && s.projectLabel === state.workProj)) &&
+        (!q || s.title.toLowerCase().includes(q) || (s.projectLabel || '').toLowerCase().includes(q)),
     )
-    $('search-results').innerHTML = rows.length
-      ? rows.map((s) => {
-          const prj = s.projectScope === 'project' ? `<span class="s-prj">${esc(s.projectLabel)}</span>` : ''
-          return `<div class="s-row" data-hash="${esc(hashOf(s))}"><span class="s-ico">${I.msg}</span><span class="st">${esc(s.title)}</span>${prj}</div>`
-        }).join('')
-      : '<div class="no-hit">没有匹配的会话</div>'
+    const sessHtml = rows
+      .map((s) => {
+        // work 下结果已限在同一项目，项目标签无信息量；chat 下保留以区分来源
+        const prj = !inWork && s.projectScope === 'project' ? `<span class="s-prj">${esc(s.projectLabel)}</span>` : ''
+        return `<div class="s-row" data-hash="${esc(hashOf(s))}"><span class="s-ico">${I.msg}</span><span class="st">${esc(s.title)}</span>${prj}</div>`
+      })
+      .join('')
+    const files = inWork ? wkFilePaths(wkTree, '', q) : []
+    const filesHtml = files
+      .map((p) => `<div class="s-row" data-wkfile="${esc(p)}"><span class="s-ico">${I.dshFile}</span><span class="st">${esc(p)}</span></div>`)
+      .join('')
+    // work 下两张内容面（会话 / 文件）各带小标题；chat 只有会话面、不加标题（与原观感一致）
+    const html = inWork
+      ? (sessHtml ? '<div class="s-sec">会话</div>' + sessHtml : '') + (filesHtml ? '<div class="s-sec">文件</div>' + filesHtml : '')
+      : sessHtml
+    $('search-results').innerHTML =
+      html || `<div class="no-hit">${inWork ? '项目内没有匹配的会话或文件' : '没有匹配的会话'}</div>`
     $('search-results').querySelectorAll('.s-row').forEach((b) =>
       b.addEventListener('click', () => {
-        navigate('#/' + encodeURIComponent(b.dataset.hash))
+        if (b.dataset.wkfile) openWorkFile(b.dataset.wkfile)
+        else navigate('#/' + encodeURIComponent(b.dataset.hash))
         overlay.classList.remove('show')
         if (isMobile()) setPanel(false)
       }),
@@ -4966,7 +5084,6 @@ function setFirstSendHash(v) { firstSendHash = v }
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
   let wkTab = 'files'      // 'files' | 'chat'
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
-  let wkFilter = ''        // 文件过滤词（前端过滤，不重拉）
   let wkLoading = false
   let wkErr = ''
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
@@ -5595,19 +5712,14 @@ function setFirstSendHash(v) { firstSendHash = v }
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
   }
 
-  // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；🔍 的提示词随 tab 走——过滤对象不同，
-  // 写死「过滤文件」会在聊天 tab 里给出错位提示（与 #panel-search 的「两个搜索」定案同源）。
-  // 文件 tab 的加号（新建文件/文件夹）待新建写接口定案后接入，届时同一按钮按 tab 分派。
+  // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
+  // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
     const nb = $('wk-new')
     const isChat = wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
     if (pop && isChat) pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
-    const fb = $('wk-find')
-    if (fb) fb.title = isChat ? '过滤聊天' : '过滤文件'
-    const fi = $('wk-find-input')
-    if (fi) fi.placeholder = isChat ? '过滤聊天…' : '过滤文件…'
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -5628,39 +5740,25 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
-      const f = wkFilter.trim().toLowerCase()
       const list = state.workProj
-        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj)
-            .sort(sessCmp)
-            .filter((s) => !f || String(s.title || '').toLowerCase().includes(f))
+        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj).sort(sessCmp)
         : []
-      const rows = !state.workProj
-        ? '<div class="wk-empty">先在上方选择一个项目</div>'
-        : list.length
-          ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
-          : `<div class="wk-empty">${f ? '没有匹配的聊天' : '该项目还没有聊天'}</div>`
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
-      return rows
+      if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
+      return list.length
+        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
+        : '<div class="wk-empty">该项目还没有聊天</div>'
     }
     if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
     if (wkLoading) return '<div class="wk-empty">加载中…</div>'
     if (wkErr) return `<div class="wk-empty">${esc(wkErr)}</div>`
     if (!wkTree || !wkTree.length) return '<div class="wk-empty">项目内没有可列出的文件</div>'
-    const f = wkFilter.trim().toLowerCase()
-    return wkTreeHtml(wkTree, 0, '', f) || '<div class="wk-empty">没有匹配的文件</div>'
+    return wkTreeHtml(wkTree, 0, '') || '<div class="wk-empty">项目内没有可列出的文件</div>'
   }
 
-  // 目录命中判定：过滤词命中自身或任一子孙即保留（否则目录被过滤掉，里面的命中项也没了）
-  function wkNodeHit(n, f) {
-    if (!f) return true
-    if (String(n.name).toLowerCase().includes(f)) return true
-    return (n.children || []).some((c) => wkNodeHit(c, f))
-  }
-
-  function wkTreeHtml(nodes, depth, prefix, f) {
+  function wkTreeHtml(nodes, depth, prefix) {
     let h = ''
     for (const n of nodes || []) {
-      if (!wkNodeHit(n, f)) continue
       const p = prefix ? `${prefix}/${n.name}` : n.name
       const pad = `padding-left:${8 + depth * 13}px`
       if (n.type === 'dir') {
@@ -5669,7 +5767,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
         h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
-        if (open) h += wkTreeHtml(n.children, depth + 1, p, f)
+        if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
         h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
@@ -5715,9 +5813,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
     wkOpen.clear()
-    wkFilter = ''
-    const fi = $('wk-find-input')
-    if (fi) fi.value = ''
     renderWorkChrome()
     saveWork()
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
@@ -6439,7 +6534,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 窗口宽变同理（面板拖宽不改钮宽，但换字号/系统缩放下会）。
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionMsThumb)
     window.addEventListener('resize', positionMsThumb)
-    $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
     $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
@@ -6571,28 +6665,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       $('wk-new-pop').hidden = true
       toast('创建 / 上传功能暂未接入')
     })
-    $('wk-find').addEventListener('click', () => {
-      const row = $('wk-find-row')
-      row.hidden = !row.hidden
-      // 过滤词作用于「当前 tab」——文件 tab 滤文件名/路径、聊天 tab 滤会话标题（同一 wkFilter，各自判据）
-      if (!row.hidden) $('wk-find-input').focus()
-      else if (wkFilter) {
-        wkFilter = ''
-        $('wk-find-input').value = ''
-        renderWorkBody()
-      }
-    })
-    $('wk-find-input').addEventListener('input', (e) => {
-      wkFilter = e.target.value
-      renderWorkBody()
-    })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
         wkTab = b.dataset.wktab === 'chat' ? 'chat' : 'files'
-        // 两个 tab 的过滤判据不同，切 tab 时清词（否则会以旧词在新 tab 里给出「没有匹配」的假空态）
-        wkFilter = ''
-        const fi = $('wk-find-input')
-        if (fi) fi.value = ''
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
       }),
@@ -7211,11 +7286,13 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (files.length) addImageFiles(files)
   })
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
-  // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain
+  // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
+  // 2026-10-09 扩展：消息区选区先经 selectionMd 还原**原始 md 源码**（core/markdown.js，整块覆盖用 data-md 原文；
+  // 块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
   document.addEventListener('copy', (e) => {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
-    const text = sel.toString()
+    const text = selectionMd(sel) || sel.toString()
     if (!text) return
     e.clipboardData.setData('text/plain', text)
     e.preventDefault()

@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=493" />
+  <link rel="stylesheet" href="/styles.css?v=497" />
 </head>
 <body>
 <div id="app">
@@ -48,12 +48,23 @@
             <button class="ms-btn on" data-sbmode="chat">floria·chat</button>
             <button class="ms-btn" data-sbmode="work">floria·work</button>
           </div>
+          <!-- 顶栏三件套（2026-10-08 定案）：🔍搜索 / 🌙日夜 / ⇤折叠 两模式**同一位置、同一形态**
+               （.panel-actions 同一行）；个性化只在第三槽——chat = #panel-collapse（折叠侧栏），
+               work = #wk-view（视图开关，管右栏预览列与侧栏开合）。显隐由 `#panel.work` 钩子切（见
+               styles.css），不各写各的选择器。搜索两模式共用 #panel-search → #search-overlay，
+               只是 work 下内容限到当前项目（bubble-search.js renderSearch 按 state.sbMode 分派）。 -->
           <div class="panel-actions">
-            <button id="panel-search" class="act-btn" title="搜索会话"></button>
+            <button id="panel-search" class="act-btn" title="搜索"></button>
             <!-- 主题切换（2026-10-06 夜晚模式）：日/月图标由 app.js 按当前 data-theme 注入，点击在
                  浅/暗间翻转并写 localStorage['floria-theme']（头部预置脚本据此免闪帧）。 -->
             <button id="panel-theme" class="act-btn" title="切换主题" aria-label="切换深浅色主题"></button>
             <button id="panel-collapse" class="act-btn" title="折叠侧栏"></button>
+            <button id="wk-view" class="act-btn" title="视图开关" aria-haspopup="dialog"></button>
+            <div id="wk-view-pop" class="popup" hidden>
+              <div class="wkv-title">视图</div>
+              <button class="wkv-row" data-wkpane="workspace"><span>预览</span><span class="wkv-sw"></span></button>
+              <button class="wkv-row" data-wkpane="sidebar"><span>侧边栏</span><span class="wkv-sw"></span></button>
+            </div>
           </div>
         </div>
         <div id="chat-panel">
@@ -95,19 +106,12 @@
             <button id="wk-proj-seat" class="wk-proj" title="切换项目" aria-haspopup="menu">
               <span class="wk-proj-ico"></span><span class="wk-proj-label">选择项目</span><span class="chevron"></span>
             </button>
-            <button id="wk-view" class="act-btn" title="视图开关" aria-haspopup="dialog"></button>
             <div id="wk-proj-pop" class="popup" hidden></div>
-            <div id="wk-view-pop" class="popup" hidden>
-              <div class="wkv-title">视图</div>
-              <button class="wkv-row" data-wkpane="workspace"><span>预览</span><span class="wkv-sw"></span></button>
-              <button class="wkv-row" data-wkpane="sidebar"><span>侧边栏</span><span class="wkv-sw"></span></button>
-            </div>
           </div>
           <div class="wk-tabs">
             <button class="wk-tab on" data-wktab="files">文件</button>
             <button class="wk-tab" data-wktab="chat">聊天</button>
             <div class="wk-tools">
-              <button id="wk-find" class="wk-ico" title="过滤文件"></button>
               <button id="wk-new" class="wk-ico" title="新建聊天" aria-haspopup="menu"></button>
               <div id="wk-new-pop" class="popup" hidden>
                 <button class="wkn-row" data-wknew="file">创建文件</button>
@@ -116,9 +120,6 @@
                 <button class="wkn-row" data-wknew="upload-dir">上传文件夹</button>
               </div>
             </div>
-          </div>
-          <div class="wk-find-row" id="wk-find-row" hidden>
-            <input id="wk-find-input" type="text" placeholder="过滤文件…" autocomplete="off" spellcheck="false" />
           </div>
           <div class="wk-body" id="wk-body"></div>
           <div class="wk-foot" id="wk-foot">
@@ -385,6 +386,6 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=3"></script>
-<script src="/app.js?v=494"></script>
+<script src="/app.js?v=497"></script>
 </body>
 </html>

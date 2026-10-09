@@ -1,35 +1,17 @@
 // 消息区交互与用户气泡内容：复制/用量弹层/图表/大图 lightbox + userBodyHtml/图片/文件卡片 + 时长与旁白渲染
-import { mdHtml } from '../../core/markdown.js'
+import { mdHtml, messageMd } from '../../core/markdown.js'
 import { I } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live } from '../../engine/state.js'
 import { stripQuoteBodies } from '../../inputbar/mention.js'
 import { ICON_COPY, writeClipboard } from './usage.js'
 /* @module chat/messages/msg-actions.js */
-  // 消息复制（DSH MessageIconActions copy 语义）：取消息纯文本（剔除已处理折叠/变更卡/操作行/工具折叠），
-  // writeClipboard 成功 → 图标换 check 1s（DSH 同款反馈窗口），失败 toast
-  // 块级标签 → 复制文本补换行。textContent 会把相邻块级元素文本直接拼接（<p>a</p><p>b</p> → "ab"、
-  // <br> 更无文本节点被吞），复制结果丢换行与空行；故按标签补：段落级补空行、列表/表格行补单换行。
-  const COPY_PARA_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE', 'DIV', 'TABLE'])
-  const COPY_LINE_TAGS = new Set(['LI', 'TR', 'UL', 'OL', 'HR'])
-  function copyTextOf(node) {
-    let out = ''
-    const walk = (n) => {
-      if (n.nodeType === 3) { out += n.nodeValue; return }
-      if (n.nodeType !== 1) return
-      if (n.tagName === 'BR') { out += '\n'; return }
-      const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
-      if (sep && out && !out.endsWith('\n')) out += sep
-      n.childNodes.forEach(walk)
-      if (sep && out && !out.endsWith('\n')) out += sep
-    }
-    walk(node)
-    return out
-  }
+  // 消息复制（2026-10-09 定案：复制「原始 markdown 源码」，非渲染文本）：data-md 的生产与消费同处
+  // core/markdown.js（mdAttr 挂载 / messageMd·selectionMd 消费），此处只做「复制按钮点击 → writeClipboard」。
+  // 复制按钮 = 该条消息 .body 内全部块级 data-md 按序拼接（折叠体/操作条不在 .body 内，天然排除）；
+  // 选区复制（含纯文本降级）由全局唯一的 copy 拦截在 inputbar/ctx-meter.js 承载（勿在此另起监听）。
   function messageCopyText(msgEl) {
-    const clone = msgEl.cloneNode(true)
-    clone.querySelectorAll('.done-fold, .change-card, .msg-actions, .tool-fold, .mention-x, .chart-bar, .chart-raw, script, style').forEach((el) => el.remove())
-    return copyTextOf(clone).replace(/[ \t]+\n/g, '\n').trim()
+    return messageMd(msgEl.querySelector('.body'))
   }
   document.addEventListener('click', (e) => {
     const btn = e.target && e.target.closest ? e.target.closest('.msg-copy') : null

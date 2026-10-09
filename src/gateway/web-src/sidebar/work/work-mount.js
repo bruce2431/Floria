@@ -27,7 +27,6 @@
     // 窗口宽变同理（面板拖宽不改钮宽，但换字号/系统缩放下会）。
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionMsThumb)
     window.addEventListener('resize', positionMsThumb)
-    $('wk-find').innerHTML = I.mag
     $('wk-new').innerHTML = I.dshPlus
     $('wk-view').innerHTML = I.toggle
     $('wk-tb-new').innerHTML = I.dshPlus // 顶栏 + 按钮图标（单源 core/icons.js）
@@ -159,28 +158,9 @@
       $('wk-new-pop').hidden = true
       toast('创建 / 上传功能暂未接入')
     })
-    $('wk-find').addEventListener('click', () => {
-      const row = $('wk-find-row')
-      row.hidden = !row.hidden
-      // 过滤词作用于「当前 tab」——文件 tab 滤文件名/路径、聊天 tab 滤会话标题（同一 wkFilter，各自判据）
-      if (!row.hidden) $('wk-find-input').focus()
-      else if (wkFilter) {
-        wkFilter = ''
-        $('wk-find-input').value = ''
-        renderWorkBody()
-      }
-    })
-    $('wk-find-input').addEventListener('input', (e) => {
-      wkFilter = e.target.value
-      renderWorkBody()
-    })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
         wkTab = b.dataset.wktab === 'chat' ? 'chat' : 'files'
-        // 两个 tab 的过滤判据不同，切 tab 时清词（否则会以旧词在新 tab 里给出「没有匹配」的假空态）
-        wkFilter = ''
-        const fi = $('wk-find-input')
-        if (fi) fi.value = ''
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
       }),

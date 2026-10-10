@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=508" />
+  <link rel="stylesheet" href="/styles.css?v=510" />
 </head>
 <body>
 <div id="app">
@@ -68,8 +68,8 @@
           </div>
         </div>
         <div id="chat-panel">
-        <!-- 管理入口 tabs（插件 / 项目 / 模型 / 神经）：定义单一真源 = web-src/views/registry.js，
-             启动时 renderMgrTabs() 按表生成（本处不再有死按钮与内联 SVG；图标取 core/icons.js 的 I 表） -->
+        <!-- 管理入口 tabs（第一方会话/插件/预览 + 已启用的应用）：定义单一真源 = web-src/views/registry.js，
+             启动时 renderMgrTabs() 按 CARDS + APP_TABS + EXT 生成（本处不再有死按钮与内联 SVG；图标取 core/icons.js 的 I 表） -->
         <div class="mgr-tabs" id="mgr-tabs"></div>
         <div id="recent">
           <div id="recent-head">
@@ -366,6 +366,6 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=3"></script>
-<script src="/app.js?v=508"></script>
+<script src="/app.js?v=510"></script>
 </body>
 </html>

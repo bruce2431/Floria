@@ -131,7 +131,6 @@
     if (needToken()) return null // token 门锁定态：不发起数据请求
     MODELS_LOADING = true
     MODELS_ERR = ''
-    renderMgrModelList()
     try {
       const res = await fetch(apiUrl('/gateway/models'))
       const data = await res.json()
@@ -159,7 +158,6 @@
       if (!MODELS) MODELS_ERR = e.message || String(e)
     } finally {
       MODELS_LOADING = false
-      renderMgrModelList()
       renderModelSeat() // 2026-08-25 模型数据落地后刷新输入栏模型 seat（含 hideGate 补拉场景）
     }
     return MODELS
@@ -281,7 +279,13 @@
       const raw = localStorage.getItem(UI_KEY)
       if (!raw) return
       const d = JSON.parse(raw)
-      if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
+      if (!d || !d.mgrView) return
+      const m = { ...state.mgrView, ...d.mgrView }
+      // 枚举边界归一（持久化区是外部边界）：kind∈{plugins,skills,apps}、cat∈{public,personal}，
+      // 旧形态（应用曾为 cat 值）或脏值一律回落缺省，避免落成无按钮可选的空网格。
+      if (m.kind !== 'plugins' && m.kind !== 'skills' && m.kind !== 'apps') m.kind = 'plugins'
+      if (m.cat !== 'public' && m.cat !== 'personal') m.cat = 'public'
+      state.mgrView = m
     } catch { /* 忽略 */ }
   }
   // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
@@ -3937,41 +3941,50 @@ function setFirstSendHash(v) { firstSendHash = v }
       })
   }
 
-  // ---------- 插件卡（插件 / 技能）----------
+  // ---------- 插件卡（插件 / 技能 / 应用）----------
   // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
-  // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 registry / mgr.js。
+  // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 mgr.js。
+  // 「应用」cat 的数据源与启停口在 registry（APP_CATALOG / setAppEnabled）——本卡只呈现列表与按钮；
+  // 循环 import（registry → 本卡的 pluginsCardDef）是函数级调用，无求值期依赖。
   const pluginsCardDef = {
-    id: 'plugins', title: '插件', tip: '插件 / 技能预览', icon: 'plug', tab: true,
+    id: 'plugins', title: '插件', tip: '插件 / 技能 / 应用', icon: 'plug', tab: true,
     mount(body, ctx) { renderMgrPlugins(body, ctx) },
   }
 
-  // 「插件/技能」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
+  // 「插件/技能/应用」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
   function renderMgrPlugins(body, ctx) {
     const v = state.mgrView
-    const kindName = v.kind === 'skills' ? '技能' : '插件'
-    const sub =
-      v.kind === 'skills'
+    const isApps = v.kind === 'apps'
+    const kindName = isApps ? '应用' : v.kind === 'skills' ? '技能' : '插件'
+    const sub = isApps
+      ? '工作区根 .claude/preview 申报的界面单元 · 点 + 启用后侧栏出现该应用 tab'
+      : v.kind === 'skills'
         ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
         : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
     body.innerHTML =
       '<div class="mgr-pane">' +
+      // 顶层切换＝「插件 / 技能 / 应用」三态：应用与插件/技能同轴，故并入同一段控件（原在公开/个人行）
       '<div class="mgr-top">' +
       '<div class="mgr-kind">' +
       `<button class="mgr-kind-btn${v.kind === 'plugins' ? ' on' : ''}" data-kind="plugins">插件</button>` +
       `<button class="mgr-kind-btn${v.kind === 'skills' ? ' on' : ''}" data-kind="skills">技能</button>` +
+      `<button class="mgr-kind-btn${v.kind === 'apps' ? ' on' : ''}" data-kind="apps">应用</button>` +
       '</div>' +
       '</div>' +
       `<div class="mgr-head"><h2 class="mgr-title">${kindName}</h2><div class="mgr-sub">${sub}</div></div>` +
-      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
-      '<div class="mgr-cats">' +
-      `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
-      `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
-      '</div>' +
+      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${isApps ? '搜索应用…' : v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
+      // 公开/个人只对「插件 / 技能」轴有意义，应用态不显示该行
+      (isApps
+        ? ''
+        : '<div class="mgr-cats">' +
+          `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
+          `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
+          '</div>') +
       '<div class="mgr-grid" id="mgr-grid"></div>' +
-      '<div class="mgr-foot">数据源：网关 /gateway/plugins 实时扫描</div>' +
+      `<div class="mgr-foot">${isApps ? '数据源：工作区根 .claude/preview（/gateway/preview-cards）' : '数据源：网关 /gateway/plugins 实时扫描'}</div>` +
       '</div>'
     renderMgrGrid()
-    loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉
+    if (!isApps) loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉（应用目录由 registry 拉）
     const pane = body.querySelector('.mgr-pane')
     pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
       b.addEventListener('click', () => {
@@ -3991,11 +4004,26 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (q) q.addEventListener('input', () => { v.q = q.value; saveMgrView(); renderMgrGrid() })
   }
 
-  // 插件/技能卡片网格（按 kind + cat + 搜索词过滤；数据源 = 后端 /gateway/plugins）
+  // 插件/技能/应用卡片网格（按 kind + cat + 搜索词过滤；应用数据源 = registry 的 APP_CATALOG）
   function renderMgrGrid() {
     const v = state.mgrView
     const grid = $('mgr-grid')
     if (!grid) return
+    // 「应用」kind：列出工作区根申报的全部应用，右侧 + / ✓ 切换启用（启用即侧栏出现该应用 tab）
+    if (v.kind === 'apps') {
+      const q = (v.q || '').trim().toLowerCase()
+      const rows = appCatalog().filter((a) => !q || a.title.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+      grid.innerHTML = rows.length
+        ? rows.map(appCardHtml).join('')
+        : '<div class="mgr-empty">没有匹配的应用（工作区根 .claude/preview/preview.json 未申报应用）</div>'
+      grid.querySelectorAll('.app-toggle').forEach((b) =>
+        b.addEventListener('click', () => {
+          setAppEnabled(b.dataset.app, !isAppEnabled(b.dataset.app))
+          renderMgrGrid() // 启用态只影响本网格按钮，局部重渲即可（侧栏 tab 由 setAppEnabled 内 renderMgrTabs 刷新）
+        }),
+      )
+      return
+    }
     const label = v.kind === 'skills' ? '技能' : '插件'
     if (MGR_LOADING) {
       grid.innerHTML = '<div class="mgr-empty">加载真实清单中…</div>'
@@ -4024,810 +4052,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       '<button class="mgr-more" title="更多">…</button></div>'
     )
   }
-
-  // ---------- 项目卡 ----------
-  // 数据源 = 已加载会话 ALL 按 projectLabel 分组（projectScope==='project'），不另起后端接口。
-  // 点项目胶囊一律进预览（hash 路由 #preview/<label>），无 rerender 需求。
-  const projectsCardDef = {
-    id: 'projects', title: '项目', tip: '项目管理', icon: 'folder', tab: true,
-    mount(body) { renderMgrProjects(body) },
-  }
-
-  // 每个项目胶囊占据一整行（数据源 = 会话按 projectLabel 分组）
-  function renderMgrProjects(body) {
-    const projCount = new Set(ALL.filter((s) => s.projectScope === 'project' && s.projectLabel).map((s) => s.projectLabel)).size
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-head"><h2 class="mgr-title">项目</h2>' +
-      '<div class="mgr-sub">按项目文件夹分组 · 会话按最近活跃排序</div></div>' +
-      `<div class="mgr-search">${I.mag}<input id="mgr-pq" type="text" placeholder="搜索项目…" value="${esc(state.mgrView.q)}"></div>` +
-      `<div class="mgr-cats"><span class="mgr-cat on">共 ${projCount} 个项目</span></div>` +
-      '<div class="mgr-list" id="mgr-list"></div>' +
-      '<div class="mgr-foot">数据源：会话按项目分组（/gateway/sessions）</div>' +
-      '</div>'
-    renderMgrProj()
-    const pq = $('mgr-pq')
-    if (pq) pq.addEventListener('input', () => { state.mgrView.q = pq.value; saveMgrView(); renderMgrProj() })
-  }
-
-  // 项目列表（仿照插件布设，每个项目胶囊占据一整行）
-  function renderMgrProj() {
-    const list = $('mgr-list')
-    if (!list) return
-    const q = (state.mgrView.q || '').trim().toLowerCase()
-    const byProject = {}
-    for (const s of ALL) if (s.projectScope === 'project' && s.projectLabel) (byProject[s.projectLabel] = byProject[s.projectLabel] || []).push(s)
-    const labels = Object.keys(byProject).filter((l) => !q || l.toLowerCase().includes(q))
-    // 按项目最近活跃时间降序（同 renderProject 排序）
-    labels.sort((a, b) => {
-      const la = Math.max(0, ...byProject[a].map((s) => s.updatedAt))
-      const lb = Math.max(0, ...byProject[b].map((s) => s.updatedAt))
-      return lb - la
-    })
-    // 该项目是否带 .claude/preview/（会话 preview 标志由后端 findProjects.hasPreview 透传）
-    const hasPreview = (l) => ALL.some((s) => s.projectScope === 'project' && s.projectLabel === l && s.preview)
-    list.innerHTML = labels.length
-      ? labels.map((l) => mgrProjHtml(l, byProject[l], hasPreview(l))).join('')
-      : '<div class="mgr-empty">' + (q ? '没有匹配的项目' : '暂无项目会话') + '</div>'
-    list.querySelectorAll('.mgr-proj').forEach((b) =>
-      b.addEventListener('click', () => {
-        // 点项目胶囊一律进预览：带 .claude/preview 加载真预览页；不带 → 默认项目主页
-        // （GitHub 仓库风格，web/default-preview/，由网关 /gateway/project 拉数据）。
-        if (b.dataset.label) {
-          // 进预览走 hash 路由（#preview/<label>），刷新后可恢复当前预览页
-          navigate('#preview/' + encodeURIComponent(b.dataset.label))
-          if (isMobile()) closePanel()
-          return
-        }
-        const hash = b.dataset.hash
-        if (!hash) return
-        navigate('#/' + encodeURIComponent(hash))
-        if (isMobile()) closePanel()
-      }),
-    )
-  }
-  function mgrProjHtml(label, chats, hasPreview) {
-    const latest = [...chats].sort((a, b) => b.updatedAt - a.updatedAt)[0]
-    const n = chats.length
+  // 应用胶囊：+（未启用）/ ✓（已启用）为唯一动作；已启用整卡不另设入口（点击 tab 在侧栏）
+  function appCardHtml(a) {
+    const on = isAppEnabled(a.id)
     return (
-      `<button class="mgr-proj" data-hash="${latest ? esc(hashOf(latest)) : ''}" data-label="${esc(label)}" data-preview="${hasPreview ? '1' : '0'}" title="${esc(label)} · ${n} 个会话（点击进入项目主页）">` +
-      `<span class="mgr-ic" style="background:${mgrColor(label)}">${I.folder}</span>` +
-      `<span class="mgr-meta"><span class="mgr-name">${esc(label)}${hasPreview ? '<span class="pv-badge">预览</span>' : ''}<span class="inst-badge">${n} 个会话</span></span>` +
-      `<span class="mgr-desc">${hasPreview ? '点击打开项目预览页（.claude/preview）' : '点击打开默认项目主页（无预览页）'}</span></span>` +
-      '<span class="mgr-more" title="打开">›</span></button>'
+      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-meta"><div class="mgr-name">${esc(a.title)}${on ? '<span class="inst-badge">已启用</span>' : ''}</div>` +
+      `<div class="mgr-desc">${esc(a.id)} · ${esc(a.path)}</div></div>` +
+      `<button class="mgr-more app-toggle${on ? ' on' : ''}" data-app="${esc(a.id)}" title="${on ? '停用（移除侧栏 tab）' : '启用（侧栏出现该应用 tab）'}">${on ? '✓' : '+'}</button></div>`
     )
-  }
-
-  // ---------- 模型卡 ----------
-  // 数据源 = 网关 /gateway/models（只读展示 + 设为默认）。modelProviderOf 同被输入栏模型菜单复用（唯一一份）。
-  const modelsCardDef = {
-    id: 'models', title: '模型', tip: '模型配置', icon: 'chip', tab: true,
-    mount(body) { renderMgrModels(body) },
-  }
-
-  // 「模型」卡体：便携根 settings.json 的模型配置（只读；数据源 = 网关 /gateway/models）
-  function renderMgrModels(body) {
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-head"><h2 class="mgr-title">模型列表</h2></div>' +
-      '<div class="mgr-model-list" id="mgr-model-list"></div>' +
-      '<div class="mgr-foot">数据源：网关 /gateway/models</div>' +
-      '</div>'
-    renderMgrModelList()
-    loadModelsData(false)
-  }
-
-  // 模型列表的卡体渲染（写进 .mgr-model-list）
-  function renderMgrModelList() {
-    const list = $('mgr-model-list')
-    if (!list) return
-    if (MODELS_LOADING) {
-      list.innerHTML = '<div class="mgr-empty">加载模型列表…</div>'
-      return
-    }
-    if (MODELS_ERR) {
-      list.innerHTML =
-        '<div class="mgr-empty">模型列表加载失败：' + esc(MODELS_ERR) +
-        '<br><button class="mgr-retry" id="mgr-models-retry">重试</button></div>'
-      const retry = $('mgr-models-retry')
-      if (retry) retry.addEventListener('click', () => loadModelsData(true))
-      return
-    }
-    const d = MODELS
-    if (!d) {
-      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
-      return
-    }
-    const items = Array.isArray(d.items) ? d.items : []
-    if (!items.length) {
-      list.innerHTML = '<div class="mgr-empty">暂无模型配置</div>'
-      return
-    }
-    // 按供应商分组（保持配置出现顺序，组内保持原序）；2026-08-29 优先网关下发的真实归属（items[].provider）
-    const groups = []
-    for (const it of items) {
-      const p = it.provider || modelProviderOf(it)
-      let g = groups.find((x) => x.provider === p)
-      if (!g) {
-        g = { provider: p, items: [] }
-        groups.push(g)
-      }
-      g.items.push(it)
-    }
-    list.innerHTML = groups
-      .map(
-        (g) =>
-          '<div class="mgr-model-group">' +
-          `<div class="mgr-model-ghead"><span class="mgr-model-gname">${esc(g.provider)}</span></div>` +
-          g.items.map(modelCapHtml).join('') +
-          '</div>',
-      )
-      .join('')
-    list.querySelectorAll('.mgr-model-item.settable').forEach((row) => {
-      row.addEventListener('click', () => setDefaultModel(row.dataset.model))
-    })
-  }
-  // 模型胶囊：完全复用项目胶囊 .mgr-proj 的风格与尺寸（40px 彩块 icon + 名称行 + 描述行）。
-  // 2026-08-23 设为默认：凭据池内模型 → 整行可点「设为默认」；2026-08-29 直接切模型自动切供应商 →
-  // 放开为全池（src 以「凭据池」开头的行，跨商由网关 switchModelAuto 自动切供应商）；
-  // 当前默认模型（MODELS.activeModel）标「默认」徽标；其余配置项保持只读。
-  function modelCapHtml(it) {
-    const name = String(it.v || '')
-    // 备注小字 = 是否为视觉模型（凭据池 modelVision 配置；未标记按非视觉）
-    const desc = it.vision === true ? '支持视觉' : '不支持视觉'
-    // DeepSeek 供应商 → 白底 + 蓝色鲸鱼；其它供应商保留彩块 + 芯片线条
-    const isDs = (it.provider || modelProviderOf(it)) === 'DeepSeek'
-    const icStyle = isDs ? 'background:#fff;color:#4d6bfe;border:1px solid #d9e2f8' : 'background:' + mgrColor(name)
-    const icSvg = isDs ? I.whale : I.chip
-    // 凭据池内模型 → 整行可点「设为默认」；默认模型整行绿色高亮（无文字徽标）。
-    // 不渲染右侧装饰箭头：模型胶囊右侧无任何按钮。
-    const settable = !!(typeof it.src === 'string' && it.src.startsWith('凭据池'))
-    const isDefault = settable && MODELS.activeModel === name
-    const cls = 'mgr-proj mgr-model-item' + (settable ? ' settable' : '') + (isDefault ? ' is-default' : '')
-    return (
-      `<div class="${cls}"${settable ? ' title="点击设为默认模型"' : ''} data-model="${esc(name)}">` +
-      `<span class="mgr-ic" style="${icStyle}">${icSvg}</span>` +
-      `<span class="mgr-meta"><span class="mgr-name">${esc(name)}</span>` +
-      `<span class="mgr-desc">${esc(desc)}</span></span>` +
-      '</div>'
-    )
-  }
-  // 2026-08-23 设为默认：POST /gateway/model { defaultModel } → 写 credentials.json activeModel（仅全局默认，
-  // 不影响当前会话）。成功后本地更新 MODELS.activeModel 重渲染，默认徽标移到新模型。
-  async function setDefaultModel(id) {
-    if (needToken()) { toast('未连接网关，无法设置'); return } // 2026-08-29 !gToken → needToken()（cookie 设备误报修复）
-    if (MODELS && MODELS.activeModel === id) { toast('已是默认模型'); return }
-    const ok = await apiSetModel({ defaultModel: id })
-    if (ok) {
-      if (MODELS) MODELS.activeModel = id
-      renderMgrModelList()
-      toast(`默认模型已设为 ${id}`)
-    } else {
-      toast('设置失败 · 模型不在凭据池或网关未连接')
-    }
-  }
-
-  // ---------- 神经元卡（web「神经」tab）----------
-  // 2026-09-23 视图卡化：本文件只负责「把神经元视图的内容写进交给它的卡体」（body 参数由
-  // views/registry.js 的槽位传入）；脑图标取 core/icons.js 的 I.brain（原 NEU_ICON 常量迁入 I 表）。
-  // 2026-10-01 卡片化：卡内「整卡重渲」不再直接调 mgr.js 的 renderMgr()，改走 ctx.rerender()（唯一通道出口）。
-  const neuronsCardDef = {
-    id: 'neurons', title: '神经', tip: '神经元视图（mem→认知→社群节点图）', icon: 'brain', tab: true,
-    mount(body, ctx) { NEU_RERENDER = ctx.rerender; renderMgrNeurons(body) },
-  }
-  let NEU_RERENDER = () => {}
-
-  // ---------- 数据源：神经元清单（层级1） ----------
-  let NEU = null
-  let NEU_LOADING = false
-  let NEU_ERR = ''
-  async function loadNeuronsData(force) {
-    if (NEU && !force) return NEU
-    if (needToken()) return null
-    NEU_LOADING = true
-    NEU_ERR = ''
-    renderNeuGrid()
-    try {
-      const res = await fetch(apiUrl('/gateway/neurons'))
-      const data = await res.json()
-      if (!data || !Array.isArray(data.neurons)) throw new Error(data.error || 'bad response')
-      NEU = data.neurons
-    } catch (e) {
-      NEU_ERR = e.message || String(e)
-    } finally {
-      NEU_LOADING = false
-      renderNeuGrid()
-    }
-    return NEU
-  }
-
-  // ---------- 数据源：图数据包（层级2） ----------
-  let NEU_GRAPH = null // 当前已加载图包（按 neuron.id 缓存一份；切换/重进 force 重拉）
-  let NEU_GRAPH_LOADING = false
-  let NEU_GRAPH_ERR = ''
-  async function loadNeuronGraph(id, force) {
-    if (NEU_GRAPH && NEU_GRAPH.neuron.id === id && !force) return NEU_GRAPH
-    if (needToken()) return null
-    if (NEU_GRAPH_LOADING) return null
-    NEU_GRAPH_LOADING = true
-    NEU_GRAPH_ERR = ''
-    try {
-      const res = await fetch(apiUrl('/gateway/neurons/graph?id=' + encodeURIComponent(id)))
-      const data = await res.json()
-      if (!data || !data.neuron || !Array.isArray(data.cogs)) throw new Error(data.error || 'bad response')
-      NEU_GRAPH = data
-    } catch (e) {
-      NEU_GRAPH_ERR = e.message || String(e)
-    } finally {
-      NEU_GRAPH_LOADING = false
-      // 渲染唯一入口：就绪→startNeuGraph / 失败→错误态。回程守卫 = 神经元卡仍在槽里才对它渲染
-      // （旧实现无条件 renderMgrNeurons()，图数据慢过用户切 tab 时会把别的视图洗掉）。
-      const b = viewBody('neurons')
-      if (b && state.mgrView.neuronSel) renderMgrNeurons(b)
-    }
-    return NEU_GRAPH
-  }
-
-  /** 神经元视图统一分发（注册表 neurons 条的 render）：有选中 = 图视图，无 = 选择界面 */
-  function renderMgrNeurons(body) {
-    if (state.mgrView.neuronSel) renderNeuGraphView(body)
-    else renderNeuPicker(body)
-  }
-
-  // ---------- 层级1：神经元选择界面 ----------
-  function renderNeuPicker(body) {
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      '<div class="mgr-head"><h2 class="mgr-title">神经元</h2>' +
-      '<div class="mgr-sub">记忆神经元库 · mem→认知→社群三级节点图（数据源 .claude/neturon/neurons）</div></div>' +
-      '<div class="mgr-grid" id="neu-grid"></div>' +
-      '<div class="mgr-foot">数据源：网关 /gateway/neurons 实时扫描</div>' +
-      '</div>'
-    renderNeuGrid()
-    loadNeuronsData(false)
-  }
-
-  function renderNeuGrid() {
-    const grid = $('neu-grid')
-    if (!grid) return
-    if (NEU_LOADING) {
-      grid.innerHTML = '<div class="mgr-empty">扫描神经元库中…</div>'
-      return
-    }
-    if (NEU_ERR) {
-      grid.innerHTML =
-        '<div class="mgr-empty">清单加载失败：' + esc(NEU_ERR) +
-        '<br><button class="mgr-retry" id="neu-retry">重试</button></div>'
-      const retry = $('neu-retry')
-      if (retry) retry.addEventListener('click', () => loadNeuronsData(true))
-      return
-    }
-    const list = NEU || []
-    grid.innerHTML = list.length
-      ? list.map(neuCardHtml).join('')
-      : '<div class="mgr-empty">未发现神经元库（各根 .claude/neturon/neurons/ 下含 config.yaml + l2.mem/mem.db 的目录即注册）</div>'
-    grid.querySelectorAll('.neu-card').forEach((c) =>
-      c.addEventListener('click', () => {
-        state.mgrView.neuronSel = c.dataset.id
-        saveMgrView()
-        NEU_RERENDER()
-        if (isMobile()) closePanel()
-      }),
-    )
-  }
-
-  function neuCardHtml(n) {
-    return (
-      `<div class="mgr-card neu-card" data-id="${esc(n.id)}" title="进入 ${esc(n.name || n.id)} 节点图">` +
-      `<div class="mgr-ic" style="background:${mgrColor(n.id)}">${I.brain}</div>` +
-      '<div class="mgr-meta">' +
-      `<div class="mgr-name">${esc(n.name || n.id)}<span class="inst-badge">${esc(n.id)}</span></div>` +
-      `<div class="mgr-desc">${esc(n.description || '（无触发说明）')}</div>` +
-      '<div class="neu-stats">' +
-      `<span>记忆 ${n.mem_count}</span><span>认知 ${n.cog_count}</span><span>社群 ${n.community_count}</span>` +
-      (n.last_updated ? `<span>更新 ${esc(String(n.last_updated).slice(0, 10))}</span>` : '') +
-      '</div></div>' +
-      '<span class="mgr-more" title="进入">›</span></div>'
-    )
-  }
-
-  // ---------- 层级2：节点图视图 ----------
-  function renderNeuGraphView(body) {
-    const sel = state.mgrView.neuronSel
-    const meta = (NEU || []).find((n) => n.id === sel)
-    body.innerHTML =
-      '<div class="mgr-pane neu-pane">' +
-      '<div class="neu-head">' +
-      '<button class="neu-back" id="neu-back" title="返回神经元选择">‹ 神经元</button>' +
-      `<span class="neu-title">${esc((meta && (meta.name || meta.id)) || sel)}</span>` +
-      (meta ? `<span class="neu-meta-chip">记忆 ${meta.mem_count}</span><span class="neu-meta-chip">认知 ${meta.cog_count}</span><span class="neu-meta-chip">社群 ${meta.community_count}</span>` : '') +
-      '<span class="neu-legend"><i class="lg lg-mem"></i>记忆<i class="lg lg-cog"></i>认知<i class="lg lg-comm"></i>社群</span>' +
-      '</div>' +
-      '<div class="neu-graph" id="neu-graph"><canvas id="neu-canvas"></canvas><div class="neu-pop" id="neu-pop" hidden></div></div>' +
-      '<div class="mgr-foot">滚轮缩放 · 空白处拖拽平移 · 节点可拖拽 · 悬停/点击弹浮窗 · 数据源 /gateway/neurons/graph</div>' +
-      '</div>'
-    const back = $('neu-back')
-    if (back)
-      back.addEventListener('click', () => {
-        state.mgrView.neuronSel = null
-        saveMgrView()
-        NEU_RERENDER()
-      })
-    if (NEU_GRAPH_LOADING) {
-      const box = $('neu-graph')
-      if (box) box.innerHTML = '<canvas id="neu-canvas"></canvas><div class="neu-hint">加载图数据…</div>'
-      return
-    }
-    if (NEU_GRAPH_ERR) {
-      const box = $('neu-graph')
-      if (box) {
-        box.innerHTML =
-          '<canvas id="neu-canvas"></canvas><div class="neu-hint">图数据加载失败：' + esc(NEU_GRAPH_ERR) +
-          '<br><button class="mgr-retry" id="neu-graph-retry">重试</button></div>'
-        const retry = $('neu-graph-retry')
-        if (retry) retry.addEventListener('click', () => loadNeuronGraph(sel, true))
-      }
-      return
-    }
-    if (NEU_GRAPH && NEU_GRAPH.neuron.id === sel) startNeuGraph(NEU_GRAPH)
-    else loadNeuronGraph(sel, false)
-  }
-
-  // ---------- 三级图模型（纯函数，探针覆盖） ----------
-
-  // 半径公式：mem 小点（内容量微调）；cog ∝ 挂载记忆数 + 内容量；社群 ∝ cog 数 + 内容量
-  function neuMemR(chars) {
-    return 2.5 + Math.min(2.5, chars / 600)
-  }
-  function neuCogR(nMems, chars) {
-    return Math.min(24, 7 + 2.4 * Math.sqrt(nMems) + Math.min(7, chars / 1200))
-  }
-  function neuCommR(nCogs, chars) {
-    return Math.min(34, 11 + 3.2 * Math.sqrt(nCogs * 2) + Math.min(9, chars / 2500))
-  }
-  function neuHue(i) {
-    return MGR_PALETTE[i % MGR_PALETTE.length]
-  }
-
-  /** payload → 仿真模型：nodes（x/y 初始化为确定性同心布局，无随机 → 探针可复现）+ links */
-  function neuBuildModel(d) {
-    const nodes = []
-    const links = []
-    const idxOf = {}
-    const C = d.communities
-    for (let i = 0; i < C.length; i++) {
-      const c = C[i]
-      const ang = (2 * Math.PI * i) / Math.max(1, C.length) - Math.PI / 2
-      idxOf['c' + c.i] = nodes.length
-      nodes.push({
-        key: 'comm' + c.i, type: 'comm', r: neuCommR(c.size, c.chars), ref: c,
-        x: Math.cos(ang) * 170, y: Math.sin(ang) * 170, vx: 0, vy: 0,
-      })
-    }
-    for (const g of d.cogs) {
-      idxOf['g' + g.id] = nodes.length
-      const comm = g.community >= 0 ? C[g.community] : null
-      const host = comm ? idxOf['c' + comm.i] : -1
-      // 初始位：社群节点近旁外圈（未入群 cog 落外围 300 环）
-      const k = nodes.length
-      const ang = 0.7 * k
-      const rad = host >= 0 ? nodes[host].r + 60 + (k % 7) * 9 : 300
-      const cx = host >= 0 ? nodes[host].x : 0
-      const cy = host >= 0 ? nodes[host].y : 0
-      nodes.push({
-        key: 'cog' + g.id, type: 'cog', r: neuCogR(g.mem_ids.length + g.rel_ids.length, g.chars), ref: g,
-        x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad, vx: 0, vy: 0,
-      })
-    }
-    for (const m of d.mems) {
-      idxOf['m' + m.id] = nodes.length
-      // 初始位：挂靠首个 cog 近旁；孤儿 mem（不挂任何 cog）落中心环
-      const hostCog = d.cogs.find((g) => g.mem_ids.includes(m.id) || g.rel_ids.includes(m.id))
-      const host = hostCog ? idxOf['g' + hostCog.id] : -1
-      const k = nodes.length
-      const ang = 1.3 * k
-      const rad = host >= 0 ? nodes[host].r + 10 + (k % 5) * 5 : 120 + (k % 9) * 8
-      const cx = host >= 0 ? nodes[host].x : 0
-      const cy = host >= 0 ? nodes[host].y : 0
-      nodes.push({
-        key: 'mem' + m.id, type: 'mem', r: neuMemR(m.chars), ref: m,
-        x: cx + Math.cos(ang) * rad, y: cy + Math.sin(ang) * rad, vx: 0, vy: 0,
-      })
-    }
-    // 连边（事实闭合）：cog→社群 + cog→mem/rel 全量连边（同一 mem 挂多 cog 时每 cog 各一条）
-    for (const g of d.cogs) {
-      const gi = idxOf['g' + g.id]
-      if (g.community >= 0 && idxOf['c' + g.community] !== undefined) links.push({ s: idxOf['c' + g.community], t: gi, kind: 'comm' })
-      for (const mid of g.mem_ids) { const mi = idxOf['m' + mid]; if (mi !== undefined) links.push({ s: gi, t: mi, kind: 'mem' }) }
-      for (const mid of g.rel_ids) { const mi = idxOf['m' + mid]; if (mi !== undefined) links.push({ s: gi, t: mi, kind: 'rel' }) }
-    }
-    return { nodes, links, neuron: d.neuron, resolution: d.resolution }
-  }
-
-  // ---------- 力导向仿真（d3-force 同型：斥力 + 弹簧 + 向心引力 + 碰撞） ----------
-  // 2026-09-16 用户实测「节点间斥力太大」：整体 ÷2.5（mem 卫星平衡距 49→32px，mem 云不再被吹散）
-  const NEU_CHARGE = { mem: 12, cog: 72, comm: 360 }
-  const NEU_PAD = { mem: 6, rel: 6, comm: 16 }
-  const NEU_KLINK = { mem: 0.06, rel: 0.04, comm: 0.09 }
-  // 向心引力（2026-09-16 二次定案：18:32 回退曾误恢复 15:47 首版分级值——16:12 定案本就是废弃
-  // 分级、改统一外场，d3 forceCenter 同型）：向心只负责把整图约束在画布内，与类型/尺寸完全无关；
-  // 径向分层语义全部交斥力——charge 大者被推得远（comm 外圈 / cog 中带 / mem 内带）。
-  const NEU_G = 0.01
-
-  function neuTick(model, alpha) {
-    const ns = model.nodes
-    // 斥力（O(n²)，数百节点规模足够；d² 衰减 + 位移上限防爆）
-    for (let i = 0; i < ns.length; i++) {
-      const a = ns[i]
-      for (let j = i + 1; j < ns.length; j++) {
-        const b = ns[j]
-        let dx = b.x - a.x
-        let dy = b.y - a.y
-        let d2 = dx * dx + dy * dy
-        if (d2 < 1) { dx = (i % 3) - 1 || 0.5; dy = (j % 3) - 1 || 0.5; d2 = 1 }
-        const f = (NEU_CHARGE[a.type] * NEU_CHARGE[b.type] * alpha) / d2
-        const d = Math.sqrt(d2)
-        const fx = (dx / d) * f
-        const fy = (dy / d) * f
-        a.vx -= fx; a.vy -= fy
-        b.vx += fx; b.vy += fy
-      }
-    }
-    // 弹簧（目标距离 = 两端半径和 + 余量）
-    for (const lk of model.links) {
-      const a = ns[lk.s]
-      const b = ns[lk.t]
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const d = Math.sqrt(dx * dx + dy * dy) || 1
-      const L = a.r + b.r + NEU_PAD[lk.kind]
-      // 弹簧无地板：力 ∝ alpha 随仿真衰减自然归零（旧 max(alpha,0.15) 地板令末段速度恒定、停机像急刹）
-      const f = (d - L) * NEU_KLINK[lk.kind] * alpha
-      const fx = (dx / d) * f
-      const fy = (dy / d) * f
-      a.vx += fx; a.vy += fy
-      b.vx -= fx; b.vy -= fy
-    }
-    // 向心引力（统一外场指向画布中心，与类型/尺寸无关）
-    for (const n of ns) {
-      const g = NEU_G
-      n.vx += (0 - n.x) * g * alpha
-      n.vy += (0 - n.y) * g * alpha
-      n.vx *= 0.85
-      n.vy *= 0.85
-      const sp = Math.sqrt(n.vx * n.vx + n.vy * n.vy)
-      // 速度上限随 alpha 线性收缩（alpha≤0.3 后渐缓趋停，2026-09-16 用户「中止过于突然，应该是速度逐渐变缓」）
-      const cap = 14 * Math.min(1, alpha / 0.3)
-      if (sp > cap) { n.vx = (n.vx / sp) * cap; n.vy = (n.vy / sp) * cap }
-      if (!n.fixed) { n.x += n.vx; n.y += n.vy } else { n.vx = 0; n.vy = 0 }
-    }
-    // 碰撞去重叠（按半径和推出；单趟即可，斥力会接力）
-    for (let i = 0; i < ns.length; i++) {
-      const a = ns[i]
-      for (let j = i + 1; j < ns.length; j++) {
-        const b = ns[j]
-        const dx = b.x - a.x
-        const dy = b.y - a.y
-        const min = a.r + b.r + 1.5
-        const d2 = dx * dx + dy * dy
-        if (d2 >= min * min || d2 === 0) continue
-        const d = Math.sqrt(d2)
-        const push = ((min - d) / d) * 0.5
-        const fx = dx * push
-        const fy = dy * push
-        if (!a.fixed) { a.x -= fx; a.y -= fy }
-        if (!b.fixed) { b.x += fx; b.y += fy }
-      }
-    }
-  }
-
-  // ---------- 渲染与交互（实例态挂在闭包，画布离场即停帧） ----------
-  let NEU_VIEW = null // {model, view:{x,y,k}, raf, pinned, canvas, ctx, box, pop, alpha, drag}
-
-  function startNeuGraph(data) {
-    const canvas = $('neu-canvas')
-    const box = $('neu-graph')
-    const pop = $('neu-pop')
-    if (!canvas || !box || !pop) return
-    const model = neuBuildModel(data)
-    NEU_VIEW = { model, view: { x: 0, y: 0, k: 1 }, raf: 0, pinned: null, canvas, ctx: canvas.getContext('2d'), box, pop, alpha: 1, drag: null }
-    const st = NEU_VIEW
-    const resize = () => {
-      const w = box.clientWidth
-      const h = box.clientHeight
-      if (!w || !h) return
-      const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.round(w * dpr)
-      canvas.height = Math.round(h * dpr)
-      canvas.style.width = w + 'px'
-      canvas.style.height = h + 'px'
-      st.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      st.w = w
-      st.h = h
-      st.alpha = Math.max(st.alpha, 0.3) // 尺寸变化轻 reheating 重排
-    }
-    resize()
-    st.ro = new ResizeObserver(resize)
-    st.ro.observe(box)
-
-    const frame = () => {
-      if (!canvas.isConnected) {
-        if (st.ro) st.ro.disconnect()
-        if (st.raf) cancelAnimationFrame(st.raf)
-        if (NEU_VIEW === st) NEU_VIEW = null
-        return
-      }
-      if (st.alpha > 0.003) {
-        neuTick(st.model, st.alpha)
-        st.alpha *= 0.985
-      }
-      drawNeu(st)
-      if (st.pinned) positionPop(st)
-      st.raf = requestAnimationFrame(frame)
-    }
-    st.raf = requestAnimationFrame(frame)
-    bindNeuPointer(st)
-    st.frame = frame
-    // 认知层缺失照实提示（库只有记忆层：cog_graph.json/community.json 由认知管线产出，未跑即无）
-    const cog = data.cognition || {}
-    if (!cog.graph || !cog.communities) {
-      const old = box.querySelector('.neu-note')
-      if (old) old.remove()
-      const note = document.createElement('div')
-      note.className = 'neu-note'
-      note.textContent = !cog.graph
-        ? '该库尚无认知图（未跑认知管线 recall → fill_precog → build_graph），当前仅呈现记忆层 ' + data.mems.length + ' 条'
-        : '该库尚未检测社群（未跑 detect_communities），认知节点暂未归群'
-      box.appendChild(note)
-      st.note = note
-    }
-  }
-
-  /** 屏幕坐标 → 图坐标 */
-  function neuToGraph(st, sx, sy) {
-    return { x: (sx - st.w / 2 - st.view.x) / st.view.k, y: (sy - st.h / 2 - st.view.y) / st.view.k }
-  }
-  function neuHit(st, sx, sy) {
-    const p = neuToGraph(st, sx - st.box.getBoundingClientRect().left, sy - st.box.getBoundingClientRect().top)
-    let best = null
-    for (const n of st.model.nodes) {
-      const d = Math.sqrt((n.x - p.x) ** 2 + (n.y - p.y) ** 2)
-      const hit = n.type === 'mem' ? n.r + 4 : n.r + 2
-      if (d <= hit && (!best || n.r > best.r)) best = n
-    }
-    return best
-  }
-
-  // 夜晚模式（2026-10-06）：画布内容不反色，但节点的「分隔描边」与社群标签须按底色切一组色——
-  // 浅色下描边=白（把彩点从白底上分离）、标签=深灰；暗色下描边=画布底色 #161616（把彩点从暗底上分离）、
-  // 标签=浅灰。逐帧读取（drawNeu 每帧重绘）⇒ 切主题后下一帧自动生效，无需事件。
-  function neuPalette() {
-    const dark = document.documentElement.getAttribute('data-theme') === 'dark'
-    return dark
-      ? { ringCog: 'rgba(22,22,22,0.9)', ringComm: 'rgba(22,22,22,0.95)', label: 'rgba(208,212,220,0.85)' }
-      : { ringCog: 'rgba(255,255,255,0.9)', ringComm: 'rgba(255,255,255,0.95)', label: 'rgba(40,50,70,0.85)' }
-  }
-
-  function drawNeu(st) {
-    const { ctx, model, view } = st
-    const w = st.w || 0
-    const h = st.h || 0
-    const pal = neuPalette()
-    ctx.clearRect(0, 0, w, h)
-    ctx.save()
-    ctx.translate(w / 2 + view.x, h / 2 + view.y)
-    ctx.scale(view.k, view.k)
-    // 边：mem 实线淡 / rel 更淡 / comm 稍深
-    for (const lk of model.links) {
-      const a = model.nodes[lk.s]
-      const b = model.nodes[lk.t]
-      const hue = a.type === 'comm' ? neuHue(a.ref.i) : cogHue(a)
-      ctx.strokeStyle =
-        lk.kind === 'comm' ? hexA(hue, 0.4) : lk.kind === 'rel' ? hexA(hue, 0.1) : hexA(hue, 0.22)
-      ctx.lineWidth = lk.kind === 'comm' ? 1.6 : lk.kind === 'rel' ? 0.6 : 1
-      ctx.beginPath()
-      ctx.moveTo(a.x, a.y)
-      ctx.lineTo(b.x, b.y)
-      ctx.stroke()
-    }
-    // 节点：mem 小点 → cog 彩点 → 社群大节点（描边 + 标签）
-    for (const n of model.nodes) {
-      ctx.beginPath()
-      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-      if (n.type === 'mem') {
-        ctx.fillStyle = '#9aa7b8'
-      } else if (n.type === 'cog') {
-        ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = pal.ringCog
-        ctx.lineWidth = 1.2
-        ctx.stroke()
-      } else {
-        ctx.fillStyle = cogHue(n)
-        ctx.strokeStyle = pal.ringComm
-        ctx.lineWidth = 2
-        ctx.stroke()
-      }
-      ctx.fill()
-      if (n.type === 'comm') {
-        ctx.fillStyle = pal.label
-        ctx.font = '10px system-ui, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText((n.ref.name || '群' + (n.ref.i + 1)) + '·' + n.ref.size, n.x, n.y + n.r + 12)
-      }
-    }
-    ctx.restore()
-  }
-  function cogHue(n) {
-    return n.type === 'comm' ? neuHue(n.ref.i) : n.ref.community >= 0 ? neuHue(n.ref.community) : '#8a94a6'
-  }
-  function hexA(hex, a) {
-    const h = hex.replace('#', '')
-    const r = parseInt(h.slice(0, 2), 16)
-    const g = parseInt(h.slice(2, 4), 16)
-    const b = parseInt(h.slice(4, 6), 16)
-    return `rgba(${r},${g},${b},${a})`
-  }
-
-  // ---------- 指针交互（悬停浮窗 / 点击钉住 / 拖节点 / 平移 / 缩放） ----------
-  function bindNeuPointer(st) {
-    const cv = st.canvas
-    let moved = 0
-    cv.addEventListener('pointerdown', (e) => {
-      cv.setPointerCapture(e.pointerId)
-      moved = 0
-      const hit = neuHit(st, e.clientX, e.clientY)
-      st.drag = { hit, sx: e.clientX, sy: e.clientY, vx: st.view.x, vy: st.view.y }
-      if (hit) hit.fixed = true
-    })
-    cv.addEventListener('pointermove', (e) => {
-      if (st.drag) {
-        const dx = e.clientX - st.drag.sx
-        const dy = e.clientY - st.drag.sy
-        moved = Math.max(moved, Math.abs(dx) + Math.abs(dy))
-        if (st.drag.hit) {
-          const p = neuToGraph(st, e.clientX - st.box.getBoundingClientRect().left, e.clientY - st.box.getBoundingClientRect().top)
-          st.drag.hit.x = p.x
-          st.drag.hit.y = p.y
-          st.alpha = Math.max(st.alpha, 0.35)
-        } else {
-          st.view.x = st.drag.vx + dx
-          st.view.y = st.drag.vy + dy
-        }
-        return
-      }
-      const hit = neuHit(st, e.clientX, e.clientY)
-      if (hit) showNeuPop(st, hit, e.clientX, e.clientY)
-      else if (!st.pinned) hideNeuPop(st)
-    })
-    const up = (e) => {
-      if (st.drag) {
-        if (st.drag.hit) {
-          st.drag.hit.fixed = false
-          if (moved < 5) {
-            st.pinned = st.pinned === st.drag.hit ? null : st.drag.hit
-            if (st.pinned) showNeuPop(st, st.pinned, e.clientX, e.clientY)
-            else hideNeuPop(st)
-          }
-        } else if (moved < 5) {
-          st.pinned = null
-          hideNeuPop(st)
-        }
-      }
-      st.drag = null
-    }
-    cv.addEventListener('pointerup', up)
-    cv.addEventListener('pointercancel', () => { st.drag = null })
-    cv.addEventListener(
-      'wheel',
-      (e) => {
-        e.preventDefault()
-        const k = Math.min(3, Math.max(0.25, st.view.k * Math.exp(-e.deltaY * 0.0012)))
-        st.view.k = k
-      },
-      { passive: false },
-    )
-    cv.addEventListener('pointerleave', () => { if (!st.pinned) hideNeuPop(st) })
-  }
-
-  // ---------- 浮窗（美化卡片：标题行 + 统计 chips + 成员/内容区） ----------
-  function showNeuPop(st, node, clientX, clientY) {
-    st.hover = node
-    const pop = st.pop
-    pop.innerHTML = neuPopHtml(node)
-    pop.hidden = false
-    st.popAt = { x: clientX, y: clientY }
-    positionPop(st)
-  }
-  function positionPop(st) {
-    const node = st.pinned || st.hover
-    const pop = st.pop
-    if (!node || pop.hidden) return
-    // 钉住态跟随节点图→屏坐标；悬停态用最近指针位
-    let sx
-    let sy
-    if (st.pinned === node) {
-      const rect = st.box.getBoundingClientRect()
-      sx = rect.left + st.w / 2 + st.view.x + node.x * st.view.k
-      sy = rect.top + st.h / 2 + st.view.y + node.y * st.view.k
-    } else if (st.popAt) {
-      sx = st.popAt.x
-      sy = st.popAt.y
-    } else return
-    const pw = pop.offsetWidth || 300
-    const ph = pop.offsetHeight || 160
-    const rect = st.box.getBoundingClientRect()
-    let left = sx - rect.left + 14
-    let top = sy - rect.top + 14
-    left = Math.max(6, Math.min(left, rect.width - pw - 6))
-    top = Math.max(6, Math.min(top, rect.height - ph - 6))
-    pop.style.left = left + 'px'
-    pop.style.top = top + 'px'
-  }
-  function hideNeuPop(st) {
-    st.hover = null
-    st.pop.hidden = true
-  }
-
-  function neuPopHtml(node) {
-    if (node.type === 'comm') return neuCommHtml(node.ref)
-    if (node.type === 'cog') return neuCogHtml(node.ref)
-    return neuMemHtml(node.ref)
-  }
-
-  function chipsHtml(arr) {
-    return '<div class="neu-chips">' + arr.map((x) => `<span class="neu-chip">${x}</span>`).join('') + '</div>'
-  }
-
-  function neuCommHtml(c) {
-    const hue = neuHue(c.i)
-    const rows = c.members
-      .map(
-        (m) =>
-          `<div class="neu-mrow"><span class="neu-role ${esc(m.role)}" style="--hue:${hue}"></span>` +
-          `<span class="neu-mq" title="${esc(m.query)}">${esc(m.query)}</span>` +
-          `<span class="neu-score">${m.core_score.toFixed(2)}</span></div>`,
-      )
-      .join('')
-    return (
-      `<div class="neu-pop-h"><span class="neu-dot" style="background:${hue}"></span>` +
-      (c.name ? `${esc(c.name)} · 认知 ${c.size}` : `群 ${c.i + 1} · 认知 ${c.size}`) +
-      '</div>' +
-      (c.description ? `<div class="neu-q">${esc(c.description)}</div>` : '') +
-      chipsHtml([`记忆 ${c.mem_count}`, `密度 ${c.density.toFixed(2)}`, `内容 ${fmtChars(c.chars)}`]) +
-      `<div class="neu-members">${rows || '<div class="neu-nomember">（无成员）</div>'}</div>`
-    )
-  }
-
-  function neuCogHtml(g) {
-    const hue = g.community >= 0 ? neuHue(g.community) : '#8a94a6'
-    const kws = g.keywords
-      .slice(0, 6)
-      .map((k) => `<span class="neu-kw">${esc(k)}</span>`)
-      .join('')
-    return (
-      `<div class="neu-pop-h"><span class="neu-dot" style="background:${hue}"></span>认知节点${g.community >= 0 ? ` · 群 ${g.community + 1}` : ' · 游离'}</div>` +
-      `<div class="neu-q">${esc(g.query)}</div>` +
-      (kws ? `<div class="neu-kws">${kws}</div>` : '') +
-      chipsHtml([
-        `记忆 ${g.mem_ids.length}`,
-        g.rel_ids.length ? `关联 ${g.rel_ids.length}` : '',
-        `内容 ${fmtChars(g.chars)}`,
-      ].filter(Boolean))
-    )
-  }
-
-  function neuMemHtml(m) {
-    return (
-      '<div class="neu-pop-h"><span class="neu-dot" style="background:#9aa7b8"></span>记忆' +
-      (m.time ? ` · ${esc(m.time)}` : '') +
-      '</div>' +
-      `<div class="neu-prev">${esc(m.preview || '（无文本）')}</div>` +
-      chipsHtml([`内容 ${fmtChars(m.chars)}`, m.source ? '来源 ' + esc(m.source) : ''].filter(Boolean))
-    )
-  }
-
-  function fmtChars(n) {
-    return n >= 1000 ? (n / 1000).toFixed(1) + 'k 字' : n + ' 字'
   }
 
   // ---------- 会话卡 ----------
@@ -4838,11 +4071,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
 
-  // ---------- 卡片注册表 ----------
+  // ---------- 第一方卡片注册表 ----------
   // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
-  // #session-card，deactivate=teardownSessionView）；其余四张管理卡同态各自成模块。
-  const CARDS = [sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef]
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
+  // #session-card，deactivate=teardownSessionView）；插件卡与预览卡同态各自成模块。
+  // 「项目 / 模型 / 神经元」三卡自 2026-10-10 起不再是第一方卡——改由工作区根以应用形式申报、
+  // 用户在插件卡「应用」列表里手动启用（APP_TABS 见下），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
+  const CARDS = [sessionCardDef, pluginsCardDef, previewCardDef]
+  const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
@@ -4938,12 +4173,90 @@ function setFirstSendHash(v) { firstSendHash = v }
     return QACTIONS
   }
 
+  // ---------- 应用目录与「已启用的应用」tab（2026-10-10）----------
+  // 应用 = 工作区根 <workroot>/.claude/preview/ 里申报的界面单元（preview.json 的 cards 段，经
+  // /gateway/preview-cards?label=<全局根> 取回）。**不扫描目录、不自动渲染**：清单只进插件卡的
+  // 「应用」列表（第三个 cat），由用户点「+」启用；**已启用**的应用才在侧栏生成 tab（APP_TABS），
+  // 点击走 openCard → mountExtCard 渲染其 iframe 页（壳与字段校验复用 cards/ext/ext-card.js，零第二份
+  // 实现）。与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
+  // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
+  // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
+  const GLOBAL_LABEL = '全局根 · 散装对话'
+  const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
+  let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
+  let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
+  let APPS_ENABLED = new Set()
+  let appSeq = 0
+
+  function loadEnabledApps() {
+    const d = readUI()
+    const list = d && Array.isArray(d[APPS_KEY]) ? d[APPS_KEY] : []
+    APPS_ENABLED = new Set(list.filter((x) => typeof x === 'string'))
+  }
+  function saveEnabledApps() {
+    patchUI({ [APPS_KEY]: [...APPS_ENABLED] })
+  }
+  function appCatalog() {
+    return APP_CATALOG
+  }
+  function isAppEnabled(id) {
+    return APPS_ENABLED.has(id)
+  }
+  // 启用/停用唯一写口：改集合 → 落盘 → 重建侧栏 tab。返回落定后的启用态（调用方据此重渲按钮）。
+  function setAppEnabled(id, on) {
+    if (typeof id !== 'string' || !id) return false
+    if (on) APPS_ENABLED.add(id)
+    else APPS_ENABLED.delete(id)
+    saveEnabledApps()
+    applyAppTabs()
+    renderMgrTabs()
+    return APPS_ENABLED.has(id)
+  }
+  // 目录 → 侧栏 tab（只取已启用者）。id 加 `app:` 前缀，与第一方裸词 id、EXT 的 `ext:` 零撞车。
+  function applyAppTabs() {
+    APP_TABS = APP_CATALOG.filter((c) => APPS_ENABLED.has(c.id)).map((c) => ({
+      id: `app:${c.id}`,
+      title: c.title,
+      tip: `${c.title} · 应用（工作区根）`,
+      icon: I[c.icon] ? c.icon : 'plug',
+      tab: c.tab,
+      mount: (body) => mountExtCard(body, GLOBAL_LABEL, c),
+    }))
+  }
+  // 目录整份替换 + 落缓存快照（刷新即用；与 EXT 同一份缓存结构，key = 全局根 label）。
+  function setAppCatalog(cards) {
+    APP_CATALOG = normExtCards(cards)
+    persistExtDecls(GLOBAL_LABEL, { cards: APP_CATALOG })
+    applyAppTabs()
+    renderMgrTabs()
+  }
+  // 拉取点（唯一）：hideGate 补拉链调一次；断连重连自愈走同点。seq 守卫 = 只有最后一次响应可落目录。
+  // 取不到 = 工作区根未申报应用（不猜不兜底，目录照旧为空）。
+  function syncGlobalPlugins() {
+    loadEnabledApps() // 启用集合恒从盘上读（唯一真源；本函数也是「刷新/重连」的复位点）
+    const cached = readUI()
+    const e = cached && cached.extDecls ? cached.extDecls[GLOBAL_LABEL] : null
+    if (e && Array.isArray(e.cards)) setAppCatalog(e.cards) // 缓存快照先落（列表即刻可用）
+    else {
+      applyAppTabs()
+      renderMgrTabs()
+    }
+    const seq = ++appSeq
+    fetch(`/gateway/preview-cards?label=${encodeURIComponent(GLOBAL_LABEL)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then((d) => {
+        if (seq !== appSeq) return
+        setAppCatalog((d && d.cards) || [])
+      })
+      .catch(() => {})
+  }
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = CARDS.concat(EXT).filter((v) => v.tab)
+    box.innerHTML = CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
@@ -9948,13 +9261,16 @@ function setApprovalPending(v) { approvalPending = v }
       }
       renderRecent()
       // work 模式数据补拉：boot 的 initWork→ensureWork 撞上 needToken()（token 未就绪）早退，
-      // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr/models/neurons 同点补拉。
+      // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr 同点补拉。
       if (state.sbMode === 'work') ensureWork()
     })
+    // 应用目录补拉（2026-10-10）：工作区根 .claude/preview 申报的应用清单 + 已启用侧栏 tab。
+    // boot 时 token 未就绪会取空，故与 loadSessions 同点补拉；断连重连自愈走同点（hideGate 即恢复口）。
+    syncGlobalPlugins()
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
     if (state.preview) route()
-    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true); if (state.mgr === 'neurons') loadNeuronsData(true) }
+    else if (state.mgr) loadMgrData(true)
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、

@@ -1713,17 +1713,15 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
    卡化后「哪张卡在槽里」直接决定可见内容：管理卡在场时会话卡 hidden（#empty-hint / #input-wrap
    随卡整体 display:none），旧版 #chat-area.mgr-on 的三条压制规则（隐藏空态 icon / 隐藏输入栏）
    与 920px 宽帽、:has() 满高特例一并退役——它们的前提是「一张卡装五个视图、只有内容在换」。 */
-/* 全高特例（预览 iframe / 神经元图）：内容自己管滚动，卡体撑满；判据是卡内的结构，不是槽上的类 */
+/* 全高特例（预览 iframe / 外部卡 iframe）：内容自己管滚动，卡体撑满；判据是卡内的结构，不是槽上的类 */
 .view-card:has(.preview-shell) > .view-scroll,
-.view-card:has(.ext-shell) > .view-scroll,
-.view-card:has(.neu-graph) > .view-scroll { padding: 0; scrollbar-gutter: auto; overflow: hidden; display: flex; flex-direction: column; }
+.view-card:has(.ext-shell) > .view-scroll { padding: 0; scrollbar-gutter: auto; overflow: hidden; display: flex; flex-direction: column; }
 /* margin:0 与 max-width:none 是同一条「撤掉 920px 居中帽」的两个半条，必须成对出现：
    .view-scroll 在本块成了 column flex 容器，flex item 在交叉轴（水平）带 auto margin 时不参与
    stretch，宽度改取 fit-content —— 内容又是 width:100% 的 iframe，percentage 在不定宽父里回落
    成 iframe 默认宽 300px ⇒ 预览缩成居中窄条。不变量：特例卡内 .view-body 的宽度恒由卡宽决定。 */
 .view-card:has(.preview-shell) > .view-scroll > .view-body,
-.view-card:has(.ext-shell) > .view-scroll > .view-body,
-.view-card:has(.neu-graph) > .view-scroll > .view-body { max-width: none; margin: 0; flex: 1; min-height: 0; }
+.view-card:has(.ext-shell) > .view-scroll > .view-body { max-width: none; margin: 0; flex: 1; min-height: 0; }
 .mgr-pane { width: 100%; }
 .mgr-top { display: flex; align-items: center; justify-content: space-between; min-height: 40px; margin-bottom: 28px; }
 .mgr-kind { display: inline-flex; background: var(--active); border-radius: 10px; padding: 3px; gap: 2px; }
@@ -1756,36 +1754,14 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
 .mgr-desc { font-size: 12px; color: var(--text-2); margin-top: 3px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; } /* min-height 固定两行介绍位（12px×1.5×2），保证全部卡片等高（每卡都能承载两行介绍） */
 .mgr-more { flex: none; width: 26px; height: 26px; border-radius: 7px; color: var(--text-2); font-size: 16px; line-height: 1; opacity: 0; transition: opacity 0.15s, background 0.15s; }
 .mgr-card:hover .mgr-more, .mgr-more:focus-visible { opacity: 1; }
-body.touch .mgr-card .mgr-more, body.touch .mgr-proj .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 hover:hover，同 body.touch 段） */
+body.touch .mgr-card .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 hover:hover，同 body.touch 段） */
 .mgr-more:hover { background: var(--active); }
-/* 管理视图：项目列表（仿插件布设，每个项目胶囊占据一整行） */
-.mgr-list { display: flex; flex-direction: column; gap: 10px; }
-.mgr-proj { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; transition: border-color 0.15s, background 0.15s; cursor: pointer; }
-.mgr-proj:hover { border-color: var(--border-soft); background: var(--hover); }
-.mgr-proj .mgr-ic { width: 40px; height: 40px; }
-.mgr-proj .mgr-desc { margin-top: 2px; }
-.mgr-model-item .mgr-name { line-height: 20px; } /* 模型胶囊 name 行高锚定到与项目胶囊 badge 行一致（纯文本行被 body 1.6 行高撑到 24px，压回 20px 保等高） */
-.mgr-ic svg { width: 22px; height: 22px; }
-.mgr-ic svg.whale { width: 22px; height: 16.2px; } /* DeepSeek 鲸鱼按官方 23.16:17.04 比例（FishLogo），不压成方形 */
-.mgr-proj:hover .mgr-more, .mgr-proj .mgr-more:focus-visible { opacity: 1; }
+.mgr-more.app-toggle.on { color: #22c55e; font-weight: 700; } /* 应用已启用：+ 变绿 ✓ */
 .mgr-empty { grid-column: 1 / -1; padding: 42px 0; text-align: center; color: var(--text-3); font-size: 13px; }
 .mgr-retry { display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; padding: 7px 16px; border-radius: 999px; font-size: 13px; background: var(--btn-bg, #4d6bfe); color: #fff; border: none; cursor: pointer; }
 .mgr-retry:hover { opacity: 0.9; }
 .mgr-foot { margin-top: 26px; text-align: center; font-size: 12px; color: var(--text-3); }
-/* 管理视图：模型列表（按供应商分组；数据源 = 网关 /api/models + 凭据池，只读展示） */
-.mgr-model-list { display: flex; flex-direction: column; gap: 10px; } /* 与项目列表 .mgr-list 同宽同距 */
-.mgr-model-group { display: flex; flex-direction: column; gap: 8px; }
-.mgr-model-ghead { display: flex; align-items: center; gap: 8px; padding: 2px 2px 0; }
-.mgr-model-gname { font-size: 13px; font-weight: 700; color: var(--text-2); }
-.mgr-model-item { cursor: default; } /* 只读展示：胶囊外观完全复用 .mgr-proj，点击无动作 */
-/* 2026-08-23 设为默认：凭据池可切换模型整行可点（cursor:pointer，无独立按钮、无右侧箭头）；
-   默认模型整行绿色高亮（is-default） */
-.mgr-model-item.settable { cursor: pointer; }
-.mgr-model-item.settable:hover { border-color: #4176e6; }
-.mgr-model-item.is-default { border-color: #22c55e; background: var(--ok-soft); }
-.mgr-model-item.is-default:hover { border-color: #16a34a; }
 /* 管理视图：项目预览（点项目胶囊 → iframe 加载 <项目>/.claude/preview/ 替换主界面；退出走侧栏导航） */
-.pv-badge { font-size: 11px; font-weight: 500; color: #fff; background: #4d6bfe; border-radius: 999px; padding: 1px 8px; flex: none; }
 /* .preview-shell relative 承载绝对定位（overlay 等依赖此定位上下文） */
 .preview-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .preview-frame { flex: 1; width: 100%; border: none; border-radius: 0; background: #fff; } /* 2026-08-27 去 1px 边框+圆角：完全填满 */
@@ -1983,7 +1959,7 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
    外部卡 / 神经元画布）本就 padding:0，汉堡浮在其上，不参与此规则。 */
 @media (min-width: 721px) and (max-width: 899px) {
   #sidebar:not(.open) ~ #chat-area #session-card > #chat-scroll { padding-top: 60px; }
-  #sidebar:not(.open) ~ #chat-area .view-card:not(:has(.preview-shell)):not(:has(.ext-shell)):not(:has(.neu-graph)) > .view-scroll { padding-top: 60px; }
+  #sidebar:not(.open) ~ #chat-area .view-card:not(:has(.preview-shell)):not(:has(.ext-shell)) > .view-scroll { padding-top: 60px; }
 }
 
 /* 平板 / 小屏笔记本（iPad 竖屏 ~768–1023px） */
@@ -2288,52 +2264,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .queue-dock .q-text + .q-imgs,
 .queue-dock .q-who + .q-imgs { margin-top: 6px; }
 .queue-dock .q-imgs .q-img { display: block; max-width: min(160px, 100%); max-height: 160px; width: auto; height: auto; border-radius: 10px; margin: 0; cursor: pointer; }
-
-/* ===== 神经元视图（2026-09-16「神经」tab）：层级1 选择卡片 + 层级2 Canvas 三级节点图 ===== */
-/* 层级1 卡片统计行（复用 .mgr-card 外观，仅加统计 chips 行） */
-.neu-stats { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-.neu-stats span { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 8px; font-size: 11.5px; }
-.neu-card { cursor: pointer; }
-/* 层级2：图区充满卡内剩余高度（全高规则见 .view-card:has(.neu-graph)），头部 + 图容器纵向排布 */
-.neu-pane { display: flex; flex-direction: column; height: 100%; padding: 20px 24px 14px; }
-.neu-head { display: flex; align-items: center; gap: 10px; flex: none; margin-bottom: 12px; }
-.neu-back { flex: none; padding: 6px 14px; border-radius: 999px; font-size: 13px; background: var(--active); color: var(--text-2); transition: background 0.15s, color 0.15s; }
-.neu-back:hover { background: var(--hover); color: var(--text); }
-.neu-title { font-size: 16px; font-weight: 700; color: var(--text); }
-.neu-meta-chip { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; }
-.neu-legend { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
-.neu-legend .lg { display: inline-block; border-radius: 50%; }
-.neu-legend .lg-mem { width: 8px; height: 8px; background: #9aa7b8; }
-.neu-legend .lg-cog { width: 12px; height: 12px; background: #5b8ff9; }
-.neu-legend .lg-comm { width: 15px; height: 15px; background: #7b6bd6; }
-/* 图容器：relative 承载 canvas 与浮窗；canvas 满铺 + touch-action none（自管指针手势） */
-.neu-graph { position: relative; flex: 1; min-height: 0; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-#neu-canvas { position: absolute; inset: 0; touch-action: none; cursor: grab; }
-#neu-canvas:active { cursor: grabbing; }
-.neu-hint { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-2); font-size: 13px; text-align: center; padding: 0 20px; }
-/* 认知层缺失提示条（库只有记忆层）：贴顶、不遮图、不吃指针（悬停/拖拽穿透到 canvas） */
-.neu-note { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 3; pointer-events: none; background: var(--active); color: var(--text-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.5; }
-/* 悬停/钉住浮窗：白卡 + 描边 + 柔和投影；容器外禁指针（悬停穿透，成员列表单独放开可滚） */
-.neu-pop { position: absolute; z-index: 6; width: 300px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 32px rgba(20, 30, 60, 0.16); padding: 11px 12px 10px; font-size: 12.5px; pointer-events: none; }
-.neu-pop-h { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
-.neu-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.neu-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.neu-chip { background: var(--active); color: var(--text-2); border-radius: 999px; padding: 2px 8px; font-size: 11.5px; }
-.neu-members { pointer-events: auto; margin-top: 9px; border-top: 1px solid var(--border); padding-top: 8px; max-height: 190px; overflow: auto; display: flex; flex-direction: column; gap: 5px; }
-.neu-mrow { display: flex; align-items: center; gap: 6px; }
-.neu-role { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--hue, #8a94a6); }
-.neu-role.context { background: transparent; border: 1.5px solid var(--hue, #8a94a6); }
-.neu-mq { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-.neu-score { flex: none; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.neu-nomember { color: var(--text-3); }
-.neu-q { margin-top: 8px; font-size: 12.5px; line-height: 1.5; color: var(--text); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
-.neu-kws { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.neu-kw { border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--text-2); }
-.neu-prev { margin-top: 8px; color: var(--text-2); line-height: 1.55; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
-@media (max-width: 720px) {
-  .neu-legend { display: none; }
-  .neu-pane { padding: 14px 14px 10px; }
-}
 
 /* ============ 侧栏 chat / work 双模式（2026-09-25，参考 Prism） ============
    状态源 = core/state.js 的 sbMode/projects/workProj/workFile/wkMainTab/wkAssist/wkPreview/wkPrevW；

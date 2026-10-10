@@ -10,23 +10,23 @@
 // 外部永不获得在宿主 DOM 执行的能力（SPEC-视图卡化 §7 边界）。
 
 import { I } from '../core/icons.js'
+import { gToken } from '../engine/gateway.js'
 import { chatArea, sessionCard } from '../engine/state.js'
 import { esc } from '../core/util.js'
 import { patchUI, readUI } from '../core/storage.js'
 import { sessionCardDef } from './cards/session/session-card.js'
-import { neuronsCardDef } from './cards/neurons/neurons-card.js'
 import { pluginsCardDef } from './cards/plugins/plugins-card.js'
-import { projectsCardDef } from './cards/projects/projects-card.js'
-import { modelsCardDef } from './cards/models/models-card.js'
 import { previewCardDef } from './cards/preview/preview-card.js'
 import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-card.js'
 /* @module views/registry.js */
 
-  // ---------- 卡片注册表 ----------
+  // ---------- 第一方卡片注册表 ----------
   // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
-  // #session-card，deactivate=teardownSessionView）；其余四张管理卡同态各自成模块。
-  const CARDS = [sessionCardDef, pluginsCardDef, projectsCardDef, modelsCardDef, neuronsCardDef, previewCardDef]
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
+  // #session-card，deactivate=teardownSessionView）；插件卡与预览卡同态各自成模块。
+  // 「项目 / 模型 / 神经元」三卡自 2026-10-10 起不再是第一方卡——改由工作区根以应用形式申报、
+  // 用户在插件卡「应用」列表里手动启用（APP_TABS 见下），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
+  const CARDS = [sessionCardDef, pluginsCardDef, previewCardDef]
+  const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
@@ -122,12 +122,90 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
     return QACTIONS
   }
 
+  // ---------- 应用目录与「已启用的应用」tab（2026-10-10）----------
+  // 应用 = 工作区根 <workroot>/.claude/preview/ 里申报的界面单元（preview.json 的 cards 段，经
+  // /gateway/preview-cards?label=<全局根> 取回）。**不扫描目录、不自动渲染**：清单只进插件卡的
+  // 「应用」列表（第三个 cat），由用户点「+」启用；**已启用**的应用才在侧栏生成 tab（APP_TABS），
+  // 点击走 openCard → mountExtCard 渲染其 iframe 页（壳与字段校验复用 cards/ext/ext-card.js，零第二份
+  // 实现）。与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
+  // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
+  // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
+  const GLOBAL_LABEL = '全局根 · 散装对话'
+  const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
+  let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
+  let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
+  let APPS_ENABLED = new Set()
+  let appSeq = 0
+
+  function loadEnabledApps() {
+    const d = readUI()
+    const list = d && Array.isArray(d[APPS_KEY]) ? d[APPS_KEY] : []
+    APPS_ENABLED = new Set(list.filter((x) => typeof x === 'string'))
+  }
+  function saveEnabledApps() {
+    patchUI({ [APPS_KEY]: [...APPS_ENABLED] })
+  }
+  function appCatalog() {
+    return APP_CATALOG
+  }
+  function isAppEnabled(id) {
+    return APPS_ENABLED.has(id)
+  }
+  // 启用/停用唯一写口：改集合 → 落盘 → 重建侧栏 tab。返回落定后的启用态（调用方据此重渲按钮）。
+  function setAppEnabled(id, on) {
+    if (typeof id !== 'string' || !id) return false
+    if (on) APPS_ENABLED.add(id)
+    else APPS_ENABLED.delete(id)
+    saveEnabledApps()
+    applyAppTabs()
+    renderMgrTabs()
+    return APPS_ENABLED.has(id)
+  }
+  // 目录 → 侧栏 tab（只取已启用者）。id 加 `app:` 前缀，与第一方裸词 id、EXT 的 `ext:` 零撞车。
+  function applyAppTabs() {
+    APP_TABS = APP_CATALOG.filter((c) => APPS_ENABLED.has(c.id)).map((c) => ({
+      id: `app:${c.id}`,
+      title: c.title,
+      tip: `${c.title} · 应用（工作区根）`,
+      icon: I[c.icon] ? c.icon : 'plug',
+      tab: c.tab,
+      mount: (body) => mountExtCard(body, GLOBAL_LABEL, c),
+    }))
+  }
+  // 目录整份替换 + 落缓存快照（刷新即用；与 EXT 同一份缓存结构，key = 全局根 label）。
+  function setAppCatalog(cards) {
+    APP_CATALOG = normExtCards(cards)
+    persistExtDecls(GLOBAL_LABEL, { cards: APP_CATALOG })
+    applyAppTabs()
+    renderMgrTabs()
+  }
+  // 拉取点（唯一）：hideGate 补拉链调一次；断连重连自愈走同点。seq 守卫 = 只有最后一次响应可落目录。
+  // 取不到 = 工作区根未申报应用（不猜不兜底，目录照旧为空）。
+  function syncGlobalPlugins() {
+    loadEnabledApps() // 启用集合恒从盘上读（唯一真源；本函数也是「刷新/重连」的复位点）
+    const cached = readUI()
+    const e = cached && cached.extDecls ? cached.extDecls[GLOBAL_LABEL] : null
+    if (e && Array.isArray(e.cards)) setAppCatalog(e.cards) // 缓存快照先落（列表即刻可用）
+    else {
+      applyAppTabs()
+      renderMgrTabs()
+    }
+    const seq = ++appSeq
+    fetch(`/gateway/preview-cards?label=${encodeURIComponent(GLOBAL_LABEL)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then((d) => {
+        if (seq !== appSeq) return
+        setAppCatalog((d && d.cards) || [])
+      })
+      .catch(() => {})
+  }
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = CARDS.concat(EXT).filter((v) => v.tab)
+    box.innerHTML = CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
@@ -190,16 +268,21 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
 
 export {
   CARDS,
+  GLOBAL_LABEL,
+  appCatalog,
   clearExtCards,
   clearQuoteActions,
   currentCardId,
   deactivateCard,
   hydrateExtCardId,
   hydrateExtCards,
+  isAppEnabled,
   openCard,
   quoteActions,
   registerExtCards,
   registerQuoteActions,
   renderMgrTabs,
+  setAppEnabled,
+  syncGlobalPlugins,
   viewBody,
 }

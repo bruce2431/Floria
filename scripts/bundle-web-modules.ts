@@ -48,9 +48,6 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'views/cards/ext/ext-card.js', part: 1 },
   { file: 'views/cards/preview/preview-card.js', part: 1 },
   { file: 'views/cards/plugins/plugins-card.js', part: 1 },
-  { file: 'views/cards/projects/projects-card.js', part: 1 },
-  { file: 'views/cards/models/models-card.js', part: 1 },
-  { file: 'views/cards/neurons/neurons-card.js', part: 1 },
   { file: 'views/cards/session/session-card.js', part: 1 },
   // 视图注册表：须排在 core/icons.js(I)、engine/state.js(esc/#chat-area/session-card) 与各卡定义件之后。
   { file: 'views/registry.js', part: 1 },

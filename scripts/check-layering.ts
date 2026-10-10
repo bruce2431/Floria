@@ -76,8 +76,6 @@ const BASELINE: Record<string, Disp> = {
     { kind: '待治理', reason: '取 quoteActions；契约宜下沉' },
   'sidebar/mgr-data.js → views/cards/plugins/plugins-card.js':
     { kind: '待治理', reason: '取 renderMgrGrid；渲染函数宜经契约暴露' },
-  'sidebar/mgr-data.js → views/cards/models/models-card.js':
-    { kind: '待治理', reason: '取 renderMgrModelList；渲染函数宜经契约暴露' },
   'sidebar/mgr.js → views/registry.js':
     { kind: '待治理', reason: '取 openCard；契约宜下沉' },
   'sidebar/rail-ext.js → views/cards/ext/ext-card.js':

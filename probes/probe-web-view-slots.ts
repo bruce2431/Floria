@@ -73,7 +73,8 @@ ok(
 )
 
 // ---------- ③ 无第二份内联清单（防再次分叉） ----------
-for (const f of ['chat/route.js', 'sidebar/mgr.js', 'views/cards/neurons/neurons-card.js', 'engine/live.js']) {
+// 注：神经元视图已迁出仓库（2026-10-10 起为工作区根应用卡 .claude/preview/neurons/index.html），不再列入。
+for (const f of ['chat/route.js', 'sidebar/mgr.js', 'engine/live.js']) {
   const t = await Bun.file(`${SRC}/${f}`).text()
   const hits = [...t.matchAll(/live\.(curUuid|deltaSeq|localMessages) = null/g)].length
   const allowed = f === 'chat/route.js' ? 6 : 0 // route.js：clearSessionSlots 3 处 + renderSession 切会话 3 处

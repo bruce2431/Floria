@@ -1148,7 +1148,16 @@ export function writeProjectComments(
 function findProjects(root: string): ProjectInfo[] {
   const groups: ProjectInfo[] = []
   const global = join(root, '.claude', 'projects')
-  if (isDir(global)) groups.push({ label: '全局根 · 散装对话', dir: global, scope: 'global', hasPreview: false })
+  // 全局根也参与 preview 申报（2026-10-10 全局根插件卡）：dir 保持 <root>/.claude/projects，
+  // 其 `..` 即 <root>/.claude ⇒ join(dir,'..','preview') = <root>/.claude/preview，与项目同一公式。
+  if (isDir(global)) {
+    groups.push({
+      label: '全局根 · 散装对话',
+      dir: global,
+      scope: 'global',
+      hasPreview: isDir(join(root, '.claude', 'preview')),
+    })
+  }
   const entries = readdirSync(root, { withFileTypes: true })
   for (const e of entries) {
     if (!e.isDirectory()) continue
@@ -2427,18 +2436,23 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 项目预览申报表：/gateway/preview-cards?label=<项目> → { label, cards:[…], quoteActions:[…] }
-  // （卡片化二期 + 2026-09-28）preview.json 的 cards / quoteActions 声明；无 preview 项目 / label 未命中
-  // → 404，无声明 → 各自空数组。一次请求取两份申报（消费点同 = sidebar/mgr.js syncExtCards）。
+  // 预览申报表：/gateway/preview-cards?label=<项目|全局根> → { label, cards:[…], quoteActions:[…] }
+  // （卡片化二期 + 2026-09-28；2026-10-10 起含全局根）preview.json 的 cards / quoteActions 声明；
+  // label 必须命中 findProjects（项目名或「全局根 · 散装对话」）且该项目有 .claude/preview → 否则 404，
+  // 命中但无声明 → 各自空数组。一次请求取两份申报（消费点 = preview-card.syncExtCards / 全局插件拉取）。
   if (req.method === 'GET' && url.pathname === '/gateway/preview-cards') {
     const cLabel = url.searchParams.get('label') || ''
-    const cProj = findProjects(root).find((g) => g.scope === 'project' && g.label === cLabel)
+    // 项目 label 与全局根 label 不重叠，故只按 label 命中判；hasPreview 已含全局根（findProjects）——
+    // 无 .claude/preview 一律 404，不猜不兜底。
+    const cProj = findProjects(root).find((g) => g.label === cLabel)
     if (!cProj || !cProj.hasPreview) {
       sendJson(res, 404, { error: 'project not found' })
       return
     }
     try {
-      const cDir = resolve(cProj.dir, '..', 'preview') // cProj.dir = <root>/<label>/.claude/projects
+      // dir = <root>/<label>/.claude/projects（项目）或 <root>/.claude/projects（全局根），
+      // 两者 `..` 再配 preview 均为各自的 .claude/preview。
+      const cDir = resolve(cProj.dir, '..', 'preview')
       sendJson(res, 200, {
         label: cLabel,
         cards: readPreviewCards(cDir),
@@ -2741,13 +2755,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     } catch {
       /* 保留原文，existsSync 不命中自然 404 兜底 */
     }
-    const pvProj = findProjects(root).find((g) => g.scope === 'project' && g.label === pvLabel && g.hasPreview)
+    // label 命中且带 .claude/preview（项目或全局根，2026-10-10 起含全局根）——同 /gateway/preview-cards
+    const pvProj = findProjects(root).find((g) => g.label === pvLabel && g.hasPreview)
     if (!pvProj) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
       res.end('Not Found')
       return
     }
-    const pvDir = join(pvProj.dir, '..', 'preview') // pvProj.dir = <root>/<label>/.claude/projects
+    const pvDir = join(pvProj.dir, '..', 'preview') // dir = <root>/<label>/.claude/projects 或全局根 <root>/.claude/projects
     const pvFile = resolve(pvDir, pvRel)
     if (pvFile !== pvDir && !pvFile.startsWith(pvDir + sep)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })

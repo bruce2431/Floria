@@ -10,7 +10,7 @@ import { closeMentionPop } from '../inputbar/mention.js'
 import { renderModelSeat } from '../inputbar/model-select.js'
 import { syncGwSend } from '../inputbar/send.js'
 import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
-import { loadNeuronsData } from '../views/cards/neurons/neurons-card.js'
+import { syncGlobalPlugins } from '../views/registry.js'
 import { renderRecent } from '../sidebar/recent.js'
 import { ensureWork } from '../sidebar/work.js'
 /* @module engine/auth.js */
@@ -151,13 +151,16 @@ import { ensureWork } from '../sidebar/work.js'
       }
       renderRecent()
       // work 模式数据补拉：boot 的 initWork→ensureWork 撞上 needToken()（token 未就绪）早退，
-      // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr/models/neurons 同点补拉。
+      // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr 同点补拉。
       if (state.sbMode === 'work') ensureWork()
     })
+    // 应用目录补拉（2026-10-10）：工作区根 .claude/preview 申报的应用清单 + 已启用侧栏 tab。
+    // boot 时 token 未就绪会取空，故与 loadSessions 同点补拉；断连重连自愈走同点（hideGate 即恢复口）。
+    syncGlobalPlugins()
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
     if (state.preview) route()
-    else if (state.mgr) { loadMgrData(true); if (state.mgr === 'models') loadModelsData(true); if (state.mgr === 'neurons') loadNeuronsData(true) }
+    else if (state.mgr) loadMgrData(true)
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、

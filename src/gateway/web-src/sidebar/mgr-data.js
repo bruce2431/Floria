@@ -1,11 +1,12 @@
-// 管理视图数据源（插件/模型）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
+// 管理视图数据源（插件/技能清单 + 模型配置/供应商判定）（2026-09-10 web-src 模块化切割自 app.js v287；
+// 2026-10-10 模型卡删除后 MODELS 一族只服务输入栏模型 seat，应用目录改由 views/registry.js 持有；
+// 唯一手改处，web/app.js 为生成物）
 
 import { hideGate } from '../engine/auth.js'
 import { needToken, apiUrl } from '../engine/gateway.js'
 import { loadModelCur, saveModelCur, MODEL_CUR, renderModelSeat } from '../inputbar/model-select.js'
 import { state } from '../engine/state.js'
 import { renderMgrGrid } from '../views/cards/plugins/plugins-card.js'
-import { renderMgrModelList } from '../views/cards/models/models-card.js'
 /* @module sidebar/mgr-data.js */
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
@@ -41,7 +42,6 @@ import { renderMgrModelList } from '../views/cards/models/models-card.js'
     if (needToken()) return null // token 门锁定态：不发起数据请求
     MODELS_LOADING = true
     MODELS_ERR = ''
-    renderMgrModelList()
     try {
       const res = await fetch(apiUrl('/gateway/models'))
       const data = await res.json()
@@ -69,7 +69,6 @@ import { renderMgrModelList } from '../views/cards/models/models-card.js'
       if (!MODELS) MODELS_ERR = e.message || String(e)
     } finally {
       MODELS_LOADING = false
-      renderMgrModelList()
       renderModelSeat() // 2026-08-25 模型数据落地后刷新输入栏模型 seat（含 hideGate 补拉场景）
     }
     return MODELS
@@ -116,8 +115,6 @@ export {
   MGR,
   MGR_ERR,
   MGR_LOADING,
-  MGR_PALETTE,
-  MODEL_PROVIDER_KEYS,
   MODELS,
   MODELS_ERR,
   MODELS_LOADING,

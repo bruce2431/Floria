@@ -12,11 +12,12 @@
 | token 门 | `#gate-screen` | 未认证时的设备配对页：请求码 + PC 端 `/server auth add` 授权（阶段：趴栏图→过渡视频→配对） | 初始chat界面 |
 | 新会话界面 | `#empty-hint` | 认证后空态：趴栏图 + 输入栏居中 | 初始chat界面 |
 | 聊天主区 | `#chat-area`（`#chat-scroll`/`#messages`） | 会话界面主体 | chat界面 |
-| 管理视图 | `.mgr-pane`（入口 `.mgr-tab`） | 管理 tabs 打开的四页：插件/项目/模型/神经 | |
-| 项目预览页 | `.preview-shell`（iframe） | 项目卡打开的 `/preview/<label>/*` 托管页 | |
+| 管理视图 | `.mgr-pane`（入口 `.mgr-tab`） | 管理 tabs 打开的页：第一方「插件 / 预览」+ 已启用的应用 tab（`app:<id>`，见「应用」行） | |
+| 项目预览页 | `.preview-shell`（iframe） | `/preview/<label>/*` 托管页（项目侧栏胶囊 / 项目列表进入） | |
 | 外部卡 | `ext:<label>:<id>`（`.ext-shell` > `.ext-frame`） | preview 申报、由宿主摆进主区/侧栏的卡片：**一卡一 iframe**（`/preview/<label>/<path>`，同源），内容跑在自己的文档里（宿主不解释、不注入） | 卡片化二期/外部卡片 |
-| 卡片申报 | `preview.json` 的 `cards` 段 / `floria-cards-register` | preview 向宿主声明「我有哪些卡、摆在哪」（静态清单 + 运行期 postMessage 同 id 覆盖）；与 `backend` 并列的第二种能力申报，渲染位置由 preview 要求（`host:"view"`）。链路 → [web-ui.md](web-ui.md) §42 + [gateway.md](gateway.md) §6.5 | |
-| 神经元视图 | `.neu-pane`（`.neu-card` / `.neu-graph` / `.neu-pop`） | 「神经」tab：层级1 神经元库选择卡片 + 层级2 三级节点图（mem→cog→社群，Canvas 力导向）+ 悬停/点击浮窗；数据源 [gateway.md](gateway.md) §14 | |
+| 应用 / 应用卡 | `app:<id>`（`.ext-shell` > `.ext-frame`） | **工作区根** `.claude/preview/preview.json` 的 `cards` 申报、经插件卡「应用」列表手动启用的常驻卡：启用后成侧栏 tab（`app:<id>`），点击 `openCard` → `mountExtCard` 渲染其 iframe 页。与外部卡同壳不同表：**恒属工作区根、不被预览生命周期清理**。链路 → [web-ui.md](web-ui.md) §42 | 常驻插件卡/全局应用 |
+| 卡片申报 | `preview.json` 的 `cards` 段 / `floria-cards-register` | preview 向宿主声明「我有哪些卡、摆在哪」（静态清单 + 运行期 postMessage 同 id 覆盖）；与 `backend` 并列的第二种能力申报，渲染位置由 preview 要求（`host:"view"`）。label 含全局根（应用卡来源）。链路 → [web-ui.md](web-ui.md) §42 + [gateway.md](gateway.md) §6.5 | |
+| 神经元视图 | `.neu-pane`（`.neu-card` / `.neu-graph` / `.neu-pop`） | 层级1 神经元库选择卡片 + 层级2 三级节点图（mem→cog→社群，Canvas 力导向）+ 悬停/点击浮窗；数据源 [gateway.md](gateway.md) §14。2026-10-10 起为工作区根应用卡（`app:neurons`，页面 `.claude/preview/neurons/index.html`），类名新归属该自包含页 | 「神经」tab |
 | web 前端 | `gateway/web/` | 浏览器端界面（等权前端之一） | web界面 |
 | 主题 | `<html data-theme>`（`html[data-theme="dark"]`） | 前端配色主题：缺省属性 = 浅色；`data-theme="dark"` = **夜晚模式**（配色参考 Prism）。真源 = `<html data-theme>`；`localStorage['floria-theme']`（`'light'`/`'dark'`，缺省跟随 `prefers-color-scheme`）只作下次首帧的预置输入。所有暗色差异只在 `html[data-theme="dark"]` 一处覆盖语义令牌，浅色路径逐像素不变。见 web-ui §56 | 夜晚模式 / 暗色主题 |
 | 主题切换钮 | `#panel-theme`（`.act-btn`，`I.sun`⇄`I.moon`） | 侧栏头部动作区 `#panel-actions` 内的日/月图标钮（与搜索/折叠并列，chat/work 两模式均可见）：点击翻转 `<html data-theme>` + 写 localStorage + 换图标 + 同步 `theme-color`。见 web-ui §56 | 明暗切换钮 |

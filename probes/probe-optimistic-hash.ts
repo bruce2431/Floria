@@ -20,7 +20,15 @@ function ok(name: string, cond: boolean, detail = '') {
 const stateJs = await Bun.file(`${SRC}/engine/state.js`).text()
 const routeJs = await Bun.file(`${SRC}/chat/route.js`).text()
 const mgrJs = await Bun.file(`${SRC}/sidebar/mgr.js`).text()
-const messagesJs = await Bun.file(`${SRC}/chat/messages.js`).text()
+// chat/messages.js 已拆为门面 + messages/*（2026-10-08 纯搬迁）：断言须覆盖整个消息族，addUser 等
+// 实体函数落在 messages/transient.js 等子模块。
+const messagesJs = (
+  await Promise.all(
+    ['chat/messages.js', 'chat/messages/transient.js', 'chat/messages/renderer.js',
+     'chat/messages/msg-actions.js', 'chat/messages/change-card.js', 'chat/messages/icons.js',
+     'chat/messages/usage.js'].map((f) => Bun.file(`${SRC}/${f}`).text()),
+  )
+).join('\n')
 const approvalJs = await Bun.file(`${SRC}/inputbar/approval.js`).text()
 const liveJs = await Bun.file(`${SRC}/engine/live.js`).text()
 const appJs = await Bun.file(`${WEB}/app.js`).text()
@@ -30,7 +38,7 @@ const allSrc = (
   await Promise.all(
     ['engine/state.js', 'chat/route.js', 'sidebar/mgr.js', 'chat/messages.js', 'inputbar/approval.js',
      'engine/live.js', 'inputbar/send.js', 'sidebar/recent.js', 'engine/gateway.js', 'engine/auth.js',
-     'views/cards/neurons/neurons-card.js', 'views/cards/preview/preview-card.js']
+     'views/cards/preview/preview-card.js']
       .map((f) => Bun.file(`${SRC}/${f}`).text()),
   )
 ).join('\n')

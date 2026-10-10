@@ -28,7 +28,13 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
       const raw = localStorage.getItem(UI_KEY)
       if (!raw) return
       const d = JSON.parse(raw)
-      if (d && d.mgrView) state.mgrView = { ...state.mgrView, ...d.mgrView }
+      if (!d || !d.mgrView) return
+      const m = { ...state.mgrView, ...d.mgrView }
+      // 枚举边界归一（持久化区是外部边界）：kind∈{plugins,skills,apps}、cat∈{public,personal}，
+      // 旧形态（应用曾为 cat 值）或脏值一律回落缺省，避免落成无按钮可选的空网格。
+      if (m.kind !== 'plugins' && m.kind !== 'skills' && m.kind !== 'apps') m.kind = 'plugins'
+      if (m.cat !== 'public' && m.cat !== 'personal') m.cat = 'public'
+      state.mgrView = m
     } catch { /* 忽略 */ }
   }
   // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。

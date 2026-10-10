@@ -118,10 +118,10 @@
                "path": "cards/books.html", "host": "view", "tab": true } ] }
 ```
 
-- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`。label 未命中 / `hasPreview` 为假 → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。
+- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`。label 未命中 / 无 preview → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。**label 范围含全局根**（`全局根 · 散装对话`）：全局项的 preview 目录 = `<工作区根>/.claude/preview/`（`findProjects` 对该项 `hasPreview` 探此目录），与项目项共用同一条解析链——工作区根的卡片申报即落此处（web-ui.md §42「常驻应用卡」）。
 - 解析：`readPreviewJson(previewDir)` 是 `preview.json` 的**单一解析入口**（`readBackendCfg` 与 `readPreviewCards` 共用；`JSON.parse` 带 `try/catch`，坏 JSON / 顶层非对象一律返回 null ⇒ 空集，不抛到 `findProjects`）。`readPreviewCards` 逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空、`host === 'view'`、`isPreviewRelPath(path)` 为真；不合格项**整条丢弃**（不猜、不补默认值、不回落）。`icon` 非空串即留（是否为合法图标键由前端 `I` 表判定，缺省回落 `plug`）。
 - `isPreviewRelPath`：preview 目录内相对路径 —— 拒绝对路径 / 反斜杠 / `?` / 空段 / `.` `..` 段 / 解码后越界 / 非法 `%` 序列；允许尾随 `#片段`。**同款规则在前端 `views/cards/ext/ext-card.js` `isExtPath` 再写一份**——两条外部输入（网关读的 `preview.json` / 不过网关的 `postMessage`）各自守门，不是重复实现。
-- 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）。
+- 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）；**同一条路由的 label 亦含全局根**（全局项 `pvDir` = `<工作区根>/.claude/preview`），故工作区根卡片页经 `/preview/全局根 · 散装对话/<path>` 托管。
 - 解析行为真值表见 `probes/probe-web-ext-cards.ts`（从源码提取函数体、剥 TS 类型后直接跑，不另起网关）。
 
 ### 6.6 preview.json 的 quoteActions 字段（浮窗动作申报，2026-09-28）
@@ -264,7 +264,7 @@ CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients
 
 ## 14. 神经元可视化数据端点（`/gateway/neurons[/graph]`，只读）
 
-web「神经」tab（[web-ui.md](web-ui.md) §26）的两个只读数据源，实现于 `src/gateway/neuronViz.ts`，`localGateway.ts` 注册在 `/gateway/models` 之后，token/cookie 鉴权同其它 `/gateway/*`。
+web「神经」视图（[web-ui.md](web-ui.md) §26；2026-10-10 起为工作区根应用卡）的两个只读数据源，实现于 `src/gateway/neuronViz.ts`，`localGateway.ts` 注册在 `/gateway/models` 之后，token/cookie 鉴权同其它 `/gateway/*`。
 
 | 端点 | 返回 | 说明 |
 |---|---|---|

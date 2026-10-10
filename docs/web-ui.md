@@ -198,11 +198,11 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 13. 排队消息催办：点击排队气泡打断当前思考
 
-**语义**：点击置底排队区某条气泡 = 「这条我等不及了」。效果**与「模型自然答完后排队消息被纳入」完全一致**——该消息作为注入引导织进**当前**折叠体，模型在**同一回合**里接着答它。明确排除：①**不是新的乐观气泡**（不产生新回合）；②**不是中断**（不走 `onCancel`、无撤回/restored 链）。生效时机：**只在模型生成（思考）时打断**；模型跑工具时点击不动它。
+**语义**：点击置底排队区某条气泡 = 「这条我等不及了」。效果**与「模型自然答完后排队消息被纳入」完全一致**——该消息作为注入引导织进**当前**折叠体，模型在**同一回合**里接着答它。明确排除：①**不是新的乐观气泡**（不产生新回合）；②**不是中断**（不走 `onCancel`、无撤回/restored 链）。生效时机：**模型生成（思考）时立即打断**；**有前台任务（bash 命令 / 子代理）在跑时**先按 CLI Ctrl+B 的 `backgroundAll` 把它转后台（进程保活）再断流（原「跑工具时点击不动它」的运行程序缺口已补）。
 
 **引擎侧（`query.ts` + `messageQueueManager.ts`）**：既有中链 drain（每轮工具循环开头把队列里的 prompt 命令转成 `queued_command` 附件）是「纳入」的唯一路径。**不能用回合级 `abortController`**——它污染本轮之后所有迭代且直接结束回合。故新增**生成级断流**（不变量：**队列非空 且 当前有一次生成流在飞 且 该生成尚未产出完整 `tool_use` 块 → 断流**）：①`messageQueueManager` 加催办标记 `queueNudgeRequested` + `requestQueueNudge()/peekQueueNudge()/consumeQueueNudge()` + `getDrainableQueuedPrompt()`（可催办对象判据＝`mode:'prompt'` ∧ 非斜杠 ∧ 主线程 `agentId===undefined`），并在 `notifySubscribers()` 里「队列清空即失效」；②`query.ts` 生成流 `for await` 循环体首行 `if (isMainThread && toolUseBlocks.length === 0 && peekQueueNudge()) break`（`toolUseBlocks` 是**本迭代**数组，此处为 0 时断流**不可能**留下孤儿 `tool_use`）；③收口在 `if (!needsFollowUp)` 之前：`if (!needsFollowUp && consumeQueueNudge()) needsFollowUp = true` ⇒ 模型同一回合答这条消息。一次性消费 ⇒ 不会无限断流；队列清空即清标记 ⇒ 不会跨回合误伤。
 
-**链路**：web `.q-item` 点击（事件委托，`cursor:pointer` + `title` 提示）→ `/clients` WS 发 `{type:'queue-nudge', sessionId}` → 网关按会话精确路由（未在线回 status；**不 resumeAndDeliver**——离线会话没有生成流可断）→ CLI `gatewayClient.ts` → `src/bridge/gatewayQueueNudgeHandle.ts`（模块级句柄）→ REPL 注册 handler 判活两条（缺一不可）：**①有在飞生成**（`abortController` 存活）、**②队列里有可 drain 的用户消息** → `requestQueueNudge()`。headless 无句柄 → 静默忽略。
+**链路**：web `.q-item` 点击（事件委托，`cursor:pointer` + `title` 提示）→ `/clients` WS 发 `{type:'queue-nudge', sessionId}` → 网关按会话精确路由（未在线回 status；**不 resumeAndDeliver**——离线会话没有生成流可断）→ CLI `gatewayClient.ts` → `src/bridge/gatewayQueueNudgeHandle.ts`（模块级句柄）→ REPL 注册 handler：**先判活两条（缺一不可）——①有在飞回合**（`abortController` 存活）、**②队列里有可 drain 的用户消息**；**再动作**——`hasForegroundTasks` 命中则 `backgroundAll()`（= Ctrl+B，`tasks/LocalShellTask/LocalShellTask.tsx`）把在跑的 bash/子代理转后台，最后 `requestQueueNudge()` 置位断流标记。headless 无句柄 → 静默忽略。
 
 **气泡归属（不变量）**：**气泡属于文字、不属于图片**——气泡壳（`padding`/`border-radius`/`background`/虚线边框/hover）挂在文字段 `.q-text` 上，`.q-item` 是纯命中盒（`cursor:pointer` + 命中区，自带零壳）；`width: fit-content` 令气泡按文字收窄。归属由 **DOM 结构本身**决定（有无 `.q-text`），无类名、无布尔状态源。三态：纯文本项=一个气泡；纯图项=无 `.q-text` ⇒ 无气泡、整张图即点击体；文字+图项=文字带气泡、图片在气泡外裸渲染（`.q-imgs` 仅在前面有件时留 `margin-top`）。**排队图恒用 `.q-img`，绝不换 `.msg-img`**——lightbox 委托（`chat/messages.js`）只认 `.msg-img` ⇒ 点排队图**结构上不可能**开大图，只触发上面的 `queue-nudge`（与「只有已发送图片才有大图」同一机制，无需额外守卫）。
 

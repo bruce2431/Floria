@@ -102,10 +102,12 @@ allow/deny/ask + defaultMode 兜底；路径匹配 gitignore 语义（`@/`=便�
 
 web 点击排队气泡 → 当前这次**生成流**就地收尾，排队消息由中链 drain 纳入**当前**回合（用户语义 → [web-ui.md](web-ui.md) §13）：
 
-- **回合级 abort 不可用**：`toolUseContext.abortController.signal` 直传给 `callModel`，abort 会污染本轮后续所有迭代，且 abort 分支 `return { reason:'aborted_streaming' }` 直接结束回合。故催办走**生成级断流**：`messageQueueManager` 的 `queueNudgeRequested`（`requestQueueNudge / peekQueueNudge / consumeQueueNudge`），**生命周期锚定队列**——`notifySubscribers()` 里「队列清空即失效」（否则标记留着误伤下一轮生成），`consumeQueueNudge` 一次性消费。
+- **回合级 abort 不可用**：`toolUseContext.abortController.signal` 直传给 `callModel`，abort 会污染本轮后续所有迭代，且 abort 分支 `return { reason:'aborted_streaming' }` 直接结束回合。故催办走**生成级断流**：`messageQueueManager` 的 `queueNudgeRequested`（`requestQueueNudge / peekQueueNudge / consumeQueueNudge / clearQueueNudge`），**生命周期只限当前在飞回合**——两处失效：① `notifySubscribers()` 里「队列清空即失效」；② REPL 回合收尾 `finally`（`queryGuard.end()` 成立处）调 `clearQueueNudge()`。②覆盖「标记已置位但生成流在收口 `consumeQueueNudge` 前就收尾」的路径（用户打断 / 请求异常 / 提前 `return`，如 `query.ts` 的 `aborted_streaming` / `model_error` / `image_error` / `blocking_limit`），否则残留标记会在下一回合首个生成增量处误触发断流。`consumeQueueNudge` 一次性消费。
 - **断流不变量**：生成流 `for await` 循环体首行 `if (isMainThread && toolUseBlocks.length === 0 && peekQueueNudge()) break`。`toolUseBlocks` 是**本迭代**数组且 tool_use 块只在 `content_block_stop` 才入数组/执行器 ⇒ 此处为 0 时断流不可能留下孤儿 `tool_use`、无需合成 `tool_result`（完全绕开工具链）。「工具一旦落定就不动它」由此门控天然成立。断流经 `claude.ts` 生成器 `finally` 释放 HTTP 流。
 - **同轮续跑**：收口在 `if (!needsFollowUp)` 之前——`if (!needsFollowUp && consumeQueueNudge()) needsFollowUp = true`，走 follow-up 路径（零工具），下方既有中链 drain 把排队消息转成 `queued_command` 附件并 `removeFromQueue`，循环底部续跑下一迭代（复用「模型自然答完后排队消息被纳入」那条既有路径，不新造纳入机制）。
 - **判活在外层**：REPL 侧 `bridge/gatewayQueueNudgeHandle.ts` 句柄只在「有在飞生成 + `getDrainableQueuedPrompt()` 非空」时置位。可催办对象判据与 drain 过滤同语义：`mode:'prompt'` ∧ 非斜杠 ∧ `agentId===undefined`。
+- **运行程序缺口（= CLI Ctrl+B 落地点）**：断流门控 `toolUseBlocks.length === 0` 意味着**有前台任务（bash 命令 / 子代理）在跑时催办插不进去**（工具已落定，不打断）⇒ 点击气泡看着没反应。故 REPL 句柄在**判活通过后**（有在飞回合 + `getDrainableQueuedPrompt()` 非空）再判 `hasForegroundTasks(state)`：命中则 `backgroundAll(() => store.getState(), setAppState)`（`tasks/LocalShellTask/LocalShellTask.tsx`，与 `SessionBackgroundHint.tsx` 的 Ctrl+B `task:background` 同一函数）把前台任务**提升为后台任务**（进程保活、不 abort 回合），BashTool 随即以 `backgroundedByUser` 返回 ⇒ 模型继续思考 ⇒ 下一处迭代断流并入本条。无前台任务时该分支 no-op。
+- **统一抽象**：催办 = 「让当前回合尽快走到下一个中链 drain 点，把排队消息并入本轮」——两个堵点（前台任务挡 drain、在飞生成未收尾）各有动作（`backgroundAll` / 置催办标记），都**不中断在飞请求、不改回合边界**。判活（有在飞回合 + 有可 drain 的用户消息）在前，动作在后。
 
 ## 工具循环熔断（`query.ts` + `utils/toolLoopBreaker.ts`）
 

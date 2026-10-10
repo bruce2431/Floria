@@ -155,6 +155,15 @@ export function consumeQueueNudge(): boolean {
 }
 
 /**
+ * 回合终止清理：丢弃未消费的催办标记。催办只对「当前在飞回合」有意义——回合若在
+ * 生成流走到收口（consumeQueueNudge）前就收尾（用户打断 / 请求异常 / 提前返回），
+ * 标记会残留并误伤下一回合（其首个生成增量立即断流）。REPL 在回合收尾 finally 调用。
+ */
+export function clearQueueNudge(): void {
+  queueNudgeRequested = false
+}
+
+/**
  * 本轮 drain 能否把某条排队命令纳入当前轮次（= 可被催办的对象）。
  * 与 query.ts 中链 drain 的过滤同语义：用户输入（mode 'prompt'）、非斜杠、
  * 主线程（agentId 未标记）。返回 undefined = 催办无从落地（断流只会白丢一次

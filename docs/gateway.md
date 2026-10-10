@@ -199,7 +199,7 @@ web 前端在 `/clients` WS 上行发控制帧，网关 `handleWsMessage` `switc
 | --- | --- | --- |
 | `send` | 投递用户消息（可带 `images`）→ CLI `enqueue`（与本地打字同路径） | 暂存/`resumeAndDeliver` 恢复（§7） |
 | `interrupt` | web 停止键 = CLI 一次 Ctrl+C（`onCancel` 全套） | status 提示 |
-| `queue-nudge` | **排队消息催办**：点击排队气泡 → CLI 侧判活置位催办标记，`query.ts` 生成流就地断流、本轮中链 drain 把该消息纳入当前回合（≠ interrupt：不改回合边界、不撤回、不产生新回合） | status 提示 |
+| `queue-nudge` | **排队消息催办**：点击排队气泡 → CLI 侧判活置位催办标记，`query.ts` 生成流就地断流、本轮中链 drain 把该消息纳入当前回合（≠ interrupt：不改回合边界、不撤回、不产生新回合）；若有前台任务在跑（断流插不进去）则先 `backgroundAll`（= Ctrl+B）把它转后台再断流 | status 提示 |
 | `shutdown` | 优雅退出该会话 CLI（exit 0 让 WT 自动收 tab，3s 后树杀兜底，§7） | status/树杀兜底 |
 | `approve` | 审批/提问应答回路由（§8） | status 提示 |
 

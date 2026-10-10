@@ -210,7 +210,8 @@ import { useIDEIntegration } from '../hooks/useIDEIntegration.js';
 import exit from '../commands/exit/index.js';
 import { ExitFlow } from '../components/ExitFlow.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
-import { popAllEditable, enqueue, type SetAppState, getCommandQueue, getCommandQueueLength, getDrainableQueuedPrompt, requestQueueNudge, removeByFilter } from '../utils/messageQueueManager.js';
+import { popAllEditable, enqueue, type SetAppState, getCommandQueue, getCommandQueueLength, getDrainableQueuedPrompt, requestQueueNudge, clearQueueNudge, removeByFilter } from '../utils/messageQueueManager.js';
+import { backgroundAll, hasForegroundTasks } from '../tasks/LocalShellTask/LocalShellTask.js';
 import { useCommandQueue } from '../hooks/useCommandQueue.js';
 import { SessionBackgroundHint } from '../components/SessionBackgroundHint.js';
 import { startBackgroundSession } from '../tasks/LocalMainSessionTask.js';
@@ -2355,16 +2356,28 @@ export function REPL({
     });
     return () => setGatewayInterruptHandle(null);
   }, []);
-  // 2026-09-10 web 排队消息催办：点击排队气泡（gatewayClient → gatewayQueueNudgeHandle）
-  // → 置位催办标记，query.ts 的生成流就地断流并让本轮 drain 把该消息纳入当前轮次。
-  // 判活两条（缺一不可）：①有在飞生成（abortController 存活）——没有生成流可断，
-  // 队列消息自会被常规投递处理，误置位会伤到下一轮生成；②队列里确有本轮 drain 能吃
-  // 下的用户消息——否则断流只是白丢一次生成（斜杠命令不进 drain）。
+  // 2026-09-10 web 排队消息催办：点击排队气泡（gatewayClient → gatewayQueueNudgeHandle）。
+  // **统一抽象：催办 = 「这条我等不及了」= 让当前回合尽快走到下一个中链 drain 点，把排队
+  // 消息作为 queued_command 并入本轮**（既不中断回合、也不新建回合）。据此两个堵点、两个
+  // 动作，都保证「不中断在飞请求、不改回合边界」：
+  //   ① 有前台任务（正在跑的 bash 命令 / 子代理）挡着 drain —— 先 backgroundAll() 把它提升为
+  //      后台任务（进程保活、不 abort 回合；= Ctrl+B 的 task:background，与
+  //      components/SessionBackgroundHint.tsx 同一函数）。BashTool 随即以 backgroundedByUser
+  //      返回，本轮继续；无前台任务时是 no-op。（2026-10-10 补的运行程序缺口：此前该情形
+  //      断流插不进去 ⇒ 点气泡没反应。）
+  //   ② 有在飞生成 —— 置位催办标记，query.ts 生成流在下一个安全增量（toolUseBlocks 为空、
+  //      即模型思考中）就地收尾，收口走 follow-up 让本轮 drain 纳入本条。
+  // 判活两条（缺一不可，先判后动）：有在飞回合（abortController 存活）+ 队列里确有本轮 drain
+  // 能吃下的用户消息（getDrainableQueuedPrompt；斜杠命令 / task-notification 不算）。二者
+  // 任一不成立即 no-op：没有生成流可断、或断流只是白丢一次生成，且都不该去动正在跑的命令。
   useEffect(() => {
     setGatewayQueueNudgeHandle(() => {
       const signal = abortControllerRef.current?.signal;
       if (!signal || signal.aborted) return;
       if (!getDrainableQueuedPrompt()) return;
+      if (hasForegroundTasks(store.getState())) {
+        backgroundAll(() => store.getState(), setAppState);
+      }
       requestQueueNudge();
     });
     return () => setGatewayQueueNudgeHandle(null);
@@ -3103,6 +3116,10 @@ export function REPL({
       // running→idle. Returns false if a newer query owns the guard
       // (cancel+resubmit race where the stale finally fires as a microtask).
       if (queryGuard.end(thisGeneration)) {
+        // 催办标记随回合终止作废（2026-10-10）：催办只对当前在飞回合有意义，若回合在
+        // 生成流收口消费前就收尾（用户打断 / 请求异常 / 提前返回），残留标记会在下一
+        // 回合首个生成增量处误触发断流。此处是「回合终止」唯一点，正常/打断/异常全覆盖。
+        clearQueueNudge();
         setLastQueryCompletionTime(Date.now());
         skipIdleCheckRef.current = false;
         // Always reset loading state in finally - this ensures cleanup even

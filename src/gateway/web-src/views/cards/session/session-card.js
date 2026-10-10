@@ -8,6 +8,7 @@
 
 import { sessionCard } from '../../../engine/state.js'
 import { teardownSessionView } from '../../../chat/route.js'
+import { registerCard } from '../../../engine/registry.js'
 /* @module views/cards/session/session-card.js */
   // ---------- 会话卡 ----------
   const sessionCardDef = {
@@ -15,5 +16,6 @@ import { teardownSessionView } from '../../../chat/route.js'
     card: () => sessionCard,
     deactivate: teardownSessionView,
   }
+  registerCard(sessionCardDef)
 
 export { sessionCardDef }

@@ -3,7 +3,7 @@
  * probe-web-card-boundary —— web 视图卡的依赖方向不变量（卡片解耦，2026-10-05）
  *
  * 目标（用户口径）：web 调用卡片、卡片自持组件、每卡独立可运行 —— 卡片依赖方向必须收成单向
- *   **卡 → 小底座**（core + 数据层 sidebar/mgr-data + 契约 views/registry + 卡自身目录），
+ *   **卡 → 小底座**（core + 数据层 sidebar/mgr-data + 契约 engine/registry + 卡自身目录），
  *   **禁 卡 → 兄弟子系统**（chat/ 其余、sidebar/recent·rail-ext·work·mgr、inputbar/、core/live、core/auth）。
  * 违反即「改某个子系统连带打坏某张卡」，本探针把它锁死防复发。
  *
@@ -14,13 +14,15 @@
  *   - engine/{state,sessions,gateway,panel}.js（小底座）
  *   - core 叶子 {icons,util,storage}.js（§12：无状态/无连接/无订阅，可被任意层依赖）
  *   - sidebar/mgr-data.js（数据层）
- *   - views/registry.js（卡片契约）
- *   - views/cards/ext/ext-card.js（外部申报域共享底座：preview 卡外部卡/侧栏按钮的状态清点归此）
+ *   - engine/registry.js（卡片契约，2026-10-10 自 views/registry.js 下沉）
+ *   - engine/ext-decl.js（外部申报纯校验/壳 src 串，契约层共享底座）
+ *   - feature/preview-frame.js（项目预览帧渲染实现：preview 卡 mountPreview、ext 卡 rail-ext 状态；
+ *     属显式登记的共享底座，非「卡 → 兄弟子系统」）
  *   - 卡**自身目录** `./*`（含子目录，同目录组件随卡）
  * 显式例外（带注释，本版不动 routing）：
  *   - views/cards/session/session-card.js → chat/route.js（`teardownSessionView`，会话卡=会话视图本体）
  *
- * 第二断言：views/registry.js 的 import ⊆ {engine/state, engine/gateway, core 叶子, ./cards/*}
+ * 第二断言：engine/registry.js 的 import ⊆ {engine/state, engine/gateway, engine/ext-decl, core 叶子}
  *   （registry 是卡片契约唯一入口，不得 import chat/sidebar/inputbar 成 god importer）。
  */
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs'
@@ -57,8 +59,9 @@ const ALLOW_EXACT = new Set([
   'engine/gateway.js',
   'engine/panel.js',
   'sidebar/mgr-data.js',
-  'views/registry.js',
-  'views/cards/ext/ext-card.js', // 外部申报域共享底座
+  'engine/registry.js', // 卡片契约（2026-10-10 自 views/registry.js 下沉）
+  'engine/ext-decl.js', // 外部申报纯校验/壳 src 串（契约层共享底座）
+  'feature/preview-frame.js', // 项目预览帧渲染实现（显式登记的共享底座）
 ])
 const EXCEPTIONS: Record<string, string[]> = {
   // 会话卡 = 会话视图本体，deactivate 挂 teardownSessionView
@@ -112,22 +115,23 @@ if (!existsSync(CARDS)) {
 }
 
 // ---- 第二断言：registry 不做 god importer ----
-const REG = resolve(SRC, 'views/registry.js')
+const REG = resolve(SRC, 'engine/registry.js')
 if (!existsSync(REG)) {
   bad(`缺少契约入口 ${logical(REG)}`)
 } else {
   const src = readFileSync(REG, 'utf-8')
   // 契约入口只许依赖小底座：engine/state（会话槽）、engine/gateway（gToken 拉工作区根应用目录）、
-  // core 叶子（icons/util/storage）+ 各卡描述符——不得 import chat/sidebar/inputbar（god importer）。
-  const regAllow = new Set(['engine/state.js', 'engine/gateway.js', 'core/icons.js', 'core/util.js', 'core/storage.js'])
+  // engine/ext-decl（外部申报纯校验）、core 叶子（icons/util/storage）——不得 import chat/sidebar/
+  // inputbar（god importer），亦不得 import views（engine 永不 import views）。
+  const regAllow = new Set(['engine/state.js', 'engine/gateway.js', 'engine/ext-decl.js', 'core/icons.js', 'core/util.js', 'core/storage.js'])
   let n = 0
   for (const m of src.matchAll(IMPORT_RE)) {
     n++
     const target = resolveSpec(REG, m[1])
-    if (regAllow.has(target) || target.startsWith('views/cards/')) continue
-    bad(`views/registry.js → ${target}（契约入口不得 import chat/sidebar/inputbar，禁 god importer）`)
+    if (regAllow.has(target)) continue
+    bad(`engine/registry.js → ${target}（契约入口不得 import chat/sidebar/inputbar/views，禁 god importer）`)
   }
-  ok(`views/registry.js：${n} 条 import ⊆ {engine/state,engine/gateway,core 叶子,./cards/*}`)
+  ok(`engine/registry.js：${n} 条 import ⊆ {engine/state,engine/gateway,engine/ext-decl,core 叶子}`)
 }
 
 console.log(`\n${pass}/${fail}`)

@@ -6,17 +6,20 @@ import { state } from '../../../engine/state.js'
 import { esc } from '../../../core/util.js'
 import { saveMgrView } from '../../../core/storage.js'
 import { MGR, MGR_ERR, MGR_LOADING, loadMgrData, mgrColor } from '../../../sidebar/mgr-data.js'
-import { appCatalog, isAppEnabled, setAppEnabled } from '../../registry.js'
+import { appCatalog, isAppEnabled, registerCard, setAppEnabled } from '../../../engine/registry.js'
 /* @module views/cards/plugins/plugins-card.js */
   // ---------- 插件卡（插件 / 技能 / 应用）----------
   // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
   // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 mgr.js。
   // 「应用」cat 的数据源与启停口在 registry（APP_CATALOG / setAppEnabled）——本卡只呈现列表与按钮；
   // 循环 import（registry → 本卡的 pluginsCardDef）是函数级调用，无求值期依赖。
+  // refresh 契约：卡外（mgr-data 拉完清单）经 refreshCard('plugins') 局部重渲本网格，不必懂本卡实现。
   const pluginsCardDef = {
     id: 'plugins', title: '插件', tip: '插件 / 技能 / 应用', icon: 'plug', tab: true,
     mount(body, ctx) { renderMgrPlugins(body, ctx) },
+    refresh() { renderMgrGrid() },
   }
+  registerCard(pluginsCardDef)
 
   // 「插件/技能/应用」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
   function renderMgrPlugins(body, ctx) {

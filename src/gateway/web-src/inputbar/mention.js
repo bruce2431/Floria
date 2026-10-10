@@ -4,6 +4,7 @@ import { messagesHtml, addUser } from '../chat/messages.js'
 import { GATEWAY, gateAwait, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
+import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken } from '../core/mention-syntax.js'
 import { findSession, sessionCwd } from '../engine/sessions.js'
 import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
@@ -13,42 +14,18 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
-  const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
-  const MENTION_SESSION_RE = /\[会话:([^\]]+)\]/g
   // @ 提及 icon（2026-09-28 换 dsh v0.2.0-rc.1 产品图标集，16 描线/currentColor；旧 24 手绘那套作废）。
   // 语义与 dsh 一致：会话=ChatLines、插件=PluginPinwheel、技能=Skill、目录=FolderClose、文件=Browse
-  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。
+  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。会话/文件两枚随 chip 构造器下移 core/mention-syntax.js。
   const MENTION_PLUGIN_ICON = I.dshPlugin
   const MENTION_SKILL_ICON = I.dshSkill
-  const MENTION_SESSION_ICON = I.dshChat
   // ---------- 目录 / 文件引用（2026-09-26）：@ 浮窗与 + 工具栏共用的一组「逐级浏览工作区根」状态 ----------
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
-  // 路径同基准（用户定案：相对全局根）。令牌 [@目录:路径] / [@文件:路径] 刻意与上传附件占位 [文件:<路径>]
-  // 不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
-  const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
-  // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
-  // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
-  // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
-  // 不会抢「引用」。
-  const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
-  // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
-  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
-  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
-  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
-  // 回复引用的**原文块**：`[@引用回复:N|标题]\n<原文>\n[/引用回复]`。原文是给模型看的 payload
-  // （回复无文件位置可查，原文必须进消息），**气泡里不得出现**（2026-09-28 用户实报「为什么文本
-  // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
-  // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
+  // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
   const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
-  // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
-  // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
-  // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。带**原文块**（同回复引用
-  // `QUOTE_REPLY_BODY_RE` 手法）：① PDF 定位不精确 ② 大 PDF 必须给页码提示 ③ 选中原文才是要引用的 payload。
-  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
-  const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = I.dshUp
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
@@ -77,13 +54,6 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       .map((it, i) => ({ it, i, g: GROUP_ORDER.indexOf(groupOf(it)) }))
       .sort((a, b) => (a.g - b.g) || (a.i - b.i))
       .map((x) => x.it)
-  }
-
-  // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
-  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
-  function splitSessionToken(v) {
-    const i = String(v).indexOf('|')
-    return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
   }
 
   // ---------- 目录 / 文件浏览（数据层；两个浮窗共用，渲染各自负责） ----------
@@ -167,39 +137,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return chip
   }
 
-  // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
-  // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
-  // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
-  function mentionChipHtml(kind, name, ptype) {
-    if (kind === 'path') {
-      const label = '@' + name
-      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
-    }
-    const label = kind === 'session' ? splitSessionToken(name).title : name
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
-  }
-
-  // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
-  // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
-  function quoteRefChipHtml(path, l0, l1) {
-    const name = String(path).split('/').pop()
-    const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
-  }
-  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
-  function quoteReplyChipHtml(idx, title) {
-    const t = String(title || '').trim() || '本会话'
-    const label = `引用自「${t}」· 第 ${idx} 条回复`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
-  }
-  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
-  // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
-  function quotePdfChipHtml(path, p0, p1) {
-    const name = String(path).split('/').pop()
-    const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
-    const label = `引用自 ${name}${pages}`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
-  }
+  // chip HTML 构造器（mentionChipHtml / quote*ChipHtml）与令牌正则、splitSessionToken 已下移
+  // core/mention-syntax.js（core 叶子，供 core/markdown.js 与本源共用，断开 core→feature 成环）。
 
   // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
   //  文件引用 = 只给位置，模型自己 Read；

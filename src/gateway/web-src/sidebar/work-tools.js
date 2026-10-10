@@ -2,7 +2,7 @@
 // 工具登记处。右栏两态——**预览态**（默认，渲项目预览帧 #wk-pv-body）与**工具态**（顶 tab 条 + 各工具
 // pane 互斥显隐）；态与 active 工具共用一个状态源 state.wkPvTab（'' = 预览态，工具 id = 工具态）。
 // 任何模块可调 registerWkTool({ id, title, pane, mount }) 挂一枚工具 tab——本表只做「注册 → 按序渲 tab →
-// 交调用方切内容」，不写任何工具内容（与 views/registry.js 视图卡同思路）。
+// 交调用方切内容」，不写任何工具内容（与 engine/registry.js 视图卡同思路）。
 //   内置（work.js 注册）：'comments' 评论（sidebar/comments.js 渲染进 #wk-cmt）；外部注册 = 任意模块调
 //   registerWkTool 追加，注册序即 tab 序。
 // 契约：tab = <button class="wk-pv-tab" data-wkpv="<id>">（点击委托挂在 work.js 的 #wk-pv-tabs 容器上，

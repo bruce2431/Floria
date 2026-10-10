@@ -10,7 +10,7 @@ import { closeMentionPop } from '../inputbar/mention.js'
 import { renderModelSeat } from '../inputbar/model-select.js'
 import { syncGwSend } from '../inputbar/send.js'
 import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
-import { syncGlobalPlugins } from '../views/registry.js'
+import { syncGlobalPlugins } from './registry.js'
 import { renderRecent } from '../sidebar/recent.js'
 import { ensureWork } from '../sidebar/work.js'
 /* @module engine/auth.js */

@@ -1,6 +1,6 @@
 // 界面状态持久化（localStorage 打补丁读写 + mgrView / work 两族恢复）（2026-10-07 自 engine/state.js 拆出；唯一手改处，web/app.js 为生成物）
 
-import { state, WK_PANES_DEF } from '../engine/state.js'
+import { state } from './ui-state.js'
 /* @module core/storage.js */
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
@@ -43,11 +43,12 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
     if (!state.workProj) return
     state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
   }
-  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
-  // applySidebarPin）负责——纯函数不许碰 DOM。
-  function loadWorkPanes(label) {
+  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 def（两开关缺省 = work 领域值，由调用方传入
+  // WK_PANES_DEF——本模块是 core 叶子，不依赖 feature 的 work-state.js）。只写 state，渲染由调用方
+  // （applyPanes / applySidebarPin）负责——纯函数不许碰 DOM。
+  function loadWorkPanes(label, def) {
     const s = (label && state.wkPanes[label]) || null
-    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
+    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
     state.wkPreview = val('workspace')
     state.panelPinned = val('sidebar')
   }
@@ -56,7 +57,7 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
     stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
     patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH })
   }
-  function loadWork() {
+  function loadWork(def) {
     try {
       const raw = localStorage.getItem(UI_KEY)
       if (!raw) return
@@ -68,7 +69,7 @@ import { state, WK_PANES_DEF } from '../engine/state.js'
       if (d.wkPanes && typeof d.wkPanes === 'object') {
         for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
       }
-      loadWorkPanes(state.workProj) // 两开关 = 恢复项目的槽（无槽回落缺省）
+      loadWorkPanes(state.workProj, def) // 两开关 = 恢复项目的槽（无槽回落缺省）
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
       // wkChats（work 顶栏聊天胶囊开放集）不持久化：纯运行时状态，刷新即空、切项目重置（2026-10-07 定案），

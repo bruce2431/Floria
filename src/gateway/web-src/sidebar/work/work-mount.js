@@ -245,7 +245,7 @@
   // 启动一次：恢复持久化状态 → 绑定事件 → 落地（顺序不可换：绑定要先于 applySbMode 的渲染，
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
-    loadWork()
+    loadWork(WK_PANES_DEF)
     // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
     // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
     hydrateExtCards(state.workProj)

@@ -7,11 +7,11 @@ import { ALL, chatArea, sessionCard, state } from '../engine/state.js'
 import { esc, isMobile, toast } from '../core/util.js'
 import { loadWork, loadWorkPanes, saveWork, stashWorkPanes } from '../core/storage.js'
 import { loadSessions, sessCmp, findSession } from '../engine/sessions.js'
-import { currentCardId, hydrateExtCards } from '../views/registry.js'
+import { currentCardId, hydrateExtCards } from '../engine/registry.js'
 import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } from './recent.js'
 import { cmtInvalidate, cmtLoad, cmtMount, cmtRangesFor, cmtRender, cmtSetHooks } from './comments.js'
 import { renderProjSeat } from '../inputbar/commands.js'
-import { mountPreview, syncExtCards } from '../views/cards/preview/preview-card.js'
+import { mountPreview, syncExtCards } from '../feature/preview-frame.js'
 import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkToolDefs, wkToolNormId } from './work-tools.js'
 /* @module sidebar/work.js */
   // ---------- work 模式侧栏（Prism 式） ----------

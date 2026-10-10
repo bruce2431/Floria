@@ -16,11 +16,10 @@ import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr } from '../sidebar/mgr.js'
-import { clearRailExt } from '../views/cards/ext/ext-card.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, syncWorkTabs, workScopeOk } from '../sidebar/work.js'
-import { openProjectPreview } from '../views/cards/preview/preview-card.js'
-import { hydrateExtCardId, openCard } from '../views/registry.js'
+import { clearRailExt, openProjectPreview } from '../feature/preview-frame.js'
+import { hydrateExtCardId, openCard } from '../engine/registry.js'
 /* @module chat/route.js */
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关

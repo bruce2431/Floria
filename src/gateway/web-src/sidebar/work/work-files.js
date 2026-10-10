@@ -182,7 +182,7 @@
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
-    loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
+    loadWorkPanes(label, WK_PANES_DEF) // 新项目：有槽恢复该项目的开关，无槽回落缺省（缺省值归 work 领域）
     state.workFile = ''
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）

@@ -4,7 +4,7 @@ import { I } from '../core/icons.js'
 import { inputEl, messagesEl, state } from '../engine/state.js'
 import { esc } from '../core/util.js'
 import { findSession } from '../engine/sessions.js'
-import { quoteActions } from '../views/registry.js'
+import { quoteActions } from '../engine/registry.js'
 import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'
 import { openCommentComposer } from '../sidebar/comments.js'
 import { gwSend, syncGwSend } from './send.js'
@@ -24,7 +24,7 @@ import { gwSend, syncGwSend } from './send.js'
   //
   // 2026-09-28 扩展（项目注册）：浮窗改为「**内置动作 + 当前项目申报动作**分表合流」。动作表由项目在
   // `<项目>/.claude/preview/preview.json` 的 `quoteActions` 段静态申报（与 cards 同构、同一拉取点），
-  // 经 views/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
+  // 经 engine/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
   // （iframe）——它的选区在宿主看来不可达（跨文档 getSelection 不达），故由预览页 postMessage 自报：
   // `floria-quote-open`（开窗）/ `floria-quote-close`（关窗），宿主点申报动作行回发 `floria-quote-action`。
   // 执行逻辑**留在项目页面自己的运行上下文**（要调 Pj13 的 API 与 pdf 状态），宿主只回发 id、不代执行。

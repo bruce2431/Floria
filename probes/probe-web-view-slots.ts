@@ -61,11 +61,12 @@ ok(
   lineOf(mgrBody, 'clearSessionSlots()') >= 0 && lineOf(mgrBody, 'clearSessionSlots()') < lineOf(mgrBody, 'openCard(state.mgr)'),
   '顺序错：清槽必须早于 openCard(state.mgr)',
 )
-// 2026-10-01 卡片化二期：openProjectPreview 迁 views/cards/preview/preview-card.js；硬挂载分支=异 label/帧不在场。
+// 2026-10-01 卡片化二期：openProjectPreview 迁出 preview 卡；2026-10-10 分层治理再下移至
+// feature/preview-frame.js（渲染实现归 feature，engine 契约只做表编排）；硬挂载分支=异 label/帧不在场。
 // 2026-10-05 卡片解耦：preview 卡不再直懂 chat，改调契约出口 deactivateCard('session')（会话卡 deactivate
 // = teardownSessionView → clearSessionSlots）；「先卸会话态再进预览」不变量不变，只是卸法走卡片契约。
-const previewCardJs = await Bun.file(`${SRC}/views/cards/preview/preview-card.js`).text()
-const prevBody = body(previewCardJs, 'function openProjectPreview(')
+const previewFrameJs = await Bun.file(`${SRC}/feature/preview-frame.js`).text()
+const prevBody = body(previewFrameJs, 'function openProjectPreview(')
 ok(
   'A4 openProjectPreview 硬挂载分支卸会话态早于 state.preview = label',
   lineOf(prevBody, "deactivateCard('session')") >= 0 &&

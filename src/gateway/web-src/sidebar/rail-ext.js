@@ -2,8 +2,8 @@
 
 import { I } from '../core/icons.js'
 import { esc } from '../core/util.js'
-import { railExtItems, setRailExtItems } from '../views/cards/ext/ext-card.js'
-import { registerExtCards } from '../views/registry.js'
+import { railExtItems, setRailExtItems } from '../feature/preview-frame.js'
+import { registerExtCards } from '../engine/registry.js'
 /* @module sidebar/rail-ext.js */
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
   // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
@@ -17,7 +17,7 @@ import { registerExtCards } from '../views/registry.js'
   //       display:contents 不产生盒，子元素与内置四个图标同列同 gap 居中（零新增视觉）。
   // 不变量：注册集属于**当前加载的那份预览文档**——文档换（iframe 换 src / 重建 / 离开预览），
   //        注册集即失效并清空；凭 e.source 精确匹配当前 .preview-frame 才采纳，别处窗口伪报不进来。
-  // 状态表 railExtItems + clearRailExt 已迁 views/cards/ext/ext-card.js（与本模块只读/写经由它）；
+  // 状态表 railExtItems + clearRailExt 已迁 feature/preview-frame.js（与本模块只读/写经由它）；
   // 本模块只留桥接与渲染。
   function renderRailExt() {
     const box = $('rail-ext')
@@ -43,7 +43,7 @@ import { registerExtCards } from '../views/registry.js'
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
       // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
-      // views/cards/ext/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      // engine/ext-decl.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
       if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       setRailExtItems((Array.isArray(d.items) ? d.items : [])

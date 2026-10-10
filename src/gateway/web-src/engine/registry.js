@@ -1,42 +1,46 @@
-// 视图注册表 + 槽位整卡切换（2026-09-23 视图卡化；2026-10-01 卡片化二期：一模块一卡组件 + 单通道；
-// 唯一手改处，web/app.js 为生成物）
-// 单一真源：每个卡组件（views/cards/<name>-card.js）导出描述符 { id, title, tip, icon, tab, mount }，
-// 本表只做「按 id 取卡 → 挂进槽 → 调 mount」的编排，不写任何卡内容。
-// 消费三处——①侧栏 tab 生成（renderMgrTabs，启动时按表注入 #mgr-tabs）②路由 #mgr/<id>（parseRoute 的
-// r.mgr 即 id）③卡体渲染（openCard 把卡体交给卡自己的 mount）。会话卡以 tab:false 入表（侧栏条目构成
-// 不动），但切卡路径与四张管理卡完全一致——槽位永远只有 openCard(id) 一条路径，无默认内容旁路。
-// 外部（<项目>/.claude/preview/ 申报）卡另立**运行时表 EXT**，与第一方 CARDS 合流于 cardOf /
-// renderMgrTabs 两个查询点，但分表存放——外部卡只有宿主生成的 iframe 壳（无 mount 代码），
-// 外部永不获得在宿主 DOM 执行的能力（SPEC-视图卡化 §7 边界）。
+// 视图注册表 + 槽位整卡切换（契约层，2026-10-10 自 views/registry.js 下移为 engine/*）
+// （2026-09-23 视图卡化；2026-10-01 卡片化二期：一模块一卡组件 + 单通道；唯一手改处，web/app.js 为生成物）
+// 单一真源：每个卡组件（views/cards/<name>/<name>-card.js）在**自身模块顶层**调 registerCard(def) 入表
+// （描述符 { id, title, tip, icon, tab, mount }），本表只做「按 id 取卡 → 挂进槽 → 调 mount」的编排，
+// 不写任何卡内容，也不 import 任何卡实现（engine 永不 import views）。
+// 消费三处——①侧栏 tab 生成（renderMgrTabs，启动时由 app 调 bootRegistry 注入 #mgr-tabs）②路由
+// #mgr/<id>（parseRoute 的 r.mgr 即 id）③卡体渲染（openCard 把卡体交给卡自己的 mount）。会话卡以
+// tab:false 入表（侧栏条目构成不动），但切卡路径与四张管理卡完全一致——槽位永远只有 openCard(id) 一条
+// 路径，无默认内容旁路。外部（<项目>/.claude/preview/ 申报）卡另立**运行时表 EXT**，与第一方 CARDS
+// 合流于 cardOf / renderMgrTabs 两个查询点，但分表存放——外部卡只有宿主生成的 iframe 壳（无 mount 代码），
+// 壳渲染经 setExtCardRenderer 注入（实现留 views/cards/ext/ext-card.js），外部永不获得在宿主 DOM 执行的能力
+// （SPEC-视图卡化 §7 边界）。
 
 import { I } from '../core/icons.js'
-import { gToken } from '../engine/gateway.js'
-import { chatArea, sessionCard } from '../engine/state.js'
+import { gToken } from './gateway.js'
+import { chatArea, sessionCard } from './state.js'
 import { esc } from '../core/util.js'
 import { patchUI, readUI } from '../core/storage.js'
-import { sessionCardDef } from './cards/session/session-card.js'
-import { pluginsCardDef } from './cards/plugins/plugins-card.js'
-import { previewCardDef } from './cards/preview/preview-card.js'
-import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-card.js'
-/* @module views/registry.js */
+import { normExtCards, normQuoteActions } from './ext-decl.js'
+/* @module engine/registry.js */
 
   // ---------- 第一方卡片注册表 ----------
-  // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
-  // #session-card，deactivate=teardownSessionView）；插件卡与预览卡同态各自成模块。
-  // 「项目 / 模型 / 神经元」三卡自 2026-10-10 起不再是第一方卡——改由工作区根以应用形式申报、
-  // 用户在插件卡「应用」列表里手动启用（APP_TABS 见下），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
-  const CARDS = [sessionCardDef, pluginsCardDef, previewCardDef]
+  // 卡描述符由各卡模块顶层 registerCard 自注册（一模块一卡）；「项目 / 模型 / 神经元」三卡自 2026-10-10
+  // 起不再是第一方卡——改由工作区根以应用形式申报、用户在插件卡「应用」列表里手动启用（APP_TABS 见下），
+  // 侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
+  let CARDS = []
+  function registerCard(def) { if (def && def.id) CARDS.push(def) }
   const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
+  // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
+  function refreshCard(id) { cardOf(id)?.refresh?.() }
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
-  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
+  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js，经 setExtCardRenderer 注入）——外部
+  // 永不获得在宿主 DOM 执行的能力。
   // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
   // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
   // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
   // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
-  // 清（清点收在 views/cards/preview/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
+  // 清（清点收在 feature/preview-frame.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
   // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
+  let extRender = null
+  function setExtCardRenderer(fn) { extRender = fn }
   let EXT = []
   let EXT_LABEL = ''
   function registerExtCards(label, cards, replace) {
@@ -56,7 +60,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
         tip: `${c.title} · ${label}`,
         icon: I[c.icon] ? c.icon : 'plug',
         tab: c.tab,
-        mount: (body) => mountExtCard(body, label, c),
+        mount: (body) => extRender(body, label, c),
       })
     }
     renderMgrTabs()
@@ -70,7 +74,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
 
   // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
   // 真源仍是网关（preview.json）：缓存只是「上次所见」的快照，启动/切项目时先 hydrate 回来让
-  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（preview-card.js）。无缓存（首次访问）
+  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（feature/preview-frame.js）。无缓存（首次访问）
   // = 空表，照旧等网络清单——不猜不兜底。
   function persistExtDecls(label, patch) {
     if (!label) return
@@ -101,7 +105,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
 
   // ---------- 项目申报的浮窗动作表（2026-09-28）----------
   // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
-  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（preview-card.js syncExtCards /
+  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（feature/preview-frame.js syncExtCards /
   // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
   // 动作是纯数据、无 mount 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
   // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
@@ -126,8 +130,8 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
   // 应用 = 工作区根 <workroot>/.claude/preview/ 里申报的界面单元（preview.json 的 cards 段，经
   // /gateway/preview-cards?label=<全局根> 取回）。**不扫描目录、不自动渲染**：清单只进插件卡的
   // 「应用」列表（第三个 cat），由用户点「+」启用；**已启用**的应用才在侧栏生成 tab（APP_TABS），
-  // 点击走 openCard → mountExtCard 渲染其 iframe 页（壳与字段校验复用 cards/ext/ext-card.js，零第二份
-  // 实现）。与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
+  // 点击走 openCard → 注入的 iframe 壳渲染其页（字段校验复用 engine/ext-decl.js，零第二份实现）。
+  // 与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
   // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
   // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
   const GLOBAL_LABEL = '全局根 · 散装对话'
@@ -169,7 +173,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
       tip: `${c.title} · 应用（工作区根）`,
       icon: I[c.icon] ? c.icon : 'plug',
       tab: c.tab,
-      mount: (body) => mountExtCard(body, GLOBAL_LABEL, c),
+      mount: (body) => extRender(body, GLOBAL_LABEL, c),
     }))
   }
   // 目录整份替换 + 落缓存快照（刷新即用；与 EXT 同一份缓存结构，key = 全局根 label）。
@@ -209,6 +213,9 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
+  // 启动引导：由入口（app.js 启动段）显式调用——各卡模块顶层 registerCard 已完成后再渲 tab，
+  // 避免模块求值期副作用（registry 须排在卡模块之前，故不能在自身顶层调 renderMgrTabs）。
+  function bootRegistry() { renderMgrTabs() }
 
   // ---------- 槽位（#chat-area = 无形槽）：同一时刻恰好一张卡 ----------
   // 管理/预览卡按需创建、离开即 .remove()——神经元图的 rAF 以 canvas.isConnected 自毁，
@@ -249,7 +256,7 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
     if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
     return el
   }
-  // 契约出口：卡外（如 preview-card 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
+  // 契约出口：卡外（如 preview-frame 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
   function deactivateCard(id) {
     cardOf(id)?.deactivate?.()
   }
@@ -264,12 +271,10 @@ import { mountExtCard, normExtCards, normQuoteActions } from './cards/ext/ext-ca
     return curCardEl.querySelector('.view-body')
   }
 
-  renderMgrTabs()
-
 export {
-  CARDS,
   GLOBAL_LABEL,
   appCatalog,
+  bootRegistry,
   clearExtCards,
   clearQuoteActions,
   currentCardId,
@@ -279,10 +284,13 @@ export {
   isAppEnabled,
   openCard,
   quoteActions,
+  refreshCard,
+  registerCard,
   registerExtCards,
   registerQuoteActions,
   renderMgrTabs,
   setAppEnabled,
+  setExtCardRenderer,
   syncGlobalPlugins,
   viewBody,
 }

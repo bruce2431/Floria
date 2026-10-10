@@ -17,6 +17,9 @@ const OUT = './src/gateway/web/app.js'
 const PIECES: { file: string; part: number }[] = [
   { file: 'core/icons.js', part: 1 },
   { file: 'sidebar/mgr-data.js', part: 1 },
+  // 界面状态纯数据（core/ui-state.js，2026-10-10 自 engine/state.js 下移）须先于 engine/state.js 与
+  // core/{util,storage}.js（三件均 import 它）。
+  { file: 'core/ui-state.js', part: 1 },
   // 元素/状态（engine/state.js）与持久化（core/storage.js）、工具（core/util.js）在产物中交错：
   // 三件自原 IIFE 的不同区段切出（util 的 `function toast` 在原版位于 markdown 之后），须保原物理序。
   { file: 'engine/state.js', part: 1 },
@@ -24,6 +27,9 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'engine/state.js', part: 2 },
   { file: 'core/util.js', part: 1 },
   { file: 'core/char.js', part: 1 },
+  // @ 提及/引用令牌纯符号层（2026-10-10 自 inputbar/mention.js 下移）：core/markdown.js 渲染内联 chip 只依赖
+  // 此层（断开 core→feature 成环）；只依赖 core/icons.js，须排在其后、core/markdown.js 之前。
+  { file: 'core/mention-syntax.js', part: 1 },
   { file: 'core/markdown.js', part: 1 },
   { file: 'core/util.js', part: 2 },
   { file: 'engine/sessions.js', part: 1 },
@@ -43,17 +49,27 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'sidebar/bubble-search.js', part: 1 },
   // 侧栏开合核（2026-10-05 自 recent.js 抽出）：模块内全为函数声明，顶层无执行码。
   { file: 'engine/panel.js', part: 1 },
-  // 视图卡组件（2026-10-01 卡片化二期）：一模块一卡。各卡定义件全部排在 registry.js 之前
-  // （registry 顶层 `const CARDS` 引用各卡 CardDef const，须在其后）；卡之间互序无关（描述符只引用 hoist 函数）。
+  // 分层治理（2026-10-10）：外部申报纯校验（engine/ext-decl.js）与卡契约注册表（engine/registry.js）
+  // 下沉到 engine 层——engine 永不 import views，渲染实现留在 views/feature。registry 顶层 `let CARDS=[]`
+  // + 契约 registerCard；各卡模块顶层自注册（registerCard(def)）⇒ registry 须物理排在各卡之前（TDZ），
+  // 故此处不再「卡在 registry 之前」（旧 views/registry.js 已删）。
+  { file: 'engine/ext-decl.js', part: 1 },
+  { file: 'engine/registry.js', part: 1 },
+  // 视图卡组件（2026-10-01 卡片化二期）：一模块一卡，各卡顶层 registerCard 自注册入 engine/registry。
   { file: 'views/cards/ext/ext-card.js', part: 1 },
   { file: 'views/cards/preview/preview-card.js', part: 1 },
   { file: 'views/cards/plugins/plugins-card.js', part: 1 },
   { file: 'views/cards/session/session-card.js', part: 1 },
-  // 视图注册表：须排在 core/icons.js(I)、engine/state.js(esc/#chat-area/session-card) 与各卡定义件之后。
-  { file: 'views/registry.js', part: 1 },
+  // 项目预览帧 + 外部卡申报同步 + 侧栏快捷按钮状态（feature/preview-frame.js，2026-10-10 自
+  // views/cards/{preview,ext} 与 sidebar/rail-ext 迁入）：三级链渲染实现 + 「当前预览文档」域状态归
+  // feature 层（engine 契约只做表编排）。须在 work.js 之前（work 预览态复用 mountPreview）。
+  { file: 'feature/preview-frame.js', part: 1 },
   // work 工具页注册表（右栏工具态的水平标签栏）：纯函数声明 + 顶层 const WK_TOOL_DEFS，须在 work.js
   // 之前（其 mountWork 调 registerWkTool，applyPvTab 调 wkToolDefs/wkToolDef/wkToolNormId）。
   { file: 'sidebar/work-tools.js', part: 1 },
+  // work 视图两开关缺省（WK_PANES_DEF，2026-10-10 自 engine/state.js 下移为 work 领域值）：须在 work 侧栏
+  // 各件之前（work-mount.js 的 initWork 调 loadWork(WK_PANES_DEF)、work-files.js 调 loadWorkPanes(label, 同)）。
+  { file: 'sidebar/work-state.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。

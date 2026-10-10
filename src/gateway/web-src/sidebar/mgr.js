@@ -1,6 +1,6 @@
 // 侧栏管理视图编排（2026-10-01 卡片化二期：卡内容已迁 views/cards/*-card.js，本文件只留编排与
 // 侧栏列表/项目树；唯一手改处，web/app.js 为生成物）
-// 2026-09-23 视图卡化：视图内容写进交给它的卡体——卡由 views/registry.js 的槽位管理，分发改成
+// 2026-09-23 视图卡化：视图内容写进交给它的卡体——卡由 engine/registry.js 的槽位管理，分发改成
 // 查表（openCard(state.mgr)），四段 if 链与空 .mgr-top 占位一并退场。
 
 import { clearSessionSlots, navigate } from '../chat/route.js'
@@ -11,7 +11,7 @@ import { sessCmp, sorted } from '../engine/sessions.js'
 import { ALL, bodyEl, state } from '../engine/state.js'
 import { esc, isMobile } from '../core/util.js'
 import { closeMentionPop } from '../inputbar/mention.js'
-import { openCard } from '../views/registry.js'
+import { openCard } from '../engine/registry.js'
 import { bindSessClicks, itemHtml, setPanel } from './recent.js'
 /* @module sidebar/mgr.js */
   // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。

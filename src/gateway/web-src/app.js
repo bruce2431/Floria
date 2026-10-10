@@ -12,6 +12,7 @@ import { setChar } from './core/char.js'
 import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './engine/gateway.js'
 import { I } from './core/icons.js'
 import { initLive } from './engine/live.js'
+import { bootRegistry } from './engine/registry.js'
 import { loadSessions } from './engine/sessions.js'
 import { inputEl, overlay, sInput, sidebar, state } from './engine/state.js'
 import { isMobile } from './core/util.js'
@@ -142,6 +143,9 @@ import { initWork, setSbMode } from './sidebar/work.js'
     // 2026-10-06 根修「work 刷新多出一枚新会话胶囊」：先把真实路由 hash 落地，否则 initWork→applyPanes
     // 的开放集兜底（wkEnsureTab(wkActiveKey())）会读到尚未赋值的 currentHash('') ⇒ 当哨兵 'new' 塞一枚。
     state.currentHash = bootHash()
+    // 卡注册表引导：各卡模块已在模块求值期 registerCard 入表，此处显式渲一次侧栏 tab
+    // （registry 不再在自身顶层渲染，避免模块求值期副作用；须在 initWork/route 之前就位）。
+    bootRegistry()
     initWork()
     route()
     if (GATEWAY) initGateway()

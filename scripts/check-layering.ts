@@ -42,51 +42,16 @@ const LAYER = {
 const LAYER_NAME = ['core', 'engine', 'feature', 'views', 'app']
 
 // core/ 内部再分：叶集合 vs 引擎集合（引擎项可能在 core/ 或 engine/ 目录下）
-const CORE_LEAVES = new Set(['util', 'icons', 'markdown', 'storage', 'char'])
+const CORE_LEAVES = new Set(['util', 'icons', 'markdown', 'storage', 'char', 'mention-syntax', 'ui-state'])
 const ENGINE_MODULES = new Set(['state', 'live', 'gateway', 'sessions'])
-const FEATURE_DIRS = new Set(['chat', 'inputbar', 'sidebar'])
+const FEATURE_DIRS = new Set(['chat', 'inputbar', 'sidebar', 'feature'])
 
 // ── 违规基线（已人工评审的跨层依赖；键 = "from → to"）────────────
+// 2026-10-10 分层治理 Phase 2（契约下沉）：14 条待治理 + 1 条例外全部随契约下沉到 engine/feature
+// 而消失（views/registry.js → engine/registry.js、ext-card/preview-card 拆出 engine/ext-decl.js +
+// feature/preview-frame.js），BASELINE 清空。余下 21 条 engine→feature（事件反转型）属下一批高风险项。
 type Disp = { kind: '例外' | '待治理'; reason: string }
-const BASELINE: Record<string, Disp> = {
-  // ─ 合理例外：共享原语/契约，跨层复用好于复制 ─
-  'views/cards/preview/preview-card.js → views/cards/ext/ext-card.js':
-    { kind: '例外', reason: '共享 rail-ext 清理原语 clearRailExt，跨卡复用优于复制' },
-
-  // ─ 待治理（core→engine）：core 叶子直接取 engine/state 的 DOM 句柄，宜由 state 契约下沉修复 ─
-  'core/char.js → engine/state.js':
-    { kind: '待治理', reason: '取 charEl DOM 句柄；宜由 state 暴露契约而非直连引擎' },
-  'core/storage.js → engine/state.js':
-    { kind: '待治理', reason: '取 state/WK_PANES_DEF；持久化层应只依赖纯数据契约' },
-  'core/util.js → engine/state.js':
-    { kind: '待治理', reason: 'toast() 取 state/toastEl；宜下移 DOM 句柄依赖' },
-
-  // ─ 待治理（core→feature）：markdown 依赖 mention 的纯字符串工具，宜下移进 core ─
-  'core/markdown.js → inputbar/mention.js':
-    { kind: '待治理', reason: '依赖 MENTION/QUOTE 正则与 chip-html 纯函数，宜下移为 core 叶子' },
-
-  // ─ 待治理（feature→views）：宜把 registry 契约下沉、卡片渲染经契约暴露 ─
-  'chat/route.js → views/registry.js':
-    { kind: '待治理', reason: '经 registry 契约开卡；契约宜下沉至 feature 之下' },
-  'chat/route.js → views/cards/ext/ext-card.js':
-    { kind: '待治理', reason: '取 clearRailExt；应与卡内部实现解耦' },
-  'chat/route.js → views/cards/preview/preview-card.js':
-    { kind: '待治理', reason: '取 openProjectPreview；宜经 registry 契约暴露' },
-  'inputbar/quote.js → views/registry.js':
-    { kind: '待治理', reason: '取 quoteActions；契约宜下沉' },
-  'sidebar/mgr-data.js → views/cards/plugins/plugins-card.js':
-    { kind: '待治理', reason: '取 renderMgrGrid；渲染函数宜经契约暴露' },
-  'sidebar/mgr.js → views/registry.js':
-    { kind: '待治理', reason: '取 openCard；契约宜下沉' },
-  'sidebar/rail-ext.js → views/cards/ext/ext-card.js':
-    { kind: '待治理', reason: '取 railExtItems/setRailExtItems；卡状态应与卡内部解耦' },
-  'sidebar/rail-ext.js → views/registry.js':
-    { kind: '待治理', reason: '取 registerExtCards；契约宜下沉' },
-  'sidebar/work.js → views/registry.js':
-    { kind: '待治理', reason: '取 currentCardId/hydrateExtCards；契约宜下沉' },
-  'sidebar/work.js → views/cards/preview/preview-card.js':
-    { kind: '待治理', reason: '取 mountPreview/syncExtCards；宜经 registry 契约暴露' },
-}
+const BASELINE: Record<string, Disp> = {}
 
 /** 由模块相对路径（相对 SRC，形如 "core/state.js"）判定所属层；无法判定返回 null。 */
 function layerOf(rel: string): number | null {

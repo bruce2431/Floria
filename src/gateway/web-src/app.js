@@ -7,23 +7,31 @@
    只读查看：composer 不可发送。 */
 // —— 2026-09-10 模块化切割入口（事件绑定 + 启动序列；其余逻辑在 core/sidebar/inputbar/chat 各模块）——
 import { route, navigate, renderSession, bootHash } from './chat/route.js'
-import { hideGate } from './engine/auth.js'
+import { stage, stageStart, stageSync } from './chat/stage.js'
+import { hideGate, setAuthPorts } from './engine/auth.js'
 import { setChar } from './core/char.js'
-import { GATEWAY, HOT_RELOAD, initGateway, detectGateway } from './engine/gateway.js'
+import { GATEWAY, HOT_RELOAD, initGateway, detectGateway, setGatewayPorts } from './engine/gateway.js'
 import { I } from './core/icons.js'
-import { initLive } from './engine/live.js'
+import { initLive, setLiveModelHook, setLivePorts } from './engine/live.js'
+import { applySessionModel } from './inputbar/model-select.js'
 import { bootRegistry } from './engine/registry.js'
 import { loadSessions } from './engine/sessions.js'
 import { inputEl, overlay, sInput, sidebar, state } from './engine/state.js'
 import { isMobile } from './core/util.js'
 import { initCodeBlock } from './core/markdown.js'
 import { saveMgrView } from './core/storage.js'
-import { initViewport } from './engine/viewport.js'
-import { gwSend } from './inputbar/send.js'
+import { initViewport, setViewportAdapter } from './engine/viewport.js'
+import { gwSend, syncGwSend } from './inputbar/send.js'
 import { openSearch, renderSearch } from './sidebar/bubble-search.js'
 import { renderProject } from './sidebar/mgr.js'
-import { setPanel, newWebSession, renderRecent } from './sidebar/recent.js'
-import { initWork, setSbMode } from './sidebar/work.js'
+import { setPanel, newWebSession, renderRecent, getFirstSendHash, setFirstSendHash } from './sidebar/recent.js'
+import { initWork, setSbMode, ensureWork } from './sidebar/work.js'
+import { loadMgrData, loadModelsData } from './sidebar/mgr-data.js'
+import { closeMentionPop, onInputChange } from './inputbar/mention.js'
+// 分层治理 4C/4D（2026-10-10）：engine/{live,gateway,auth}.js 的 feature 端口实参——入口（layer 4）统一接线。
+import { absorbPending, fmtDur, getCharNote, getLastSegInfo, getPendingUserMsgs, isEndStop, isRealUser, messagesHtml, queueClaimAdopt, setPendingUserMsgs, stampMsgIn, statusFlags } from './chat/messages.js'
+import { claimStartTs, clearTakeover, getTakeover, renderSettle, renderTaskDock, renderTransient, syncTurnLive, addSystem, getApprovalPending, renderApproval, setApprovalPending, showApprovalError, sendSubscribe } from './inputbar/approval.js'
+import { renderCtxMeter } from './inputbar/ctx-meter.js'
 
 /* @module __app__ */
   // ---------- 事件绑定 ----------
@@ -133,6 +141,34 @@ import { initWork, setSbMode } from './sidebar/work.js'
     await loadSessions()
     initCodeBlock() // 代码块软换行偏好（localStorage）——须在首次 mdHtml 渲染之前
     initLive()
+    // 依赖接线（分层治理：engine 不静态 import feature，由入口注入实现）。本段与 initLive 同一同步块，
+    // SSE 回调要等本轮执行完才可能投递 → port 注入对首个事件必已就位（4C 起 engine/live.js 的渲染出口/
+    // 暂态/stage/可变状态全部经端口读取）。
+    setLivePorts({
+      // chat/messages.js 读基元 + 可变渲染态读取口（getter 现读，勿缓存）
+      msg: { isRealUser, isEndStop, fmtDur, stampMsgIn, messagesHtml, absorbPending, queueClaimAdopt, statusFlags, getLastSegInfo, getCharNote },
+      // 渲染/暂态/导航出口（feature 层实现）
+      ui: { renderTransient, renderSettle, renderRecent, renderTaskDock, renderCtxMeter, claimStartTs, syncTurnLive, syncGwSend, navigate },
+      // 两层消息流 stage（stage 为稳定 const 对象；stageStart 为函数）
+      stage: { stage, stageStart },
+      // 可变状态读写口（takeover / firstSendHash / pendingUserMsgs；getter 现读，勿缓存）
+      state: { getTakeover, clearTakeover, getFirstSendHash, setFirstSendHash, getPendingUserMsgs, setPendingUserMsgs },
+    })
+    // 依赖接线 4D（2026-10-10）：engine/gateway.js（审批态读写 + 发送态同步 + @ 提及输入回调）与
+    // engine/auth.js（解锁后界面重渲 + 数据补拉 + 发送态同步）的 feature 端口——与 4C 同点接线；
+    // 早于下方 initGateway()（其 connect→WS onopen/hideGate 经端口回写）。
+    setGatewayPorts({
+      approval: { addSystem, clearTakeover, renderApproval, showApprovalError, sendSubscribe, getTakeover, getApprovalPending, setApprovalPending },
+      send: { syncGwSend },
+      mention: { onInputChange },
+    })
+    setAuthPorts({
+      ui: { route, closeMentionPop, renderRecent },
+      data: { loadMgrData, loadModelsData, ensureWork },
+      send: { syncGwSend },
+    })
+    setViewportAdapter({ syncStage: stageSync }) // 键盘适配：可视区变矮后重算两层消息流占位/跟随
+    setLiveModelHook(applySessionModel) // 实时同步：CLI 上报模型 → 校准输入栏模型 seat
     initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)
     setChar(1) // 启动默认形象

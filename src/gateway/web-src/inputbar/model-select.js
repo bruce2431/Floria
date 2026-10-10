@@ -53,6 +53,28 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
   // 用户本次会话内主动切换过模型 → 不再被 /gateway/session 旧上报覆盖（切换会话时重置）。避免
   // POST /gateway/model 尚未落地前的一次刷新把刚切的选择回滚成旧值。
   let modelUserPicked = false
+  // 用 CLI 上报的会话实际模型校准模型 seat（2026-10-10 分层治理 4B 自 engine/sessions.js 反转迁入：
+  // 「校准 seat」是输入栏行为，归 feature 层——engine 不再 import feature，故本函数随状态同处）。
+  // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
+  // **切换前的在途快照**——用户刚在 web 切过（modelUserPicked）且这条上报的时刻早于那次切换
+  // （modelTs < 本地 ts）→ 它是切换前发出的旧数据，采纳会把刚做的选择回滚（用户反馈「web 保留了
+  // 上一个」）。旧实现用 modelUserPicked 一票否决整页会话剩余时间，CLI 侧后续切模型永远进不来
+  // → 弃用，改为时间戳比较；一旦采纳过一次上报（外部真相落定）即解除防回滚标记，恢复常态跟随。
+  function applySessionModel(model, modelTs) {
+    if (!model) return
+    // 写 modelUserPicked 一律走 setModelUserPicked（ESM 导入绑定只读，直接赋值 esbuild 直接报错）
+    if (MODEL_CUR.model === model) { setModelUserPicked(false); return }
+    if (
+      modelUserPicked &&
+      typeof modelTs === 'number' &&
+      typeof MODEL_CUR.ts === 'number' &&
+      modelTs < MODEL_CUR.ts
+    ) return
+    setModelUserPicked(false)
+    setModelCur({ ...MODEL_CUR, model })
+    saveModelCur()
+    renderModelSeat()
+  }
   // 命令菜单状态（对齐 dsh PopupState：open/status/options/search/active/submitting/confirming/acknowledged/error）
   // 2026-09-09 二轮定案：去 tab 单页分组（上传/技能/引用会话/指令堆放一页）；items=渲染时平铺条目（键盘索引基准）
 
@@ -249,6 +271,7 @@ export function setModelUserPicked(v) { modelUserPicked = v }
 export {
   MODEL_CUR,
   MODEL_KEY,
+  applySessionModel,
   closeModelPop,
   currentChoice,
   effLabel,

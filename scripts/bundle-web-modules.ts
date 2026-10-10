@@ -54,6 +54,9 @@ const PIECES: { file: string; part: number }[] = [
   // + 契约 registerCard；各卡模块顶层自注册（registerCard(def)）⇒ registry 须物理排在各卡之前（TDZ），
   // 故此处不再「卡在 registry 之前」（旧 views/registry.js 已删）。
   { file: 'engine/ext-decl.js', part: 1 },
+  // Phase 5（2026-10-10）：外部卡运行时（EXT/APP_TABS/QACTIONS + 申报缓存）自 registry.js 拆出——
+  // registry 顶层 `setTabRefresh(renderMgrTabs)` 注入本件的重渲回调 ⇒ 本件须排在 registry 之前（TDZ）。
+  { file: 'engine/ext-runtime.js', part: 1 },
   { file: 'engine/registry.js', part: 1 },
   // 视图卡组件（2026-10-01 卡片化二期）：一模块一卡，各卡顶层 registerCard 自注册入 engine/registry。
   { file: 'views/cards/ext/ext-card.js', part: 1 },

@@ -41,6 +41,10 @@ import { CHEV } from './icons.js'
   // 增量重建（2026-08-26）：messagesHtml 记录「最后一个被 closeSeg 的段」的 key/html/前驱锚点/处理中标志，
   // refreshSession 对处理中末段只替换该段 DOM（applySegDelta），头部历史消息保留不动——消除整页重建闪烁。
   let lastSegInfo = null
+  // 分层治理 4C（2026-10-10）：engine/live.js 的只读读取口——经端口注入调用，每次现读可变绑定，
+  // 调用方严禁缓存返回值（缓存即与渲染实时态脱钩）。
+  function getCharNote() { return charNote }
+  function getLastSegInfo() { return lastSegInfo }
 
   // lazy（2026-09-18 web 卡顿根治）：true = 惰性两段式——切段循环照跑（桶分配 O(N) 轻量）但
   // 历史段不生成 HTML（think/ask/tool/reply 行的 html 置空）、closeSeg 只封存不渲染（按渲染同序

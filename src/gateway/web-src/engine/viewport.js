@@ -1,6 +1,11 @@
 // 键盘弹出适配（移动端）——唯一真源 visualViewport（本文件是手改处，web/app.js 为生成物）
-import { stageSync } from '../chat/stage.js'
 /* @module engine/viewport.js */
+
+  // 依赖反转（分层治理 4A，2026-10-10）：engine 不得静态 import feature。可视区变矮后要重算的
+  // 「两层消息流占位/跟随」是 chat/stage.js 的 stageSync，改由 app 启动序列经 setViewportAdapter 注入；
+  // 未注入时为空操作（initViewport 之前必已注入，见 app.js 启动序列的依赖接线段）。
+  // 变量名不能叫 stageSync——拼接后全模块共享同一 IIFE 作用域，会与 chat/stage.js 的 function 声明重名。
+  let stageSyncFn = () => {}
 
   // ---------- 键盘弹出适配（2026-09-19）----------
   // 不变量（五轮定案，用户「整个界面连侧栏一起上下」，要「整页平移」）：应用是一块**刚性板**，
@@ -112,7 +117,7 @@ import { stageSync } from '../chat/stage.js'
       const barH = wrap.offsetHeight
       if (barH > 0) document.documentElement.style.setProperty('--bar-h', barH + 'px')
     }
-    stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
+    stageSyncFn() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }
 
   function scheduleSettle() { if (!settleRaf) settleRaf = requestAnimationFrame(settle) }
@@ -144,4 +149,7 @@ import { stageSync } from '../chat/stage.js'
     syncKeyboard()
     settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
   }
+// —— 跨模块写入口（切割脚本生成）——
+export function setViewportAdapter(a) { stageSyncFn = a.syncStage }
+
 export { initViewport, kbGeometry, popRoom }

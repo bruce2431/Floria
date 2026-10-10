@@ -36,6 +36,8 @@ function body(file: string, header: string): string {
 }
 
 const registryJs = await Bun.file(`${SRC}/engine/registry.js`).text()
+// 2026-10-10 分层治理 Phase 5：外部卡运行时表（EXT/APP_TABS/QACTIONS + 申报缓存）自 registry.js 拆出。
+const extRuntimeJs = await Bun.file(`${SRC}/engine/ext-runtime.js`).text()
 const extDeclJs = await Bun.file(`${SRC}/engine/ext-decl.js`).text()
 const previewFrameJs = await Bun.file(`${SRC}/feature/preview-frame.js`).text()
 const extCardJs = await Bun.file(`${SRC}/views/cards/ext/ext-card.js`).text()
@@ -56,8 +58,8 @@ const appJs = await Bun.file(`${WEB}/app.js`).text()
 const count = (s: string, re: RegExp) => [...s.matchAll(re)].length
 
 // ---------- I3 分表：EXT 与 CARDS 分开存，查询点合流 ----------
-ok('I3 registry.js 有独立运行时表 EXT', /let EXT = \[\]/.test(registryJs))
-ok('I3 registry.js 有 EXT_LABEL（记录本表属于哪个项目）', /let EXT_LABEL = ''/.test(registryJs))
+ok('I3 ext-runtime.js 有独立运行时表 EXT', /let EXT = \[\]/.test(extRuntimeJs))
+ok('I3 ext-runtime.js 有 EXT_LABEL（记录本表属于哪个项目）', /let EXT_LABEL = ''/.test(extRuntimeJs))
 // 2026-10-10 分层治理：静态卡表由「registry 顶层 const CARDS = [各卡 CardDef]」改为「各卡模块顶层
 // registerCard(def) 自注册」——registry 只持 `let CARDS = []` + 契约 registerCard（engine 永不 import views）。
 ok('I3 静态卡表 CARDS 为空表 + registerCard 契约（各卡自注册）', /let CARDS = \[\]/.test(registryJs) && /function registerCard\(def\) \{ if \(def && def\.id\) CARDS\.push\(def\) \}/.test(registryJs))
@@ -69,16 +71,16 @@ ok('I3 静态卡表 CARDS 为空表 + registerCard 契约（各卡自注册）',
   ok('I3 插件卡顶层 registerCard(pluginsCardDef) + refresh 契约', /registerCard\(pluginsCardDef\)/.test(pluginsCardJs) && /refresh\(\) \{ renderMgrGrid\(\) \}/.test(pluginsCardJs))
   ok('I3 外部申报卡（ext-card）不含第一方卡注册（外部走 EXT 分表，壳由宿主生成）', !/registerCard\(/.test(extCardJs) && /setExtCardRenderer\(mountExtCard\)/.test(extCardJs))
 }
-ok('I3 cardOf 查三张表（CARDS → APP_TABS → EXT）', /const cardOf = \(id\) => CARDS\.find\(\(c\) => c\.id === id\) \|\| APP_TABS\.find\(\(c\) => c\.id === id\) \|\| EXT\.find\(/.test(registryJs))
-ok('I3 renderMgrTabs 遍历 CARDS + APP_TABS + EXT', registryJs.includes('CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)'))
-const regBody = body(registryJs, 'function registerExtCards(')
+ok('I3 cardOf 查三张表（CARDS → APP_TABS → EXT，后两张经 ext-runtime 只读访问口）', /const cardOf = \(id\) => CARDS\.find\(\(c\) => c\.id === id\) \|\| appTabs\(\)\.find\(\(c\) => c\.id === id\) \|\| extTabs\(\)\.find\(/.test(registryJs))
+ok('I3 renderMgrTabs 遍历 CARDS + APP_TABS + EXT', registryJs.includes('CARDS.concat(appTabs(), extTabs()).filter((v) => v.tab)'))
+const regBody = body(extRuntimeJs, 'function registerExtCards(')
 ok('I3 EXT 注册只写 EXT、不碰静态卡表 CARDS', regBody.includes('EXT.push({') && !regBody.includes('CARDS'))
 ok('I3 外部卡 mount 一律经注入的 extRender（宿主生成壳），无外部代码注入点', regBody.includes('mount: (body) => extRender(body, label, c)'))
 ok('I3 外部卡 id 命名空间 ext:<label>:<id>（与第一方裸词 id 零撞车）', regBody.includes('`ext:${label}:${c.id}`'))
 ok('I3 外部卡字段校验委托给 engine/ext-decl.js 的同一份过滤器', regBody.includes('normExtCards(cards)'))
 
 // ---------- I1 生命周期：清点受控（异 label / 文档重挂清；离开预览路由不清） ----------
-ok('I1 registry.js 定义 clearExtCards', /function clearExtCards\(\)/.test(registryJs))
+ok('I1 ext-runtime.js 定义 clearExtCards', /function clearExtCards\(\)/.test(extRuntimeJs))
 ok('I1 same-label 且非 replace 时保留既有卡（同 id 覆盖语义）', regBody.includes('if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }'))
 // 2026-10-10 分层治理：syncExtCards / mountPreview / openProjectPreview 自 preview-card.js 下移至
 // feature/preview-frame.js（渲染实现归 feature，engine 契约只做表编排）；clearRailExt 定义随之同模块。
@@ -99,11 +101,11 @@ ok('I1 clearExtCards 调用点只此一处（feature/preview-frame.js syncExtCar
 // ---------- I5 刷新可恢复：EXT 是内存表，须落一份缓存并在启动/路由/切项目三处回填 ----------
 // 守护的不变量：刷新（或网关重启后重载页面）后外部卡 tab 与 /manage/ext:<label>:<id> 直进
 // 都仍成立——不靠「先开一次预览」副作用。
-const declBody = body(registryJs, 'function persistExtDecls(')
+const declBody = body(extRuntimeJs, 'function persistExtDecls(')
 ok('I5 申报快照落 floria-ui-v1（分表 extDecls，与 work/管理态同一条存储链）', declBody.includes('readUI()') && declBody.includes('patchUI({ extDecls: all })'))
 ok('I5 只缓存网关权威快照（replace=true），postMessage 增量不落盘', regBody.includes('if (replace) persistExtDecls(label, { cards: list })'))
-ok('I5 浮窗动作与 EXT 同存（同一份申报、同一份缓存）', body(registryJs, 'function registerQuoteActions(').includes('persistExtDecls(label, { quoteActions: QACTIONS })'))
-const hydBody = body(registryJs, 'function hydrateExtCards(')
+ok('I5 浮窗动作与 EXT 同存（同一份申报、同一份缓存）', body(extRuntimeJs, 'function registerQuoteActions(').includes('persistExtDecls(label, { quoteActions: QACTIONS })'))
+const hydBody = body(extRuntimeJs, 'function hydrateExtCards(')
 ok('I5 回填走同一注册口（不另写第二套建表逻辑）', hydBody.includes('registerExtCards(label, e.cards, true)') && hydBody.includes('registerQuoteActions(label, e.quoteActions)'))
 ok('I5 启动恢复接线（work-mount.js initWork 在 loadWork 之后回填）', /loadWork\(WK_PANES_DEF\)[\s\S]{0,400}?hydrateExtCards\(state\.workProj\)/.test(workMountJs))
 ok('I5 切项目回填（work-files.js selectProject 换槽即换卡）', /state\.workProj = label[\s\S]{0,900}?hydrateExtCards\(label\)/.test(workFilesJs))
@@ -194,6 +196,11 @@ const rows = [...bundleTs.matchAll(/\{ file: '((?:views|engine|feature)\/[\w/-]+
 const regAt = rows.indexOf('engine/registry.js')
 const cardRows = rows.filter((f) => f.startsWith('views/cards/'))
 ok('B1 契约 registry.js 先于四张第一方卡（engine/registry.js 早于 views/cards/*，自注册可入表）', regAt >= 0 && cardRows.length === 4 && cardRows.every((f) => rows.indexOf(f) > regAt), rows.join(' < '))
+// 2026-10-10 Phase 5：registry 模块体在顶层调 setTabRefresh(renderMgrTabs) 注入重渲口 ⇒ ext-runtime 须
+// 物理排在其之前（TDZ：tabRefresh 的初值须已求值），且两者都排在四张卡之前。
+const extRtAt = rows.indexOf('engine/ext-runtime.js')
+ok('B1 ext-runtime.js 先于 registry.js（registry 顶层注入 setTabRefresh 需要 tabRefresh 已初始化）', extRtAt >= 0 && regAt > extRtAt, rows.join(' < '))
+ok('B1 ext-runtime.js 不 import registry.js（依赖单向 registry → ext-runtime，engine 内不成环）', !/from '\.\/registry\.js'/.test(extRuntimeJs))
 ok('B2 产物 app.js 含 mountExtCard 定义', appJs.includes('function mountExtCard('))
 ok('B2 产物 app.js 含 registerExtCards / clearExtCards 定义', appJs.includes('function registerExtCards(') && appJs.includes('function clearExtCards('))
 ok('B2 产物 app.js 含实时申报分支', appJs.includes("if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }"))

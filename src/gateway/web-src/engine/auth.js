@@ -1,18 +1,10 @@
 // 设备认证配对 + token 门链（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { route, renderSession } from '../chat/route.js'
-import { stage } from '../chat/stage.js'
 import { GATEWAY, GATEWAY_REVIEW, gateVerified, gToken, needToken, connect } from './gateway.js'
 import { initLive, refreshList, refreshSession } from './live.js'
 import { hashOf, findSession, loadSessions } from './sessions.js'
 import { chatArea, messagesEl, inputWrap, inputEl, state, ALL } from './state.js'
-import { closeMentionPop } from '../inputbar/mention.js'
-import { renderModelSeat } from '../inputbar/model-select.js'
-import { syncGwSend } from '../inputbar/send.js'
-import { loadMgrData, MODELS, loadModelsData } from '../sidebar/mgr-data.js'
-import { syncGlobalPlugins } from './registry.js'
-import { renderRecent } from '../sidebar/recent.js'
-import { ensureWork } from '../sidebar/work.js'
+import { syncGlobalPlugins } from './ext-runtime.js'
 /* @module engine/auth.js */
   function deviceHint() {
     return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 ? 'iPad' : ''
@@ -25,6 +17,13 @@ import { ensureWork } from '../sidebar/work.js'
   const gateScreen = $('gate-screen')
   const gTok = $('g-token'), gVid = $('g-video'), gNewImg = $('g-new')
   const gCard = $('g-card')
+
+  // 依赖反转（分层治理 4D，2026-10-10）：engine/auth.js 不再静态 import chat/sidebar/inputbar——
+  // token 门解锁（hideGate）后的界面重渲、数据补拉、发送态同步一律经 app 启动序列注入的端口访问
+  // （端口在 boot 同步块内接线，早于 detectorGateway→initGateway→showGate/hideGate 首次调用）。
+  let authUi = {} // 解锁后界面出口：chat/route.js 的 route + inputbar/mention.js 的 closeMentionPop + sidebar/recent.js 的 renderRecent
+  let authData = {} // 解锁后数据补拉：sidebar/mgr-data.js 的 loadMgrData/loadModelsData + sidebar/work.js 的 ensureWork
+  let authSend = {} // inputbar/send.js：syncGwSend
 
 
 /* @module engine/auth.js #3 */
@@ -64,7 +63,7 @@ import { ensureWork } from '../sidebar/work.js'
   }
 
   function showGate() {
-    closeMentionPop()
+    authUi.closeMentionPop()
     setGateAwait(true)
     setGateVerified(false)
     document.body.classList.add('token-gate')
@@ -85,7 +84,7 @@ import { ensureWork } from '../sidebar/work.js'
     gNewImg.classList.remove('show')
     gCard.classList.remove('hide', 'shake')
     pairStart() // 显示设备请求码 + 启动激活轮询
-    syncGwSend()
+    authSend.syncGwSend()
   }
   function gatePlayTransition() {
     // 阶段1 → 阶段2：白板内表单淡出，过渡视频淡入播放（视频首帧≈举白板图，无缝衔接）
@@ -129,7 +128,7 @@ import { ensureWork } from '../sidebar/work.js'
       gateScreen.hidden = true
       gateScreen.classList.remove('fade-out')
     }, 280)
-    syncGwSend()
+    authSend.syncGwSend()
     // token 门锁定态跳过的数据加载，解锁后补拉（SSE 重连 + 会话列表/当前会话）
     // 2026-08-18 修复：loadSessions 只填 ALL 不渲染，门后首次拉取后侧栏一直空——
     // 后续 SSE hello→refreshList 因 sig===listSig 短路跳过渲染；须在数据落地后显式渲染侧栏
@@ -144,29 +143,29 @@ import { ensureWork } from '../sidebar/work.js'
         const sess = findSession(state.currentHash)
         if (sess) {
           state.currentHash = hashOf(sess)
-          if (!messagesEl.querySelector('.msg:not(.msg-system)')) route()
+          if (!messagesEl.querySelector('.msg:not(.msg-system)')) authUi.route()
         } else {
-          route()
+          authUi.route()
         }
       }
-      renderRecent()
+      authUi.renderRecent()
       // work 模式数据补拉：boot 的 initWork→ensureWork 撞上 needToken()（token 未就绪）早退，
       // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr 同点补拉。
-      if (state.sbMode === 'work') ensureWork()
+      if (state.sbMode === 'work') authData.ensureWork()
     })
     // 应用目录补拉（2026-10-10）：工作区根 .claude/preview 申报的应用清单 + 已启用侧栏 tab。
     // boot 时 token 未就绪会取空，故与 loadSessions 同点补拉；断连重连自愈走同点（hideGate 即恢复口）。
     syncGlobalPlugins()
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
-    if (state.preview) route()
-    else if (state.mgr) loadMgrData(true)
+    if (state.preview) authUi.route()
+    else if (state.mgr) authData.loadMgrData(true)
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、
       // token 空 → /gateway/models 401，MODELS 恒 null，seat 一直显示「选择模型」（用户反馈「看不到模型」）。
       // hideGate 解锁后 token 已就绪 → 补拉一次，finally 内 renderModelSeat 刷新输入栏模型名。
-      loadModelsData(true).catch(() => {})
+      authData.loadModelsData(true).catch(() => {})
     }
   }
   async function gateSubmit() {
@@ -193,3 +192,6 @@ export {
   pairTimer,
   showGate,
 }
+
+// 分层治理 4D（2026-10-10）：feature 端口注入（app 启动序列调用一次，须早于 showGate/hideGate 首次调用）。
+export function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }

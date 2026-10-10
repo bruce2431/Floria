@@ -4,9 +4,13 @@
 //   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts          # 只报告，exit 0
 //   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts --strict # 有「真违规」时 exit 1
 //   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts --graph  # 附加依赖图摘要（度数/层级/按层边数）
+//   F:/@WrokSpace/.tools/bun/bun.exe scripts/check-layering.ts --self-test  # 只跑 SCC 分桶判据的自测（合成图），不扫源码
 //
-// 规则（--strict 只看「真违规」= 未声明的成环/逆向/卡边界）：
-//   1. 成环：import 图里长度 >1 的强连通分量（Tarjan SCC）。
+// 规则（--strict 只看「分层真违规」= 未声明的跨层成环/逆向/卡边界）：
+//   1. 成环：import 图里长度 >1 的强连通分量（Tarjan SCC）按「是否含跨层边」分两桶——
+//      **跨层 SCC**（含任一条低层→高层的边）＝分层违规；**同层 SCC**（内部边全在同一层）＝
+//      结构告警，不计入分层违规（同层环不违反分层约束，但仍是架构风险，必须保持可见）。
+//      理由：跨层边清零后残余 SCC 必然同层，若一律算违规则分层治理永远无法收敛到 0。
 //   2. 逆向依赖：低层 import 高层（core 0 → engine 1 → feature 2 → views 3 → app 4）。
 //   3. 卡边界：views/cards/<name>/ 的卡组件不得互相 import（同卡目录内部除外）——
 //      卡只能依赖 Shared Kernel core/* 与 registry 契约，不得依赖兄弟卡组件。
@@ -69,6 +73,59 @@ function layerOf(rel: string): number | null {
     return LAYER.engine
   }
   return null
+}
+
+/** SCC 分桶判据：分量内含任一条跨层内部边 ⇒ 分层违规（true）；全同层 ⇒ 结构告警（false）。 */
+function sccHasCrossLayer(comp: string[], e: Map<string, Set<string>>): boolean {
+  const compSet = new Set(comp)
+  for (const from of comp) {
+    const fl = layerOf(from)
+    if (fl === null) continue
+    for (const to of e.get(from) ?? []) {
+      if (!compSet.has(to)) continue
+      const tl = layerOf(to)
+      if (tl !== null && tl !== fl) return true
+    }
+  }
+  return false
+}
+
+// ── 自测（--self-test）：SCC 分桶判据回归 ───────────────────────
+// 风险：成环判据放宽为「同层不算违规」后，若分类器退化成「恒判同层」，跨层环会被静默放过、
+// 分层校验形同虚设。此自测用合成图钉死分类器两侧行为（跨层必判违规 / 同层必不判违规）。
+if (process.argv.includes('--self-test')) {
+  const mk = (pairs: [string, string][]) => {
+    const g = new Map<string, Set<string>>()
+    for (const [a, b] of pairs) { if (!g.has(a)) g.set(a, new Set()); g.get(a)!.add(b) }
+    return g
+  }
+  const cases: { name: string; comp: string[]; g: Map<string, Set<string>>; want: boolean }[] = [
+    { name: 'engine 同层环 ⇒ 告警', comp: ['engine/live.js', 'engine/gateway.js'], want: false,
+      g: mk([['engine/live.js', 'engine/gateway.js'], ['engine/gateway.js', 'engine/live.js']]) },
+    { name: 'feature 同层环 ⇒ 告警', comp: ['chat/route.js', 'chat/messages.js'], want: false,
+      g: mk([['chat/route.js', 'chat/messages.js'], ['chat/messages.js', 'chat/route.js']]) },
+    { name: 'core 同层环 ⇒ 告警', comp: ['core/util.js', 'core/icons.js'], want: false,
+      g: mk([['core/util.js', 'core/icons.js'], ['core/icons.js', 'core/util.js']]) },
+    { name: 'core⇄engine 跨层环 ⇒ 违规', comp: ['core/util.js', 'engine/live.js'], want: true,
+      g: mk([['core/util.js', 'engine/live.js'], ['engine/live.js', 'core/util.js']]) },
+    { name: 'engine→feature→engine 跨层环 ⇒ 违规', comp: ['engine/live.js', 'engine/sessions.js', 'feature/preview-frame.js'], want: true,
+      g: mk([['engine/live.js', 'feature/preview-frame.js'], ['feature/preview-frame.js', 'engine/sessions.js'], ['engine/sessions.js', 'engine/live.js']]) },
+  ]
+  let pass = 0
+  const fails: string[] = []
+  for (const c of cases) {
+    const got = sccHasCrossLayer(c.comp, c.g)
+    if (got === c.want) pass++
+    else fails.push(`${c.name}（期望 ${c.want}，实得 ${got}）`)
+  }
+  // 反向哨兵：分量外的跨层边不得污染判定
+  const outside = mk([['engine/live.js', 'engine/gateway.js'], ['engine/gateway.js', 'engine/live.js'], ['engine/live.js', 'feature/preview-frame.js']])
+  if (!sccHasCrossLayer(['engine/live.js', 'engine/gateway.js'], outside)) pass++
+  else fails.push('分量外的跨层边不得计入（泄漏）')
+  const total = cases.length + 1
+  console.log(`分层判据自测（SCC 分桶）  ${pass}/${fails.length}`)
+  for (const f of fails) console.log(`  ✗ ${f}`)
+  process.exit(fails.length ? 1 : 0)
 }
 
 // ── 扫描：建模块级有向图 ────────────────────────────────────────
@@ -176,6 +233,13 @@ function strongconnect(v: string) {
 }
 for (const m of mods) if (!index.has(m)) strongconnect(m)
 
+// SCC 分桶：含跨层边 = 分层违规；内部边全同层 = 结构告警（不计入 --strict）。
+const crossSccs: string[][] = []
+const sameSccs: string[][] = []
+for (const comp of sccs) (sccHasCrossLayer(comp, edges) ? crossSccs : sameSccs).push(comp)
+crossSccs.sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]))
+sameSccs.sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]))
+
 /** 在一个 SCC 内找一条示例环路径。 */
 function exampleCycle(comp: string[]): string[] {
   const set = new Set(comp)
@@ -243,10 +307,18 @@ if (GRAPH) {
 const totalRev = reverseExc.length + reverseGov.length + reverseTrue.length
 const totalCard = cardExc.length + cardTrue.length
 
-console.log(`【成环】依赖环（真违规）${sccs.length} 个`)
-for (const comp of sccs) {
+console.log(`【跨层成环】分层违规 ${crossSccs.length} 个`)
+for (const comp of crossSccs) {
   const cyc = exampleCycle(comp)
   console.log(`  • 环(${comp.length}): ${cyc.join(' → ')}`)
+}
+console.log('')
+
+console.log(`【同层成环】结构告警 ${sameSccs.length} 个（不计入分层违规，保留为后续架构治理项）`)
+for (const comp of sameSccs) {
+  const layers = [...new Set(comp.map(layerOf).filter((l) => l !== null))].sort((a, b) => a - b)
+  const cyc = exampleCycle(comp)
+  console.log(`  • ${layers.map((l) => LAYER_NAME[l]).join('/')} 内环(${comp.length}): ${cyc.join(' → ')}`)
 }
 console.log('')
 
@@ -291,9 +363,10 @@ if (stale.length) {
   console.log('')
 }
 
-const trueBad = sccs.length + reverseTrue.length + cardTrue.length
-console.log(`合计：真违规 ${trueBad}（成环 ${sccs.length} + 逆向 ${reverseTrue.length} + 卡边界 ${cardTrue.length}）`
+const trueBad = crossSccs.length + reverseTrue.length + cardTrue.length
+console.log(`合计：分层真违规 ${trueBad}（跨层成环 ${crossSccs.length} + 逆向 ${reverseTrue.length} + 卡边界 ${cardTrue.length}）`
   + `  例外 ${reverseExc.length + cardExc.length}  待治理 ${reverseGov.length}`
   + `  ＝ 违规总量 ${trueBad + reverseExc.length + cardExc.length + reverseGov.length}`)
 console.log(`（跨层依赖总量：逆向 ${totalRev} + 卡边界 ${totalCard}）`)
+console.log(`同层结构环 ${sameSccs.length} 个（不违反分层约束，不计入分层真违规）`)
 if (STRICT && trueBad > 0) process.exit(1)

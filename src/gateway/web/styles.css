@@ -2,6 +2,7 @@
    配色：黑白灰 + 唯一彩色 = 发送按钮蓝
    布局：主聊天区 + 左侧可折叠侧栏（折叠 0px 宽、唤出入口=左上角汉堡 + 左缘热区 / 展开 panel 280px） */
 :root {
+  color-scheme: light; /* 原生滚动条 / 表单控件随主题（iPad·Safari 忽略 ::-webkit-scrollbar，只认这个） */
   --bg: #ffffff;
   --chat-bg: #ffffff;
   --rail-bg: #fafafa;
@@ -24,6 +25,10 @@
   --float-shadow: 0 10px 26px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
+  /* 统一滚动条（2026-10-10）：thumb 半透明——容器底色有白卡/灰底板/黑浮层三种，实色 token 必在
+     某一种上失衡；透明轨道 + 半透明 thumb 是唯一能同时适配所有底的一套值。 */
+  --sb-thumb: rgba(0, 0, 0, 0.2);
+  --sb-thumb-hover: rgba(0, 0, 0, 0.35);
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
   --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.08);
   --radius: 14px;
@@ -73,6 +78,7 @@
    --sunken-bg 等派生量随之）。缺省态由 <head> 内联脚本按 localStorage['floria-theme'] 预置
    document.documentElement[data-theme]（缺省跟随系统 prefers-color-scheme），故首帧即正确、无闪帧。 */
 html[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #161616;
   --chat-bg: #161616;
   --rail-bg: #161616;
@@ -90,6 +96,8 @@ html[data-theme="dark"] {
   --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.8); /* 加厚投影，黑底上仍读得出「浮起来」 */
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
+  --sb-thumb: rgba(255, 255, 255, 0.18);
+  --sb-thumb-hover: rgba(255, 255, 255, 0.34);
   --shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
   --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
   --ink: #e8e8e8;
@@ -125,6 +133,16 @@ html[data-theme="dark"] {
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* 全局统一滚动条（2026-10-10）：所有滚动容器共用一套滑条——宽 8px、轨道透明、thumb 用 --sb-*
+   随日夜，不再逐容器重复定义（旧版五处各写 width+thumb、且未设 track ⇒ 夜晚露白边，实报
+   「部分滑条是丑陋的白边」）。iPad/Safari 自 13 起忽略 ::-webkit-scrollbar，整条会退回原生
+   滚动条，其日夜由 :root / html[data-theme="dark"] 的 color-scheme 决定（表单控件与 CM6 内部
+   滚动条同理）。刻意隐藏滑条处（.wk-tb-tabs / .wk-pv-tabs）以更高的类特异性覆盖，仍生效。 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sb-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); }
 
 /* html 高度=动态视口 100dvh（2026-09-10 根修）：html,body 的 100% 是恒定大视口（URL 栏
    收起态高），iPad Safari 顶栏展开时叠盖视口顶——贴顶乐观气泡被顶栏遮挡 + 占位按大视口
@@ -222,15 +240,13 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    [--kb-total, L] —— 窗口顶 = 屏顶、窗口底 = 键盘上沿，滚动视窗本身=可视视窗（stageSync 读
    clientHeight 的贴顶/占位几何口径不变）。 */
 #chat-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; scrollbar-gutter: stable; overflow-anchor: none; padding: 24px 20px 8px; margin-top: var(--kb-total, 0px); transition: opacity 0.25s ease; }
+/* 滑条样式见文件头「全局统一滚动条」 */
 /* padding-bottom 无过渡（2026-09-10 根修）：pad 写入必须与 .pin-stage 占位高度同帧一致
    （app.js syncTakeoverPad 写 pad 后同帧 stageSync 对账）→ scrollHeight 对 pad 写入不变
    → maxScroll=贴顶位 恒成立 → 视口零钳制零移动。旧 0.32s pad 过渡让占位与 pad 在过渡期
    失配，maxScroll 逐帧下坠被浏览器钳制拖拽=「折叠提问卡消息流随之滑动」根因，故删除；
    pad 变化本由占位高度对冲（scrollHeight 不变量），过渡无视觉职责 */
 #chat-area.in-session #chat-scroll { padding-bottom: 142px; } /* 2026-08-21 dsh 高胶囊：docked bar ≈116px + 底边距 22px = 138px，留 4px 余量 */
-#chat-scroll::-webkit-scrollbar { width: 8px; }
-#chat-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
 /* composer 遮罩（2026-10-03 移植 dsh .composerSeat 渐隐带，几何见 index.html 注）：会话态贴底栏
    区域全卡宽渐隐——顶部 36px 由透明过渡到卡底色（固定 px 停止、不随底栏长高拉伸，等价 dsh 的
    「24% of resting composer 用 px 固定」），36px 以下实心，遮住底栏两侧与下方滚过的消息流。
@@ -1824,8 +1840,6 @@ body.touch .mgr-card .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 
 }
 
 #recent-body { flex: 1; overflow-y: auto; padding: 4px 8px 12px; }
-#recent-body::-webkit-scrollbar { width: 8px; }
-#recent-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
 .sess-item {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
@@ -1930,8 +1944,6 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
 .search-row input { flex: 1; border: none; outline: none; font: 14px inherit; color: var(--text); background: transparent; }
 .search-row input::placeholder { color: var(--text-3); }
 #search-results { overflow-y: auto; max-height: 50vh; display: flex; flex-direction: column; gap: 2px; }
-#search-results::-webkit-scrollbar { width: 8px; }
-#search-results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .s-row { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
 .s-row:hover { background: var(--hover); }
 .s-row .s-ico { color: var(--text-2); display: flex; flex: 0 0 auto; }
@@ -2381,8 +2393,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wkv-row.on .wkv-sw::after { transform: translateX(13px); }
 
 .wk-body { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
-.wk-body::-webkit-scrollbar { width: 8px; }
-.wk-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 /* 空态/加载态文案用 --text-2：--text-3(#c4c4c9) 在白底浮层上肉眼等同空白，
    2026-09-25「下拉纯空白」实报的次因——失败必须看得见 */
 .wk-empty { padding: 18px 12px; font-size: 12.5px; color: var(--text-2); text-align: center; }
@@ -2535,6 +2545,7 @@ body.wk-resizing { cursor: col-resize; user-select: none; }
 /* 工具页顶 tab 条（Prism 式：纯文字 tab，active = 主色文字 + 下划线；无卡片底、无边框块）。
    tab 由 work-tools.js renderWkToolTabs 渲（注册序 = tab 序），点击委托在 work.js mountWork。 */
 .wk-pv-tabs { flex: none; display: flex; align-items: center; gap: 18px; padding: 0 14px; height: 42px; border-bottom: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
+.wk-pv-tabs::-webkit-scrollbar { display: none; } /* 与 .wk-tb-tabs 对齐：横向溢出不留原生滑条 */
 .wk-pv-tab { flex: none; height: 100%; padding: 0; border: none; border-bottom: 2px solid transparent; background: transparent; color: var(--text-3); font: inherit; font-size: 13px; cursor: pointer; }
 .wk-pv-tab:hover { color: var(--text-2); }
 .wk-pv-tab.on { color: var(--text); border-bottom-color: var(--text); }
@@ -2653,8 +2664,6 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
 .wk-ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.wk-ed-body::-webkit-scrollbar { width: 8px; height: 8px; }
-.wk-ed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 /* 编辑区（CodeMirror 6，2026-10-07）：所有可编辑文本文件挂 .wk-ed-cm 宿主，md 走 Live Preview、
    代码按扩展名高亮。字号/配色与本项目 .msg .body 同源（库自带 editorTheme 用 em/hsl 变量，
    这里以 #work-editor 前缀覆盖为项目度量）。 */

@@ -5,6 +5,9 @@ import { stageStart, scrollBottom } from '../stage.js'
 import { firstSendHash } from '../../sidebar/recent.js'
 /* @module chat/messages/transient.js */
   let pendingUserMsgs = []
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是下方 setPendingUserMsgs）——
+  // 每次现读可变绑定，调用方严禁缓存返回值。
+  function getPendingUserMsgs() { return pendingUserMsgs }
   function addUser(text, imgs, files) {
     clearTakeover() // 清掉残留的提问/审批 takeover
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是

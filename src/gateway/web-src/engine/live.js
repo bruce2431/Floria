@@ -1,19 +1,28 @@
 // 实时同步（SSE 监听 jsonl 变化）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { liveFoldBody, isRealUser, isEndStop, fmtDur, stampMsgIn, charNote, lastSegInfo, messagesHtml, pendingUserMsgs, absorbPending, queueClaimAdopt, statusFlags } from '../chat/messages.js'
-import { navigate, renderSession } from '../chat/route.js'
-import { stage, stageFollow, stageStart } from '../chat/stage.js'
 import { hideGate } from './auth.js'
 import { setChar } from '../core/char.js'
 import { needToken, apiUrl, setConn } from './gateway.js'
-import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, applySessionModel, withSynthetic } from './sessions.js'
+import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, withSynthetic } from './sessions.js'
 import { messagesEl, inputEl, bodyEl, state, ALL, live, connUp } from './state.js'
 import { toast } from '../core/util.js'
-import { renderTransient, renderSettle, claimStartTs, claimTick, syncTurnLive, takeover, clearTakeover, renderTaskDock } from '../inputbar/approval.js'
-import { renderCtxMeter } from '../inputbar/ctx-meter.js'
-import { gwSend, syncGwSend } from '../inputbar/send.js'
-import { firstSendHash, renderRecent } from '../sidebar/recent.js'
 /* @module engine/live.js */
+
+  // 依赖反转（分层治理 4B，2026-10-10）：engine 不静态 import feature。「CLI 上报模型 → 校准模型 seat」
+  // 是输入栏行为（inputbar/model-select.js 的 applySessionModel），改由 app 启动序列经此钩子注入；
+  // 未注入时为空操作（initLive 之前必已注入，见 app.js 依赖接线段）。两处调用＝SSE model 事件与
+  // 会话全量刷新（refreshSession）。
+  let onSessionModel = () => {}
+
+  // 依赖反转（分层治理 4C，2026-10-10）：engine/live.js 不再静态 import chat/inputbar/sidebar——
+  // 渲染出口、暂态/stage、可变状态一律经 app 启动序列注入的端口对象访问。端口内的 getter
+  // （getLastSegInfo/getCharNote/getPendingUserMsgs/getTakeover/getFirstSendHash）每次调用现读 feature
+  // 模块的可变绑定，调用侧严禁缓存返回值（缓存即与 owner 的实时状态脱钩）；写侧只在需要时调端口回调。
+  // 端口注入先于 initLive（app.js 依赖接线段），故此处空对象占位即可，无需兜底分支。
+  let liveMsgPort = {}   // chat/messages.js 的读基元 + 可变渲染态读取口（isRealUser/fmtDur/messagesHtml/…）
+  let liveUiPort = {}    // 渲染/暂态/导航出口（renderTransient/renderSettle/renderRecent/renderTaskDock/…）
+  let liveStagePort = {} // 两层消息流 stage（stage 对象 + stageStart）
+  let liveStatePort = {} // 可变状态读写口（takeover/firstSendHash/pendingUserMsgs）
 
   // ---------- 实时同步（阶段1：SSE 监听 jsonl 变化，自动刷新会话/列表）----------
   // 兼容：刷新只替换 messagesEl 内层，折叠开合（含网关实时折叠）与滚动位置尽量保留；
@@ -57,7 +66,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         //（「正在思考/正在处理」停表），不再冻结在断流前的最后快照上假绿假转。
         if (ev.state == null && typeof ev.session === 'string') {
           const s = ALL.find((x) => hashOf(x) === ev.session)
-          if (s && s.state) { s.state = null; renderRecent() }
+          if (s && s.state) { s.state = null; liveUiPort.renderRecent() }
           if (ev.session === live.curUuid) refreshSession(true)
         }
         // 2026-09-07 状态恢复对称刷新：state 由真空恢复（CLI 重连重报/60s 心跳补报——网关重启
@@ -73,7 +82,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // + toast 指路（转录在磁盘，列表点开即 resume 重开，积压消息自动补投）。
         if (typeof ev.session === 'string') {
           const s = ALL.find((x) => hashOf(x) === ev.session)
-          if (s && s.state) { s.state = null; renderRecent() }
+          if (s && s.state) { s.state = null; liveUiPort.renderRecent() }
           if (ev.session === live.curUuid) refreshSession(true)
           toast('会话进程已退出，可从列表点开重开（转录已保留）')
         }
@@ -95,8 +104,8 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 直接带 items 全量快照）→ 当前会话置底排队区即时重渲，不等 400ms 防抖的 refreshSession。
         if (live.curUuid && ev.session === live.curUuid) {
           live.queueRemote = Array.isArray(ev.items) ? ev.items : []
-          queueClaimAdopt(live.queueRemote) // 队首主张收编（同回程入口：CLI 端/另一端入队的瞬态同样立即主张化）
-          renderTransient() // 暂态区对账重渲（2026-09-07 收编：远端快照更新与气泡/主张折叠同趟对账）
+          liveMsgPort.queueClaimAdopt(live.queueRemote) // 队首主张收编（同回程入口：CLI 端/另一端入队的瞬态同样立即主张化）
+          liveUiPort.renderTransient() // 暂态区对账重渲（2026-09-07 收编：远端快照更新与气泡/主张折叠同趟对账）
         }
       }
       else if (ev.type === 'task-state') {
@@ -105,7 +114,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 空数组 = 清单清空/隐藏 → 浮窗整体不出现（与 CLI「tasks.length===0 → null」同一判定）。
         if (live.curUuid && ev.session === live.curUuid) {
           live.tasks = Array.isArray(ev.tasks) ? ev.tasks : []
-          renderTaskDock()
+          liveUiPort.renderTaskDock()
         }
       }
       else if (ev.type === 'model') {
@@ -113,7 +122,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 网关 /gateway/model-report 落值后 SSE 群发（事件体带 model + modelTs）。此前 web 只能等
         // 下一次 /gateway/session 拉取才校准，会话空闲时长时间不来 → 底栏停在旧模型。
         // 仅当前会话采纳（其它会话的模型变化与本会话底栏无关），冲突判定见 applySessionModel。
-        if (live.curUuid && ev.session === live.curUuid) applySessionModel(ev.model, ev.modelTs)
+        if (live.curUuid && ev.session === live.curUuid) onSessionModel(ev.model, ev.modelTs)
       }
       else if (ev.type === 'session-delta') {
         // 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎变化 delta 直达——CLI 过滤投影
@@ -193,16 +202,17 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
             // 撤回 = 该条乐观主张一并作废（jsonl 永无该 user，absorbPending 永不命中）——
             // 不同步丢弃 pending 项，renderTransient 会让主张气泡/折叠复活（幻影回流）。
             const t0 = ev.text.trim()
-            const n0 = pendingUserMsgs.length
-            setPendingUserMsgs(pendingUserMsgs.filter((p) => {
-              const inCur = p.hash === state.currentHash || (p.hash === '' && firstSendHash === state.currentHash)
+            const pend0 = liveStatePort.getPendingUserMsgs()
+            const n0 = pend0.length
+            liveStatePort.setPendingUserMsgs(pend0.filter((p) => {
+              const inCur = p.hash === state.currentHash || (p.hash === '' && liveStatePort.getFirstSendHash() === state.currentHash)
               if (!inCur) return true
               return String(p.text || '').replace(/\s*\[Image #\d+\]/g, '').trim() !== t0
             }))
-            if (pendingUserMsgs.length !== n0) renderTransient()
+            if (liveStatePort.getPendingUserMsgs().length !== n0) liveUiPort.renderTransient()
             if (!inputEl.textContent.trim()) {
               inputEl.textContent = ev.text
-              syncGwSend()
+              liveUiPort.syncGwSend()
               inputEl.focus()
             }
             const t = ev.text.trim()
@@ -223,11 +233,11 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 2026-09-06 wsession 异步化失败链：后台 spawn/注册失败（含 20s 注册超时）→ 网关 SSE 群发。
         // 收尾不留静默：清首条事务 + 移除合成列表条目 + toast 报错；当前正看该会话 → 回首页。
         if (typeof ev.session === 'string') {
-          if (firstSendHash === ev.session) setFirstSendHash('')
+          if (liveStatePort.getFirstSendHash() === ev.session) liveStatePort.setFirstSendHash('')
           setAll(ALL.filter((s) => hashOf(s) !== ev.session))
-          renderRecent()
+          liveUiPort.renderRecent()
           toast('web 会话启动失败：' + (ev.error || '未知错误'))
-          if (state.currentHash === ev.session) navigate('#/')
+          if (state.currentHash === ev.session) liveUiPort.navigate('#/')
         }
       }
       else if (ev.type === 'updated') {
@@ -259,7 +269,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         const openF = [...bodyEl.querySelectorAll('.folder.open')].map((f) => f.dataset.f)
         setAll(withSynthetic(data.sessions))
         applyTurnEndAt(ALL)
-        renderRecent()
+        liveUiPort.renderRecent()
         if (openF.length) {
           for (const f of bodyEl.querySelectorAll('.folder')) {
             if (openF.includes(f.dataset.f)) f.classList.add('open')
@@ -278,11 +288,11 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (m.role === 'system' || m.role === 'progress' || m.role === 'attachment') continue
-      if (isRealUser(m)) return true // 刚发的用户消息（assistant 回复未到）= 处理中
+      if (liveMsgPort.isRealUser(m)) return true // 刚发的用户消息（assistant 回复未到）= 处理中
       if (m.role === 'assistant') {
         // 2026-08-26：stopReason 精确判定（stop_reason=null 的旁白/工具=处理中，end_turn/stop_sequence=结束）；
         // 字段缺失（旧数据 undefined）回落旧启发式
-        if (m.stopReason !== undefined) return !isEndStop(m.stopReason)
+        if (m.stopReason !== undefined) return !liveMsgPort.isEndStop(m.stopReason)
         const hasText = m.blocks.some((b) => b.kind === 'text' && b.text && b.text.trim())
         const hasTool = m.blocks.some((b) => b.kind === 'tool_use')
         return !(hasText && !hasTool)
@@ -344,9 +354,9 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         live.queueRemote = queued
         // 2026-09-10 任务浮窗首载/刷新：与 SSE task-state 增量同构（全量快照 → 整窗重渲）
         live.tasks = tasks
-        renderTaskDock()
-        applySessionModel(model, modelTs) // 2026-08-24：实时刷新同样按 CLI 上报模型校准 seat
-        renderCtxMeter(context)
+        liveUiPort.renderTaskDock()
+        onSessionModel(model, modelTs) // 2026-08-24：实时刷新同样按 CLI 上报模型校准 seat（注入的钩子）
+        liveUiPort.renderCtxMeter(context)
         // 2026-09-08 事件流统一 P1（方案 20260908135557）：全量回程 = 权威快照，重置本地 delta
         // 基线（localMessages 副本 + 网关 seq 记账）。此后 session-delta SSE 按「尾部替换」增量
         // 演进副本；fetch 回程是基线唯一重置点（单源），gap/失步由本函数全量对账恢复。
@@ -376,11 +386,11 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     // data-m、引导气泡另带 data-g，无 data-m 的 user 气泡只可能是乐观 DOM）即乐观权威期，
     // 不再只认 firstSendHash（web 新建事务）：CLI 启动会话的 web 首条消息同样经「乐观气泡→
     // 落盘接管」同位换皮，漏判则真实气泡被 stampMsgIn 判「新增」重播 fadeup = 闪动。
-    if (messages.length > 0 && (firstSendHash === hash || messagesEl.querySelector('[data-t="u"]:not([data-m])'))) {
+    if (messages.length > 0 && (liveStatePort.getFirstSendHash() === hash || messagesEl.querySelector('[data-t="u"]:not([data-m])'))) {
       txTakeover = true
-      for (const p of pendingUserMsgs) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
-      live.txProcStart = claimStartTs()
-      if (firstSendHash === hash) setFirstSendHash('')
+      for (const p of liveStatePort.getPendingUserMsgs()) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
+      live.txProcStart = liveUiPort.claimStartTs()
+      if (liveStatePort.getFirstSendHash() === hash) liveStatePort.setFirstSendHash('')
     }
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
@@ -398,15 +408,15 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     }
     // 2026-08-29 待落盘乐观消息吸收判定：jsonl 已出现该文本（单条落盘或 drainCommandQueue
     // 多条合并成一条，join 后 includes 命中）→ 真实气泡已由渲染权威接管，不再重插
-    absorbPending(messages)
-    if (adoptQueue) queueClaimAdopt(adoptQueue) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
-    renderTransient() // 暂态区对账重渲（吸收变化/远端快照更新后；权威重建后由下方再渲带降级判定）
+    liveMsgPort.absorbPending(messages)
+    if (adoptQueue) liveMsgPort.queueClaimAdopt(adoptQueue) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
+    liveUiPort.renderTransient() // 暂态区对账重渲（吸收变化/远端快照更新后；权威重建后由下方再渲带降级判定）
     const last = messages.length ? messages[messages.length - 1] : null
     const sig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
     // 新增用户消息检测（实时同步的钉顶触发点）：末尾真实用户消息索引/时间变了 = 新回合。
     // 注入引导消息（injected:true）不触发钉顶（用户定案：引导消息不钉顶，钉顶只属于新回合开启消息）
     let lastU = -1
-    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
+    for (let i = messages.length - 1; i >= 0; i--) if (liveMsgPort.isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
     const uSig = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
     const hasNewUser = live.lastUserSig !== '' && uSig && uSig !== live.lastUserSig
     // 基线推进规则（2026-09-08 二轮根修）：无新回合（含 lastUserSig==='' 的基线补齐）→ 直接
@@ -441,22 +451,23 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     // 两段式：先 lazy 切段（历史段只切段不生成 HTML，O(N) 轻量；末段真渲染产出本轮 lastSegInfo/
     // charNote）→ 判定可增量直接 applySegDelta（历史段零渲染成本）；不可增量（切段边界/回合收口/
     // 锚点缺失）再跑全量渲染付全额——行为与原等价，全量频次=切段边界（低频）。
-    messagesHtml(messages, true)
+    liveMsgPort.messagesHtml(messages, true)
     // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
     // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
     // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
     let lastRealUser = -1
-    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastRealUser = i; break }
+    for (let i = messages.length - 1; i >= 0; i--) if (liveMsgPort.isRealUser(messages[i])) { lastRealUser = i; break }
     // 2026-08-29 引导消息折叠链：引导消息气泡 data-m=段 key ≠ 自身索引 → 额外带 data-g=自身索引，
     // 此处一并查（否则引导消息在末段时 userBubbleMissing 恒真 → 每次 SSE 都整页重建）
     const userBubbleMissing = lastRealUser >= 0 && !messagesEl.querySelector(`[data-m="${lastRealUser}"][data-t="u"], [data-g="${lastRealUser}"]`)
-    const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && lastSegInfo && lastSegInfo.processing && lastSegInfo.html
+    const segInfo = liveMsgPort.getLastSegInfo() // 现读（不得缓存跨帧）：本轮 messagesHtml 刚产出的末段信息
+    const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && segInfo && segInfo.processing && segInfo.html
     live.lastMsgLen = messages.length
     if (canDelta) {
-      applySegDelta(lastSegInfo)
-      renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
+      applySegDelta(segInfo)
+      liveUiPort.renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
     } else {
-      const html = messagesHtml(messages)
+      const html = liveMsgPort.messagesHtml(messages)
       // 折叠开合恢复改用**结构稳定键**（2026-09-11 根治）：原实现按 querySelectorAll('details')
       // 的数组下标采集/回填，注释假定「索引稳定」——但整页重建时 details 序列本就会变：处理中段的
       // liveFoldBody 尾组数随工具增长、think-row 数随思考块增长、回合收口时处理中段转已完成段
@@ -493,7 +504,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         const pool = imgPools.get(im.getAttribute('src'))
         if (pool && pool.length) im.replaceWith(pool.shift())
       }
-      if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
+      if (!txTakeover) liveMsgPort.stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
       // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
       // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
       // 用户手动展开的「已处理」折叠照常恢复。新增折叠（索引越界）保留默认：处理中展开、已处理收起
@@ -506,15 +517,15 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       })
       // 2026-08-30 乐观改排队区（清单#4③）→ 2026-09-07 暂态区收编：整页重建洗掉 #live-zone
       // → renderTransient 从状态整体重建（气泡/折叠/排队区恒定顺序挂回 pin-stage 之前）
-      renderTransient()
+      liveUiPort.renderTransient()
     }
     // 2026-09-11 ④ 只读提问卡接管已移除（见 route.js 同处注）：提问态由消息流紧凑工具行表达，
     // 此处只保留审批卡保护——交互式逐题审批卡占据输入栏时不得被 clearTakeover 洗掉。
-    if (takeover !== 'approval') clearTakeover()
-    setChar(charNote) // 只读 SSE：按末段最近工具/处理状态切形象
+    if (liveStatePort.getTakeover() !== 'approval') liveStatePort.clearTakeover()
+    setChar(liveMsgPort.getCharNote()) // 只读 SSE：按末段最近工具/处理状态切形象
     bindLiveFoldTimer(messages)
     applyStreamPreview() // 2026-09-08 流式字符通道：重渲洗 DOM 后重挂流式预览暂态（streamText 内存态恢复）
-    syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
+    liveUiPort.syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
     if (hasNewUser && uSig !== live.pinnedUserSig) {
       // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位按跟随几何同帧就位。
       // pinnedUserSig 防重复：迟到的刷新不会再重钉上一回合。
@@ -526,14 +537,14 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         // 换 key 帧必须走 stageStart 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照）：
         // 乐观气泡唤出的占位在场 → 接管帧同回合延续；CLI 端发起的新回合（web 观察）同样在此
         // 唤出。2026-09-11 起无动画窗（smooth 分支退役）——两条路径同一落点，不再分叉。
-        stageStart(el, uSig)
+        liveStagePort.stageStart(el, uSig)
       }
     } else {
-      renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
+      liveUiPort.renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
     }
     // 占位在场=两层跟随接管（stageFollow/动画期已自带让位逻辑）；
     // 否则保留原有「原本在底部就跟着吸底」行为
-    if (!stage.active) {
+    if (!liveStagePort.stage.active) {
       sc.style.scrollBehavior = 'auto'
       if (atBottom) sc.scrollTop = sc.scrollHeight
       sc.style.scrollBehavior = ''
@@ -655,7 +666,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i]
         // 注入引导消息（injected:true）不重置计时——「已处理」时长 = 从段开启消息起算，不打断（用户定案）
-        if (isRealUser(m) && !m.injected && m.timestamp) {
+        if (liveMsgPort.isRealUser(m) && !m.injected && m.timestamp) {
           t1 = m.timestamp
           break
         }
@@ -697,7 +708,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       // 红标语义 = 「引擎无产出**且无已知阻塞原因**」；纯工具期与审批同等豁免（用户实测
       // 「正在运行时候怎么会无响应呢」，案例=长跑命令 3m33s 被误标）。工具判据取 DOM 运行态标记
       // .tool-line.tool-running——running 分支 summary 与 toolCurHtml 两条出口同款类，单一判据。
-      const awaitingApproval = takeover === 'approval'
+      const awaitingApproval = liveStatePort.getTakeover() === 'approval'
       const toolRunning = !!fold.querySelector('.tool-line.tool-running')
       // ④ 2026-09-18 用户定案：无响应降为**最底层优先级**——状态行有任意状态在场（正在思考/
       // 正在生成/正在压缩/正在运行）即不判，仅当无任何状态时才允许红标。压缩期误标实证根修：
@@ -713,7 +724,7 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
       // 豁免规则（审批等待/工具在飞/任意状态在场 = 已知阻塞或已有状态表达）→ 本帧不参与僵死
       // 判定，传 0 表达「判据不适用」；阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造
       // （优先级：连接中断 > 无响应，无响应为最底层）。
-      const flags = statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
+      const flags = liveMsgPort.statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
       // 两行各自独立跳字（2026-09-09 用户定案「折叠顶只留正在处理/已处理，状态标识归工具行层」；
       // 二轮定案：工具调用行=折叠体，状态显示行是其内暂态层 .fold-state——有工具组并入 summary
       // 同行、无工具组独立行，动画展示不留存）：① 折叠顶 summary 恒「正在处理 + d-dur 总时长」；
@@ -730,10 +741,10 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
         const label = stEl.dataset.label || ''
         const ts = Number(stEl.dataset.ts) || 0
         const dsec = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
-        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${fmtDur(dsec)}` : label
+        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${liveMsgPort.fmtDur(dsec)}` : label
       }
       const durEl = sum.querySelector('.d-dur')
-      if (durEl) durEl.textContent = ' ' + fmtDur(sec)
+      if (durEl) durEl.textContent = ' ' + liveMsgPort.fmtDur(sec)
       // 僵死/断连红标独立对账（原地，信号恢复即自动消失）；宿主=状态显示行 .fold-state（有工具组时
       // 在工具行 summary 内、无工具组时段尾独立行）或 done-body 尾（乐观主张折叠），不上折叠顶
       // summary（同上定案：折叠顶不留状态标识字样）
@@ -785,6 +796,11 @@ import { firstSendHash, renderRecent } from '../sidebar/recent.js'
     }
     el.textContent = text.length > 200 ? '…' + text.slice(-200) : text
   }
+
+// —— 跨模块写入口（切割脚本生成）——
+export function setLiveModelHook(fn) { onSessionModel = fn }
+// 分层治理 4C（2026-10-10）：feature 端口注入（app 启动序列调用一次，须先于 initLive）。
+export function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort = p.stage; liveStatePort = p.state }
 
 export {
   applySegDelta,

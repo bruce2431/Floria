@@ -485,6 +485,9 @@ import { renderList, renderProject } from './mgr.js'
   // 旧 pendingFirstSend（pre/hash 双字段+三处守卫+DOM 在场补挂）状态发散已整删：三态=状态源过多
   // +同步 navigate 时序（hash 回填前移 newWebSession 内）+DOM 被当状态存储三者叠加，详见各守卫处。
   let firstSendHash = ''
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setFirstSendHash）——每次现读，
+  // 调用方严禁缓存返回值。
+  function getFirstSendHash() { return firstSendHash }
   async function newWebSession(projectLabel) {
     if (needToken()) return toast('请先完成 token 验证')
     if (webCreating) return null

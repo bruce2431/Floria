@@ -59,10 +59,13 @@ ok('A1 viewport 段排在启动序列之前（顶层 let 先于 initViewport 调
   })())
 
 // ---------- ② 唯一真源与消费点 ----------
-ok('A2 启动序列调 initViewport（紧随 initLive）', (() => {
+// 2026-10-10 分层治理 4A：initLive 与 initViewport 之间插入依赖接线段（setViewportAdapter 注入
+// stageSync）。不变量不变（启动序列先 initLive 再 initViewport，且注入先于 initViewport），
+// 故判据由「字符距离」改为「中间隔着那行接线」。
+ok('A2 启动序列调 initViewport（紧随 initLive，中间是依赖接线）', (() => {
   const i = appSrc.indexOf('initLive()')
   const j = appSrc.indexOf('initViewport()')
-  return i >= 0 && j > i && j - i < 120
+  return i >= 0 && j > i && /setViewportAdapter\(\{ syncStage: stageSync \}\)/.test(appSrc.slice(i, j))
 })())
 ok('A3 applyGeometry 消费 visualViewport（同步段与延迟段的唯一出口）', /window\.visualViewport/.test(body(viewportJs, 'function applyGeometry()')))
 ok('A3 键盘高由布局视口、可视视口与布局滚动（iPad 通道）共同得出',
@@ -84,7 +87,11 @@ ok('A3 --kb-total 与 --kb 同帧写入（app 内可视窗顶偏移）',
   /setProperty\('--kb-total', total \+ 'px'\)/.test(body(viewportJs, 'function applyGeometry()')))
 ok('A3 不再有「浏览器位移归零」迎战代码（scrollTo 已删——位移由 total 恒等式吸收）',
   !/scrollTo\(/.test(viewportJs))
-ok('A3 键盘在场重算消息流占位几何（stageSync）', /stageSync\(\)/.test(viewportJs) && /import \{ stageSync \}/.test(viewportJs))
+// 2026-10-10 分层治理 4A（依赖反转）：engine/viewport.js 不再静态 import feature（chat/stage.js），
+// 改由 app 启动序列经 setViewportAdapter 注入 syncStage；不变量＝可视区变矮时仍重算消息流占位几何。
+ok('A3 键盘在场重算消息流占位几何（注入的 syncStage；engine 不 import feature）',
+  /stageSyncFn\(\)/.test(viewportJs) && /export function setViewportAdapter/.test(viewportJs) &&
+    !/^import .*from '\.\.\/(chat|inputbar|sidebar|feature)\//m.test(viewportJs))
 
 // ---------- ②b 相位：补偿必须与视觉变化同帧（rAF 转手必晚一帧 = 侧栏被顶起一瞬间） ----------
 ok('A4 监听器直挂同步段（resize/scroll 同帧写补偿）',
@@ -100,7 +107,7 @@ ok('A4 同步段内不读元素布局（getBoundingClientRect/offset* 会强制�
   layoutReads.join(','))
 ok('A4 键盘高经变量交接延迟段（lastTotal，不回读 CSS 变量）',
   /lastTotal = total/.test(syncBody) && /popRoom\(barTop, lastTotal, BAR_ROOM_MARGIN\)/.test(body(viewportJs, 'function settle()')))
-ok('A4 仅「量算 + 占位重算」走 rAF 合帧', /requestAnimationFrame\(settle\)/.test(viewportJs) && /stageSync\(\)/.test(body(viewportJs, 'function settle()')))
+ok('A4 仅「量算 + 占位重算」走 rAF 合帧', /requestAnimationFrame\(settle\)/.test(viewportJs) && /stageSyncFn\(\)/.test(body(viewportJs, 'function settle()')))
 // 弹层余量的两个输入都是「位移无关量」：barTop 由 app 与底栏两个 rect 相减（位移在差里抵消），
 // lift = total 是纯数字交接——不再有「rect 含位移却拿去跟 vv.offsetTop 比」的口径赌注。
 ok('A4 弹层余量输入位移无关（rect 相减得 app 内布局 y）',

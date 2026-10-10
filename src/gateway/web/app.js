@@ -874,28 +874,25 @@ function setConnUp(v) { connUp = v }
     // file = jsonl 文件名（uuid），供 SSE queue-state / task-state 事件按会话精确匹配。
     return { messages: data.display || data.messages, context: data.context || null, model: data.model || null, modelTs: data.modelTs || null, vision: !!data.vision, cwd: data.cwd || null, queued: Array.isArray(data.queued) ? data.queued : [], tasks: Array.isArray(data.tasks) ? data.tasks : [], file: typeof data.file === 'string' ? data.file : null, deltaSeq: typeof data.deltaSeq === 'number' ? data.deltaSeq : null }
   }
-  // 用 CLI 上报的会话实际模型校准模型 seat（2026-08-24 模型 web/CLI 同步；2026-09-19 改冲突判定）。
-  // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
-  // **切换前的在途快照**——用户刚在 web 切过（modelUserPicked）且这条上报的时刻早于那次切换
-  // （modelTs < 本地 ts）→ 它是切换前发出的旧数据，采纳会把刚做的选择回滚（用户反馈「web 保留了
-  // 上一个」）。旧实现用 modelUserPicked 一票否决整页会话剩余时间，CLI 侧后续切模型永远进不来
-  // → 弃用，改为时间戳比较；一旦采纳过一次上报（外部真相落定）即解除防回滚标记，恢复常态跟随。
-  function applySessionModel(model, modelTs) {
-    if (!model) return
-    // 写 modelUserPicked 一律走 setModelUserPicked（ESM 导入绑定只读，直接赋值 esbuild 直接报错）
-    if (MODEL_CUR.model === model) { setModelUserPicked(false); return }
-    if (
-      modelUserPicked &&
-      typeof modelTs === 'number' &&
-      typeof MODEL_CUR.ts === 'number' &&
-      modelTs < MODEL_CUR.ts
-    ) return
-    setModelUserPicked(false)
-    setModelCur({ ...MODEL_CUR, model })
-    saveModelCur()
-    renderModelSeat()
-  }
+  // 模型 seat 校准（applySessionModel）已于 2026-10-10 分层治理 4B 迁入 inputbar/model-select.js——
+  // 它操作的是输入栏状态（MODEL_CUR/modelUserPicked），归 feature 层；engine 不得 import feature。
 function setSessionCwd(v) { sessionCwd = v }
+
+  // 依赖反转（分层治理 4B，2026-10-10）：engine 不静态 import feature。「CLI 上报模型 → 校准模型 seat」
+  // 是输入栏行为（inputbar/model-select.js 的 applySessionModel），改由 app 启动序列经此钩子注入；
+  // 未注入时为空操作（initLive 之前必已注入，见 app.js 依赖接线段）。两处调用＝SSE model 事件与
+  // 会话全量刷新（refreshSession）。
+  let onSessionModel = () => {}
+
+  // 依赖反转（分层治理 4C，2026-10-10）：engine/live.js 不再静态 import chat/inputbar/sidebar——
+  // 渲染出口、暂态/stage、可变状态一律经 app 启动序列注入的端口对象访问。端口内的 getter
+  // （getLastSegInfo/getCharNote/getPendingUserMsgs/getTakeover/getFirstSendHash）每次调用现读 feature
+  // 模块的可变绑定，调用侧严禁缓存返回值（缓存即与 owner 的实时状态脱钩）；写侧只在需要时调端口回调。
+  // 端口注入先于 initLive（app.js 依赖接线段），故此处空对象占位即可，无需兜底分支。
+  let liveMsgPort = {}   // chat/messages.js 的读基元 + 可变渲染态读取口（isRealUser/fmtDur/messagesHtml/…）
+  let liveUiPort = {}    // 渲染/暂态/导航出口（renderTransient/renderSettle/renderRecent/renderTaskDock/…）
+  let liveStagePort = {} // 两层消息流 stage（stage 对象 + stageStart）
+  let liveStatePort = {} // 可变状态读写口（takeover/firstSendHash/pendingUserMsgs）
 
   // ---------- 实时同步（阶段1：SSE 监听 jsonl 变化，自动刷新会话/列表）----------
   // 兼容：刷新只替换 messagesEl 内层，折叠开合（含网关实时折叠）与滚动位置尽量保留；
@@ -939,7 +936,7 @@ function setSessionCwd(v) { sessionCwd = v }
         //（「正在思考/正在处理」停表），不再冻结在断流前的最后快照上假绿假转。
         if (ev.state == null && typeof ev.session === 'string') {
           const s = ALL.find((x) => hashOf(x) === ev.session)
-          if (s && s.state) { s.state = null; renderRecent() }
+          if (s && s.state) { s.state = null; liveUiPort.renderRecent() }
           if (ev.session === live.curUuid) refreshSession(true)
         }
         // 2026-09-07 状态恢复对称刷新：state 由真空恢复（CLI 重连重报/60s 心跳补报——网关重启
@@ -955,7 +952,7 @@ function setSessionCwd(v) { sessionCwd = v }
         // + toast 指路（转录在磁盘，列表点开即 resume 重开，积压消息自动补投）。
         if (typeof ev.session === 'string') {
           const s = ALL.find((x) => hashOf(x) === ev.session)
-          if (s && s.state) { s.state = null; renderRecent() }
+          if (s && s.state) { s.state = null; liveUiPort.renderRecent() }
           if (ev.session === live.curUuid) refreshSession(true)
           toast('会话进程已退出，可从列表点开重开（转录已保留）')
         }
@@ -977,8 +974,8 @@ function setSessionCwd(v) { sessionCwd = v }
         // 直接带 items 全量快照）→ 当前会话置底排队区即时重渲，不等 400ms 防抖的 refreshSession。
         if (live.curUuid && ev.session === live.curUuid) {
           live.queueRemote = Array.isArray(ev.items) ? ev.items : []
-          queueClaimAdopt(live.queueRemote) // 队首主张收编（同回程入口：CLI 端/另一端入队的瞬态同样立即主张化）
-          renderTransient() // 暂态区对账重渲（2026-09-07 收编：远端快照更新与气泡/主张折叠同趟对账）
+          liveMsgPort.queueClaimAdopt(live.queueRemote) // 队首主张收编（同回程入口：CLI 端/另一端入队的瞬态同样立即主张化）
+          liveUiPort.renderTransient() // 暂态区对账重渲（2026-09-07 收编：远端快照更新与气泡/主张折叠同趟对账）
         }
       }
       else if (ev.type === 'task-state') {
@@ -987,7 +984,7 @@ function setSessionCwd(v) { sessionCwd = v }
         // 空数组 = 清单清空/隐藏 → 浮窗整体不出现（与 CLI「tasks.length===0 → null」同一判定）。
         if (live.curUuid && ev.session === live.curUuid) {
           live.tasks = Array.isArray(ev.tasks) ? ev.tasks : []
-          renderTaskDock()
+          liveUiPort.renderTaskDock()
         }
       }
       else if (ev.type === 'model') {
@@ -995,7 +992,7 @@ function setSessionCwd(v) { sessionCwd = v }
         // 网关 /gateway/model-report 落值后 SSE 群发（事件体带 model + modelTs）。此前 web 只能等
         // 下一次 /gateway/session 拉取才校准，会话空闲时长时间不来 → 底栏停在旧模型。
         // 仅当前会话采纳（其它会话的模型变化与本会话底栏无关），冲突判定见 applySessionModel。
-        if (live.curUuid && ev.session === live.curUuid) applySessionModel(ev.model, ev.modelTs)
+        if (live.curUuid && ev.session === live.curUuid) onSessionModel(ev.model, ev.modelTs)
       }
       else if (ev.type === 'session-delta') {
         // 2026-09-08 事件流统一 P1（方案 20260908135557）：引擎变化 delta 直达——CLI 过滤投影
@@ -1075,16 +1072,17 @@ function setSessionCwd(v) { sessionCwd = v }
             // 撤回 = 该条乐观主张一并作废（jsonl 永无该 user，absorbPending 永不命中）——
             // 不同步丢弃 pending 项，renderTransient 会让主张气泡/折叠复活（幻影回流）。
             const t0 = ev.text.trim()
-            const n0 = pendingUserMsgs.length
-            setPendingUserMsgs(pendingUserMsgs.filter((p) => {
-              const inCur = p.hash === state.currentHash || (p.hash === '' && firstSendHash === state.currentHash)
+            const pend0 = liveStatePort.getPendingUserMsgs()
+            const n0 = pend0.length
+            liveStatePort.setPendingUserMsgs(pend0.filter((p) => {
+              const inCur = p.hash === state.currentHash || (p.hash === '' && liveStatePort.getFirstSendHash() === state.currentHash)
               if (!inCur) return true
               return String(p.text || '').replace(/\s*\[Image #\d+\]/g, '').trim() !== t0
             }))
-            if (pendingUserMsgs.length !== n0) renderTransient()
+            if (liveStatePort.getPendingUserMsgs().length !== n0) liveUiPort.renderTransient()
             if (!inputEl.textContent.trim()) {
               inputEl.textContent = ev.text
-              syncGwSend()
+              liveUiPort.syncGwSend()
               inputEl.focus()
             }
             const t = ev.text.trim()
@@ -1105,11 +1103,11 @@ function setSessionCwd(v) { sessionCwd = v }
         // 2026-09-06 wsession 异步化失败链：后台 spawn/注册失败（含 20s 注册超时）→ 网关 SSE 群发。
         // 收尾不留静默：清首条事务 + 移除合成列表条目 + toast 报错；当前正看该会话 → 回首页。
         if (typeof ev.session === 'string') {
-          if (firstSendHash === ev.session) setFirstSendHash('')
+          if (liveStatePort.getFirstSendHash() === ev.session) liveStatePort.setFirstSendHash('')
           setAll(ALL.filter((s) => hashOf(s) !== ev.session))
-          renderRecent()
+          liveUiPort.renderRecent()
           toast('web 会话启动失败：' + (ev.error || '未知错误'))
-          if (state.currentHash === ev.session) navigate('#/')
+          if (state.currentHash === ev.session) liveUiPort.navigate('#/')
         }
       }
       else if (ev.type === 'updated') {
@@ -1141,7 +1139,7 @@ function setSessionCwd(v) { sessionCwd = v }
         const openF = [...bodyEl.querySelectorAll('.folder.open')].map((f) => f.dataset.f)
         setAll(withSynthetic(data.sessions))
         applyTurnEndAt(ALL)
-        renderRecent()
+        liveUiPort.renderRecent()
         if (openF.length) {
           for (const f of bodyEl.querySelectorAll('.folder')) {
             if (openF.includes(f.dataset.f)) f.classList.add('open')
@@ -1160,11 +1158,11 @@ function setSessionCwd(v) { sessionCwd = v }
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (m.role === 'system' || m.role === 'progress' || m.role === 'attachment') continue
-      if (isRealUser(m)) return true // 刚发的用户消息（assistant 回复未到）= 处理中
+      if (liveMsgPort.isRealUser(m)) return true // 刚发的用户消息（assistant 回复未到）= 处理中
       if (m.role === 'assistant') {
         // 2026-08-26：stopReason 精确判定（stop_reason=null 的旁白/工具=处理中，end_turn/stop_sequence=结束）；
         // 字段缺失（旧数据 undefined）回落旧启发式
-        if (m.stopReason !== undefined) return !isEndStop(m.stopReason)
+        if (m.stopReason !== undefined) return !liveMsgPort.isEndStop(m.stopReason)
         const hasText = m.blocks.some((b) => b.kind === 'text' && b.text && b.text.trim())
         const hasTool = m.blocks.some((b) => b.kind === 'tool_use')
         return !(hasText && !hasTool)
@@ -1226,9 +1224,9 @@ function setSessionCwd(v) { sessionCwd = v }
         live.queueRemote = queued
         // 2026-09-10 任务浮窗首载/刷新：与 SSE task-state 增量同构（全量快照 → 整窗重渲）
         live.tasks = tasks
-        renderTaskDock()
-        applySessionModel(model, modelTs) // 2026-08-24：实时刷新同样按 CLI 上报模型校准 seat
-        renderCtxMeter(context)
+        liveUiPort.renderTaskDock()
+        onSessionModel(model, modelTs) // 2026-08-24：实时刷新同样按 CLI 上报模型校准 seat（注入的钩子）
+        liveUiPort.renderCtxMeter(context)
         // 2026-09-08 事件流统一 P1（方案 20260908135557）：全量回程 = 权威快照，重置本地 delta
         // 基线（localMessages 副本 + 网关 seq 记账）。此后 session-delta SSE 按「尾部替换」增量
         // 演进副本；fetch 回程是基线唯一重置点（单源），gap/失步由本函数全量对账恢复。
@@ -1258,11 +1256,11 @@ function setSessionCwd(v) { sessionCwd = v }
     // data-m、引导气泡另带 data-g，无 data-m 的 user 气泡只可能是乐观 DOM）即乐观权威期，
     // 不再只认 firstSendHash（web 新建事务）：CLI 启动会话的 web 首条消息同样经「乐观气泡→
     // 落盘接管」同位换皮，漏判则真实气泡被 stampMsgIn 判「新增」重播 fadeup = 闪动。
-    if (messages.length > 0 && (firstSendHash === hash || messagesEl.querySelector('[data-t="u"]:not([data-m])'))) {
+    if (messages.length > 0 && (liveStatePort.getFirstSendHash() === hash || messagesEl.querySelector('[data-t="u"]:not([data-m])'))) {
       txTakeover = true
-      for (const p of pendingUserMsgs) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
-      live.txProcStart = claimStartTs()
-      if (firstSendHash === hash) setFirstSendHash('')
+      for (const p of liveStatePort.getPendingUserMsgs()) if (p.hash === '') p.hash = hash // 事务归属落定：'' 项归入本会话（吸收判定依赖 p.hash===cur）
+      live.txProcStart = liveUiPort.claimStartTs()
+      if (liveStatePort.getFirstSendHash() === hash) liveStatePort.setFirstSendHash('')
     }
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
@@ -1280,15 +1278,15 @@ function setSessionCwd(v) { sessionCwd = v }
     }
     // 2026-08-29 待落盘乐观消息吸收判定：jsonl 已出现该文本（单条落盘或 drainCommandQueue
     // 多条合并成一条，join 后 includes 命中）→ 真实气泡已由渲染权威接管，不再重插
-    absorbPending(messages)
-    if (adoptQueue) queueClaimAdopt(adoptQueue) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
-    renderTransient() // 暂态区对账重渲（吸收变化/远端快照更新后；权威重建后由下方再渲带降级判定）
+    liveMsgPort.absorbPending(messages)
+    if (adoptQueue) liveMsgPort.queueClaimAdopt(adoptQueue) // 队首主张收编（刷新两段式根治，形态由 renderTransient 按 authLive 定）
+    liveUiPort.renderTransient() // 暂态区对账重渲（吸收变化/远端快照更新后；权威重建后由下方再渲带降级判定）
     const last = messages.length ? messages[messages.length - 1] : null
     const sig = messages.length + ':' + (last ? (last.timestamp || '') : '') + ':' + (last && last.blocks.length ? last.blocks[last.blocks.length - 1].kind : '')
     // 新增用户消息检测（实时同步的钉顶触发点）：末尾真实用户消息索引/时间变了 = 新回合。
     // 注入引导消息（injected:true）不触发钉顶（用户定案：引导消息不钉顶，钉顶只属于新回合开启消息）
     let lastU = -1
-    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
+    for (let i = messages.length - 1; i >= 0; i--) if (liveMsgPort.isRealUser(messages[i]) && !messages[i].injected) { lastU = i; break }
     const uSig = lastU >= 0 ? lastU + ':' + (messages[lastU].timestamp || '') : ''
     const hasNewUser = live.lastUserSig !== '' && uSig && uSig !== live.lastUserSig
     // 基线推进规则（2026-09-08 二轮根修）：无新回合（含 lastUserSig==='' 的基线补齐）→ 直接
@@ -1323,22 +1321,23 @@ function setSessionCwd(v) { sessionCwd = v }
     // 两段式：先 lazy 切段（历史段只切段不生成 HTML，O(N) 轻量；末段真渲染产出本轮 lastSegInfo/
     // charNote）→ 判定可增量直接 applySegDelta（历史段零渲染成本）；不可增量（切段边界/回合收口/
     // 锚点缺失）再跑全量渲染付全额——行为与原等价，全量频次=切段边界（低频）。
-    messagesHtml(messages, true)
+    liveMsgPort.messagesHtml(messages, true)
     // 2026-08-29 吞消息根治：末条真实用户消息（常为刚落盘的引导消息）气泡若不在 DOM（中间段
     // 新增，乐观气泡已被洗掉），增量路径只贴末段永远补不上 → 强制整页重建一次补齐；气泡在位
     // 后续轮次恢复增量（只多一次整页，折叠开合/入场动画已有恢复机制）。
     let lastRealUser = -1
-    for (let i = messages.length - 1; i >= 0; i--) if (isRealUser(messages[i])) { lastRealUser = i; break }
+    for (let i = messages.length - 1; i >= 0; i--) if (liveMsgPort.isRealUser(messages[i])) { lastRealUser = i; break }
     // 2026-08-29 引导消息折叠链：引导消息气泡 data-m=段 key ≠ 自身索引 → 额外带 data-g=自身索引，
     // 此处一并查（否则引导消息在末段时 userBubbleMissing 恒真 → 每次 SSE 都整页重建）
     const userBubbleMissing = lastRealUser >= 0 && !messagesEl.querySelector(`[data-m="${lastRealUser}"][data-t="u"], [data-g="${lastRealUser}"]`)
-    const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && lastSegInfo && lastSegInfo.processing && lastSegInfo.html
+    const segInfo = liveMsgPort.getLastSegInfo() // 现读（不得缓存跨帧）：本轮 messagesHtml 刚产出的末段信息
+    const canDelta = !userBubbleMissing && live.lastMsgLen != null && messages.length >= live.lastMsgLen && segInfo && segInfo.processing && segInfo.html
     live.lastMsgLen = messages.length
     if (canDelta) {
-      applySegDelta(lastSegInfo)
-      renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
+      applySegDelta(segInfo)
+      liveUiPort.renderTransient() // 增量末段替换后暂态区对账（权威 done-live 复判 → 乐观主张降级/移除）
     } else {
-      const html = messagesHtml(messages)
+      const html = liveMsgPort.messagesHtml(messages)
       // 折叠开合恢复改用**结构稳定键**（2026-09-11 根治）：原实现按 querySelectorAll('details')
       // 的数组下标采集/回填，注释假定「索引稳定」——但整页重建时 details 序列本就会变：处理中段的
       // liveFoldBody 尾组数随工具增长、think-row 数随思考块增长、回合收口时处理中段转已完成段
@@ -1375,7 +1374,7 @@ function setSessionCwd(v) { sessionCwd = v }
         const pool = imgPools.get(im.getAttribute('src'))
         if (pool && pool.length) im.replaceWith(pool.shift())
       }
-      if (!txTakeover) stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
+      if (!txTakeover) liveMsgPort.stampMsgIn(prevMsgs) // 接管帧不播入场动画（同位换皮，见上方事务收口注释）
       // 已存在的折叠恢复刷新前状态（覆盖 messagesHtml 对处理中折叠的默认 open，避免折叠后被刷新强制弹开）；
       // 处理中折叠（done-live）回复落地 → 自动收起（对齐「回复落地后收起」设计，短回复占位得以重新补回）；
       // 用户手动展开的「已处理」折叠照常恢复。新增折叠（索引越界）保留默认：处理中展开、已处理收起
@@ -1388,15 +1387,15 @@ function setSessionCwd(v) { sessionCwd = v }
       })
       // 2026-08-30 乐观改排队区（清单#4③）→ 2026-09-07 暂态区收编：整页重建洗掉 #live-zone
       // → renderTransient 从状态整体重建（气泡/折叠/排队区恒定顺序挂回 pin-stage 之前）
-      renderTransient()
+      liveUiPort.renderTransient()
     }
     // 2026-09-11 ④ 只读提问卡接管已移除（见 route.js 同处注）：提问态由消息流紧凑工具行表达，
     // 此处只保留审批卡保护——交互式逐题审批卡占据输入栏时不得被 clearTakeover 洗掉。
-    if (takeover !== 'approval') clearTakeover()
-    setChar(charNote) // 只读 SSE：按末段最近工具/处理状态切形象
+    if (liveStatePort.getTakeover() !== 'approval') liveStatePort.clearTakeover()
+    setChar(liveMsgPort.getCharNote()) // 只读 SSE：按末段最近工具/处理状态切形象
     bindLiveFoldTimer(messages)
     applyStreamPreview() // 2026-09-08 流式字符通道：重渲洗 DOM 后重挂流式预览暂态（streamText 内存态恢复）
-    syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
+    liveUiPort.syncTurnLive() // 2026-09-04 打断按钮：SSE 刷新整页/增量重建后校准（回合收口→还原发送键）
     if (hasNewUser && uSig !== live.pinnedUserSig) {
       // 真正的新用户消息 → 回合开启唤出（两层消息流）：占位按跟随几何同帧就位。
       // pinnedUserSig 防重复：迟到的刷新不会再重钉上一回合。
@@ -1408,14 +1407,14 @@ function setSessionCwd(v) { sessionCwd = v }
         // 换 key 帧必须走 stageStart 换参照气泡（脚印随参照实时量取，2026-09-10 起无诞生快照）：
         // 乐观气泡唤出的占位在场 → 接管帧同回合延续；CLI 端发起的新回合（web 观察）同样在此
         // 唤出。2026-09-11 起无动画窗（smooth 分支退役）——两条路径同一落点，不再分叉。
-        stageStart(el, uSig)
+        liveStagePort.stageStart(el, uSig)
       }
     } else {
-      renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
+      liveUiPort.renderSettle() // 无新回合：占位在场时对账（重挂/校准/跟随归位），未激活零开销
     }
     // 占位在场=两层跟随接管（stageFollow/动画期已自带让位逻辑）；
     // 否则保留原有「原本在底部就跟着吸底」行为
-    if (!stage.active) {
+    if (!liveStagePort.stage.active) {
       sc.style.scrollBehavior = 'auto'
       if (atBottom) sc.scrollTop = sc.scrollHeight
       sc.style.scrollBehavior = ''
@@ -1537,7 +1536,7 @@ function setSessionCwd(v) { sessionCwd = v }
       for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i]
         // 注入引导消息（injected:true）不重置计时——「已处理」时长 = 从段开启消息起算，不打断（用户定案）
-        if (isRealUser(m) && !m.injected && m.timestamp) {
+        if (liveMsgPort.isRealUser(m) && !m.injected && m.timestamp) {
           t1 = m.timestamp
           break
         }
@@ -1579,7 +1578,7 @@ function setSessionCwd(v) { sessionCwd = v }
       // 红标语义 = 「引擎无产出**且无已知阻塞原因**」；纯工具期与审批同等豁免（用户实测
       // 「正在运行时候怎么会无响应呢」，案例=长跑命令 3m33s 被误标）。工具判据取 DOM 运行态标记
       // .tool-line.tool-running——running 分支 summary 与 toolCurHtml 两条出口同款类，单一判据。
-      const awaitingApproval = takeover === 'approval'
+      const awaitingApproval = liveStatePort.getTakeover() === 'approval'
       const toolRunning = !!fold.querySelector('.tool-line.tool-running')
       // ④ 2026-09-18 用户定案：无响应降为**最底层优先级**——状态行有任意状态在场（正在思考/
       // 正在生成/正在压缩/正在运行）即不判，仅当无任何状态时才允许红标。压缩期误标实证根修：
@@ -1595,7 +1594,7 @@ function setSessionCwd(v) { sessionCwd = v }
       // 豁免规则（审批等待/工具在飞/任意状态在场 = 已知阻塞或已有状态表达）→ 本帧不参与僵死
       // 判定，传 0 表达「判据不适用」；阈值与文案由 messages.js statusFlags/STALE_SEC 单源构造
       // （优先级：连接中断 > 无响应，无响应为最底层）。
-      const flags = statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
+      const flags = liveMsgPort.statusFlags(connUp, awaitingApproval || toolRunning || hasStatus ? 0 : staleSec)
       // 两行各自独立跳字（2026-09-09 用户定案「折叠顶只留正在处理/已处理，状态标识归工具行层」；
       // 二轮定案：工具调用行=折叠体，状态显示行是其内暂态层 .fold-state——有工具组并入 summary
       // 同行、无工具组独立行，动画展示不留存）：① 折叠顶 summary 恒「正在处理 + d-dur 总时长」；
@@ -1612,10 +1611,10 @@ function setSessionCwd(v) { sessionCwd = v }
         const label = stEl.dataset.label || ''
         const ts = Number(stEl.dataset.ts) || 0
         const dsec = ts ? Math.max(0, Math.round((Date.now() - ts) / 1000)) : 0
-        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${fmtDur(dsec)}` : label
+        stEl.querySelector('.ts-text').textContent = label && ts ? `${label} ${liveMsgPort.fmtDur(dsec)}` : label
       }
       const durEl = sum.querySelector('.d-dur')
-      if (durEl) durEl.textContent = ' ' + fmtDur(sec)
+      if (durEl) durEl.textContent = ' ' + liveMsgPort.fmtDur(sec)
       // 僵死/断连红标独立对账（原地，信号恢复即自动消失）；宿主=状态显示行 .fold-state（有工具组时
       // 在工具行 summary 内、无工具组时段尾独立行）或 done-body 尾（乐观主张折叠），不上折叠顶
       // summary（同上定案：折叠顶不留状态标识字样）
@@ -1668,6 +1667,8 @@ function setSessionCwd(v) { sessionCwd = v }
     el.textContent = text.length > 200 ? '…' + text.slice(-200) : text
   }
 
+function setLiveModelHook(fn) { onSessionModel = fn }
+function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort = p.stage; liveStatePort = p.state }
   // ---------- 路由 ----------
   // 2026-08-28 pushState 路径路由：/session/<全长会话hash>、/manage/<kind>、/project/<label>（project 避开网关
   // /preview/* 静态页路径）；hash 路由保留为旧链接/旧缓存页兜底（parseRoute 先 pathname 后 hash）。
@@ -2747,6 +2748,10 @@ function setLastNavHash(v) { lastNavHash = v }
   // 增量重建（2026-08-26）：messagesHtml 记录「最后一个被 closeSeg 的段」的 key/html/前驱锚点/处理中标志，
   // refreshSession 对处理中末段只替换该段 DOM（applySegDelta），头部历史消息保留不动——消除整页重建闪烁。
   let lastSegInfo = null
+  // 分层治理 4C（2026-10-10）：engine/live.js 的只读读取口——经端口注入调用，每次现读可变绑定，
+  // 调用方严禁缓存返回值（缓存即与渲染实时态脱钩）。
+  function getCharNote() { return charNote }
+  function getLastSegInfo() { return lastSegInfo }
 
   // lazy（2026-09-18 web 卡顿根治）：true = 惰性两段式——切段循环照跑（桶分配 O(N) 轻量）但
   // 历史段不生成 HTML（think/ask/tool/reply 行的 html 置空）、closeSeg 只封存不渲染（按渲染同序
@@ -3528,6 +3533,9 @@ function setLastNavHash(v) { lastNavHash = v }
   // 旧 pendingFirstSend（pre/hash 双字段+三处守卫+DOM 在场补挂）状态发散已整删：三态=状态源过多
   // +同步 navigate 时序（hash 回填前移 newWebSession 内）+DOM 被当状态存储三者叠加，详见各守卫处。
   let firstSendHash = ''
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setFirstSendHash）——每次现读，
+  // 调用方严禁缓存返回值。
+  function getFirstSendHash() { return firstSendHash }
   async function newWebSession(projectLabel) {
     if (needToken()) return toast('请先完成 token 验证')
     if (webCreating) return null
@@ -3896,15 +3904,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
 
-  // ---------- 第一方卡片注册表 ----------
-  // 卡描述符由各卡模块顶层 registerCard 自注册（一模块一卡）；「项目 / 模型 / 神经元」三卡自 2026-10-10
-  // 起不再是第一方卡——改由工作区根以应用形式申报、用户在插件卡「应用」列表里手动启用（APP_TABS 见下），
-  // 侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
-  let CARDS = []
-  function registerCard(def) { if (def && def.id) CARDS.push(def) }
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
-  // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
-  function refreshCard(id) { cardOf(id)?.refresh?.() }
+  // ---------- 表变更 → 侧栏 tab 重渲（回调注入，勿缓存）----------
+  // registry 在其模块体中注入 renderMgrTabs（PIECES 保证 registry 排在 ext-runtime 之后）。
+  // 缺省 no-op：注入前的表变更不会崩，随后 bootRegistry() 的全量渲染会覆盖最终态。
+  let tabRefresh = () => {}
+  function setTabRefresh(fn) { tabRefresh = fn }
 
   // ---------- 运行时外部卡表（卡片化二期）----------
   // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
@@ -3920,6 +3924,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   function setExtCardRenderer(fn) { extRender = fn }
   let EXT = []
   let EXT_LABEL = ''
+  const extTabs = () => EXT // registry 只读取用（合流渲染），增删恒走本件
+  const appTabs = () => APP_TABS
   function registerExtCards(label, cards, replace) {
     if (!label) return
     if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
@@ -3940,13 +3946,13 @@ function setFirstSendHash(v) { firstSendHash = v }
         mount: (body) => extRender(body, label, c),
       })
     }
-    renderMgrTabs()
+    tabRefresh()
   }
   function clearExtCards() {
     if (!EXT.length && !EXT_LABEL) return
     EXT = []
     EXT_LABEL = ''
-    renderMgrTabs()
+    tabRefresh()
   }
 
   // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
@@ -4039,7 +4045,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     else APPS_ENABLED.delete(id)
     saveEnabledApps()
     applyAppTabs()
-    renderMgrTabs()
+    tabRefresh()
     return APPS_ENABLED.has(id)
   }
   // 目录 → 侧栏 tab（只取已启用者）。id 加 `app:` 前缀，与第一方裸词 id、EXT 的 `ext:` 零撞车。
@@ -4058,7 +4064,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     APP_CATALOG = normExtCards(cards)
     persistExtDecls(GLOBAL_LABEL, { cards: APP_CATALOG })
     applyAppTabs()
-    renderMgrTabs()
+    tabRefresh()
   }
   // 拉取点（唯一）：hideGate 补拉链调一次；断连重连自愈走同点。seq 守卫 = 只有最后一次响应可落目录。
   // 取不到 = 工作区根未申报应用（不猜不兜底，目录照旧为空）。
@@ -4069,7 +4075,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (e && Array.isArray(e.cards)) setAppCatalog(e.cards) // 缓存快照先落（列表即刻可用）
     else {
       applyAppTabs()
-      renderMgrTabs()
+      tabRefresh()
     }
     const seq = ++appSeq
     fetch(`/gateway/preview-cards?label=${encodeURIComponent(GLOBAL_LABEL)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
@@ -4081,12 +4087,24 @@ function setFirstSendHash(v) { firstSendHash = v }
       .catch(() => {})
   }
 
+
+  // ---------- 第一方卡片注册表 ----------
+  // 卡描述符由各卡模块顶层 registerCard 自注册（一模块一卡）；「项目 / 模型 / 神经元」三卡自 2026-10-10
+  // 起不再是第一方卡——改由工作区根以应用形式申报、用户在插件卡「应用」列表里手动启用（APP_TABS 见
+  // engine/ext-runtime.js），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
+  let CARDS = []
+  function registerCard(def) { if (def && def.id) CARDS.push(def) }
+  const cardOf = (id) => CARDS.find((c) => c.id === id) || appTabs().find((c) => c.id === id) || extTabs().find((c) => c.id === id)
+  // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
+  function refreshCard(id) { cardOf(id)?.refresh?.() }
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
+  // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）。
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)
+    box.innerHTML = CARDS.concat(appTabs(), extTabs()).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
   }
@@ -4147,6 +4165,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!curCardEl || curCardEl.dataset.view !== id) return null
     return curCardEl.querySelector('.view-body')
   }
+
+  // 表变更 → 重渲：把本件的渲染口交给 ext-runtime（它不自 import 本件，避免 engine 内成环）。
+  // 注入后 EXT/APP_TABS 的任何变更（网关清单回程、postMessage 注册、启用开关）即时刷侧栏。
+  setTabRefresh(renderMgrTabs)
 
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
@@ -6950,6 +6972,14 @@ function setFirstSendHash(v) { firstSendHash = v }
   let gws = null
   let reconnectTimer = null
 
+  // 依赖反转（分层治理 4D，2026-10-10）：engine/gateway.js 不再静态 import inputbar/*——
+  // 审批卡渲染/审批态读写、发送态同步、@ 提及输入回调一律经 app 启动序列注入的端口访问。
+  // 端口内 getter（getTakeover/getApprovalPending）每次现读 feature 模块的可变绑定，调用侧严禁缓存
+  // （缓存即与 owner 的实时态脱钩）；端口注入先于 initGateway、且早于 WS 首个 onopen/onmessage。
+  let gwApproval = {} // inputbar/approval.js：审批卡渲染 + 审批态读写
+  let gwSendPort = {} // inputbar/send.js：syncGwSend
+  let gwMention = {} // inputbar/mention.js：onInputChange
+
   // 安全加固（2026-08-15）：数据接口 URL 统一附加网关 token（query），与 WS 升级校验一致。
   // 2026-08-28 门控条件从「有无 gToken」改为「是否已验证」：cookie 授权设备刷新后直接可拉数据，
   // 未验证（无 cookie 且无首链 token）时请求不发，待 connect 失败回门 / hideGate 解锁后补拉。
@@ -7587,6 +7617,28 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 用户本次会话内主动切换过模型 → 不再被 /gateway/session 旧上报覆盖（切换会话时重置）。避免
   // POST /gateway/model 尚未落地前的一次刷新把刚切的选择回滚成旧值。
   let modelUserPicked = false
+  // 用 CLI 上报的会话实际模型校准模型 seat（2026-10-10 分层治理 4B 自 engine/sessions.js 反转迁入：
+  // 「校准 seat」是输入栏行为，归 feature 层——engine 不再 import feature，故本函数随状态同处）。
+  // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
+  // **切换前的在途快照**——用户刚在 web 切过（modelUserPicked）且这条上报的时刻早于那次切换
+  // （modelTs < 本地 ts）→ 它是切换前发出的旧数据，采纳会把刚做的选择回滚（用户反馈「web 保留了
+  // 上一个」）。旧实现用 modelUserPicked 一票否决整页会话剩余时间，CLI 侧后续切模型永远进不来
+  // → 弃用，改为时间戳比较；一旦采纳过一次上报（外部真相落定）即解除防回滚标记，恢复常态跟随。
+  function applySessionModel(model, modelTs) {
+    if (!model) return
+    // 写 modelUserPicked 一律走 setModelUserPicked（ESM 导入绑定只读，直接赋值 esbuild 直接报错）
+    if (MODEL_CUR.model === model) { setModelUserPicked(false); return }
+    if (
+      modelUserPicked &&
+      typeof modelTs === 'number' &&
+      typeof MODEL_CUR.ts === 'number' &&
+      modelTs < MODEL_CUR.ts
+    ) return
+    setModelUserPicked(false)
+    setModelCur({ ...MODEL_CUR, model })
+    saveModelCur()
+    renderModelSeat()
+  }
   // 命令菜单状态（对齐 dsh PopupState：open/status/options/search/active/submitting/confirming/acknowledged/error）
   // 2026-09-09 二轮定案：去 tab 单页分组（上传/技能/引用会话/指令堆放一页）；items=渲染时平铺条目（键盘索引基准）
   const cmd = { open: false, status: 'pending', items: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
@@ -8276,6 +8328,9 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // → absorbPending 文本吸收移除（渲染权威接管）；权威 done-live[data-m] 在场 → 主张降级
   // （renderTransient 同趟：主张折叠不渲染、气泡项按排队成员渲染）。
   let pendingUserMsgs = []
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是下方 setPendingUserMsgs）——
+  // 每次现读可变绑定，调用方严禁缓存返回值。
+  function getPendingUserMsgs() { return pendingUserMsgs }
   function addUser(text, imgs, files) {
     clearTakeover() // 清掉残留的提问/审批 takeover
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
@@ -8569,6 +8624,9 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
   //      接管已移除，见 chat/messages.js askLineHtml 注）；
   //      解决（审批提交/审批撤销）后 #input-bar 回归（content swap，同输入栏卡片足迹）。 ----
   let takeover = null
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setTakeover）——每次现读，
+  // 调用方严禁缓存返回值。
+  function getTakeover() { return takeover }
   const takeoverEl = () => $('composer-takeover')
   // 2026-08-30 修复「提问卡相对位置大小奇怪」：takeover 卡片可远高于普通输入栏（多题卡 ~700px），
   // 而 #chat-scroll 的 padding-bottom 是按输入栏足迹设计的固定值（styles.css 142px）→ 卡片贴底
@@ -9031,6 +9089,9 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
   // 进入「提交中」（禁用按钮 + 状态行），等网关 approval-confirmed（CLI 已处理回执）才关卡；
   // approval-rejected（目标不在线）/断连 → 卡片保留 + 可见错误 + 重试按钮；等待无超时（2026-08-26 用户定案，与 CLI 一致，仅凭 confirmed/rejected/dismiss 收尾）。
   let approvalPending = null // {requestId, allowed, qa, perms}：等待确认中的审批
+  // 分层治理 4D（2026-10-10）：engine/gateway.js 的只读读取口（写侧仍是尾部 setApprovalPending）——
+  // 每次现读可变绑定，调用方严禁缓存返回值。
+  function getApprovalPending() { return approvalPending }
   function sendApprove(requestId, allowed, qa, perms) {
     if (!gws || gws.readyState !== 1) return showApprovalError('连接已断开，审批未送达', requestId, allowed, qa, perms)
     // 2026-08-23 web 独立会话：带 sessionId 供网关路由到对应子进程（CLI 会话无此字段走 broadcast 未接入提示）
@@ -9200,8 +9261,8 @@ function setApprovalPending(v) { approvalPending = v }
       gateVerified = true
       if (gateAwait) gatePlayTransition() // 门流程：播过渡视频（白板拉伸成输入栏/角色转正趴栏），ended 后 hideGate
       else hideGate() // URL 带 token 直连（无门）：验证通过直接解锁
-      syncGwSend()
-      sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
+      gwSendPort.syncGwSend()
+      gwApproval.sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
     }
     gws.onclose = () => {
       setConn(false, '未连接')
@@ -9218,7 +9279,7 @@ function setApprovalPending(v) { approvalPending = v }
         reconnectTimer = setTimeout(connect, 4000)
       }
       gws = null
-      syncGwSend()
+      gwSendPort.syncGwSend()
     }
     gws.onerror = () => setConn(false, '连接失败')
     gws.onmessage = (ev) => {
@@ -9230,28 +9291,30 @@ function setApprovalPending(v) { approvalPending = v }
       // 原 handleLine 直连 CLI 流式渲染链（streamText/procThink/实时变更卡）随之整体退役。
       if (msg.type === 'approval') {
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        renderApproval(msg)
+        gwApproval.renderApproval(msg)
       } else if (msg.type === 'approval-confirmed') {
         // 2026-08-26 P0 审批确认送达：CLI 已处理回执 → 关卡 + 提示（不再 send 后立即清卡）
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending && approvalPending.requestId === msg.requestId) {
-          const wasAllow = approvalPending.allowed
-          setApprovalPending(null)
-          clearTakeover()
-          addSystem(wasAllow ? '已允许该工具调用' : '已拒绝该工具调用')
+        const ap = gwApproval.getApprovalPending()
+        if (ap && ap.requestId === msg.requestId) {
+          const wasAllow = ap.allowed
+          gwApproval.setApprovalPending(null)
+          gwApproval.clearTakeover()
+          gwApproval.addSystem(wasAllow ? '已允许该工具调用' : '已拒绝该工具调用')
         }
       } else if (msg.type === 'approval-rejected') {
         // 2026-08-26 P0：目标 CLI 不在线 → 保留卡片 + 可见错误 + 重试
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending && approvalPending.requestId === msg.requestId) {
-          showApprovalError('审批未送达目标，请重试', msg.requestId, approvalPending.allowed, approvalPending.qa, approvalPending.perms)
+        const ap = gwApproval.getApprovalPending()
+        if (ap && ap.requestId === msg.requestId) {
+          gwApproval.showApprovalError('审批未送达目标，请重试', msg.requestId, ap.allowed, ap.qa, ap.perms)
         }
       } else if (msg.type === 'approval-dismiss') {
         // 2026-08-24 审批双操作（web 与 CLI 均可）：CLI 终端/窗口已先操作 → 撤掉 floria 审批卡
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending) { setApprovalPending(null) }
-        if (takeover === 'approval') clearTakeover()
-      } else if (msg.type === 'status') addSystem(msg.state)
+        if (gwApproval.getApprovalPending()) { gwApproval.setApprovalPending(null) }
+        if (gwApproval.getTakeover() === 'approval') gwApproval.clearTakeover()
+      } else if (msg.type === 'status') gwApproval.addSystem(msg.state)
     }
   }
 
@@ -9265,6 +9328,13 @@ function setApprovalPending(v) { approvalPending = v }
   const gateScreen = $('gate-screen')
   const gTok = $('g-token'), gVid = $('g-video'), gNewImg = $('g-new')
   const gCard = $('g-card')
+
+  // 依赖反转（分层治理 4D，2026-10-10）：engine/auth.js 不再静态 import chat/sidebar/inputbar——
+  // token 门解锁（hideGate）后的界面重渲、数据补拉、发送态同步一律经 app 启动序列注入的端口访问
+  // （端口在 boot 同步块内接线，早于 detectorGateway→initGateway→showGate/hideGate 首次调用）。
+  let authUi = {} // 解锁后界面出口：chat/route.js 的 route + inputbar/mention.js 的 closeMentionPop + sidebar/recent.js 的 renderRecent
+  let authData = {} // 解锁后数据补拉：sidebar/mgr-data.js 的 loadMgrData/loadModelsData + sidebar/work.js 的 ensureWork
+  let authSend = {} // inputbar/send.js：syncGwSend
 
   // ---------- 设备认证配对（2026-08-28，浏览器侧完全删除 token 授权链） ----------
   // 门态显示设备请求码（localStorage 持久，同一设备恒定），轮询 /gateway/activate?code=：
@@ -9302,7 +9372,7 @@ function setApprovalPending(v) { approvalPending = v }
   }
 
   function showGate() {
-    closeMentionPop()
+    authUi.closeMentionPop()
     setGateAwait(true)
     setGateVerified(false)
     document.body.classList.add('token-gate')
@@ -9323,7 +9393,7 @@ function setApprovalPending(v) { approvalPending = v }
     gNewImg.classList.remove('show')
     gCard.classList.remove('hide', 'shake')
     pairStart() // 显示设备请求码 + 启动激活轮询
-    syncGwSend()
+    authSend.syncGwSend()
   }
   function gatePlayTransition() {
     // 阶段1 → 阶段2：白板内表单淡出，过渡视频淡入播放（视频首帧≈举白板图，无缝衔接）
@@ -9367,7 +9437,7 @@ function setApprovalPending(v) { approvalPending = v }
       gateScreen.hidden = true
       gateScreen.classList.remove('fade-out')
     }, 280)
-    syncGwSend()
+    authSend.syncGwSend()
     // token 门锁定态跳过的数据加载，解锁后补拉（SSE 重连 + 会话列表/当前会话）
     // 2026-08-18 修复：loadSessions 只填 ALL 不渲染，门后首次拉取后侧栏一直空——
     // 后续 SSE hello→refreshList 因 sig===listSig 短路跳过渲染；须在数据落地后显式渲染侧栏
@@ -9382,29 +9452,29 @@ function setApprovalPending(v) { approvalPending = v }
         const sess = findSession(state.currentHash)
         if (sess) {
           state.currentHash = hashOf(sess)
-          if (!messagesEl.querySelector('.msg:not(.msg-system)')) route()
+          if (!messagesEl.querySelector('.msg:not(.msg-system)')) authUi.route()
         } else {
-          route()
+          authUi.route()
         }
       }
-      renderRecent()
+      authUi.renderRecent()
       // work 模式数据补拉：boot 的 initWork→ensureWork 撞上 needToken()（token 未就绪）早退，
       // 刷新后恢复的 workProj/workFile 会停在无树 / 编辑区 401 的状态；此处与 mgr 同点补拉。
-      if (state.sbMode === 'work') ensureWork()
+      if (state.sbMode === 'work') authData.ensureWork()
     })
     // 应用目录补拉（2026-10-10）：工作区根 .claude/preview 申报的应用清单 + 已启用侧栏 tab。
     // boot 时 token 未就绪会取空，故与 loadSessions 同点补拉；断连重连自愈走同点（hideGate 即恢复口）。
     syncGlobalPlugins()
     initLive()
     // 恢复当前界面（gToken 已就绪）：预览态重挂 iframe、管理视图补拉数据、会话态增量刷新
-    if (state.preview) route()
-    else if (state.mgr) loadMgrData(true)
+    if (state.preview) authUi.route()
+    else if (state.mgr) authData.loadMgrData(true)
     else {
       refreshSession()
       // 2026-08-25 首页/会话态补拉模型数据：初始 renderModelSeat 时 GATEWAY 尚未就绪、
       // token 空 → /gateway/models 401，MODELS 恒 null，seat 一直显示「选择模型」（用户反馈「看不到模型」）。
       // hideGate 解锁后 token 已就绪 → 补拉一次，finally 内 renderModelSeat 刷新输入栏模型名。
-      loadModelsData(true).catch(() => {})
+      authData.loadModelsData(true).catch(() => {})
     }
   }
   async function gateSubmit() {
@@ -9413,6 +9483,7 @@ function setApprovalPending(v) { approvalPending = v }
   }
   // 白板内 token 表单：回车提交（无发送按钮）—— 设备配对版已移除输入框，此绑定随 #g-token-input 删除
 
+function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
   // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
   // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl(预览)}。发送时文本拼
@@ -9642,6 +9713,12 @@ function setApprovalPending(v) { approvalPending = v }
   }
 
 
+  // 依赖反转（分层治理 4A，2026-10-10）：engine 不得静态 import feature。可视区变矮后要重算的
+  // 「两层消息流占位/跟随」是 chat/stage.js 的 stageSync，改由 app 启动序列经 setViewportAdapter 注入；
+  // 未注入时为空操作（initViewport 之前必已注入，见 app.js 启动序列的依赖接线段）。
+  // 变量名不能叫 stageSync——拼接后全模块共享同一 IIFE 作用域，会与 chat/stage.js 的 function 声明重名。
+  let stageSyncFn = () => {}
+
   // ---------- 键盘弹出适配（2026-09-19）----------
   // 不变量（五轮定案，用户「整个界面连侧栏一起上下」，要「整页平移」）：应用是一块**刚性板**，
   // 键盘弹出时整体上移一个键盘高 —— 侧栏/背景/底栏连成一体走，内部零重排，只有消息流窗口收窄。
@@ -9752,7 +9829,7 @@ function setApprovalPending(v) { approvalPending = v }
       const barH = wrap.offsetHeight
       if (barH > 0) document.documentElement.style.setProperty('--bar-h', barH + 'px')
     }
-    stageSync() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
+    stageSyncFn() // 可视区变矮 → 两层消息流占位/跟随按新几何重算（与 window resize 同口径）
   }
 
   function scheduleSettle() { if (!settleRaf) settleRaf = requestAnimationFrame(settle) }
@@ -9784,6 +9861,7 @@ function setApprovalPending(v) { approvalPending = v }
     syncKeyboard()
     settle() // 启动首帧也立即对齐（启动无在途动画，不必等下一帧）
   }
+function setViewportAdapter(a) { stageSyncFn = a.syncStage }
   function initGateway() {
     gatewayCss()
     // 连接状态徽章已改为 Floria 品牌名后的浅灰小字（index.html #floria-conn），不再动态建 #conn-badge。
@@ -9791,13 +9869,13 @@ function setApprovalPending(v) { approvalPending = v }
     // 永久 display:none 会让首页图标只在网关检测完成前瞬间可见、刷新即消失。
     inputEl.contentEditable = 'true'
     inputEl.dataset.ph = '输入消息，Enter 发送'
-    inputEl.addEventListener('input', onInputChange)
+    inputEl.addEventListener('input', gwMention.onInputChange)
     setConn(false, '连接中…')
     // 2026-08-28 token 出 URL：统一先 connect()——已授权设备（floria_auth cookie）WS 直接通过进空态；
     // 未授权（无 cookie 无首链 token）WS 被拒 → onclose 回 token 门。REVIEW 模式仍要求 URL 带 token。
     if (GATEWAY_REVIEW) { if (gToken) connect(); else showGate() }
     else connect()
-    syncGwSend()
+    gwSendPort.syncGwSend()
   }
 
   async function detectGateway() {
@@ -9813,6 +9891,7 @@ function setApprovalPending(v) { approvalPending = v }
 
 function setGateAwait(v) { gateAwait = v }
 function setGateVerified(v) { gateVerified = v }
+function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMention = p.mention }
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
   // 两条链的落地形态不同（用户定案）：文件引用只给位置——模型自己 Read 该文件；回复引用必须带原文——
@@ -10378,6 +10457,34 @@ function setGateVerified(v) { gateVerified = v }
     await loadSessions()
     initCodeBlock() // 代码块软换行偏好（localStorage）——须在首次 mdHtml 渲染之前
     initLive()
+    // 依赖接线（分层治理：engine 不静态 import feature，由入口注入实现）。本段与 initLive 同一同步块，
+    // SSE 回调要等本轮执行完才可能投递 → port 注入对首个事件必已就位（4C 起 engine/live.js 的渲染出口/
+    // 暂态/stage/可变状态全部经端口读取）。
+    setLivePorts({
+      // chat/messages.js 读基元 + 可变渲染态读取口（getter 现读，勿缓存）
+      msg: { isRealUser, isEndStop, fmtDur, stampMsgIn, messagesHtml, absorbPending, queueClaimAdopt, statusFlags, getLastSegInfo, getCharNote },
+      // 渲染/暂态/导航出口（feature 层实现）
+      ui: { renderTransient, renderSettle, renderRecent, renderTaskDock, renderCtxMeter, claimStartTs, syncTurnLive, syncGwSend, navigate },
+      // 两层消息流 stage（stage 为稳定 const 对象；stageStart 为函数）
+      stage: { stage, stageStart },
+      // 可变状态读写口（takeover / firstSendHash / pendingUserMsgs；getter 现读，勿缓存）
+      state: { getTakeover, clearTakeover, getFirstSendHash, setFirstSendHash, getPendingUserMsgs, setPendingUserMsgs },
+    })
+    // 依赖接线 4D（2026-10-10）：engine/gateway.js（审批态读写 + 发送态同步 + @ 提及输入回调）与
+    // engine/auth.js（解锁后界面重渲 + 数据补拉 + 发送态同步）的 feature 端口——与 4C 同点接线；
+    // 早于下方 initGateway()（其 connect→WS onopen/hideGate 经端口回写）。
+    setGatewayPorts({
+      approval: { addSystem, clearTakeover, renderApproval, showApprovalError, sendSubscribe, getTakeover, getApprovalPending, setApprovalPending },
+      send: { syncGwSend },
+      mention: { onInputChange },
+    })
+    setAuthPorts({
+      ui: { route, closeMentionPop, renderRecent },
+      data: { loadMgrData, loadModelsData, ensureWork },
+      send: { syncGwSend },
+    })
+    setViewportAdapter({ syncStage: stageSync }) // 键盘适配：可视区变矮后重算两层消息流占位/跟随
+    setLiveModelHook(applySessionModel) // 实时同步：CLI 上报模型 → 校准输入栏模型 seat
     initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)
     setChar(1) // 启动默认形象

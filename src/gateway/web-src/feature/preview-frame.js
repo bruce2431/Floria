@@ -5,7 +5,8 @@
 import { gToken } from '../engine/gateway.js'
 import { state } from '../engine/state.js'
 import { esc } from '../core/util.js'
-import { clearExtCards, clearQuoteActions, deactivateCard, openCard, registerExtCards, registerQuoteActions, viewBody } from '../engine/registry.js'
+import { deactivateCard, openCard, viewBody } from '../engine/registry.js'
+import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteActions } from '../engine/ext-runtime.js'
 /* @module feature/preview-frame.js */
   // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
   // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过

@@ -1,11 +1,12 @@
 // 外部预览卡片 · 渲染实现（卡片化二期）（2026-10-01 卡片化：views/ → views/cards/；唯一手改处，
 // web/app.js 为生成物）
-// 只留 iframe 壳：字段校验 / URL 构造归 engine/ext-decl.js（纯函数），表编排归 engine/registry.js；
-// 本模块顶层把 mountExtCard 经 setExtCardRenderer 注入 registry——外部永不获得在宿主 DOM 执行的能力。
+// 只留 iframe 壳：字段校验 / URL 构造归 engine/ext-decl.js（纯函数），外部卡运行时表归 engine/ext-runtime.js，
+// 槽位编排归 engine/registry.js；本模块顶层把 mountExtCard 经 setExtCardRenderer 注入 ext-runtime——
+// 外部永不获得在宿主 DOM 执行的能力。
 
 import { esc } from '../../../core/util.js'
 import { extCardSrc } from '../../../engine/ext-decl.js'
-import { setExtCardRenderer } from '../../../engine/registry.js'
+import { setExtCardRenderer } from '../../../engine/ext-runtime.js'
 /* @module views/cards/ext/ext-card.js */
   // ---------- 外部卡片（卡片化二期）----------
   // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在

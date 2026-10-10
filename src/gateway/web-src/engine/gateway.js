@@ -1,12 +1,8 @@
 // 网关模式（WS 连接/发送状态/连接初始化）（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
-import { stage } from '../chat/stage.js'
 import { deviceHint, showGate, gatePlayTransition, hideGate } from './auth.js'
-import { inputEl, state } from './state.js'
+import { inputEl, setConnUp, state } from './state.js'
 import { toast } from '../core/util.js'
-import { addSystem, takeover, clearTakeover, renderApproval, approvalPending, showApprovalError, sendSubscribe } from '../inputbar/approval.js'
-import { onInputChange } from '../inputbar/mention.js'
-import { syncGwSend } from '../inputbar/send.js'
 /* @module engine/gateway.js */
   // ---------- 网关模式（SubPj2 私有化网关）----------
   // 检测 /gateway/health 返回 mode==='gateway' 即启用：composer 可发、WS 双向、工具审批。
@@ -21,6 +17,14 @@ import { syncGwSend } from '../inputbar/send.js'
   let gToken = new URLSearchParams(location.search).get('token') || ''
   let gws = null
   let reconnectTimer = null
+
+  // 依赖反转（分层治理 4D，2026-10-10）：engine/gateway.js 不再静态 import inputbar/*——
+  // 审批卡渲染/审批态读写、发送态同步、@ 提及输入回调一律经 app 启动序列注入的端口访问。
+  // 端口内 getter（getTakeover/getApprovalPending）每次现读 feature 模块的可变绑定，调用侧严禁缓存
+  // （缓存即与 owner 的实时态脱钩）；端口注入先于 initGateway、且早于 WS 首个 onopen/onmessage。
+  let gwApproval = {} // inputbar/approval.js：审批卡渲染 + 审批态读写
+  let gwSendPort = {} // inputbar/send.js：syncGwSend
+  let gwMention = {} // inputbar/mention.js：onInputChange
 
   // 安全加固（2026-08-15）：数据接口 URL 统一附加网关 token（query），与 WS 升级校验一致。
   // 2026-08-28 门控条件从「有无 gToken」改为「是否已验证」：cookie 授权设备刷新后直接可拉数据，
@@ -212,8 +216,8 @@ import { syncGwSend } from '../inputbar/send.js'
       gateVerified = true
       if (gateAwait) gatePlayTransition() // 门流程：播过渡视频（白板拉伸成输入栏/角色转正趴栏），ended 后 hideGate
       else hideGate() // URL 带 token 直连（无门）：验证通过直接解锁
-      syncGwSend()
-      sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
+      gwSendPort.syncGwSend()
+      gwApproval.sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
     }
     gws.onclose = () => {
       setConn(false, '未连接')
@@ -230,7 +234,7 @@ import { syncGwSend } from '../inputbar/send.js'
         reconnectTimer = setTimeout(connect, 4000)
       }
       gws = null
-      syncGwSend()
+      gwSendPort.syncGwSend()
     }
     gws.onerror = () => setConn(false, '连接失败')
     gws.onmessage = (ev) => {
@@ -242,28 +246,30 @@ import { syncGwSend } from '../inputbar/send.js'
       // 原 handleLine 直连 CLI 流式渲染链（streamText/procThink/实时变更卡）随之整体退役。
       if (msg.type === 'approval') {
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        renderApproval(msg)
+        gwApproval.renderApproval(msg)
       } else if (msg.type === 'approval-confirmed') {
         // 2026-08-26 P0 审批确认送达：CLI 已处理回执 → 关卡 + 提示（不再 send 后立即清卡）
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending && approvalPending.requestId === msg.requestId) {
-          const wasAllow = approvalPending.allowed
-          setApprovalPending(null)
-          clearTakeover()
-          addSystem(wasAllow ? '已允许该工具调用' : '已拒绝该工具调用')
+        const ap = gwApproval.getApprovalPending()
+        if (ap && ap.requestId === msg.requestId) {
+          const wasAllow = ap.allowed
+          gwApproval.setApprovalPending(null)
+          gwApproval.clearTakeover()
+          gwApproval.addSystem(wasAllow ? '已允许该工具调用' : '已拒绝该工具调用')
         }
       } else if (msg.type === 'approval-rejected') {
         // 2026-08-26 P0：目标 CLI 不在线 → 保留卡片 + 可见错误 + 重试
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending && approvalPending.requestId === msg.requestId) {
-          showApprovalError('审批未送达目标，请重试', msg.requestId, approvalPending.allowed, approvalPending.qa, approvalPending.perms)
+        const ap = gwApproval.getApprovalPending()
+        if (ap && ap.requestId === msg.requestId) {
+          gwApproval.showApprovalError('审批未送达目标，请重试', msg.requestId, ap.allowed, ap.qa, ap.perms)
         }
       } else if (msg.type === 'approval-dismiss') {
         // 2026-08-24 审批双操作（web 与 CLI 均可）：CLI 终端/窗口已先操作 → 撤掉 floria 审批卡
         if (msg.session_id && msg.session_id !== state.currentHash) return
-        if (approvalPending) { setApprovalPending(null) }
-        if (takeover === 'approval') clearTakeover()
-      } else if (msg.type === 'status') addSystem(msg.state)
+        if (gwApproval.getApprovalPending()) { gwApproval.setApprovalPending(null) }
+        if (gwApproval.getTakeover() === 'approval') gwApproval.clearTakeover()
+      } else if (msg.type === 'status') gwApproval.addSystem(msg.state)
     }
   }
 
@@ -281,13 +287,13 @@ import { syncGwSend } from '../inputbar/send.js'
     // 永久 display:none 会让首页图标只在网关检测完成前瞬间可见、刷新即消失。
     inputEl.contentEditable = 'true'
     inputEl.dataset.ph = '输入消息，Enter 发送'
-    inputEl.addEventListener('input', onInputChange)
+    inputEl.addEventListener('input', gwMention.onInputChange)
     setConn(false, '连接中…')
     // 2026-08-28 token 出 URL：统一先 connect()——已授权设备（floria_auth cookie）WS 直接通过进空态；
     // 未授权（无 cookie 无首链 token）WS 被拒 → onclose 回 token 门。REVIEW 模式仍要求 URL 带 token。
     if (GATEWAY_REVIEW) { if (gToken) connect(); else showGate() }
     else connect()
-    syncGwSend()
+    gwSendPort.syncGwSend()
   }
 
   async function detectGateway() {
@@ -304,6 +310,8 @@ import { syncGwSend } from '../inputbar/send.js'
 // —— 跨模块写入口（切割脚本生成）——
 export function setGateAwait(v) { gateAwait = v }
 export function setGateVerified(v) { gateVerified = v }
+// 分层治理 4D（2026-10-10）：feature 端口注入（app 启动序列调用一次，须早于 initGateway）。
+export function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMention = p.mention }
 
 export {
   GATEWAY,

@@ -6,7 +6,8 @@ import { state } from '../../../engine/state.js'
 import { esc } from '../../../core/util.js'
 import { saveMgrView } from '../../../core/storage.js'
 import { MGR, MGR_ERR, MGR_LOADING, loadMgrData, mgrColor } from '../../../sidebar/mgr-data.js'
-import { appCatalog, isAppEnabled, registerCard, setAppEnabled } from '../../../engine/registry.js'
+import { registerCard } from '../../../engine/registry.js'
+import { appCatalog, isAppEnabled, setAppEnabled } from '../../../engine/ext-runtime.js'
 /* @module views/cards/plugins/plugins-card.js */
   // ---------- 插件卡（插件 / 技能 / 应用）----------
   // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」

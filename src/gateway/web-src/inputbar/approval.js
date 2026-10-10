@@ -236,6 +236,9 @@ import { firstSendHash } from '../sidebar/recent.js'
   //      接管已移除，见 chat/messages.js askLineHtml 注）；
   //      解决（审批提交/审批撤销）后 #input-bar 回归（content swap，同输入栏卡片足迹）。 ----
   let takeover = null
+  // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setTakeover）——每次现读，
+  // 调用方严禁缓存返回值。
+  function getTakeover() { return takeover }
   const takeoverEl = () => $('composer-takeover')
   // 2026-08-30 修复「提问卡相对位置大小奇怪」：takeover 卡片可远高于普通输入栏（多题卡 ~700px），
   // 而 #chat-scroll 的 padding-bottom 是按输入栏足迹设计的固定值（styles.css 142px）→ 卡片贴底
@@ -698,6 +701,9 @@ import { firstSendHash } from '../sidebar/recent.js'
   // 进入「提交中」（禁用按钮 + 状态行），等网关 approval-confirmed（CLI 已处理回执）才关卡；
   // approval-rejected（目标不在线）/断连 → 卡片保留 + 可见错误 + 重试按钮；等待无超时（2026-08-26 用户定案，与 CLI 一致，仅凭 confirmed/rejected/dismiss 收尾）。
   let approvalPending = null // {requestId, allowed, qa, perms}：等待确认中的审批
+  // 分层治理 4D（2026-10-10）：engine/gateway.js 的只读读取口（写侧仍是尾部 setApprovalPending）——
+  // 每次现读可变绑定，调用方严禁缓存返回值。
+  function getApprovalPending() { return approvalPending }
   function sendApprove(requestId, allowed, qa, perms) {
     if (!gws || gws.readyState !== 1) return showApprovalError('连接已断开，审批未送达', requestId, allowed, qa, perms)
     // 2026-08-23 web 独立会话：带 sessionId 供网关路由到对应子进程（CLI 会话无此字段走 broadcast 未接入提示）

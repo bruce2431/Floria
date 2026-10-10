@@ -5828,6 +5828,35 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (isMobile()) setPanel(false)
   }
 
+  // ---------- 视图浮层（唯一开合口，2026-10-10）----------
+  // 触发器两处、互斥在场：侧栏展开 = 头部 #wk-view；侧栏折叠 = 标签栏左端的汉堡 #menu-btn
+  // （#sidebar.open 的兄弟选择器把汉堡藏起，故任一时刻恰一个可见）。浮层 DOM 挂在 #app 直下
+  // （见 index.html 注释），故侧栏折叠也不被裁。锚点按「谁在场」现取，不记住触发器。
+  function wkViewAnchor() {
+    return state.panelOpen ? $('wk-view') : $('menu-btn')
+  }
+  // 把浮层贴到当前触发器下方：侧栏开 → 锚在头部右侧，右对齐；侧栏折叠 → 锚在左端，左对齐。
+  // 横向夹回 #app 内（左右各 6px），避免窄屏溢出。
+  function positionWkViewPop() {
+    const pop = $('wk-view-pop')
+    const host = $('app').getBoundingClientRect()
+    const a = wkViewAnchor().getBoundingClientRect()
+    const w = pop.offsetWidth
+    let left = state.panelOpen ? a.right - host.left - w : a.left - host.left
+    left = Math.max(6, Math.min(left, host.width - w - 6))
+    pop.style.left = left + 'px'
+    pop.style.top = a.bottom - host.top + 4 + 'px'
+  }
+  function toggleWkViewPop() {
+    const pop = $('wk-view-pop')
+    const willShow = pop.hidden
+    hideWkPops()
+    if (!willShow) return
+    applyPanes() // 行状态（#wk-view-pop 常驻 DOM，靠 applyPanes 的 syncPaneRows 对齐 paneOn）
+    pop.hidden = false
+    positionWkViewPop() // 先落显（量 offsetWidth 需已可见）再定位
+  }
+
   // ---------- 事件 ----------
   function mountWork() {
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
@@ -5852,7 +5881,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionMsThumb)
     window.addEventListener('resize', positionMsThumb)
     $('wk-new').innerHTML = I.dshPlus
-    $('wk-view').innerHTML = I.toggle
+    // 视图开关图标与 chat 的 #panel-collapse 同款（I.collapse，2026-10-10 用户定案：两模式第三槽同图标）
+    $('wk-view').innerHTML = I.collapse
     // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按页态写（预览态 = 插件图标 + 「工具栏」，工具态 = ✕ +
     // 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
     // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
@@ -5951,16 +5981,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     })
     $('wk-view').addEventListener('click', (e) => {
       e.stopPropagation()
-      const pop = $('wk-view-pop')
-      const willShow = pop.hidden
-      hideWkPops()
-      pop.hidden = !willShow
-      applyPanes()
+      toggleWkViewPop()
     })
     $('wk-view-pop').addEventListener('click', (e) => {
       e.stopPropagation()
       const b = e.target.closest('[data-wkpane]')
-      if (b) setPane(b.dataset.wkpane, !b.classList.contains('on'))
+      if (!b) return
+      setPane(b.dataset.wkpane, !b.classList.contains('on'))
+      // 切「侧边栏」会翻 panelOpen ⇒ 触发器在 #wk-view ↔ 汉堡 间易主（#sidebar 宽 0.28s 过渡中量锚也不准），
+      // 原地留着会悬在旧锚位 → 收起浮层（开关本身已是反馈，再点对面的触发器即在当前锚点重开）。
+      if (b.dataset.wkpane === 'sidebar') $('wk-view-pop').hidden = true
     })
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
@@ -6029,7 +6059,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#wk-proj-pop') && !e.target.closest('#wk-proj-seat')) $('wk-proj-pop').hidden = true
-      if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view')) $('wk-view-pop').hidden = true
+      // 两个视图浮层触发器都排除：#wk-view（侧栏展开）与 #menu-btn（侧栏折叠），否则汉堡的点击
+      // 冒泡到这里会把刚弹出的浮层立刻关掉。
+      if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view') && !e.target.closest('#menu-btn')) $('wk-view-pop').hidden = true
       if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
@@ -6351,7 +6383,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
   const EDGE_PX = 8
   const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
-  $('menu-btn').addEventListener('click', () => setPanel(true, { pin: true }))
+  // 2026-10-10 用户定案：work 模式下汉堡 = 标签栏左端的「视图」入口，点击弹出 #wk-view-pop（与侧栏头部
+  // #wk-view 同一个口，见 work-mount.js toggleWkViewPop）——work 面板的开合本就由该浮层的「侧边栏」行管；
+  // chat 模式不变，仍是「打开并钉住侧栏」。面板随模式互斥显隐（#panel.work 钩子），故按 state.sbMode 分派。
+  $('menu-btn').addEventListener('click', () => {
+    if (state.sbMode === 'work') toggleWkViewPop()
+    else setPanel(true, { pin: true })
+  })
   document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
   document.addEventListener('mouseout', (e) => {
     if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)

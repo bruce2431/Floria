@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=510" />
+  <link rel="stylesheet" href="/styles.css?v=512" />
 </head>
 <body>
 <div id="app">
@@ -60,11 +60,6 @@
             <button id="panel-theme" class="act-btn" title="切换主题" aria-label="切换深浅色主题"></button>
             <button id="panel-collapse" class="act-btn" title="折叠侧栏"></button>
             <button id="wk-view" class="act-btn" title="视图开关" aria-haspopup="dialog"></button>
-            <div id="wk-view-pop" class="popup" hidden>
-              <div class="wkv-title">视图</div>
-              <button class="wkv-row" data-wkpane="workspace"><span>预览</span><span class="wkv-sw"></span></button>
-              <button class="wkv-row" data-wkpane="sidebar"><span>侧边栏</span><span class="wkv-sw"></span></button>
-            </div>
           </div>
         </div>
         <div id="chat-panel">
@@ -321,6 +316,16 @@
     </section>
   </main>
 
+  <!-- 视图开关浮层（2026-10-10）：挂 #app（position:relative）直下，**不在侧栏内**——work 侧栏折叠时
+       宽 0 + overflow 裁切，浮层若仍留在 .panel-actions 内会被一并裁掉。触发器有两个（见 work-mount.js
+       positionWkViewPop）：侧栏展开 = 头部 #wk-view；侧栏折叠 = 标签栏左端的汉堡 #menu-btn。left/top 由
+       JS 按当前在场触发器写入（#wk-view-pop 的定位规则不再写死 right/top）。 -->
+  <div id="wk-view-pop" class="popup" hidden>
+    <div class="wkv-title">视图</div>
+    <button class="wkv-row" data-wkpane="workspace"><span>预览</span><span class="wkv-sw"></span></button>
+    <button class="wkv-row" data-wkpane="sidebar"><span>侧边栏</span><span class="wkv-sw"></span></button>
+  </div>
+
   <!-- 搜索覆盖层 -->
   <div id="search-overlay">
     <div id="search-box">
@@ -366,6 +371,6 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=3"></script>
-<script src="/app.js?v=510"></script>
+<script src="/app.js?v=512"></script>
 </body>
 </html>

@@ -33,7 +33,13 @@ import { initWork, setSbMode } from './sidebar/work.js'
   //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
   const EDGE_PX = 8
   const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
-  $('menu-btn').addEventListener('click', () => setPanel(true, { pin: true }))
+  // 2026-10-10 用户定案：work 模式下汉堡 = 标签栏左端的「视图」入口，点击弹出 #wk-view-pop（与侧栏头部
+  // #wk-view 同一个口，见 work-mount.js toggleWkViewPop）——work 面板的开合本就由该浮层的「侧边栏」行管；
+  // chat 模式不变，仍是「打开并钉住侧栏」。面板随模式互斥显隐（#panel.work 钩子），故按 state.sbMode 分派。
+  $('menu-btn').addEventListener('click', () => {
+    if (state.sbMode === 'work') toggleWkViewPop()
+    else setPanel(true, { pin: true })
+  })
   document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
   document.addEventListener('mouseout', (e) => {
     if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)

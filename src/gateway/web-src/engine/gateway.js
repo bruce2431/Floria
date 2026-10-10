@@ -84,10 +84,8 @@ import { syncGwSend } from '../inputbar/send.js'
       .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
       .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
-      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--field-2)}
-      .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
-      .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
-      .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
+      /* .code-block 系列（2026-10-10）已收口到 styles.css 的「.appr-md .code-block」作用域（含头栏/换行/hljs），
+         此处不再重复——注入样式晚于 <link> 会盖掉新设计（旧绝对定位 .code-lang 等）。 */
       .appr-md .md-table{margin:6px 0;overflow-x:auto}
       .appr-md .md-table table{border-collapse:collapse;font-size:12.5px;width:100%}
       .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}

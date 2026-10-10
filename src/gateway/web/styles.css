@@ -835,10 +835,36 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 /* 2026-08-31：旁白（.done-think）/思考正文（.tr-body）也走 mdHtml，inline code/围栏代码块样式一并对齐
    （此前只挂 .msg .body，旁白里 `feedConfigs.tsx` 等只有 UA 默认等宽、无灰底） */
 .msg .body code, .done-think code, .tr-body code { background: var(--border-soft); padding: 2px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-.msg .body .code-block, .done-think .code-block, .tr-body .code-block { position: relative; margin: 6px 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: var(--field-2); }
-.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre; }
-.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code { background: transparent; padding: 0; font-size: inherit; }
-.msg .body .code-block .code-lang, .done-think .code-block .code-lang, .tr-body .code-block .code-lang { position: absolute; top: 6px; right: 10px; font-size: 10px; color: var(--text-3); font-family: var(--mono); }
+/* 2026-10-10 codex 化：围栏代码块 = 头栏（语言名 + 换行/复制按钮）+ 高亮正文；默认软换行。
+   高亮由 core/markdown.js 调 vendored codemirror-live-markdown.highlightCode（lowlight）产出 hljs-* span，
+   令牌映射到项目 --hl-*（与 work 编辑区同一套色，日夜随动，见文件头 :root / html[data-theme=dark]）。
+   作用域四容器：消息体 / 旁白 / 思考体 / 审批计划卡（.appr-md）——四者都走 mdHtml，样式一处收口。 */
+.msg .body .code-block, .done-think .code-block, .tr-body .code-block, .appr-md .code-block { margin: 8px 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--field-2); }
+.msg .body .code-head, .done-think .code-head, .tr-body .code-head, .appr-md .code-head { display: flex; align-items: center; justify-content: space-between; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--border); }
+.msg .body .code-head .code-lang, .done-think .code-head .code-lang, .tr-body .code-head .code-lang, .appr-md .code-head .code-lang { font-size: 11.5px; color: var(--text-2); font-family: var(--mono); font-weight: 600; }
+.msg .body .code-head .code-lang::first-letter, .done-think .code-head .code-lang::first-letter, .tr-body .code-head .code-lang::first-letter, .appr-md .code-head .code-lang::first-letter { text-transform: uppercase; }
+.msg .body .code-acts, .done-think .code-acts, .tr-body .code-acts, .appr-md .code-acts { display: flex; align-items: center; gap: 2px; }
+.msg .body .code-btn, .done-think .code-btn, .tr-body .code-btn, .appr-md .code-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; color: var(--text-3); background: transparent; cursor: pointer; }
+.msg .body .code-btn:hover, .done-think .code-btn:hover, .tr-body .code-btn:hover, .appr-md .code-btn:hover { background: var(--hover); color: var(--text); }
+.msg .body .code-btn.copied, .done-think .code-btn.copied, .tr-body .code-btn.copied, .appr-md .code-btn.copied { color: var(--ok-fg); }
+.msg .body .code-block pre, .done-think .code-block pre, .tr-body .code-block pre, .appr-md .code-block pre { margin: 0; padding: 11px 13px; overflow-x: auto; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--text); }
+/* 换行态（默认 .wrap）：pre-wrap + anywhere 断超长 token；去掉 .wrap = 横向滚动（white-space:pre）。 */
+.msg .body .code-block.wrap pre, .done-think .code-block.wrap pre, .tr-body .code-block.wrap pre, .appr-md .code-block.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg .body .code-block:not(.wrap) pre, .done-think .code-block:not(.wrap) pre, .tr-body .code-block:not(.wrap) pre, .appr-md .code-block:not(.wrap) pre { white-space: pre; }
+.msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code, .appr-md .code-block code { background: transparent; padding: 0; font-size: inherit; font-family: inherit; }
+/* hljs 令牌 → --hl-*（仅代码块内的 span，全局一份即可；同一套色贯穿 work 编辑区与会话代码块） */
+.code-block code .hljs-comment, .code-block code .hljs-quote, .code-block code .hljs-meta { color: var(--hl-com); font-style: italic; }
+.code-block code .hljs-keyword, .code-block code .hljs-selector-tag, .code-block code .hljs-literal, .code-block code .hljs-doctag, .code-block code .hljs-name, .code-block code .hljs-meta .hljs-keyword { color: var(--hl-kw); }
+.code-block code .hljs-string, .code-block code .hljs-regexp, .code-block code .hljs-addition, .code-block code .hljs-attribute, .code-block code .hljs-meta .hljs-string { color: var(--hl-str); }
+.code-block code .hljs-number, .code-block code .hljs-symbol, .code-block code .hljs-bullet, .code-block code .hljs-variable, .code-block code .hljs-template-variable, .code-block code .hljs-selector-attr, .code-block code .hljs-selector-pseudo { color: var(--hl-num); }
+.code-block code .hljs-title, .code-block code .hljs-section, .code-block code .hljs-title.class_, .code-block code .hljs-title.function_ { color: var(--hl-fn); }
+.code-block code .hljs-type, .code-block code .hljs-class, .code-block code .hljs-built_in, .code-block code .hljs-builtin-name { color: var(--hl-type); }
+.code-block code .hljs-attr, .code-block code .hljs-property, .code-block code .hljs-params, .code-block code .hljs-selector-class, .code-block code .hljs-selector-id { color: var(--hl-attr); }
+.code-block code .hljs-operator, .code-block code .hljs-punctuation { color: var(--hl-op); }
+.code-block code .hljs-deletion { color: var(--danger-fg); }
+.code-block code .hljs-link { color: var(--hl-link); text-decoration: underline; }
+.code-block code .hljs-emphasis { font-style: italic; }
+.code-block code .hljs-strong { font-weight: 600; }
 /* 2026-09-12：嵌入式图表（```chart 双段围栏）——web 渲染 %%html 段进 sandbox iframe（opaque origin，
    高度由 iframe 内 BOOT postMessage 上报、messages.js 按 e.source 设高；上限 60vh 超出内部滚动），
    「源码」按钮切原文（.as-src）。%%ascii 段仅供 CLI，web 弃用。普通 ```html 围栏不受影响 */

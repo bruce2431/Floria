@@ -1,5 +1,5 @@
 // 消息区交互与用户气泡内容：复制/用量弹层/图表/大图 lightbox + userBodyHtml/图片/文件卡片 + 时长与旁白渲染
-import { mdHtml, messageMd } from '../../core/markdown.js'
+import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
 import { I } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live } from '../../engine/state.js'
@@ -33,6 +33,27 @@ import { ICON_COPY, writeClipboard } from './usage.js'
         btn.title = '复制'
         btn.setAttribute('aria-label', '复制')
       }, 1000)
+    })
+  })
+
+  // 围栏代码块头栏按钮（2026-10-10；同 msg-copy 的委托+反馈模式）：复制 = 读本块 pre>code.textContent
+  // （高亮只包 hljs-* span、不改文本，textContent 即原始代码）；换行 = toggleCodeWrap（全页现有块同步 + 持久化）。
+  document.addEventListener('click', (e) => {
+    const el = e.target && e.target.closest ? e.target : null
+    if (!el) return
+    if (el.closest('.cb-wrap')) { toggleCodeWrap(); return }
+    const btn = el.closest('.cb-copy')
+    if (!btn || btn.classList.contains('copied')) return
+    const block = btn.closest('.code-block')
+    const codeEl = block && block.querySelector('pre > code')
+    const text = codeEl ? codeEl.textContent : ''
+    if (!text) return
+    writeClipboard(text).then((ok) => {
+      if (!ok) { toast('复制失败'); return }
+      const prev = btn.innerHTML
+      btn.classList.add('copied')
+      btn.innerHTML = I.dshCheck
+      setTimeout(() => { if (!btn.isConnected) return; btn.classList.remove('copied'); btn.innerHTML = prev }, 1000)
     })
   })
 

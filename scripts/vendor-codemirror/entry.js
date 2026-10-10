@@ -22,7 +22,7 @@ import {
   collapseOnSelectionFacet, mouseSelectingField, livePreviewPlugin, markdownStylePlugin,
   editorTheme, shouldShowSource, setMouseSelecting, setTableCellRenderer,
   blockMathField, mathPlugin, tableField, tableEditorPlugin, codeBlockField, imageField, linkPlugin,
-  initHighlighter, registerLanguage, renderMath,
+  initHighlighter, registerLanguage, renderMath, highlightCode, isHighlighterAvailable,
 } from 'codemirror-live-markdown'
 
 window.CMLiveMarkdown = {
@@ -45,4 +45,7 @@ window.CMLiveMarkdown = {
   editorTheme, shouldShowSource, setMouseSelecting, setTableCellRenderer,
   blockMathField, mathPlugin, tableField, tableEditorPlugin, codeBlockField, imageField, linkPlugin,
   initHighlighter, registerLanguage, renderMath,
+  // 代码高亮（2026-10-10）：库自带 highlightCode（lowlight/highlight.js，输出 hljs-* 类）
+  // 供会话消息代码块着色复用（core/markdown.js closeCode），不再自建高亮器。
+  highlightCode, isHighlighterAvailable,
 }

@@ -757,3 +757,18 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **卡形（2026-10-07 用户定案）**：右栏是**下沉区右侧的一张白卡**——`#work-preview` `background: var(--chat-bg)` + `margin: 2px` + `border-radius: var(--radius)`，浮在底 `--plane`（`#chat-area.work` 自身底色，见 §43）上，四周 2px 缝露底板故显形。
 - **cache-bust**：`web/sw.js` `CACHE` 与 `web/index.html` `app.js ?v=` 同值（本期 v478）。
 - **探针锚点**：`probes/probe-work-scope.ts`（顶栏 / 右栏结构）+ `probes/probe-comment-marks.ts`（评论面板与原文标记）+ `probes/probe-web-ext-cards.ts`（I5 外部卡补拉两门互补）。
+
+## 59. 围栏代码块 codex 化：头栏 + 语法高亮 + 软换行（2026-10-10）
+
+**能力**：消息流（及 `mdHtml` 各消费面）里的 ``` 围栏代码块渲染成 codex 式卡片——头栏（语言名 + 换行/复制钮）+ 圆角边框 + 正文语法着色，且**默认软换行**（超长行折行不横向溢出）。
+
+- **渲染**（`core/markdown.js` `renderCodeBlock(fence, lang, raw)`，由 `closeCode` 取代旧裸 `<pre><code>` 分支）：结构 = `.code-block[.wrap]`（`data-md`=围栏原文，供复制/选区复制溯源；高亮命中时挂 `data-lang`）> `.code-head`（`.code-lang` 语言名，空语言回落文案「代码」；`.code-acts` > `.cb-wrap` + `.cb-copy` 两钮）> `pre > code` 正文。`mdAttr` 语义与其它块级件一致，未变。
+- **语法高亮（复用既有接口，不自建高亮器）**：走内置网关已 vendored 的 `window.CMLiveMarkdown.highlightCode(code, lang)`（`codemirror-live-markdown` 库自带，lowlight/highlight.js，输出 `hljs-*` 类）——该 API 由 `scripts/vendor-codemirror/entry.js` 暴露、随 `live-markdown.js` 重建。**语言为空 / 库缺失 / 未注册 → 返 null，正文回落「已转义纯文本」，不预判语言（禁猜高亮）**；头栏/复制钮仍在。
+- **转义口径（不变量：esc 一次）**：`mdHtml` 入口整体 esc 一次，`closeCode` 拿到的 `raw` 是**已转义**文本；喂 lowlight 前必须 `unesc()`（其内部自行 escapeHtml，喂已转义文本会二次转义成 `&amp;lt;`），而未命中高亮的回落分支直接用 `raw`（**不得再 esc**）。`pre > code` 的 `textContent` 恒还原原始代码（高亮只包 `<span>` 不改文本）——复制钮据此取文，无需另存映射。
+- **软换行**：默认 `.wrap`（`white-space:pre-wrap; overflow-wrap:anywhere`）；`.cb-wrap` 切换 = `toggleCodeWrap()`（翻模块级 `cbWrapOn` + 写 `localStorage['floria-code-wrap']`（'0'/'1'）+ 全页现有 `.code-block` 类名同翻）；启动时 `initCodeBlock()`（`web-src/app.js` 顶层、首次 `mdHtml` 之前）读偏好覆盖默认。
+- **复制**：`.cb-copy`（`chat/messages/msg-actions.js` 文档级委托，紧邻 `.msg-copy`）读该块 `pre > code` 的 `textContent` → `writeClipboard`，成功 1s 内退成 `I.dshCheck`。**不用 id 映射表**——`mdHtml` 一帧内对每条 body 各跑一次，序号会跨调用冲突。
+- **样式**（`styles.css`，作用域含 `.msg .body`/`.done-think`/`.tr-body`/`.appr-md`）：`.code-block`（圆角 10px + 描边 + `--field-2` 底）、`.code-head`（两端对齐 + 下边框）、`.code-btn`（26px，hover 显底）、`pre`（内边距 11/13、mono 12px）、`:not(.wrap) pre` 恒 `white-space:pre`。着色令牌 = 既有 `--hl-*` 变量（与 work 编辑器 CodeMirror 6 同一套）：`.hljs-comment/-quote/-meta`→`--hl-com` 斜体、`.hljs-keyword/-selector-tag/-literal/-name/…`→`--hl-kw`、`.hljs-string/-regexp/-attribute/…`→`--hl-str`、`.hljs-number/-symbol/-variable/…`→`--hl-num`、`.hljs-title/-section/…`→`--hl-fn`、`.hljs-type/-class/-built_in`→`--hl-type`、`.hljs-attr/-property/-params/…`→`--hl-attr`、`.hljs-operator/-punctuation`→`--hl-op`、`.hljs-deletion`→`--danger-fg`。**审批卡 `.appr-md` 的作用域在 styles.css 一处**——`engine/gateway.js` `gatewayCss()` 里原先重复注入的 `.appr-md .code-block*` 四条已删（后注入会覆盖新设计）。
+- **cache-bust**：`web/sw.js` `CACHE` = `web/index.html` 的 `app.js/styles.css ?v=` 同值，`live-markdown.js` 另带自己的 `?v=`（本期 v513 / vendor v4）。
+- **探针锚点**：`probes/probe-code-block.ts`（26 断言，取 `core/markdown.js` 真实源码 + stub `highlightCode` 执行 `mdHtml`：头栏结构 / 高亮与 data-lang / **无二次转义** / textContent 还原 / 无语言与库缺失回落 / ```chart 不受影响 / 换行偏好翻转与持久化）。
+
+

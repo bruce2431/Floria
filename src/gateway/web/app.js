@@ -108,7 +108,7 @@
     if (needToken()) return null // token 门锁定态：不发起数据请求（hideGate 解锁后刷新）
     MGR_LOADING = true
     MGR_ERR = ''
-    renderMgrGrid()
+    refreshCard('plugins')
     try {
       const res = await fetch(apiUrl('/gateway/plugins'))
       const data = await res.json()
@@ -118,7 +118,7 @@
       MGR_ERR = e.message || String(e)
     } finally {
       MGR_LOADING = false
-      renderMgrGrid()
+      refreshCard('plugins')
     }
     return MGR
   }
@@ -200,27 +200,6 @@
     return '自定义 / 其他'
   }
 
-  // ---------- 元素 ----------
-  const chatArea = $('chat-area')
-  const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
-  const messagesEl = $('messages')
-  const inputWrap = $('input-wrap')
-  const inputEl = $('input')
-  const inputBarEl = $('input-bar')
-  const sendBtn = $('send-btn')
-  const ctxMeterEl = $('ctx-meter')
-  const ctxBtnEl = $('ctx-btn')
-  const ctxPanelEl = $('ctx-panel')
-  const bodyEl = $('recent-body')
-  const sidebar = $('sidebar')
-  const toastEl = $('toast')
-  const charEl = $('char')
-  const bubblePop = $('bubble-pop')
-  const overlay = $('search-overlay')
-  const sInput = $('search-input')
-  const recentLabel = $('recent-label')
-  const modeTabsEl = $('mode-tabs')
-
   // ---------- 状态 ----------
   // currentHash 无会话态 = ''（与 recent.js firstSendHash 同一表示，禁止再引入 null）：乐观项
   // pendingUserMsgs.hash 的「未归属」判定（p.hash === ''）依赖此约定——两套空值表示会让首页
@@ -248,11 +227,30 @@
     wkChats: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
-    // 无槽 = 用 WK_PANES_DEF；未选项目（workProj 空）不落槽。读写唯一口 = stashWorkPanes / loadWorkPanes（core/storage.js）。
+    // 无槽 = 用 WK_PANES_DEF（sidebar/work-state.js）；未选项目（workProj 空）不落槽。
+    // 读写唯一口 = stashWorkPanes / loadWorkPanes（core/storage.js）。
     wkPanes: {} }
 
-  // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名，与 state 初值一一对应。
-  const WK_PANES_DEF = { workspace: true, sidebar: false }
+  // ---------- 元素 ----------
+  // 一元素一所有者：仅本模块（会话视图骨架）持有下列 DOM 句柄；charEl → core/char.js、
+  // toastEl → core/util.js 各自持有（避免 core 反向依赖本模块）。
+  const chatArea = $('chat-area')
+  const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
+  const messagesEl = $('messages')
+  const inputWrap = $('input-wrap')
+  const inputEl = $('input')
+  const inputBarEl = $('input-bar')
+  const sendBtn = $('send-btn')
+  const ctxMeterEl = $('ctx-meter')
+  const ctxBtnEl = $('ctx-btn')
+  const ctxPanelEl = $('ctx-panel')
+  const bodyEl = $('recent-body')
+  const sidebar = $('sidebar')
+  const bubblePop = $('bubble-pop')
+  const overlay = $('search-overlay')
+  const sInput = $('search-input')
+  const recentLabel = $('recent-label')
+  const modeTabsEl = $('mode-tabs')
   // 界面状态持久化（2026-08-16）：管理视图内部状态（mgrView：插件/技能切换、公开/个人、搜索词）
   // 存 localStorage，刷新后由 route 的 mgr 分支 loadMgrView 恢复——配合 hash 路由 #mgr/<kind>/#preview/<label>
   // 实现「刷新保持当前界面」（会话/管理/预览三态均可恢复，不再回退初始界面）。
@@ -294,11 +292,12 @@
     if (!state.workProj) return
     state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
   }
-  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 WK_PANES_DEF。只写 state，渲染由调用方（applyPanes /
-  // applySidebarPin）负责——纯函数不许碰 DOM。
-  function loadWorkPanes(label) {
+  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 def（两开关缺省 = work 领域值，由调用方传入
+  // WK_PANES_DEF——本模块是 core 叶子，不依赖 feature 的 work-state.js）。只写 state，渲染由调用方
+  // （applyPanes / applySidebarPin）负责——纯函数不许碰 DOM。
+  function loadWorkPanes(label, def) {
     const s = (label && state.wkPanes[label]) || null
-    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : WK_PANES_DEF[k])
+    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
     state.wkPreview = val('workspace')
     state.panelPinned = val('sidebar')
   }
@@ -307,7 +306,7 @@
     stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
     patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH })
   }
-  function loadWork() {
+  function loadWork(def) {
     try {
       const raw = localStorage.getItem(UI_KEY)
       if (!raw) return
@@ -319,7 +318,7 @@
       if (d.wkPanes && typeof d.wkPanes === 'object') {
         for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
       }
-      loadWorkPanes(state.workProj) // 两开关 = 恢复项目的槽（无槽回落缺省）
+      loadWorkPanes(state.workProj, def) // 两开关 = 恢复项目的槽（无槽回落缺省）
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
       // wkChats（work 顶栏聊天胶囊开放集）不持久化：纯运行时状态，刷新即空、切项目重置（2026-10-07 定案），
@@ -341,11 +340,15 @@
 function setAll(v) { ALL = v }
 function setConnUp(v) { connUp = v }
   // ---------- 工具 ----------
+  // 一元素一所有者：本模块自持 #toast 句柄（原取 engine/state.js ⇒ core→engine 逆向边）。
+  const toastEl = $('toast')
   let timer = null
 
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
+  // 一元素一所有者：本模块自持 #char 句柄（原取 engine/state.js ⇒ core→engine 逆向边）。
+  const charEl = $('char')
   // ---------- 角色形象（2026-08-14 实验） ----------
   // 右侧空缺处的 AI 形象随操作类型切换：读取/搜索=3、书写/编辑=2、执行代码/插件/命令行=4、其余（思考/输出/空闲）=1。
   const CHAR_READ = /^(read|grep|glob|web(fetch|search)|search|lookup|view|show|list|ls|cat|head|tail|find)$/i
@@ -361,6 +364,71 @@ function setConnUp(v) { connUp = v }
   function setChar(n) {
     if (!charEl) return
     charEl.src = '/char/' + n + '.jpg'
+  }
+
+  const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
+  const MENTION_SESSION_RE = /\[会话:([^\]]+)\]/g
+  // @ 提及 icon（2026-09-28 换 dsh v0.2.0-rc.1 产品图标集，16 描线/currentColor；旧 24 手绘那套作废）。
+  // 语义与 dsh 一致：会话=ChatLines、插件=PluginPinwheel、技能=Skill、目录=FolderClose、文件=Browse
+  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。
+  const MENTION_SESSION_ICON = I.dshChat
+  // 目录 / 文件引用令牌（2026-09-26）：令牌 [@目录:路径] / [@文件:路径] 与上传附件占位 [文件:<路径>]
+  // 刻意不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
+  const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
+  // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
+  // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
+  // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
+  // 不会抢「引用」。
+  const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
+  // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
+  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
+  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
+  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
+  // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
+  // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
+  // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。
+  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
+  const MENTION_FILE_ICON = I.dshFile
+
+  // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
+  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
+  function splitSessionToken(v) {
+    const i = String(v).indexOf('|')
+    return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
+  }
+
+  // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
+  // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
+  // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
+  function mentionChipHtml(kind, name, ptype) {
+    if (kind === 'path') {
+      const label = '@' + name
+      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
+    }
+    const label = kind === 'session' ? splitSessionToken(name).title : name
+    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
+  }
+
+  // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
+  // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
+  function quoteRefChipHtml(path, l0, l1) {
+    const name = String(path).split('/').pop()
+    const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
+    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+  }
+  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
+  function quoteReplyChipHtml(idx, title) {
+    const t = String(title || '').trim() || '本会话'
+    const label = `引用自「${t}」· 第 ${idx} 条回复`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
+  }
+  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
+  // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
+  function quotePdfChipHtml(path, p0, p1) {
+    const name = String(path).split('/').pop()
+    const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
+    const label = `引用自 ${name}${pages}`
+    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
   }
 
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
@@ -423,6 +491,56 @@ function setConnUp(v) { connUp = v }
   // 属性值经浏览器 DOM 解析解码一次 → el.dataset.md 即原始 md 文本（esc 与解码互相抵消）。
   function mdAttr(raw) {
     return raw ? ` data-md="${phAttr(raw)}"` : ''
+  }
+
+  // ---------- 围栏代码块渲染（2026-10-10 codex 化：语法高亮 + 头栏 + 软换行） ----------
+  // 高亮复用内置网关已 vendored 的 codemirror-live-markdown `highlightCode`（lowlight/highlight.js，
+  // 输出 hljs-* 类；见 vendor/codemirror/live-markdown.js，全局 window.CMLiveMarkdown）——不自建高亮器。
+  // 语言为空/库缺失/未注册 → highlightCodeHtml 返 null，正文回落「已转义纯文本」（不预判语言，禁猜高亮）。
+  const CB_WRAP_KEY = 'floria-code-wrap'
+  let cbWrapOn = true // 默认软换行（用户 2026-10-10 定案「没有自动换行」；持久化偏好见 initCodeBlock）
+  // 头栏图标（16px 线性，currentColor；不引 core/icons 以免动全局图标表）
+  const CB_ICON_COPY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+  const CB_ICON_WRAP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h13a3 3 0 0 1 0 6h-3"/><path d="M17 15l-3 3 3 3"/><path d="M4 18h6"/></svg>'
+  // 高亮原码：入参必须是「未转义」的原始代码（lowlight 内部自行 escapeHtml，给已转义文本会二次转义）。
+  // lang 为空/库缺失/语言未注册 → null = 调用方走已转义纯文本。
+  function highlightCodeHtml(raw, lang) {
+    const CM = typeof window !== 'undefined' ? window.CMLiveMarkdown : null
+    if (!CM || !CM.highlightCode || !lang) return null
+    try {
+      const r = CM.highlightCode(raw, lang)
+      return r && r.html ? r.html : null
+    } catch (_) { return null }
+  }
+  // esc 的逆（markdown.js 入口已整体转义一次；closeCode 拿到的 raw 是**已转义**文本，喂给高亮前要还原，
+  // 否则 `<`→`&lt;` 被 lowlight 再转成 `&amp;lt;` 显示错）。&amp; 必须最后解（防 `&amp;lt;` 二次解码）。
+  const unesc = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+  // 代码块 HTML：头栏（语言名 + 换行/复制按钮）+ pre>code（高亮 HTML 或已转义纯文本）。
+  // data-md=fence 挂最外层（复制/选区复制靠它还原源码）；复制按钮的原文由消费端读 pre>code.textContent
+  // （高亮只包 span 不改文本，textContent 即原始代码，无需另存）。lang 已是 esc 后文本，直接落属性不再转义。
+  function renderCodeBlock(f, lang, text) {
+    const tag = lang ? `<span class="code-lang">${lang}</span>` : '<span class="code-lang">代码</span>'
+    const hi = highlightCodeHtml(unesc(text), lang)
+    const body = hi != null ? hi : text
+    const head = '<div class="code-head">' + tag +
+      `<div class="code-acts"><button type="button" class="code-btn cb-wrap" title="切换自动换行" aria-label="切换自动换行">${CB_ICON_WRAP}</button>` +
+      `<button type="button" class="code-btn cb-copy" title="复制" aria-label="复制">${CB_ICON_COPY}</button></div></div>`
+    return `<div class="code-block${cbWrapOn ? ' wrap' : ''}"${mdAttr(f)}${hi != null ? ' data-lang="' + lang + '"' : ''}>${head}<pre><code>${body}</code></pre></div>`
+  }
+  // 换行偏好初始化（web-src/app.js 顶层调用一次）：读 localStorage 覆盖默认值。
+  function initCodeBlock() {
+    try {
+      const v = localStorage.getItem(CB_WRAP_KEY)
+      if (v === '0') cbWrapOn = false
+      else if (v === '1') cbWrapOn = true
+    } catch (_) {}
+  }
+  // 切换软换行（委托点击处理）——同步持久化偏好 + 全页现有代码块。
+  function toggleCodeWrap() {
+    cbWrapOn = !cbWrapOn
+    try { localStorage.setItem(CB_WRAP_KEY, cbWrapOn ? '1' : '0') } catch (_) {}
+    document.querySelectorAll('.code-block').forEach((el) => el.classList.toggle('wrap', cbWrapOn))
+    return cbWrapOn
   }
 
   function mdInline(s) {
@@ -498,12 +616,11 @@ function setConnUp(v) { connUp = v }
       if (!inCode) return
       const raw = codeBuf.join('\n')
       const fence = '```' + codeLang + '\n' + raw + '\n```' // data-md：围栏原文重建
-      const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
         html += `<div class="chart-embed"${mdAttr(fence)}><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
       } else {
-        html += `<div class="code-block"${mdAttr(fence)}><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += renderCodeBlock(fence, codeLang, raw)
       }
       codeBuf = []; codeLang = ''; inCode = false
     }
@@ -2267,6 +2384,27 @@ function setLastNavHash(v) { lastNavHash = v }
     })
   })
 
+  // 围栏代码块头栏按钮（2026-10-10；同 msg-copy 的委托+反馈模式）：复制 = 读本块 pre>code.textContent
+  // （高亮只包 hljs-* span、不改文本，textContent 即原始代码）；换行 = toggleCodeWrap（全页现有块同步 + 持久化）。
+  document.addEventListener('click', (e) => {
+    const el = e.target && e.target.closest ? e.target : null
+    if (!el) return
+    if (el.closest('.cb-wrap')) { toggleCodeWrap(); return }
+    const btn = el.closest('.cb-copy')
+    if (!btn || btn.classList.contains('copied')) return
+    const block = btn.closest('.code-block')
+    const codeEl = block && block.querySelector('pre > code')
+    const text = codeEl ? codeEl.textContent : ''
+    if (!text) return
+    writeClipboard(text).then((ok) => {
+      if (!ok) { toast('复制失败'); return }
+      const prev = btn.innerHTML
+      btn.classList.add('copied')
+      btn.innerHTML = I.dshCheck
+      setTimeout(() => { if (!btn.isConnected) return; btn.classList.remove('copied'); btn.innerHTML = prev }, 1000)
+    })
+  })
+
   // 用量明细弹层（DSH 回复操作条「用量 X tok」按钮 → 点击弹出面板）：单开互斥（开本关它），点外区关闭。
   // 面板 .usage-pop 在 .msg-actions 内、与 .msg-usage 同属 .msg；按钮 aria-expanded 同步。
   function closeUsagePops(except) {
@@ -3503,7 +3641,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   //       display:contents 不产生盒，子元素与内置四个图标同列同 gap 居中（零新增视觉）。
   // 不变量：注册集属于**当前加载的那份预览文档**——文档换（iframe 换 src / 重建 / 离开预览），
   //        注册集即失效并清空；凭 e.source 精确匹配当前 .preview-frame 才采纳，别处窗口伪报不进来。
-  // 状态表 railExtItems + clearRailExt 已迁 views/cards/ext/ext-card.js（与本模块只读/写经由它）；
+  // 状态表 railExtItems + clearRailExt 已迁 feature/preview-frame.js（与本模块只读/写经由它）；
   // 本模块只留桥接与渲染。
   function renderRailExt() {
     const box = $('rail-ext')
@@ -3529,7 +3667,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const f = document.querySelector('.preview-frame')
       if (!f || f.contentWindow !== e.source) return
       // 卡片化二期：预览页实时申报外部卡（同 id 覆盖静态清单项）。字段校验与 preview.json 来源共用
-      // views/cards/ext/ext-card.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
+      // engine/ext-decl.js 的同一份过滤器——两条外部输入不给两处各写一套；label 取帧上锚定的项目。
       if (cards) { registerExtCards(f.dataset.label || '', d.cards, false); return }
       // 边界校验（外部输入）：id 必为非空串、icon 必是 I 表自有键（含 constructor 之类的原型键不收）
       setRailExtItems((Array.isArray(d.items) ? d.items : [])
@@ -3703,18 +3841,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     applyPanelOpen(false)
   }
 
-  // ---------- 外部卡片（卡片化二期）----------
-  // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
-  // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
-  // **不解释卡片内容**（内容永远跑在它自己的文档里）。声明文件与 backend 段同一份申报表。
-  // 渲染 = 一卡一 iframe（`/preview/<label>/<path>`，同源）：preview 保持自包含（自带 css/js/
-  // 相对路径），与宿主 DOM/CSS/JS 零互相污染——一期 SPEC-视图卡化 §7「外部插件 = iframe」边界的延续。
-  // 契约：preview.json cards（网关 GET /gateway/preview-cards 读出，见 docs/gateway.md §6）
-  //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
-  //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
-  // 不变量：卡片集恒属于「当前 .preview-frame 所指项目」——异 label 重挂 / 文档重挂即清
-  //        （清空点收在 views/cards/preview/preview-card.js 的 syncExtCards）；不合格声明整条丢弃，不猜不兜底。
-
   // 卡片字段校验（唯一一份）：preview.json 来源在网关已校过一遍，但 postMessage 这条不经过网关，
   // 必须同款再校——两条来源共用本函数，不给两处各写一套。host 只认 view（本版唯一定义的位置）。
   function normExtCards(raw) {
@@ -3768,39 +3894,427 @@ function setFirstSendHash(v) { firstSendHash = v }
     const q = gToken ? '?token=' + encodeURIComponent(gToken) : ''
     return `/preview/${encodeURIComponent(label)}/${file}${q}${frag}`
   }
-  // 把一张外部卡的卡体写进宿主卡体（调用方 = 注册表 openCard 的 mount(卡体)）
+
+
+  // ---------- 第一方卡片注册表 ----------
+  // 卡描述符由各卡模块顶层 registerCard 自注册（一模块一卡）；「项目 / 模型 / 神经元」三卡自 2026-10-10
+  // 起不再是第一方卡——改由工作区根以应用形式申报、用户在插件卡「应用」列表里手动启用（APP_TABS 见下），
+  // 侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
+  let CARDS = []
+  function registerCard(def) { if (def && def.id) CARDS.push(def) }
+  const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
+  // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
+  function refreshCard(id) { cardOf(id)?.refresh?.() }
+
+  // ---------- 运行时外部卡表（卡片化二期）----------
+  // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
+  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js，经 setExtCardRenderer 注入）——外部
+  // 永不获得在宿主 DOM 执行的能力。
+  // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
+  // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
+  // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
+  // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
+  // 清（清点收在 feature/preview-frame.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
+  // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
+  let extRender = null
+  function setExtCardRenderer(fn) { extRender = fn }
+  let EXT = []
+  let EXT_LABEL = ''
+  function registerExtCards(label, cards, replace) {
+    if (!label) return
+    if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
+    const list = normExtCards(cards)
+    // 网关权威快照（replace=true）落盘：EXT 只活在内存里，刷新即空 ⇒ 不落盘则刷新后
+    // 外部卡 tab 缺失、/manage/ext:<label>:<id> 直进无卡可解析（见下方 hydrateExtCards）。
+    // postMessage 增量注册不落盘——那是预览页的实时补充，混进快照会让缓存随文档生命周期漂移。
+    if (replace) persistExtDecls(label, { cards: list })
+    for (const c of list) {
+      const id = `ext:${label}:${c.id}`
+      EXT = EXT.filter((v) => v.id !== id) // 同 id 覆盖，不改位置语义（后注册者在列表尾）
+      EXT.push({
+        id,
+        title: c.title,
+        tip: `${c.title} · ${label}`,
+        icon: I[c.icon] ? c.icon : 'plug',
+        tab: c.tab,
+        mount: (body) => extRender(body, label, c),
+      })
+    }
+    renderMgrTabs()
+  }
+  function clearExtCards() {
+    if (!EXT.length && !EXT_LABEL) return
+    EXT = []
+    EXT_LABEL = ''
+    renderMgrTabs()
+  }
+
+  // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
+  // 真源仍是网关（preview.json）：缓存只是「上次所见」的快照，启动/切项目时先 hydrate 回来让
+  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（feature/preview-frame.js）。无缓存（首次访问）
+  // = 空表，照旧等网络清单——不猜不兜底。
+  function persistExtDecls(label, patch) {
+    if (!label) return
+    const d = readUI() || {}
+    const all = d.extDecls && typeof d.extDecls === 'object' ? { ...d.extDecls } : {}
+    all[label] = { ...(all[label] || {}), ...patch }
+    patchUI({ extDecls: all })
+  }
+  // 缓存 → 运行时表（同步、无网络）。放表而不清表：hydrate 只认「当前该项目」这一份，
+  // 异 label 清理仍归 syncExtCards / clearExtCards（不新增第二个清点）。
+  function hydrateExtCards(label) {
+    if (!label) return
+    const d = readUI()
+    const e = d && d.extDecls ? d.extDecls[label] : null
+    if (!e || typeof e !== 'object') return
+    if (Array.isArray(e.cards)) registerExtCards(label, e.cards, true)
+    if (Array.isArray(e.quoteActions)) registerQuoteActions(label, e.quoteActions)
+  }
+  // `ext:<label>:<cardId>` → 缓存恢复。卡 id 不含冒号（normExtCards 正则 [a-zA-Z0-9_-]{1,32}），
+  // 故 label = 最后一个冒号之前那段。路由恢复用（刷新直进 /manage/ext:…）。
+  function hydrateExtCardId(id) {
+    if (typeof id !== 'string' || !id.startsWith('ext:')) return false
+    const i = id.lastIndexOf(':')
+    if (i < 4) return false
+    hydrateExtCards(id.slice(4, i))
+    return true
+  }
+
+  // ---------- 项目申报的浮窗动作表（2026-09-28）----------
+  // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
+  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（feature/preview-frame.js syncExtCards /
+  // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
+  // 动作是纯数据、无 mount 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
+  // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
+  let QACTIONS = []
+  let QACTIONS_LABEL = ''
+  function registerQuoteActions(label, actions) {
+    if (!label) return
+    QACTIONS = normQuoteActions(actions)
+    QACTIONS_LABEL = label
+    persistExtDecls(label, { quoteActions: QACTIONS }) // 与 EXT 同一份申报、同一份缓存（同清同存）
+  }
+  function clearQuoteActions() {
+    if (!QACTIONS.length && !QACTIONS_LABEL) return
+    QACTIONS = []
+    QACTIONS_LABEL = ''
+  }
+  function quoteActions() {
+    return QACTIONS
+  }
+
+  // ---------- 应用目录与「已启用的应用」tab（2026-10-10）----------
+  // 应用 = 工作区根 <workroot>/.claude/preview/ 里申报的界面单元（preview.json 的 cards 段，经
+  // /gateway/preview-cards?label=<全局根> 取回）。**不扫描目录、不自动渲染**：清单只进插件卡的
+  // 「应用」列表（第三个 cat），由用户点「+」启用；**已启用**的应用才在侧栏生成 tab（APP_TABS），
+  // 点击走 openCard → 注入的 iframe 壳渲染其页（字段校验复用 engine/ext-decl.js，零第二份实现）。
+  // 与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
+  // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
+  // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
+  const GLOBAL_LABEL = '全局根 · 散装对话'
+  const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
+  let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
+  let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
+  let APPS_ENABLED = new Set()
+  let appSeq = 0
+
+  function loadEnabledApps() {
+    const d = readUI()
+    const list = d && Array.isArray(d[APPS_KEY]) ? d[APPS_KEY] : []
+    APPS_ENABLED = new Set(list.filter((x) => typeof x === 'string'))
+  }
+  function saveEnabledApps() {
+    patchUI({ [APPS_KEY]: [...APPS_ENABLED] })
+  }
+  function appCatalog() {
+    return APP_CATALOG
+  }
+  function isAppEnabled(id) {
+    return APPS_ENABLED.has(id)
+  }
+  // 启用/停用唯一写口：改集合 → 落盘 → 重建侧栏 tab。返回落定后的启用态（调用方据此重渲按钮）。
+  function setAppEnabled(id, on) {
+    if (typeof id !== 'string' || !id) return false
+    if (on) APPS_ENABLED.add(id)
+    else APPS_ENABLED.delete(id)
+    saveEnabledApps()
+    applyAppTabs()
+    renderMgrTabs()
+    return APPS_ENABLED.has(id)
+  }
+  // 目录 → 侧栏 tab（只取已启用者）。id 加 `app:` 前缀，与第一方裸词 id、EXT 的 `ext:` 零撞车。
+  function applyAppTabs() {
+    APP_TABS = APP_CATALOG.filter((c) => APPS_ENABLED.has(c.id)).map((c) => ({
+      id: `app:${c.id}`,
+      title: c.title,
+      tip: `${c.title} · 应用（工作区根）`,
+      icon: I[c.icon] ? c.icon : 'plug',
+      tab: c.tab,
+      mount: (body) => extRender(body, GLOBAL_LABEL, c),
+    }))
+  }
+  // 目录整份替换 + 落缓存快照（刷新即用；与 EXT 同一份缓存结构，key = 全局根 label）。
+  function setAppCatalog(cards) {
+    APP_CATALOG = normExtCards(cards)
+    persistExtDecls(GLOBAL_LABEL, { cards: APP_CATALOG })
+    applyAppTabs()
+    renderMgrTabs()
+  }
+  // 拉取点（唯一）：hideGate 补拉链调一次；断连重连自愈走同点。seq 守卫 = 只有最后一次响应可落目录。
+  // 取不到 = 工作区根未申报应用（不猜不兜底，目录照旧为空）。
+  function syncGlobalPlugins() {
+    loadEnabledApps() // 启用集合恒从盘上读（唯一真源；本函数也是「刷新/重连」的复位点）
+    const cached = readUI()
+    const e = cached && cached.extDecls ? cached.extDecls[GLOBAL_LABEL] : null
+    if (e && Array.isArray(e.cards)) setAppCatalog(e.cards) // 缓存快照先落（列表即刻可用）
+    else {
+      applyAppTabs()
+      renderMgrTabs()
+    }
+    const seq = ++appSeq
+    fetch(`/gateway/preview-cards?label=${encodeURIComponent(GLOBAL_LABEL)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+      .then((d) => {
+        if (seq !== appSeq) return
+        setAppCatalog((d && d.cards) || [])
+      })
+      .catch(() => {})
+  }
+
+  // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
+  // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
+  function renderMgrTabs() {
+    const box = $('mgr-tabs')
+    if (!box) return
+    box.innerHTML = CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)
+      .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
+      .join('')
+  }
+  // 启动引导：由入口（app.js 启动段）显式调用——各卡模块顶层 registerCard 已完成后再渲 tab，
+  // 避免模块求值期副作用（registry 须排在卡模块之前，故不能在自身顶层调 renderMgrTabs）。
+  function bootRegistry() { renderMgrTabs() }
+
+  // ---------- 槽位（#chat-area = 无形槽）：同一时刻恰好一张卡 ----------
+  // 管理/预览卡按需创建、离开即 .remove()——神经元图的 rAF 以 canvas.isConnected 自毁，
+  // display:none 不释放；会话卡改 hidden（其 DOM 是单例，见上）。
+  let curCardEl = null
+  function makeCard(id) {
+    const el = document.createElement('section')
+    el.className = 'view-card mgr'
+    el.dataset.view = id
+    el.innerHTML = '<div class="view-scroll"><div class="view-body"></div></div>'
+    return el
+  }
+  function showCard(el) {
+    if (el === curCardEl) return el
+    if (curCardEl && curCardEl !== sessionCard) curCardEl.remove()
+    curCardEl = el
+    sessionCard.hidden = el !== sessionCard
+    if (el !== sessionCard) chatArea.appendChild(el)
+    return el
+  }
+  // 同 id 的卡在场则复用：卡体整换但 .view-scroll 不动 ⇒ 滚动位置天然保持
+  // （旧版进管理视图手写 scrollTop 存取块因此退场）
+  function reuseOrMake(id) {
+    if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
+    return makeCard(id)
+  }
+  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
+  // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
+  // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
+  // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
+  function openCard(id, payload) {
+    const c = cardOf(id)
+    if (!c) return null
+    const prev = currentCardId()
+    if (prev && prev !== id) cardOf(prev)?.deactivate?.()
+    const el = showCard(c.card ? c.card() : reuseOrMake(c.id))
+    if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
+    return el
+  }
+  // 契约出口：卡外（如 preview-frame 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
+  function deactivateCard(id) {
+    cardOf(id)?.deactivate?.()
+  }
+  // 当前槽内卡的 id（'session' 表示会话卡在场；无卡返回 null）。work 模式切入时据此判定是否需先退卡。
+  function currentCardId() {
+    if (curCardEl === sessionCard) return 'session'
+    return curCardEl ? curCardEl.dataset.view : null
+  }
+  // 异步回程渲染守卫：本视图的卡仍在槽里才交出卡体（否则返回 null，调用方不渲染）
+  function viewBody(id) {
+    if (!curCardEl || curCardEl.dataset.view !== id) return null
+    return curCardEl.querySelector('.view-body')
+  }
+
+  // ---------- 外部卡片（卡片化二期）----------
+  // 用途：项目 `.claude/preview/` 里的界面单元（卡片）被 Floria web 内部调用——preview 在
+  // preview.json 的 cards 段静态声明，或由预览页 postMessage 实时注册；宿主只按声明的 host 摆位，
+  // **不解释卡片内容**（内容永远跑在它自己的文档里）。声明文件与 backend 段同一份申报表。
+  // 渲染 = 一卡一 iframe（`/preview/<label>/<path>`，同源）：preview 保持自包含（自带 css/js/
+  // 相对路径），与宿主 DOM/CSS/JS 零互相污染——一期 SPEC-视图卡化 §7「外部插件 = iframe」边界的延续。
+  // 契约：preview.json cards（网关 GET /gateway/preview-cards 读出，见 docs/gateway.md §6）
+  //       预览页 → 宿主 parent.postMessage({ type:'floria-cards-register', cards:[…] }, '*')
+  //       宿主 → 预览页沿用既有 floria-rail-action 通道，本模块不新增回发。
+
+  // 把一张外部卡的卡体写进宿主卡体（调用方 = registry 经 setExtCardRenderer 注入后 openCard 的 mount）
   function mountExtCard(body, label, card) {
     body.innerHTML =
       '<div class="ext-shell">' +
       `<iframe class="ext-frame" title="${esc(card.title)}" data-ext-card="${esc(card.id)}" src="${esc(extCardSrc(label, card))}"></iframe>` +
       '</div>'
   }
-
-  // ---------- 预览页注册的侧栏快捷按钮 · 状态与清点（2026-10-05 自 sidebar/rail-ext.js 迁入）----------
-  // 快捷按钮集（floria-rail-register 申报）与外部卡申报同属「当前预览文档」域，故其清点与 EXT 清点
-  // 同居本模块；preview-card / route 直接调 clearRailExt（不再横向 import sidebar/rail-ext.js）。
-  // 桥接与渲染（bindRailExtBridge / renderRailExt）留在 sidebar/rail-ext.js，经 setRailExtItems 写本表。
-  let railExtItems = []
-  function setRailExtItems(items) { railExtItems = items }
-  function clearRailExt() {
-    railExtItems = []
-    const box = $('rail-ext')
-    if (box) box.innerHTML = ''
-  }
+  // 顶层注入：registry 的 EXT/APP 描述符 mount 走 extRender 闭包，外部实现不 import 进 engine。
+  setExtCardRenderer(mountExtCard)
 
   // ---------- 预览卡 ----------
   // 槽位预览卡（openProjectPreview，独占主区）：与 work 右栏「预览态」（sidebar/work.js
-  // renderWorkPreview）复用同一份 mountPreview——后端容器 / 静态页 / 默认页三级链只有这一处实现。
-  // syncExtCards 另被 sidebar/work.js 的补拉链调（外部卡申报）。
+  // renderWorkPreview）复用同一份 mountPreview——后端容器 / 静态页 / 默认页三级链只有这一处实现，
+  // 在 feature/preview-frame.js。syncExtCards 亦在该件，供 sidebar/work.js 的补拉链调（外部卡申报）。
   const previewCardDef = {
     id: 'preview', title: '预览', tip: '项目预览', icon: 'folder', tab: false,
     mount(body, ctx) { mountPreview(body, ctx.payload.label, ctx.payload.hasPreview) },
   }
+  registerCard(previewCardDef)
+
+  // ---------- 插件卡（插件 / 技能 / 应用）----------
+  // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
+  // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 mgr.js。
+  // 「应用」cat 的数据源与启停口在 registry（APP_CATALOG / setAppEnabled）——本卡只呈现列表与按钮；
+  // 循环 import（registry → 本卡的 pluginsCardDef）是函数级调用，无求值期依赖。
+  // refresh 契约：卡外（mgr-data 拉完清单）经 refreshCard('plugins') 局部重渲本网格，不必懂本卡实现。
+  const pluginsCardDef = {
+    id: 'plugins', title: '插件', tip: '插件 / 技能 / 应用', icon: 'plug', tab: true,
+    mount(body, ctx) { renderMgrPlugins(body, ctx) },
+    refresh() { renderMgrGrid() },
+  }
+  registerCard(pluginsCardDef)
+
+  // 「插件/技能/应用」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
+  function renderMgrPlugins(body, ctx) {
+    const v = state.mgrView
+    const isApps = v.kind === 'apps'
+    const kindName = isApps ? '应用' : v.kind === 'skills' ? '技能' : '插件'
+    const sub = isApps
+      ? '工作区根 .claude/preview 申报的界面单元 · 点 + 启用后侧栏出现该应用 tab'
+      : v.kind === 'skills'
+        ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
+        : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
+    body.innerHTML =
+      '<div class="mgr-pane">' +
+      // 顶层切换＝「插件 / 技能 / 应用」三态：应用与插件/技能同轴，故并入同一段控件（原在公开/个人行）
+      '<div class="mgr-top">' +
+      '<div class="mgr-kind">' +
+      `<button class="mgr-kind-btn${v.kind === 'plugins' ? ' on' : ''}" data-kind="plugins">插件</button>` +
+      `<button class="mgr-kind-btn${v.kind === 'skills' ? ' on' : ''}" data-kind="skills">技能</button>` +
+      `<button class="mgr-kind-btn${v.kind === 'apps' ? ' on' : ''}" data-kind="apps">应用</button>` +
+      '</div>' +
+      '</div>' +
+      `<div class="mgr-head"><h2 class="mgr-title">${kindName}</h2><div class="mgr-sub">${sub}</div></div>` +
+      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${isApps ? '搜索应用…' : v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
+      // 公开/个人只对「插件 / 技能」轴有意义，应用态不显示该行
+      (isApps
+        ? ''
+        : '<div class="mgr-cats">' +
+          `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
+          `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
+          '</div>') +
+      '<div class="mgr-grid" id="mgr-grid"></div>' +
+      `<div class="mgr-foot">${isApps ? '数据源：工作区根 .claude/preview（/gateway/preview-cards）' : '数据源：网关 /gateway/plugins 实时扫描'}</div>` +
+      '</div>'
+    renderMgrGrid()
+    if (!isApps) loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉（应用目录由 registry 拉）
+    const pane = body.querySelector('.mgr-pane')
+    pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
+      b.addEventListener('click', () => {
+        v.kind = b.dataset.kind
+        saveMgrView()
+        ctx.rerender()
+      }),
+    )
+    pane.querySelectorAll('.mgr-cat').forEach((b) =>
+      b.addEventListener('click', () => {
+        v.cat = b.dataset.cat
+        saveMgrView()
+        ctx.rerender()
+      }),
+    )
+    const q = $('mgr-q')
+    if (q) q.addEventListener('input', () => { v.q = q.value; saveMgrView(); renderMgrGrid() })
+  }
+
+  // 插件/技能/应用卡片网格（按 kind + cat + 搜索词过滤；应用数据源 = registry 的 APP_CATALOG）
+  function renderMgrGrid() {
+    const v = state.mgrView
+    const grid = $('mgr-grid')
+    if (!grid) return
+    // 「应用」kind：列出工作区根申报的全部应用，右侧 + / ✓ 切换启用（启用即侧栏出现该应用 tab）
+    if (v.kind === 'apps') {
+      const q = (v.q || '').trim().toLowerCase()
+      const rows = appCatalog().filter((a) => !q || a.title.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+      grid.innerHTML = rows.length
+        ? rows.map(appCardHtml).join('')
+        : '<div class="mgr-empty">没有匹配的应用（工作区根 .claude/preview/preview.json 未申报应用）</div>'
+      grid.querySelectorAll('.app-toggle').forEach((b) =>
+        b.addEventListener('click', () => {
+          setAppEnabled(b.dataset.app, !isAppEnabled(b.dataset.app))
+          renderMgrGrid() // 启用态只影响本网格按钮，局部重渲即可（侧栏 tab 由 setAppEnabled 内 renderMgrTabs 刷新）
+        }),
+      )
+      return
+    }
+    const label = v.kind === 'skills' ? '技能' : '插件'
+    if (MGR_LOADING) {
+      grid.innerHTML = '<div class="mgr-empty">加载真实清单中…</div>'
+      return
+    }
+    if (MGR_ERR) {
+      grid.innerHTML =
+        '<div class="mgr-empty">清单加载失败：' + esc(MGR_ERR) +
+        '<br><button class="mgr-retry" id="mgr-retry">重试</button></div>'
+      const retry = $('mgr-retry')
+      if (retry) retry.addEventListener('click', () => loadMgrData(true))
+      return
+    }
+    const src = (MGR && MGR[v.kind] && MGR[v.kind][v.cat]) || []
+    const q = (v.q || '').trim().toLowerCase()
+    const rows = q ? src.filter((x) => x.n.toLowerCase().includes(q) || x.d.toLowerCase().includes(q)) : src
+    grid.innerHTML = rows.length
+      ? rows.map(mgrCardHtml).join('')
+      : `<div class="mgr-empty">没有匹配的${label}</div>`
+  }
+  function mgrCardHtml(x) {
+    const badge = x.inst ? '<span class="inst-badge">已安装</span>' : ''
+    return (
+      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(x.n)}">${esc((x.n[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-meta"><div class="mgr-name">${esc(x.n)}${badge}</div><div class="mgr-desc">${esc(x.d)}</div></div>` +
+      '<button class="mgr-more" title="更多">…</button></div>'
+    )
+  }
+  // 应用胶囊：+（未启用）/ ✓（已启用）为唯一动作；已启用整卡不另设入口（点击 tab 在侧栏）
+  function appCardHtml(a) {
+    const on = isAppEnabled(a.id)
+    return (
+      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-meta"><div class="mgr-name">${esc(a.title)}${on ? '<span class="inst-badge">已启用</span>' : ''}</div>` +
+      `<div class="mgr-desc">${esc(a.id)} · ${esc(a.path)}</div></div>` +
+      `<button class="mgr-more app-toggle${on ? ' on' : ''}" data-app="${esc(a.id)}" title="${on ? '停用（移除侧栏 tab）' : '启用（侧栏出现该应用 tab）'}">${on ? '✓' : '+'}</button></div>`
+    )
+  }
+
+  // ---------- 会话卡 ----------
+  const sessionCardDef = {
+    id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false,
+    card: () => sessionCard,
+    deactivate: teardownSessionView,
+  }
+  registerCard(sessionCardDef)
 
   // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
   // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
   // preview.json，registerExtCards / registerQuoteActions 再校一遍（postMessage 那条不过网关，
-  // 两条外部输入共用 ext-card.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
+  // 两条外部输入共用 engine/ext-decl.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
   // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
   let extCardsSeq = 0
   function syncExtCards(label) {
@@ -3941,381 +4455,18 @@ function setFirstSendHash(v) { firstSendHash = v }
       })
   }
 
-  // ---------- 插件卡（插件 / 技能 / 应用）----------
-  // 每张卡自包含：mount(host, ctx) 只把内容写进交给它的卡体（host = .view-body）；卡内「整卡重渲」
-  // （切 kind/cat）走 ctx.rerender() 由单一通道出，不反向依赖 mgr.js。
-  // 「应用」cat 的数据源与启停口在 registry（APP_CATALOG / setAppEnabled）——本卡只呈现列表与按钮；
-  // 循环 import（registry → 本卡的 pluginsCardDef）是函数级调用，无求值期依赖。
-  const pluginsCardDef = {
-    id: 'plugins', title: '插件', tip: '插件 / 技能 / 应用', icon: 'plug', tab: true,
-    mount(body, ctx) { renderMgrPlugins(body, ctx) },
+  // ---------- 预览页注册的侧栏快捷按钮 · 状态与清点（2026-10-05 自 sidebar/rail-ext.js 迁入）----------
+  // 快捷按钮集（floria-rail-register 申报）与外部卡申报同属「当前预览文档」域，故其清点与 EXT 清点
+  // 同居本模块；preview-frame 内部（mountPreview 重挂）直接调 clearRailExt（不再横向 import
+  // sidebar/rail-ext.js）。桥接与渲染（bindRailExtBridge / renderRailExt）留在 sidebar/rail-ext.js，
+  // 经 setRailExtItems 写本表。
+  let railExtItems = []
+  function setRailExtItems(items) { railExtItems = items }
+  function clearRailExt() {
+    railExtItems = []
+    const box = $('rail-ext')
+    if (box) box.innerHTML = ''
   }
-
-  // 「插件/技能/应用」卡体（id='plugins' 的默认形态，即侧栏第一 tab）
-  function renderMgrPlugins(body, ctx) {
-    const v = state.mgrView
-    const isApps = v.kind === 'apps'
-    const kindName = isApps ? '应用' : v.kind === 'skills' ? '技能' : '插件'
-    const sub = isApps
-      ? '工作区根 .claude/preview 申报的界面单元 · 点 + 启用后侧栏出现该应用 tab'
-      : v.kind === 'skills'
-        ? '个人 = 已安装技能（扫描便携根 .claude/skills）· 公开 = 官方市场技能'
-        : '个人 = 已安装插件（扫描便携根 .claude/plugins）· 公开 = 官方市场插件'
-    body.innerHTML =
-      '<div class="mgr-pane">' +
-      // 顶层切换＝「插件 / 技能 / 应用」三态：应用与插件/技能同轴，故并入同一段控件（原在公开/个人行）
-      '<div class="mgr-top">' +
-      '<div class="mgr-kind">' +
-      `<button class="mgr-kind-btn${v.kind === 'plugins' ? ' on' : ''}" data-kind="plugins">插件</button>` +
-      `<button class="mgr-kind-btn${v.kind === 'skills' ? ' on' : ''}" data-kind="skills">技能</button>` +
-      `<button class="mgr-kind-btn${v.kind === 'apps' ? ' on' : ''}" data-kind="apps">应用</button>` +
-      '</div>' +
-      '</div>' +
-      `<div class="mgr-head"><h2 class="mgr-title">${kindName}</h2><div class="mgr-sub">${sub}</div></div>` +
-      `<div class="mgr-search">${I.mag}<input id="mgr-q" type="text" placeholder="${isApps ? '搜索应用…' : v.kind === 'skills' ? '搜索技能…' : '搜索插件…'}" value="${esc(v.q)}"></div>` +
-      // 公开/个人只对「插件 / 技能」轴有意义，应用态不显示该行
-      (isApps
-        ? ''
-        : '<div class="mgr-cats">' +
-          `<button class="mgr-cat${v.cat === 'public' ? ' on' : ''}" data-cat="public">公开</button>` +
-          `<button class="mgr-cat${v.cat === 'personal' ? ' on' : ''}" data-cat="personal">个人</button>` +
-          '</div>') +
-      '<div class="mgr-grid" id="mgr-grid"></div>' +
-      `<div class="mgr-foot">${isApps ? '数据源：工作区根 .claude/preview（/gateway/preview-cards）' : '数据源：网关 /gateway/plugins 实时扫描'}</div>` +
-      '</div>'
-    renderMgrGrid()
-    if (!isApps) loadMgrData(false) // 真实数据：首次进入拉取，刷新按钮 force 重拉（应用目录由 registry 拉）
-    const pane = body.querySelector('.mgr-pane')
-    pane.querySelectorAll('.mgr-kind-btn').forEach((b) =>
-      b.addEventListener('click', () => {
-        v.kind = b.dataset.kind
-        saveMgrView()
-        ctx.rerender()
-      }),
-    )
-    pane.querySelectorAll('.mgr-cat').forEach((b) =>
-      b.addEventListener('click', () => {
-        v.cat = b.dataset.cat
-        saveMgrView()
-        ctx.rerender()
-      }),
-    )
-    const q = $('mgr-q')
-    if (q) q.addEventListener('input', () => { v.q = q.value; saveMgrView(); renderMgrGrid() })
-  }
-
-  // 插件/技能/应用卡片网格（按 kind + cat + 搜索词过滤；应用数据源 = registry 的 APP_CATALOG）
-  function renderMgrGrid() {
-    const v = state.mgrView
-    const grid = $('mgr-grid')
-    if (!grid) return
-    // 「应用」kind：列出工作区根申报的全部应用，右侧 + / ✓ 切换启用（启用即侧栏出现该应用 tab）
-    if (v.kind === 'apps') {
-      const q = (v.q || '').trim().toLowerCase()
-      const rows = appCatalog().filter((a) => !q || a.title.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
-      grid.innerHTML = rows.length
-        ? rows.map(appCardHtml).join('')
-        : '<div class="mgr-empty">没有匹配的应用（工作区根 .claude/preview/preview.json 未申报应用）</div>'
-      grid.querySelectorAll('.app-toggle').forEach((b) =>
-        b.addEventListener('click', () => {
-          setAppEnabled(b.dataset.app, !isAppEnabled(b.dataset.app))
-          renderMgrGrid() // 启用态只影响本网格按钮，局部重渲即可（侧栏 tab 由 setAppEnabled 内 renderMgrTabs 刷新）
-        }),
-      )
-      return
-    }
-    const label = v.kind === 'skills' ? '技能' : '插件'
-    if (MGR_LOADING) {
-      grid.innerHTML = '<div class="mgr-empty">加载真实清单中…</div>'
-      return
-    }
-    if (MGR_ERR) {
-      grid.innerHTML =
-        '<div class="mgr-empty">清单加载失败：' + esc(MGR_ERR) +
-        '<br><button class="mgr-retry" id="mgr-retry">重试</button></div>'
-      const retry = $('mgr-retry')
-      if (retry) retry.addEventListener('click', () => loadMgrData(true))
-      return
-    }
-    const src = (MGR && MGR[v.kind] && MGR[v.kind][v.cat]) || []
-    const q = (v.q || '').trim().toLowerCase()
-    const rows = q ? src.filter((x) => x.n.toLowerCase().includes(q) || x.d.toLowerCase().includes(q)) : src
-    grid.innerHTML = rows.length
-      ? rows.map(mgrCardHtml).join('')
-      : `<div class="mgr-empty">没有匹配的${label}</div>`
-  }
-  function mgrCardHtml(x) {
-    const badge = x.inst ? '<span class="inst-badge">已安装</span>' : ''
-    return (
-      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(x.n)}">${esc((x.n[0] || '?').toUpperCase())}</div>` +
-      `<div class="mgr-meta"><div class="mgr-name">${esc(x.n)}${badge}</div><div class="mgr-desc">${esc(x.d)}</div></div>` +
-      '<button class="mgr-more" title="更多">…</button></div>'
-    )
-  }
-  // 应用胶囊：+（未启用）/ ✓（已启用）为唯一动作；已启用整卡不另设入口（点击 tab 在侧栏）
-  function appCardHtml(a) {
-    const on = isAppEnabled(a.id)
-    return (
-      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>` +
-      `<div class="mgr-meta"><div class="mgr-name">${esc(a.title)}${on ? '<span class="inst-badge">已启用</span>' : ''}</div>` +
-      `<div class="mgr-desc">${esc(a.id)} · ${esc(a.path)}</div></div>` +
-      `<button class="mgr-more app-toggle${on ? ' on' : ''}" data-app="${esc(a.id)}" title="${on ? '停用（移除侧栏 tab）' : '启用（侧栏出现该应用 tab）'}">${on ? '✓' : '+'}</button></div>`
-    )
-  }
-
-  // ---------- 会话卡 ----------
-  const sessionCardDef = {
-    id: 'session', title: '会话', tip: '会话', icon: 'logo', tab: false,
-    card: () => sessionCard,
-    deactivate: teardownSessionView,
-  }
-
-
-  // ---------- 第一方卡片注册表 ----------
-  // 会话卡描述符自 views/cards/session/session-card.js 引入（一模块一卡；card() 返回既存单例
-  // #session-card，deactivate=teardownSessionView）；插件卡与预览卡同态各自成模块。
-  // 「项目 / 模型 / 神经元」三卡自 2026-10-10 起不再是第一方卡——改由工作区根以应用形式申报、
-  // 用户在插件卡「应用」列表里手动启用（APP_TABS 见下），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
-  const CARDS = [sessionCardDef, pluginsCardDef, previewCardDef]
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || APP_TABS.find((c) => c.id === id) || EXT.find((c) => c.id === id)
-
-  // ---------- 运行时外部卡表（卡片化二期）----------
-  // 外部（<项目>/.claude/preview/ 申报）卡只活在这里，与第一方 CARDS 分表存放：外部卡没有 mount
-  // 代码，只有宿主生成的 iframe 壳（views/cards/ext/ext-card.js）——外部永不获得在宿主 DOM 执行的能力。
-  // id 命名空间 `ext:<label>:<id>`（第一方 id 全是裸词，零撞车）；EXT_LABEL 记录本表属于哪个项目。
-  // 两条来源汇入 registerExtCards：①网关 /gateway/preview-cards（preview.json 静态清单，replace=true
-  // 整份替换）②预览页 postMessage floria-cards-register（同 id 覆盖 + 追加，页面最了解自己有什么卡）。
-  // 生命周期不变量：外部卡集恒属于「当前 .preview-frame 所指项目」——异 label 硬挂载 / 文档重挂即
-  // 清（清点收在 views/cards/preview/preview-card.js 的 syncExtCards，与 clearRailExt 同点）；**离开预览路由
-  // 不清**，否则用户点外部卡 tab 的瞬间卡就被清没了。
-  let EXT = []
-  let EXT_LABEL = ''
-  function registerExtCards(label, cards, replace) {
-    if (!label) return
-    if (replace || EXT_LABEL !== label) { EXT = []; EXT_LABEL = label }
-    const list = normExtCards(cards)
-    // 网关权威快照（replace=true）落盘：EXT 只活在内存里，刷新即空 ⇒ 不落盘则刷新后
-    // 外部卡 tab 缺失、/manage/ext:<label>:<id> 直进无卡可解析（见下方 hydrateExtCards）。
-    // postMessage 增量注册不落盘——那是预览页的实时补充，混进快照会让缓存随文档生命周期漂移。
-    if (replace) persistExtDecls(label, { cards: list })
-    for (const c of list) {
-      const id = `ext:${label}:${c.id}`
-      EXT = EXT.filter((v) => v.id !== id) // 同 id 覆盖，不改位置语义（后注册者在列表尾）
-      EXT.push({
-        id,
-        title: c.title,
-        tip: `${c.title} · ${label}`,
-        icon: I[c.icon] ? c.icon : 'plug',
-        tab: c.tab,
-        mount: (body) => mountExtCard(body, label, c),
-      })
-    }
-    renderMgrTabs()
-  }
-  function clearExtCards() {
-    if (!EXT.length && !EXT_LABEL) return
-    EXT = []
-    EXT_LABEL = ''
-    renderMgrTabs()
-  }
-
-  // ---------- 外部卡申报的持久化（与 work/管理态同一条 floria-ui-v1 链，分表存 extDecls）----------
-  // 真源仍是网关（preview.json）：缓存只是「上次所见」的快照，启动/切项目时先 hydrate 回来让
-  // tab 与路由即刻可用，随后 syncExtCards 拉新整份覆盖（preview-card.js）。无缓存（首次访问）
-  // = 空表，照旧等网络清单——不猜不兜底。
-  function persistExtDecls(label, patch) {
-    if (!label) return
-    const d = readUI() || {}
-    const all = d.extDecls && typeof d.extDecls === 'object' ? { ...d.extDecls } : {}
-    all[label] = { ...(all[label] || {}), ...patch }
-    patchUI({ extDecls: all })
-  }
-  // 缓存 → 运行时表（同步、无网络）。放表而不清表：hydrate 只认「当前该项目」这一份，
-  // 异 label 清理仍归 syncExtCards / clearExtCards（不新增第二个清点）。
-  function hydrateExtCards(label) {
-    if (!label) return
-    const d = readUI()
-    const e = d && d.extDecls ? d.extDecls[label] : null
-    if (!e || typeof e !== 'object') return
-    if (Array.isArray(e.cards)) registerExtCards(label, e.cards, true)
-    if (Array.isArray(e.quoteActions)) registerQuoteActions(label, e.quoteActions)
-  }
-  // `ext:<label>:<cardId>` → 缓存恢复。卡 id 不含冒号（normExtCards 正则 [a-zA-Z0-9_-]{1,32}），
-  // 故 label = 最后一个冒号之前那段。路由恢复用（刷新直进 /manage/ext:…）。
-  function hydrateExtCardId(id) {
-    if (typeof id !== 'string' || !id.startsWith('ext:')) return false
-    const i = id.lastIndexOf(':')
-    if (i < 4) return false
-    hydrateExtCards(id.slice(4, i))
-    return true
-  }
-
-  // ---------- 项目申报的浮窗动作表（2026-09-28）----------
-  // preview.json 的 quoteActions 段 → 宿主侧常驻表。选中引用浮窗（inputbar/quote.js）打开时与内置
-  // 动作合流渲染。与 EXT 同一份申报来源、同一生命周期与清理点（preview-card.js syncExtCards /
-  // mountPreview 重挂）——不变量：动作表恒属于「当前 .preview-frame 所指项目」。
-  // 动作是纯数据、无 mount 代码：点击只把 id 回发预览页（floria-quote-action），执行留在项目页面里。
-  // 本版唯一来源 = preview.json 静态段（不做 postMessage 实时注册）。
-  let QACTIONS = []
-  let QACTIONS_LABEL = ''
-  function registerQuoteActions(label, actions) {
-    if (!label) return
-    QACTIONS = normQuoteActions(actions)
-    QACTIONS_LABEL = label
-    persistExtDecls(label, { quoteActions: QACTIONS }) // 与 EXT 同一份申报、同一份缓存（同清同存）
-  }
-  function clearQuoteActions() {
-    if (!QACTIONS.length && !QACTIONS_LABEL) return
-    QACTIONS = []
-    QACTIONS_LABEL = ''
-  }
-  function quoteActions() {
-    return QACTIONS
-  }
-
-  // ---------- 应用目录与「已启用的应用」tab（2026-10-10）----------
-  // 应用 = 工作区根 <workroot>/.claude/preview/ 里申报的界面单元（preview.json 的 cards 段，经
-  // /gateway/preview-cards?label=<全局根> 取回）。**不扫描目录、不自动渲染**：清单只进插件卡的
-  // 「应用」列表（第三个 cat），由用户点「+」启用；**已启用**的应用才在侧栏生成 tab（APP_TABS），
-  // 点击走 openCard → mountExtCard 渲染其 iframe 页（壳与字段校验复用 cards/ext/ext-card.js，零第二份
-  // 实现）。与 EXT 分表：EXT 属于「当前 .preview-frame 所指项目」、进出预览即清（clearExtCards）；
-  // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
-  // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
-  const GLOBAL_LABEL = '全局根 · 散装对话'
-  const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
-  let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
-  let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
-  let APPS_ENABLED = new Set()
-  let appSeq = 0
-
-  function loadEnabledApps() {
-    const d = readUI()
-    const list = d && Array.isArray(d[APPS_KEY]) ? d[APPS_KEY] : []
-    APPS_ENABLED = new Set(list.filter((x) => typeof x === 'string'))
-  }
-  function saveEnabledApps() {
-    patchUI({ [APPS_KEY]: [...APPS_ENABLED] })
-  }
-  function appCatalog() {
-    return APP_CATALOG
-  }
-  function isAppEnabled(id) {
-    return APPS_ENABLED.has(id)
-  }
-  // 启用/停用唯一写口：改集合 → 落盘 → 重建侧栏 tab。返回落定后的启用态（调用方据此重渲按钮）。
-  function setAppEnabled(id, on) {
-    if (typeof id !== 'string' || !id) return false
-    if (on) APPS_ENABLED.add(id)
-    else APPS_ENABLED.delete(id)
-    saveEnabledApps()
-    applyAppTabs()
-    renderMgrTabs()
-    return APPS_ENABLED.has(id)
-  }
-  // 目录 → 侧栏 tab（只取已启用者）。id 加 `app:` 前缀，与第一方裸词 id、EXT 的 `ext:` 零撞车。
-  function applyAppTabs() {
-    APP_TABS = APP_CATALOG.filter((c) => APPS_ENABLED.has(c.id)).map((c) => ({
-      id: `app:${c.id}`,
-      title: c.title,
-      tip: `${c.title} · 应用（工作区根）`,
-      icon: I[c.icon] ? c.icon : 'plug',
-      tab: c.tab,
-      mount: (body) => mountExtCard(body, GLOBAL_LABEL, c),
-    }))
-  }
-  // 目录整份替换 + 落缓存快照（刷新即用；与 EXT 同一份缓存结构，key = 全局根 label）。
-  function setAppCatalog(cards) {
-    APP_CATALOG = normExtCards(cards)
-    persistExtDecls(GLOBAL_LABEL, { cards: APP_CATALOG })
-    applyAppTabs()
-    renderMgrTabs()
-  }
-  // 拉取点（唯一）：hideGate 补拉链调一次；断连重连自愈走同点。seq 守卫 = 只有最后一次响应可落目录。
-  // 取不到 = 工作区根未申报应用（不猜不兜底，目录照旧为空）。
-  function syncGlobalPlugins() {
-    loadEnabledApps() // 启用集合恒从盘上读（唯一真源；本函数也是「刷新/重连」的复位点）
-    const cached = readUI()
-    const e = cached && cached.extDecls ? cached.extDecls[GLOBAL_LABEL] : null
-    if (e && Array.isArray(e.cards)) setAppCatalog(e.cards) // 缓存快照先落（列表即刻可用）
-    else {
-      applyAppTabs()
-      renderMgrTabs()
-    }
-    const seq = ++appSeq
-    fetch(`/gateway/preview-cards?label=${encodeURIComponent(GLOBAL_LABEL)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-      .then((d) => {
-        if (seq !== appSeq) return
-        setAppCatalog((d && d.cards) || [])
-      })
-      .catch(() => {})
-  }
-
-  // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
-  // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
-  function renderMgrTabs() {
-    const box = $('mgr-tabs')
-    if (!box) return
-    box.innerHTML = CARDS.concat(APP_TABS, EXT).filter((v) => v.tab)
-      .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
-      .join('')
-  }
-
-  // ---------- 槽位（#chat-area = 无形槽）：同一时刻恰好一张卡 ----------
-  // 管理/预览卡按需创建、离开即 .remove()——神经元图的 rAF 以 canvas.isConnected 自毁，
-  // display:none 不释放；会话卡改 hidden（其 DOM 是单例，见上）。
-  let curCardEl = null
-  function makeCard(id) {
-    const el = document.createElement('section')
-    el.className = 'view-card mgr'
-    el.dataset.view = id
-    el.innerHTML = '<div class="view-scroll"><div class="view-body"></div></div>'
-    return el
-  }
-  function showCard(el) {
-    if (el === curCardEl) return el
-    if (curCardEl && curCardEl !== sessionCard) curCardEl.remove()
-    curCardEl = el
-    sessionCard.hidden = el !== sessionCard
-    if (el !== sessionCard) chatArea.appendChild(el)
-    return el
-  }
-  // 同 id 的卡在场则复用：卡体整换但 .view-scroll 不动 ⇒ 滚动位置天然保持
-  // （旧版进管理视图手写 scrollTop 存取块因此退场）
-  function reuseOrMake(id) {
-    if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
-    return makeCard(id)
-  }
-  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
-  // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
-  // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
-  // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
-  // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
-  function openCard(id, payload) {
-    const c = cardOf(id)
-    if (!c) return null
-    const prev = currentCardId()
-    if (prev && prev !== id) cardOf(prev)?.deactivate?.()
-    const el = showCard(c.card ? c.card() : reuseOrMake(c.id))
-    if (c.mount) c.mount(el.querySelector('.view-body'), { id: c.id, payload, rerender: (p) => openCard(id, p) })
-    return el
-  }
-  // 契约出口：卡外（如 preview-card 硬进入分支）可显式卸某卡视图态，不必懂该卡的清理清单。
-  function deactivateCard(id) {
-    cardOf(id)?.deactivate?.()
-  }
-  // 当前槽内卡的 id（'session' 表示会话卡在场；无卡返回 null）。work 模式切入时据此判定是否需先退卡。
-  function currentCardId() {
-    if (curCardEl === sessionCard) return 'session'
-    return curCardEl ? curCardEl.dataset.view : null
-  }
-  // 异步回程渲染守卫：本视图的卡仍在槽里才交出卡体（否则返回 null，调用方不渲染）
-  function viewBody(id) {
-    if (!curCardEl || curCardEl.dataset.view !== id) return null
-    return curCardEl.querySelector('.view-body')
-  }
-
-  renderMgrTabs()
 
   const WK_TOOL_DEFS = []
 
@@ -4373,6 +4524,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')
   }
+
+  // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名（state.wkPanes[<label>]），与 core/ui-state.js 初值对应。
+  const WK_PANES_DEF = { workspace: true, sidebar: false }
 
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
@@ -5129,7 +5283,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
-    loadWorkPanes(label) // 新项目：有槽恢复该项目的开关，无槽回落缺省
+    loadWorkPanes(label, WK_PANES_DEF) // 新项目：有槽恢复该项目的开关，无槽回落缺省（缺省值归 work 领域）
     state.workFile = ''
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
@@ -6073,7 +6227,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 启动一次：恢复持久化状态 → 绑定事件 → 落地（顺序不可换：绑定要先于 applySbMode 的渲染，
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
-    loadWork()
+    loadWork(WK_PANES_DEF)
     // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
     // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
     hydrateExtCards(state.workProj)
@@ -6858,10 +7012,8 @@ function setFirstSendHash(v) { firstSendHash = v }
       .appr-md hr{border:none;border-top:1px solid var(--border);margin:8px 0}
       .appr-md a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
       .appr-md code{background:var(--border-soft);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
-      .appr-md .code-block{position:relative;margin:6px 0;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--field-2)}
-      .appr-md .code-block pre{margin:0;padding:10px 12px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--text);white-space:pre}
-      .appr-md .code-block code{background:transparent;padding:0;font-size:inherit}
-      .appr-md .code-block .code-lang{position:absolute;top:6px;right:10px;font-size:10px;color:var(--text-3);font-family:var(--mono)}
+      /* .code-block 系列（2026-10-10）已收口到 styles.css 的「.appr-md .code-block」作用域（含头栏/换行/hljs），
+         此处不再重复——注入样式晚于 <link> 会盖掉新设计（旧绝对定位 .code-lang 等）。 */
       .appr-md .md-table{margin:6px 0;overflow-x:auto}
       .appr-md .md-table table{border-collapse:collapse;font-size:12.5px;width:100%}
       .appr-md .md-table th,.appr-md .md-table td{border:1px solid var(--border);padding:5px 9px;text-align:left;white-space:normal;word-break:break-word}
@@ -6960,42 +7112,18 @@ function setFirstSendHash(v) { firstSendHash = v }
   // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
   // 令牌保留 kind 供两端差异化渲染 + 未来插件激活扩展）。
-  const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
-  const MENTION_SESSION_RE = /\[会话:([^\]]+)\]/g
   // @ 提及 icon（2026-09-28 换 dsh v0.2.0-rc.1 产品图标集，16 描线/currentColor；旧 24 手绘那套作废）。
   // 语义与 dsh 一致：会话=ChatLines、插件=PluginPinwheel、技能=Skill、目录=FolderClose、文件=Browse
-  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。
+  // ——与 + 浮窗行图标同源（同一批 I.* 常量），两处不得分叉。会话/文件两枚随 chip 构造器下移 core/mention-syntax.js。
   const MENTION_PLUGIN_ICON = I.dshPlugin
   const MENTION_SKILL_ICON = I.dshSkill
-  const MENTION_SESSION_ICON = I.dshChat
   // ---------- 目录 / 文件引用（2026-09-26）：@ 浮窗与 + 工具栏共用的一组「逐级浏览工作区根」状态 ----------
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
-  // 路径同基准（用户定案：相对全局根）。令牌 [@目录:路径] / [@文件:路径] 刻意与上传附件占位 [文件:<路径>]
-  // 不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
-  const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
-  // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
-  // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
-  // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
-  // 不会抢「引用」。
-  const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
-  // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
-  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
-  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
-  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
-  // 回复引用的**原文块**：`[@引用回复:N|标题]\n<原文>\n[/引用回复]`。原文是给模型看的 payload
-  // （回复无文件位置可查，原文必须进消息），**气泡里不得出现**（2026-09-28 用户实报「为什么文本
-  // 信息也在气泡里」）——渲染层先把整块压回单一令牌，再由 QUOTE_REPLY_RE 出胶囊。剥内部令牌、
-  // 模型侧原文不动，与 messages.js 剥 `[Image #N]`/`[文件:路径]` 占位是同一套手法。
+  // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
   const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
-  // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
-  // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
-  // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。带**原文块**（同回复引用
-  // `QUOTE_REPLY_BODY_RE` 手法）：① PDF 定位不精确 ② 大 PDF 必须给页码提示 ③ 选中原文才是要引用的 payload。
-  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
-  const MENTION_FILE_ICON = I.dshFile
   const MENTION_UP_ICON = I.dshUp
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
@@ -7024,13 +7152,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       .map((it, i) => ({ it, i, g: GROUP_ORDER.indexOf(groupOf(it)) }))
       .sort((a, b) => (a.g - b.g) || (a.i - b.i))
       .map((x) => x.it)
-  }
-
-  // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
-  // 见 src/utils/sessionAddressing.ts）。渲染一律只显示标题，sid 是给工具用的寻址键。
-  function splitSessionToken(v) {
-    const i = String(v).indexOf('|')
-    return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
   }
 
   // ---------- 目录 / 文件浏览（数据层；两个浮窗共用，渲染各自负责） ----------
@@ -7114,39 +7235,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     return chip
   }
 
-  // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
-  // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
-  // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
-  function mentionChipHtml(kind, name, ptype) {
-    if (kind === 'path') {
-      const label = '@' + name
-      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
-    }
-    const label = kind === 'session' ? splitSessionToken(name).title : name
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
-  }
-
-  // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
-  // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
-  function quoteRefChipHtml(path, l0, l1) {
-    const name = String(path).split('/').pop()
-    const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
-  }
-  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
-  function quoteReplyChipHtml(idx, title) {
-    const t = String(title || '').trim() || '本会话'
-    const label = `引用自「${t}」· 第 ${idx} 条回复`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
-  }
-  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
-  // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
-  function quotePdfChipHtml(path, p0, p1) {
-    const name = String(path).split('/').pop()
-    const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
-    const label = `引用自 ${name}${pages}`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
-  }
+  // chip HTML 构造器（mentionChipHtml / quote*ChipHtml）与令牌正则、splitSessionToken 已下移
+  // core/mention-syntax.js（core 叶子，供 core/markdown.js 与本源共用，断开 core→feature 成环）。
 
   // 引用 chip → 消息文本。两条链的落地形态刻意不同（用户定案 2026-09-28）：
   //  文件引用 = 只给位置，模型自己 Read；
@@ -9738,7 +9828,7 @@ function setGateVerified(v) { gateVerified = v }
   //
   // 2026-09-28 扩展（项目注册）：浮窗改为「**内置动作 + 当前项目申报动作**分表合流」。动作表由项目在
   // `<项目>/.claude/preview/preview.json` 的 `quoteActions` 段静态申报（与 cards 同构、同一拉取点），
-  // 经 views/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
+  // 经 engine/registry.js 的 registerQuoteActions 落表、本模块 quoteActions() 读。第二来源 = 项目预览页
   // （iframe）——它的选区在宿主看来不可达（跨文档 getSelection 不达），故由预览页 postMessage 自报：
   // `floria-quote-open`（开窗）/ `floria-quote-close`（关窗），宿主点申报动作行回发 `floria-quote-action`。
   // 执行逻辑**留在项目页面自己的运行上下文**（要调 Pj13 的 API 与 pdf 状态），宿主只回发 id、不代执行。
@@ -10286,6 +10376,7 @@ function setGateVerified(v) { gateVerified = v }
   ;(async () => {
     await detectGateway()
     await loadSessions()
+    initCodeBlock() // 代码块软换行偏好（localStorage）——须在首次 mdHtml 渲染之前
     initLive()
     initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)
@@ -10299,6 +10390,9 @@ function setGateVerified(v) { gateVerified = v }
     // 2026-10-06 根修「work 刷新多出一枚新会话胶囊」：先把真实路由 hash 落地，否则 initWork→applyPanes
     // 的开放集兜底（wkEnsureTab(wkActiveKey())）会读到尚未赋值的 currentHash('') ⇒ 当哨兵 'new' 塞一枚。
     state.currentHash = bootHash()
+    // 卡注册表引导：各卡模块已在模块求值期 registerCard 入表，此处显式渲一次侧栏 tab
+    // （registry 不再在自身顶层渲染，避免模块求值期副作用；须在 initWork/route 之前就位）。
+    bootRegistry()
     initWork()
     route()
     if (GATEWAY) initGateway()

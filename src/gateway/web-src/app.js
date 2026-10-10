@@ -16,6 +16,7 @@ import { bootRegistry } from './engine/registry.js'
 import { loadSessions } from './engine/sessions.js'
 import { inputEl, overlay, sInput, sidebar, state } from './engine/state.js'
 import { isMobile } from './core/util.js'
+import { initCodeBlock } from './core/markdown.js'
 import { saveMgrView } from './core/storage.js'
 import { initViewport } from './engine/viewport.js'
 import { gwSend } from './inputbar/send.js'
@@ -130,6 +131,7 @@ import { initWork, setSbMode } from './sidebar/work.js'
   ;(async () => {
     await detectGateway()
     await loadSessions()
+    initCodeBlock() // 代码块软换行偏好（localStorage）——须在首次 mdHtml 渲染之前
     initLive()
     initViewport() // 键盘弹出适配（visualViewport）：只压缩消息流底界与底栏
     setPanel(false)

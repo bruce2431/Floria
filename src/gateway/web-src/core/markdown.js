@@ -65,6 +65,56 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     return raw ? ` data-md="${phAttr(raw)}"` : ''
   }
 
+  // ---------- 围栏代码块渲染（2026-10-10 codex 化：语法高亮 + 头栏 + 软换行） ----------
+  // 高亮复用内置网关已 vendored 的 codemirror-live-markdown `highlightCode`（lowlight/highlight.js，
+  // 输出 hljs-* 类；见 vendor/codemirror/live-markdown.js，全局 window.CMLiveMarkdown）——不自建高亮器。
+  // 语言为空/库缺失/未注册 → highlightCodeHtml 返 null，正文回落「已转义纯文本」（不预判语言，禁猜高亮）。
+  const CB_WRAP_KEY = 'floria-code-wrap'
+  let cbWrapOn = true // 默认软换行（用户 2026-10-10 定案「没有自动换行」；持久化偏好见 initCodeBlock）
+  // 头栏图标（16px 线性，currentColor；不引 core/icons 以免动全局图标表）
+  const CB_ICON_COPY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+  const CB_ICON_WRAP = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h13a3 3 0 0 1 0 6h-3"/><path d="M17 15l-3 3 3 3"/><path d="M4 18h6"/></svg>'
+  // 高亮原码：入参必须是「未转义」的原始代码（lowlight 内部自行 escapeHtml，给已转义文本会二次转义）。
+  // lang 为空/库缺失/语言未注册 → null = 调用方走已转义纯文本。
+  function highlightCodeHtml(raw, lang) {
+    const CM = typeof window !== 'undefined' ? window.CMLiveMarkdown : null
+    if (!CM || !CM.highlightCode || !lang) return null
+    try {
+      const r = CM.highlightCode(raw, lang)
+      return r && r.html ? r.html : null
+    } catch (_) { return null }
+  }
+  // esc 的逆（markdown.js 入口已整体转义一次；closeCode 拿到的 raw 是**已转义**文本，喂给高亮前要还原，
+  // 否则 `<`→`&lt;` 被 lowlight 再转成 `&amp;lt;` 显示错）。&amp; 必须最后解（防 `&amp;lt;` 二次解码）。
+  const unesc = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+  // 代码块 HTML：头栏（语言名 + 换行/复制按钮）+ pre>code（高亮 HTML 或已转义纯文本）。
+  // data-md=fence 挂最外层（复制/选区复制靠它还原源码）；复制按钮的原文由消费端读 pre>code.textContent
+  // （高亮只包 span 不改文本，textContent 即原始代码，无需另存）。lang 已是 esc 后文本，直接落属性不再转义。
+  function renderCodeBlock(f, lang, text) {
+    const tag = lang ? `<span class="code-lang">${lang}</span>` : '<span class="code-lang">代码</span>'
+    const hi = highlightCodeHtml(unesc(text), lang)
+    const body = hi != null ? hi : text
+    const head = '<div class="code-head">' + tag +
+      `<div class="code-acts"><button type="button" class="code-btn cb-wrap" title="切换自动换行" aria-label="切换自动换行">${CB_ICON_WRAP}</button>` +
+      `<button type="button" class="code-btn cb-copy" title="复制" aria-label="复制">${CB_ICON_COPY}</button></div></div>`
+    return `<div class="code-block${cbWrapOn ? ' wrap' : ''}"${mdAttr(f)}${hi != null ? ' data-lang="' + lang + '"' : ''}>${head}<pre><code>${body}</code></pre></div>`
+  }
+  // 换行偏好初始化（web-src/app.js 顶层调用一次）：读 localStorage 覆盖默认值。
+  function initCodeBlock() {
+    try {
+      const v = localStorage.getItem(CB_WRAP_KEY)
+      if (v === '0') cbWrapOn = false
+      else if (v === '1') cbWrapOn = true
+    } catch (_) {}
+  }
+  // 切换软换行（委托点击处理）——同步持久化偏好 + 全页现有代码块。
+  function toggleCodeWrap() {
+    cbWrapOn = !cbWrapOn
+    try { localStorage.setItem(CB_WRAP_KEY, cbWrapOn ? '1' : '0') } catch (_) {}
+    document.querySelectorAll('.code-block').forEach((el) => el.classList.toggle('wrap', cbWrapOn))
+    return cbWrapOn
+  }
+
   function mdInline(s) {
     // s 必须是已转义文本（来自 mdHtml 入口）
     const codes = []
@@ -138,12 +188,11 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (!inCode) return
       const raw = codeBuf.join('\n')
       const fence = '```' + codeLang + '\n' + raw + '\n```' // data-md：围栏原文重建
-      const langTag = codeLang ? `<span class="code-lang">${codeLang}</span>` : ''
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
         html += `<div class="chart-embed"${mdAttr(fence)}><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
       } else {
-        html += `<div class="code-block"${mdAttr(fence)}><pre><code>${raw}</code></pre>${langTag}</div>`
+        html += renderCodeBlock(fence, codeLang, raw)
       }
       codeBuf = []; codeLang = ''; inCode = false
     }
@@ -306,10 +355,12 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
 export {
   MD_LINK_OK,
   MD_MONO,
+  initCodeBlock,
   mdHtml,
   mdInline,
   messageMd,
   relTime,
   selectionMd,
   setImageSrcResolver,
+  toggleCodeWrap,
 }

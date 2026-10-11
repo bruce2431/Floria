@@ -43,10 +43,8 @@
       body.innerHTML = '<div class="wk-ed-empty">未选择项目</div>'
       return
     }
-    if (wkEdFile !== state.workFile) {
-      readFile(state.workFile)
-      return
-    }
+    // 返回载入 Promise（新文件才读盘）：调用方要等「文档真进编辑器」才能定位行（如卡片 src-open 跳行）
+    if (wkEdFile !== state.workFile) return readFile(state.workFile)
     renderEdBody()
   }
 
@@ -237,7 +235,7 @@
     saveWork()
     applyPanes()
     renderWorkBody()
-    renderEditor()
+    await renderEditor() // 等文档真正进编辑器再返回（调用方据此在正确文档上定位行）
   }
 
   // 关掉打开的文件（顶栏文件 pill 的 ×）：pending 编辑先落盘（不因关 tab 丢改动），清 workFile，

@@ -91,7 +91,9 @@ function getVersionChangelog(): string {
 // 完全惰性（isEnabled 恒真但 checkPermissions 无授权目标即拒），进默认收益 = 免专用 flag 构建即可实测。
 // 2026-09-17 用户定案：NEURON_RAG（神经元内置检索/记忆）进默认特性——认知全链已实测闭环，
 // 不再需要专用 flag 构建（--feature=NEURON_RAG 显式传入仅剩命名作用）。
-const defaultFeatures = ['VOICE_MODE', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'PRIVATE_GATEWAY', 'REACTIVE_COMPACT', 'SESSION_LINK', 'NEURON_RAG']
+// 2026-10-11 用户定案：CARD_API（卡片公开 API 的 agent 侧工具 CardCall）进默认特性——门控点 =
+// tools.ts 登记 + CardCallTool.isEnabled()（feature('CARD_API')）；无浏览器在场时 list 返回空、call 明确报错。
+const defaultFeatures = ['VOICE_MODE', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'PRIVATE_GATEWAY', 'REACTIVE_COMPACT', 'SESSION_LINK', 'NEURON_RAG', 'CARD_API']
 const featureSet = new Set(defaultFeatures)
 // 显式 --feature=X 的代号集合：用于输出 exe 以 feature 代号命名（feature 构建不复用默认 cli-dev 名，避免互相覆盖）
 const explicitFeatures = new Set<string>()

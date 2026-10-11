@@ -13,6 +13,7 @@ import { itemHtml, openRenameDialog, registerRowMenu, reliftRowMenu, setPanel } 
 import { cmtInvalidate, cmtLoad, cmtMount, cmtRangesFor, cmtRender, cmtSetHooks } from './comments.js'
 import { renderProjSeat } from '../inputbar/commands.js'
 import { mountPreview, syncExtCards } from '../feature/preview-frame.js'
+import { cardBus } from '../engine/card-bus.js'
 import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkToolDefs, wkToolNormId } from './work-tools.js'
 /* @module sidebar/work.js */
   // ---------- work 模式侧栏（Prism 式） ----------

@@ -311,3 +311,18 @@ work 右栏评论 tab + 选区「添加评论」的存取侧（[web-ui.md](web-u
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（评论段 10 例：空读、写+计数、落 `.claude/comments.json`、回读、整份替换、非数组 400、非对象元素过滤、坏 JSON / 顶层非对象 → 空、两端点存在且转译结果码；临时树 `os.tmpdir()` 自清）。
 
 **读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款；**MIME 分类 = 静态表优先、未登记扩展名落 `sniffBinary()` 内容嗅探**——前 8 KB 无 NUL 判文本 → `text/plain; charset=utf-8`，见 [web-ui.md](web-ui.md) §43）**现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按相对路径读盘，`.claude/images/` 仅是普通路径。**`label` 不做 scope 筛选**：项目会话 `label`=项目名（解析到项目根），全局根会话 `label`=`全局根 · 散装对话`（解析到工作区根）——两者标签空间不重叠（项目 label 是目录名、不含 `·`），故全局会话同样能取图。单图受 `GET /gateway/file` 的 4 MB 上限约束。
+
+## 18. 卡片公开 API 端点（`/gateway/cards`、`/gateway/card-call`，2026-10-11）
+
+agent 驱动浏览器里「在场卡片」的网关侧链路（总设计 → [web-ui.md](web-ui.md) §61）。卡片活在 iframe 里：进程外无法寻址、也没有身份 ⇒ **唯一既能寻址又持有鉴权的一层是宿主总线**（`web-src/engine/card-bus.js`），网关只做「按能力表选设备 + 转发 + 配对」。
+
+- **两张内存表**：`cardHolders: Map<WebSocket,{caps,at}>`（浏览器 `/ws` 上报的能力表，断连即摘）；`pendingCardCalls: Map<callId,{ws,resolve,timer}>`（在途调用，断连/超时收口）。设备提示 `wsDevice`（`/ws?device=`）**仅供展示**，不参与寻址。
+- **WS 上行帧**：`{type:'card-caps', caps:[…]}`（宿主每次表变/`onopen` 上报，整体替换该连接的表；空数组即摘表）；`{type:'card-result', callId, ok, result?, error?}`（在途调用回执）。
+- **WS 下行帧**：`{type:'card-call', callId, target, cmd, args, timeoutMs}`。
+- **`GET /gateway/cards`** → `{devices, cards:[{label,instanceId,kind,ns,cmds,ready,device}]}`（只读能力表，供 `CardCall` 的 list）。`sanitizeCaps` 落表前收口：**无 `instanceId` 的条目直接丢**（不可寻址）、`cmds` 截 64、最多 200 条。
+- **`POST /gateway/card-call`** body `{label?,ns?,instanceId?,cmd,args?,timeoutMs?}` → 选设备 `pickCardHolder`（**instanceId 最精确 > ns > label**，可叠加 `label` 收窄 ns；多台命中取**最近上报**的那台——**绝不广播猜测**，否则 PC+iPad 的卡同时动）→ 下行 → 等 `card-result` 配对 → HTTP 响应。
+- **错误语义（真值表）**：缺 `cmd` 或三个寻址键全空 → **400**；无浏览器在线（`sockets` 空）→ **503**；有浏览器但无匹配卡 → **409**（附当场能力表 `{target, cards}`，agent 可直接改址重试）；卡超时 / 持卡设备中途断开 → **504**。**卡内命令失败（卡回 `ok:false`，如「未注册的命令 x」）走 HTTP 200 `{ok:false,error,card}`**——那是卡的正常答复而非传输错误，混成 4xx/5xx 会让 agent 误以为链路坏了而反复重试。超时 clamp `500..60000ms`。
+- **CLI 侧出口**：`src/utils/gatewayClient.ts` 的 `listGatewayCards()` / `callGatewayCard()`（HTTP 超时取 `timeoutMs+2000`，让网关的 504 先到）+ 模型工具 `CardCall`（`src/tools/CardCallTool/`，`feature('CARD_API')` 门控，进 `defaultFeatures`）。
+- **探针锚点**：`probes/probe-web-cards-api.ts`（§ 网关帧型/路由/状态码真值表 与 CLI 侧 `listGatewayCards`/`callGatewayCard`、工具/feature 登记的字面量一致性）。
+
+

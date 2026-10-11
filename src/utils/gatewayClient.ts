@@ -822,6 +822,96 @@ export async function fetchDirectorySnapshot(): Promise<{
   return { sessions, projects }
 }
 
+/**
+ * 卡片公开 API（2026-10-11）：浏览器内「在场卡片」的能力表元素，与 web 侧 cardBus.listCaps 同形，
+ * 另带 device（上报该卡的浏览器设备提示）。卡片 = web 前端的预览帧 / 外置卡 / 内联卡。
+ */
+export type GatewayCardCap = {
+  label?: string
+  instanceId?: string
+  kind?: string
+  ns?: string
+  cmds?: string[]
+  ready?: boolean
+  device?: string
+}
+
+export type CardListResult =
+  | { ok: true; devices: number; cards: GatewayCardCap[] }
+  | { ok: false; error: string }
+
+export type CardCallResult =
+  | { ok: true; result: unknown; card?: GatewayCardCap }
+  | { ok: false; error: string; card?: GatewayCardCap }
+
+export type CardCallRequest = {
+  label?: string
+  ns?: string
+  instanceId?: string
+  cmd: string
+  args?: Record<string, unknown>
+  timeoutMs?: number
+}
+
+const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/**
+ * 在场卡片能力表（GET /gateway/cards）：列浏览器内所有已就绪/在线的卡及其公开命令。
+ * 只读查询，失败回 { ok:false } 不抛（调用方——card_call 的 list 动作——据 ok 判成败）。
+ */
+export async function listGatewayCards(): Promise<CardListResult> {
+  const token = getGatewayToken()
+  const url = `${gatewayBaseUrl()}/gateway/cards${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return { ok: false, error: `网关卡片表查询失败（HTTP ${res.status}）` }
+    const payload = (await res.json()) as { devices?: unknown; cards?: unknown }
+    return {
+      ok: true,
+      devices: typeof payload.devices === 'number' ? payload.devices : 0,
+      cards: Array.isArray(payload.cards) ? (payload.cards as GatewayCardCap[]) : [],
+    }
+  } catch (e) {
+    return { ok: false, error: `网关卡片表查询失败：${errText(e)}` }
+  }
+}
+
+/**
+ * 驱动浏览器里的一张卡（POST /gateway/card-call）：网关按能力表选**持卡的那台浏览器**
+ * （instanceId > ns > label，最近上报优先），下行 card-call → 前端 cardBus 转译 → ack 回传。
+ *
+ * 超时 clamp 500..60000ms，且本端 HTTP 超时取 timeoutMs+2000 —— 让网关「卡超时 504」先到，
+ * 否则本端先断连会丢掉网关带回的当场能力表。错误语义（网关侧既定）：503 无浏览器 / 409 无卡 /
+ * 504 卡超时或设备中途断开；卡内命令失败（ok:false）走 **200**，故此处按 payload.ok 判而非 res.ok。
+ */
+export async function callGatewayCard(req: CardCallRequest): Promise<CardCallResult> {
+  const token = getGatewayToken()
+  const url = `${gatewayBaseUrl()}/gateway/card-call${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  const timeoutMs = Number.isFinite(req.timeoutMs)
+    ? Math.max(500, Math.min(req.timeoutMs as number, 60_000))
+    : 8000
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...req, timeoutMs }),
+      signal: AbortSignal.timeout(timeoutMs + 2000),
+    })
+    const payload = (await res.json().catch(() => ({}))) as {
+      ok?: unknown
+      result?: unknown
+      error?: unknown
+      card?: unknown
+    }
+    const card = payload.card as GatewayCardCap | undefined
+    if (res.ok && payload.ok !== false) return { ok: true, result: payload.result, card }
+    const error = typeof payload.error === 'string' ? payload.error : `卡片调用失败（HTTP ${res.status}）`
+    return { ok: false, error, card }
+  } catch (e) {
+    return { ok: false, error: `卡片调用失败：${errText(e)}` }
+  }
+}
+
 let queueSubscriptionAttached = false
 
 /**

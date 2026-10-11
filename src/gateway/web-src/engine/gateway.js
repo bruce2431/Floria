@@ -3,6 +3,7 @@
 import { deviceHint, showGate, gatePlayTransition, hideGate } from './auth.js'
 import { inputEl, setConnUp, state } from './state.js'
 import { toast } from '../core/util.js'
+import { cardBus } from './card-bus.js'
 /* @module engine/gateway.js */
   // ---------- 网关模式（SubPj2 私有化网关）----------
   // 检测 /gateway/health 返回 mode==='gateway' 即启用：composer 可发、WS 双向、工具审批。
@@ -48,6 +49,13 @@ import { toast } from '../core/util.js'
       return res.ok
     } catch { return false }
   }
+
+  // 卡片公开 API（2026-10-11）：帧能力表经 /ws 上行的唯一发送口。注入进 engine/card-bus.js（总线不
+  // import 本件，免 engine 内成环，同 setTabRefresh/setExtCardRenderer 手法）；注入即补报一次，此后
+  // 帧表一变 / 卡 ready / 本函数所在的 onopen 各触发一次（总线内 50ms 防抖合并）。
+  cardBus.setGatewaySender((m) => {
+    if (gws && gws.readyState === 1) gws.send(JSON.stringify(m))
+  })
 
   function gatewayCss() {
     const s = document.createElement('style')
@@ -217,6 +225,7 @@ import { toast } from '../core/util.js'
       if (gateAwait) gatePlayTransition() // 门流程：播过渡视频（白板拉伸成输入栏/角色转正趴栏），ended 后 hideGate
       else hideGate() // URL 带 token 直连（无门）：验证通过直接解锁
       gwSendPort.syncGwSend()
+      cardBus.reportCaps() // 卡片能力表：连上/重连即补报（网关侧随连接断开已摘表，重连必须重报）
       gwApproval.sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
     }
     gws.onclose = () => {
@@ -269,6 +278,10 @@ import { toast } from '../core/util.js'
         if (msg.session_id && msg.session_id !== state.currentHash) return
         if (gwApproval.getApprovalPending()) { gwApproval.setApprovalPending(null) }
         if (gwApproval.getTakeover() === 'approval') gwApproval.clearTakeover()
+      } else if (msg.type === 'card-call') {
+        // 卡片公开 API（2026-10-11）agent→卡：网关 POST /gateway/card-call 下行至此 → 总线查帧表、
+        // 翻成卡的 `<ns>-cmd`，ack 由总线经 card-result 原路回网关。本件只做收发，不懂卡。
+        cardBus.handleGatewayCall(msg)
       } else if (msg.type === 'status') gwApproval.addSystem(msg.state)
     }
   }

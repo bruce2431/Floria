@@ -32,6 +32,9 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'core/mention-syntax.js', part: 1 },
   { file: 'core/markdown.js', part: 1 },
   { file: 'core/util.js', part: 2 },
+  // 卡片公开 API 总线（engine/card-bus.js，唯一顶层名 cardBus）：只依赖 engine/state.js + core/util.js，
+  // 自身无 import 上层；各挂点（ext-card / preview-frame / gateway / work-mount）在本行之后 ⇒ 排此即足。
+  { file: 'engine/card-bus.js', part: 1 },
   { file: 'engine/sessions.js', part: 1 },
   { file: 'engine/live.js', part: 1 },
   { file: 'chat/route.js', part: 1 },

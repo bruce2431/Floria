@@ -2460,6 +2460,58 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
+  // 卡片公开 API · 只读能力表：GET /gateway/cards → 当前在线浏览器上报的全部帧能力表（agent 据此决定
+  // 调哪张卡：instanceId 最精确，或按 label/ns 寻址）。devices = 上报过能力表的浏览器连接数（一台设备
+  // 一条 /ws）；每条卡带 device（?device= 自报类型）便于同 ns 多机时自己分辨。
+  if (req.method === 'GET' && url.pathname === '/gateway/cards') {
+    sendJson(res, 200, { devices: cardHolders.size, cards: listAllCaps() })
+    return
+  }
+  // 卡片公开 API · agent 驱动卡：POST /gateway/card-call {label?,ns?,instanceId?,cmd,args?,timeoutMs?}
+  // → 挑一台持卡设备下行 → 前端总线翻成卡的 `<ns>-cmd` → ack 原路回来。
+  // 状态语义：无浏览器在线 503；有浏览器但目标卡不在场 409（附当场能力表，agent 可直接改地址重试）；
+  // 卡超时 / 持卡设备中途断开 504。**卡自己回 ok:false 是 HTTP 200**（「未注册的命令 x」是卡给的
+  // 正常答复，不是传输错误——把两者混成 4xx/5xx 会让 agent 误以为链路坏了而反复重试）。
+  if (req.method === 'POST' && url.pathname === '/gateway/card-call') {
+    let cc: Record<string, unknown>
+    try {
+      cc = await readReportBody(req)
+    } catch (e) {
+      sendReportBodyError(res, e)
+      return
+    }
+    const ccCmd = typeof cc.cmd === 'string' ? cc.cmd.trim() : ''
+    if (!ccCmd) {
+      sendJson(res, 400, { error: 'missing cmd' })
+      return
+    }
+    const ccTarget = {
+      label: typeof cc.label === 'string' ? cc.label : '',
+      ns: typeof cc.ns === 'string' ? cc.ns : '',
+      instanceId: typeof cc.instanceId === 'string' ? cc.instanceId : '',
+    }
+    if (!ccTarget.label && !ccTarget.ns && !ccTarget.instanceId) {
+      sendJson(res, 400, { error: 'missing target (label / ns / instanceId 至少其一)' })
+      return
+    }
+    if (!sockets.size) {
+      sendJson(res, 503, { error: '当前无浏览器在线，卡片命令无处可达' })
+      return
+    }
+    const ccHit = pickCardHolder(ccTarget)
+    if (!ccHit) {
+      sendJson(res, 409, { error: '目标卡不在场', target: ccTarget, cards: listAllCaps() })
+      return
+    }
+    const ccTimeout = Math.max(500, Math.min(Number.isFinite(cc.timeoutMs) ? Number(cc.timeoutMs) : 8000, 60000))
+    const ccOut = await callBrowserCard(ccHit.ws, ccTarget, ccCmd, cc.args ?? {}, ccTimeout)
+    const ccWhere = { instanceId: ccHit.cap.instanceId, label: ccHit.cap.label, ns: ccHit.cap.ns }
+    if (ccOut.kind === 'ok') sendJson(res, 200, { ok: true, result: ccOut.result, card: ccWhere })
+    else if (ccOut.kind === 'err') sendJson(res, 200, { ok: false, error: ccOut.error, card: ccWhere })
+    else if (ccOut.kind === 'timeout') sendJson(res, 504, { error: `卡片命令超时（${ccTimeout}ms）：${ccCmd}`, card: ccWhere })
+    else sendJson(res, 504, { error: '持卡设备已断开', card: ccWhere })
+    return
+  }
   // 文件内容读取：/gateway/file?label=<会话 label>&path=<相对路径> → 原始字节
   // （供个性化预览页识图渲染 Obsidian canvas / 加载图片音频视频 / 会话消息里 AI 生成图取图）。
   // label 不做 scope 筛选：项目会话 label=<项目名>（fDir=项目根），全局根会话 label=「全局根 · 散装对话」
@@ -3209,8 +3261,128 @@ function sanitizeInboundImages(raw: unknown): Array<{ id?: number; content: stri
   return out
 }
 
+// ============================================================================
+// 卡片公开 API（2026-10-11）：agent → 浏览器里的卡
+// ============================================================================
+// 卡活在 iframe 里：进程外无法寻址、也没有身份（浏览器给的物理边界——卡只认识 window.parent）。唯一
+// 既**能寻址**又**持有鉴权**的一层是宿主（web 前端总线 engine/card-bus.js）。故链路只有一条：
+//   宿主把每帧能力表（label/instanceId/ns/cmds/ready）经 /ws 的 {type:'card-caps'} 报上来
+//   → agent 侧 POST /gateway/card-call → 本网关挑一台持卡设备下行 {type:'card-call',callId,target,cmd,args}
+//   → 前端总线把 target 解析成具体帧、翻成卡的 `<ns>-cmd` → 卡的 ack 沿总线回 {type:'card-result',callId}
+//   → 本网关按 callId 配对，落成 HTTP 响应。
+// **卡片侧对此全程无感（零改动）**；卡↔宿主 / 卡↔卡两向根本不经过网关（在浏览器总线内闭环）。
+type CardCap = { label?: string; instanceId?: string; kind?: string; ns?: string; cmds?: string[]; ready?: boolean }
+/** 上报过能力表的浏览器连接（key = /ws socket）。at = 最近一次上报时刻（多设备歧义的裁决依据） */
+const cardHolders = new Map<WebSocket, { ws: WebSocket; caps: CardCap[]; at: number }>()
+/** 设备自报类型（/ws?device= hint）：仅用于 /gateway/cards 展示与多设备时人工分辨，不参与寻址 */
+const wsDevice = new WeakMap<WebSocket, string>()
+type CardOutcome =
+  | { kind: 'ok'; result: unknown }
+  | { kind: 'err'; error: string }
+  | { kind: 'timeout' }
+  | { kind: 'gone' }
+const pendingCardCalls = new Map<
+  string,
+  { ws: WebSocket; resolve: (o: CardOutcome) => void; timer: ReturnType<typeof setTimeout> }
+>()
+
+/** 前端上报的能力表落表前的收口：无 instanceId 的条目不可寻址，直接丢（总线恒会带） */
+function sanitizeCaps(v: unknown): CardCap[] {
+  if (!Array.isArray(v)) return []
+  const out: CardCap[] = []
+  const str = (x: unknown): string => (typeof x === 'string' ? x : '')
+  for (const it of v) {
+    if (!it || typeof it !== 'object') continue
+    const c = it as Record<string, unknown>
+    const instanceId = str(c.instanceId)
+    if (!instanceId) continue
+    out.push({
+      label: str(c.label),
+      instanceId,
+      kind: str(c.kind),
+      ns: str(c.ns),
+      cmds: Array.isArray(c.cmds) ? c.cmds.filter((x): x is string => typeof x === 'string').slice(0, 64) : [],
+      ready: c.ready === true,
+    })
+    if (out.length >= 200) break
+  }
+  return out
+}
+
+function listAllCaps(): Array<CardCap & { device: string }> {
+  const out: Array<CardCap & { device: string }> = []
+  for (const h of cardHolders.values()) {
+    for (const c of h.caps) out.push({ ...c, device: wsDevice.get(h.ws) || '' })
+  }
+  return out
+}
+
+/**
+ * 挑持卡设备：instanceId 最精确 > ns > label（可叠加 label 收窄 ns）；命中多台 → 取**最近上报**的那台。
+ * 绝不广播猜测：广播会让两台设备（PC + iPad）的卡同时动。命中 0 返回 null（调用方按 503/409 区分）。
+ */
+function pickCardHolder(t: { label: string; ns: string; instanceId: string }): { ws: WebSocket; cap: CardCap } | null {
+  let best: { ws: WebSocket; cap: CardCap; at: number } | null = null
+  for (const h of cardHolders.values()) {
+    for (const c of h.caps) {
+      if (t.instanceId) {
+        if (c.instanceId !== t.instanceId) continue
+      } else if (t.ns) {
+        if (c.ns !== t.ns) continue
+        if (t.label && c.label !== t.label) continue
+      } else if (t.label) {
+        if (c.label !== t.label) continue
+      } else {
+        continue
+      }
+      if (!best || h.at > best.at) best = { ws: h.ws, cap: c, at: h.at }
+    }
+  }
+  return best ? { ws: best.ws, cap: best.cap } : null
+}
+
+/** 持卡 socket 断开：摘登记 + 在途调用当场收口（设备没了就是没了，不白等超时） */
+function dropCardHolder(ws: WebSocket): void {
+  cardHolders.delete(ws)
+  for (const [id, p] of pendingCardCalls) {
+    if (p.ws !== ws) continue
+    clearTimeout(p.timer)
+    pendingCardCalls.delete(id)
+    p.resolve({ kind: 'gone' })
+  }
+}
+
+/** 下行一次卡片调用并等回执。恒 resolve（不 reject），超时/断连是 outcome 的两种形态。 */
+function callBrowserCard(ws: WebSocket, target: unknown, cmd: string, args: unknown, timeoutMs: number): Promise<CardOutcome> {
+  const callId = randomUUID()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingCardCalls.delete(callId)
+      resolve({ kind: 'timeout' })
+    }, timeoutMs)
+    pendingCardCalls.set(callId, { ws, resolve, timer })
+    try {
+      ws.send(JSON.stringify({ type: 'card-call', callId, target, cmd, args, timeoutMs }))
+    } catch {
+      clearTimeout(timer)
+      pendingCardCalls.delete(callId)
+      resolve({ kind: 'gone' })
+    }
+  })
+}
+
+/** ?device= 自报类型（同 /gateway/activate 与 upgrade 的取值口径） */
+function deviceHintOf(req: import('node:http').IncomingMessage): string {
+  try {
+    const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`)
+    return (url.searchParams.get('device') || '').trim().slice(0, 32)
+  } catch {
+    return ''
+  }
+}
+
 function handleWsMessage(ws: WebSocket, raw: string): void {
-  let data: { type?: string; text?: string; requestId?: string; allowed?: boolean; sessionId?: string; toolUseId?: string; input?: unknown; answers?: Record<string, string>; permissions?: unknown; images?: unknown }
+  let data: { type?: string; text?: string; requestId?: string; allowed?: boolean; sessionId?: string; toolUseId?: string; input?: unknown; answers?: Record<string, string>; permissions?: unknown; images?: unknown; caps?: unknown; callId?: string; ok?: boolean; result?: unknown; error?: unknown }
   try {
     data = JSON.parse(raw)
   } catch {
@@ -3356,6 +3528,24 @@ function handleWsMessage(ws: WebSocket, raw: string): void {
       // 2026-08-30 pending 重放：切会话/重连订阅时补弹该会话未决审批/提问（瞬态广播被
       // currentHash 过滤丢弃或页面未开的场景；已解决项不回放）。
       pendingApprovalsReplay(ws, sid)
+      break
+    }
+    case 'card-caps': {
+      // 前端总线帧表变更即上报（总线内 50ms 防抖），整份替换本连接的快照。空表 = 该设备当前无卡，
+      // 摘登记而非留空表（否则 409 会列出已离场的卡）。
+      const caps = sanitizeCaps(data.caps)
+      if (caps.length) cardHolders.set(ws, { ws, caps, at: Date.now() })
+      else cardHolders.delete(ws)
+      break
+    }
+    case 'card-result': {
+      // 卡的 ack 经前端总线回传：按 callId 配对（「哪一帧、哪条命令」的收口在前端 bus 内，网关不重复判）
+      const id = typeof data.callId === 'string' ? data.callId : ''
+      const p = id ? pendingCardCalls.get(id) : undefined
+      if (!p) break
+      clearTimeout(p.timer)
+      pendingCardCalls.delete(id)
+      p.resolve(data.ok === false ? { kind: 'err', error: String(data.error || '卡片命令失败') } : { kind: 'ok', result: data.result })
       break
     }
     case 'ping':
@@ -4132,8 +4322,9 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   })
   wss = new WebSocketServer({ noServer: true })
   startSocketHeartbeat() // ① 心跳：/ws 与 /clients 的僵尸连接回收（stopLocalGateway 统一停）
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
     sockets.add(ws)
+    wsDevice.set(ws, deviceHintOf(req)) // 卡片能力表的设备标签（仅展示/人工分辨用）
     markAlive(ws) // 心跳接驳：/ws 断链检测（僵尸回收，见 startSocketHeartbeat）
     scheduleIdleShutdown()
     // 2026-08-27 移除「connected」状态广播：此前每次 WS 连接 broadcast {type:'status',state:'connected'}，
@@ -4143,11 +4334,13 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
     })
     ws.on('close', () => {
       sockets.delete(ws)
+      dropCardHolder(ws) // 卡片能力表随连接消失：在途卡片调用当场收口（504 设备已断开）
       detachWebSessionClient(ws) // 2026-08-24 订阅修复：断开即摘除 web 会话订阅
       scheduleIdleShutdown()
     })
     ws.on('error', () => {
       sockets.delete(ws)
+      dropCardHolder(ws)
       detachWebSessionClient(ws)
       scheduleIdleShutdown()
     })

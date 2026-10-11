@@ -17,6 +17,8 @@
  *   - engine/registry.js（卡片契约，2026-10-10 自 views/registry.js 下沉）
  *   - engine/ext-runtime.js（外部卡运行时表 + 应用目录 + 浮窗动作表，2026-10-10 Phase 5 自 registry 拆出）
  *   - engine/ext-decl.js（外部申报纯校验/壳 src 串，契约层共享底座）
+ *   - engine/card-bus.js（卡片公开 API 总线：帧实例表 + 命令通道 + 跨卡 broker + 能力表，2026-10-11；
+ *     卡挂表只需 import 它，是卡片对外接口的共享底座）
  *   - feature/preview-frame.js（项目预览帧渲染实现：preview 卡 mountPreview、ext 卡 rail-ext 状态；
  *     属显式登记的共享底座，非「卡 → 兄弟子系统」）
  *   - 卡**自身目录** `./*`（含子目录，同目录组件随卡）
@@ -65,6 +67,7 @@ const ALLOW_EXACT = new Set([
   'engine/registry.js', // 卡片契约（2026-10-10 自 views/registry.js 下沉）
   'engine/ext-runtime.js', // 外部卡运行时表 + 应用目录（2026-10-10 Phase 5 自 registry.js 拆出）
   'engine/ext-decl.js', // 外部申报纯校验/壳 src 串（契约层共享底座）
+  'engine/card-bus.js', // 卡片公开 API 总线（帧表/命令通道/跨卡 broker/能力表，2026-10-11）
   'feature/preview-frame.js', // 项目预览帧渲染实现（显式登记的共享底座）
 ])
 const EXCEPTIONS: Record<string, string[]> = {

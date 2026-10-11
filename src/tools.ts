@@ -80,6 +80,10 @@ const getSendMessageTool = () =>
 const getSessionSendTool = () =>
   require('./tools/SessionSendTool/SessionSendTool.js')
     .SessionSendTool as typeof import('./tools/SessionSendTool/SessionSendTool.js').SessionSendTool
+// 2026-10-11 卡片公开 API（CardCall）：同法懒加载；生效判据在工具自身 isEnabled（feature('CARD_API')）。
+const getCardCallTool = () =>
+  require('./tools/CardCallTool/CardCallTool.js')
+    .CardCallTool as typeof import('./tools/CardCallTool/CardCallTool.js').CardCallTool
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { AskUserQuestionTool } from './tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import { LSPTool } from './tools/LSPTool/LSPTool.js'
@@ -244,6 +248,7 @@ export function getAllBaseTools(): Tools {
     ...(isWorktreeModeEnabled() ? [EnterWorktreeTool, ExitWorktreeTool] : []),
     getSendMessageTool(),
     getSessionSendTool(),
+    getCardCallTool(),
     ...(ListPeersTool ? [ListPeersTool] : []),
     ...(isAgentSwarmsEnabled()
       ? [getTeamCreateTool(), getTeamDeleteTool()]

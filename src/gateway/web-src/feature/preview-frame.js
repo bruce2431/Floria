@@ -7,6 +7,7 @@ import { state } from '../engine/state.js'
 import { esc } from '../core/util.js'
 import { deactivateCard, openCard, viewBody } from '../engine/registry.js'
 import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteActions } from '../engine/ext-runtime.js'
+import { cardBus } from '../engine/card-bus.js'
 /* @module feature/preview-frame.js */
   // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
   // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
@@ -61,7 +62,10 @@ import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteAction
     if (!container) return
     // 换项目 = 换源：上一份的帧留不得（软重入只对同 label 成立）
     const prev = container.querySelector('.preview-frame')
-    if (prev && prev.dataset.label !== label) container.innerHTML = ''
+    if (prev && prev.dataset.label !== label) {
+      cardBus.unregisterFrame(prev.__cardKey) // 换项目 = 上一份帧彻底拆除：表项当场注销（不等 isConnected 失格）
+      container.innerHTML = ''
+    }
     // 预览 iframe 挂在 .preview-body 里（该层由下面的 shell 建立，软重入时原样保留）
     if (!container.querySelector('.preview-body')) {
       container.innerHTML =
@@ -81,6 +85,8 @@ import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteAction
         // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
         if (cur.getAttribute('src') !== src) { clearRailExt(); syncExtCards(label); cur.setAttribute('src', src) }
         state.previewMounted = src.includes('/default-preview/') ? null : label
+        // 软重入也回表：同 el 复用 key，但 resetFrame 清掉旧文档的 ns/ready/cmds（换 src = 换了卡）
+        cardBus.registerFrame({ kind: 'preview', label, el: cur })
         return
       }
       // 覆盖层遮住后端前端加载时的深色初始化画面（2026-08-20 三轮反馈后定稿 v81）：
@@ -104,6 +110,8 @@ import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteAction
       const frame = body.querySelector('.preview-frame')
       const overlay = body.querySelector('.preview-overlay')
       if (!frame) return
+      // 挂进卡片总线：预览页（如 Pj18 的 floria-pv）说 `<ns>-cmd`/`<ns>-event` 即被总线认领
+      cardBus.registerFrame({ kind: 'preview', label, el: frame })
       let autoDismiss = null
       const dismiss = () => {
         if (autoDismiss) { clearTimeout(autoDismiss); autoDismiss = null }

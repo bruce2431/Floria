@@ -785,4 +785,24 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **刻意的例外**：`.wk-tb-tabs` / `.wk-pv-tabs` 横向溢出**不留滑条**（`.wk-pv-tabs` 旧只有 `scrollbar-width:none`，Chrome 无效 ⇒ 已补 `::-webkit-scrollbar{display:none}`；两处必须成对声明）。
 - **cache-bust**：v514。
 
+## 61. 卡片公开 API：卡↔宿主 / 卡↔卡 / agent→卡（2026-10-11）
+
+**能力**：每张卡（项目预览帧、外置卡）对外暴露一组**公开命令**，三向可调——宿主驱动卡（卡↔宿主）、一张卡经宿主转译驱动另一张卡（卡↔卡）、模型在对话里驱动浏览器里的卡（agent→卡）。三层模型：**传输**（postMessage，双向双门禁）→ **契约**（卡自定义命名空间词表）→ **中介**（**宿主是唯一 broker**）。
+
+- **物理边界（为什么宿主是唯一 broker）**：iframe 之间不共享 `window`、跨源拿不到对方的 `contentWindow` ⇒ **卡片永远只认识 `parent` 一个对象**；这既是「卡↔卡不能直连」的原因，也是鉴权的天然边界（**不给卡片加 token**）。
+- **信封**（`<ns>` = 卡片自定义命名空间，Pj18 = `floria-pv`；宿主从消息 `type` 前缀推导，不要求卡额外申报）：
+  - 宿主→卡 `{ type:'<ns>-cmd', cmd, ...参数平铺 }`（参数**平铺**，不裹一层 `args`）
+  - 卡→宿主 `{ type:'<ns>-event', ev, ...数据 }`——**ack 也走此处**（`ev:'ack'`，用 `cmd` 与在途命令配对，**不用 callId**；每帧串行队列是配对的前提）
+  - 卡↔卡 `{ type:'floria-card-call', callId, target, cmd, args }` / `{ type:'floria-card-result', callId, ok, ... }`（保留前缀，与卡 ns 零撞车）
+- **约定**：① 每条命令恒回一条 ack（成功失败都在 ack 里）；② 未注册命令回 `{ok:false,error:'未注册的命令 X'}` 不静默；③ 命令**无状态、幂等优先**，长动作卡内等完再 ack，宿主只做超时兜底；④ **命令里不塞身份**（权限判断全在宿主）；⑤ `path` 口径 = 项目根相对 POSIX（与 `/gateway/file?label=&path=` 同）。
+- **标准方法集**（极简，其余归卡片自定义）：`state`（必须，探活兼快照）、`open`（可选）。事件侧 `ready`/`ack` 为协议内置，`state`/`src-open` 等为卡片自定义事件。
+- **总线（`engine/card-bus.js`，唯一顶层名 `cardBus`）**：帧实例表 `Map<key,…>`（key = `<kind>:<label>:<id>`，同 kind+label 撞车加 `#seq` 保唯一）+ 每帧串行队列 + 跨卡 broker + 能力表。**在场判据 = `el.isConnected`**（内联卡恒在场），DOM 拆除点显式注销（`unregisterFrame`，`__cardKey` 反向键挂在元素上）；`resolveTarget` 命中 0/多一律报错不猜。
+- **帧挂点**：`feature/preview-frame.js`（一处挂点覆盖 slot/work 两消费方，换 label 硬拆前注销、软重入/新建后注册）、`views/cards/ext/ext-card.js`（外置/应用卡）；第一方内联卡经总线 `registerInlineCard`（无 iframe，命令走 `handlers` 直调）。
+- **src-open（卡内点「跳源码」→ 宿主开文件 + 定位行）**：卡发 `<ns>-event{ev:'src-open', path, line}` → 总线门禁（`frame.label` 必须是当前工作项目，否则 toast 丢弃，防跨项目越权）→ 交付**一个**口 `setSourceOpener({open(path,line)})`。**载入是异步的**（读文件 → 灌编辑器），故「开 + 定位」合成一个口交给宿主自己排序——`work-editor.js` 的 `renderEditor()` 返回载入 Promise、`openWorkFile` await 它，调用方据此在**正确文档**上定位（总线不揣测文档何时就位）。
+- **能力表 + 上报**：`listCaps()` = 各在场帧的 `{label, instanceId, kind, ns, cmds, ready}`。触发点 = 帧注册/注销、卡 `ready`、WS `onopen`；表变 50ms 防抖。上行口由 `engine/gateway.js` 注入（`cardBus.setGatewaySender`，engine 内不成环，同 `setTabRefresh`/`setExtCardRenderer` 手法）。
+- **agent→卡**：模型工具 `CardCall`（`action:'list'|'call'`）→ 网关 `POST /gateway/card-call` → WS 下行 `card-call` → `gws.onmessage` 交 `cardBus.handleGatewayCall` → 目标卡 → ack 上行 `card-result` → 网关按 callId 配对落成 HTTP。网关侧端点/帧型/选设备和错误码见 [gateway.md](gateway.md) §18。
+- **与既有 postMessage 通道的关系**：本总线是**叠加**，不动既有 5 条（`floria-rail-*` / `floria-quote-*` / `floria-wk-tool-*` / `floria-open-session` 等）——它们对新帧型早退，互不干扰。
+- **cache-bust**：v518。
+- **探针锚点**：`probes/probe-web-cards-api.ts`（31 断言：总线单顶层名 / 信封与保留前缀字面量 / ack 配对键 / 帧挂点 / 前端网关接线 / 网关帧型与路由状态码真值表 / 工具与 feature 门控 / cache-bust 版本一致）、`probes/probe-web-card-boundary.ts`（`engine/card-bus.js` 入卡片小底座白名单）、`probes/probe-web-module-scope.ts`（cardBus 单顶层名无撞名）。
+
 

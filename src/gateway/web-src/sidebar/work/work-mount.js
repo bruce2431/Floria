@@ -31,6 +31,15 @@
 
   // ---------- 事件 ----------
   function mountWork() {
+    // 卡片→宿主：预览卡（如 Pj18 的 PDF/LaTeX 卡）点「跳源码」→ `<ns>-event{ev:'src-open'}` → 总线门禁
+    // （label 必须是当前工作项目）过后，由本口打开文件并滚到行。载入是异步的（读文件→灌文档），故「开 + 定位」
+    // 合成**一个**口交给宿主自己排序——总线不猜「文档何时才算就位」。
+    cardBus.setSourceOpener({
+      open: async (p, line) => {
+        await openWorkFile(p)
+        if (line) wkEdScrollToLine(line)
+      },
+    })
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
     document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区一条分界条（下沉区 ↔ 预览）
     // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。

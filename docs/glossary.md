@@ -167,3 +167,17 @@
 | `@图片引用` | `[@文件:<工作区相对路径>]` 图片令牌 | web `@` chip 产出的**纯文本令牌**；生图会话不传 tools ⇒ 由 `mentionImages.ts` 在**请求装配期**解析成 `InputImage`（服务端、前端中立）。门控 `inputImage`；基准 `getPortableRoot()`；`resolveRealWithinRoot` realpath 复核挡符号链接/junction 逃逸 + 拒非普通文件；非图扩展名静默跳过、失败进警告回正文 | @图片路径 |
 | 生图原图（`.source/`） | `<cwd>/.claude/images/.source/<名>` | **全保真原图**（隐藏子目录、**永不被 markdown 引用**）。展示图恒扁平落 `<dir>`（web `MD_IMG_CODE` 只认单文件名）+ 受 4MB 上限；**仅当压缩过**才把原始字节按源扩展名写 `.source/`，`PersistedImage.sourcePath` 指原图、未压缩时 `=== path`（零额外写盘）。改图回注基于原图而非降质预览 | — |
 | `ImageGeneration` 工具（主模型编排） | `tools/ImageGenerationTool/` | **文本模型编排生图入口**：运行态门控 `isImageGenerationToolEnabled({target, sessionCaps, sessionModel})`——存在**可出图的生图目标**（`selectImageTarget`，**会话 provider 优先**、否则回落凭据池 `tools.image`）且**会话模型非生图模型**（与直连链互斥）。**`sessionModel` = `getMainLoopModel()`（含 /model override / web 切换），非 provider 快照 `getActiveModel()`**；生图模型不用 sessionModel（回落时连端点/钥匙都取 `tools.image` 绑定 provider 的）。入参 `{prompt, image_path?, aspect_ratio?}`；复用 `generateImages` 核心。**可见性靠模型回显**：结果文本含 `![](文件名)` + 指示模型原样输出（web 只渲染 assistant 文本 ⇒ 零前端改动） | image_generation |
+
+## 卡片公开 API（卡↔宿主 / 卡↔卡 / agent→卡，2026-10-11）
+
+| 规范名 | 实体 | 说明 | 旧称 |
+|---|---|---|---|
+| 卡 | 预览帧 / 外置卡（iframe）或第一方内联卡 | web 前端里在浏览器内运行的一帧界面，对外暴露一组**公开命令**。iframe 卡只认识 `parent`（跨源拿不到兄弟帧的 `contentWindow`）——既是卡↔卡不能直连的物理原因，也是**不给卡加 token** 的鉴权边界 | 卡片 |
+| 宿主总线 | `engine/card-bus.js`（唯一顶层名 `cardBus`） | 三层模型的**中介**层：帧实例表 + 命令通道（卡↔宿主）+ 跨卡 broker（卡↔卡）+ 能力表。**宿主是唯一 broker**——卡↔卡只能经它转译 | 卡片 API 总线 |
+| 在场（卡） | 判据 `el.isConnected`（内联卡恒在场） | 卡是否仍挂在文档里。DOM 拆除点显式注销（`unregisterFrame`）；不在场即不可达，**绝不打开/启动一张卡**（那是用户手势） | — |
+| 命名空间 `ns` | 信封前缀，如 `floria-pv` | 卡自定义的命令/事件命名空间，宿主从消息 `type` 前缀推导（`<ns>-cmd` / `<ns>-event`），不要求卡额外申报。agent 寻址里 `ns` 用于**跨设备选持卡浏览器** | — |
+| 卡命令 / ack | `<ns>-cmd` / `<ns>-event{ev:'ack'}` | 每条命令恒回一条 ack（成功失败都在内），**ack 用 `cmd` 与在途命令配对**（每帧串行队列是前提）。标准方法集 `state`（必须）/`open`（可选），其余卡片自定义 | — |
+| 能力表 | `listCaps()` / `GET /gateway/cards` | 各在场帧的 `{label, instanceId, kind, ns, cmds, ready}`；agent 的 `CardCall` list 数据源，也是「命令名以卡申报为准」的真源 | — |
+| `instanceId` | 帧 key（`<kind>:<label>:<id>`） | 卡的最精确寻址键（id = ext 卡 `card.id`，否则自增序；同 kind+label 撞车加 `#seq`）。agent 寻址优先级 `instanceId > ns > label` | — |
+| 保留前缀 | `floria-card-call` / `floria-card-result` | 卡↔卡信封（与卡 ns 零撞车）；由总线路由，目标不在场立即回 `{ok:false}` 不打开目标、禁自调用 | — |
+| `CardCall` 工具 | `tools/CardCallTool/`（`feature('CARD_API')`） | agent→卡出口：`action:'list'`（列在场卡）/`'call'`（驱动命令）；经网关 `/gateway/card-call`。命令名不内置白名单（以卡申报为准，故须先 list） | card_call |

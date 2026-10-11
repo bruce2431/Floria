@@ -3,7 +3,7 @@
 import { pendingUserMsgs, addUser } from '../chat/messages.js'
 import { navigate, mountInput, flipInput, renderSession } from '../chat/route.js'
 import { stage } from '../chat/stage.js'
-import { GATEWAY, gws } from '../engine/gateway.js'
+import { GATEWAY, gws, apiSetModel } from '../engine/gateway.js'
 import { refreshSession } from '../engine/live.js'
 import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live } from '../engine/state.js'
 import { toast, newSessionProject } from '../core/util.js'
@@ -12,6 +12,7 @@ import { renderTransient, turnLive, setBtnMode } from './approval.js'
 import { pendingImages, pendingFiles, clearPendingImages, clearPendingFiles } from './images.js'
 import { serializeInput, closeMentionPop } from './mention.js'
 import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
+import { getNewSessionModel, setNewSessionModel } from './model-select.js'
 /* @module inputbar/send.js */
   async function gwSend() {
     if (!GATEWAY) return false
@@ -47,6 +48,11 @@ import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
       const tgt = newSessionProject() // work 模式 = 工作项目（seat 只读，见 state.newSessionProject）
       const prevNew = state.newProject // 回滚用：清的是「目标项目」这一个槽，work 模式压根不读它
       state.newProject = null // 消费即清：目标项目一次性，下一次回默认全局
+      // 首页模型选择（2026-10-11）：待定槽消费即清，失败回滚时还原（同 newProject 一次性语义）。
+      // 它只作用于本次新建会话——发送首条消息前做一次会话级切换（见下方 apiSetModel），
+      // 不改全局默认（全局默认唯一入口 = 凭据池 credentials.json，见 model-select.js 注释）。
+      const prevModel = getNewSessionModel()
+      setNewSessionModel('')
       // 丝滑过渡（2026-08-30）：不等 wsession 返回（spawn CLI 窗口+注册常 >1s，期间空态冻结
       // 是「不丝滑」根源）——发送瞬间即进会话视觉：输入栏 FLIP 沉底 + 趴栏淡出 + 首条消息
       // 乐观上屏（气泡+正在处理折叠）。pre 标记 + hash 暂空：renderSession 创建中不洗
@@ -69,6 +75,7 @@ import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
         inputEl.textContent = text
         syncGwSend()
         state.newProject = prevNew
+        setNewSessionModel(prevModel)
         inputEl.focus()
         return true
       }
@@ -81,6 +88,13 @@ import { webCreating, firstSendHash, newWebSession } from '../sidebar/recent.js'
       // webSessionProjectRoot）——jsonl 落盘前会话记录尚不存在，响应带回是首条消息唯一 cwd 源。
       // 乐观文本不含文件占位（absorb 为 includes 子串匹配仍命中）；落盘文本带相对占位。
       if (d.cwd) setSessionCwd(d.cwd)
+      // 首页选的模型 → 新会话的会话级切换（与「会话内切模型」同一链路：网关按 sessionId 精确路由
+      // 并随带归属供应商，只影响本会话；本分支不写全局默认池）。await 先行于首条消息发送——model
+      // 事件先写入网关→CLI 通道，CLI 按序消费（同拍化：回合边界落地），首轮即用所选模型。
+      if (prevModel) {
+        const ok = await apiSetModel({ model: prevModel, sessionId: d.hash })
+        if (!ok) toast(`模型 ${prevModel} 未切换成功，本次会话按全局默认运行`)
+      }
       const fph = files.map((f) => `[文件:${relUploadPath(f.abs)}]`).join(' ')
       const sendText = fph ? (text ? text + ' ' + fph : fph) : text
       gws.send(JSON.stringify({ type: 'send', text: sendText, sessionId: d.hash, ...imgPayload }))

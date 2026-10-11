@@ -154,3 +154,16 @@
 | `task-state` | CLI TodoV2 任务清单上报（任务浮窗数据源；空数组=清单清空 → 浮窗整体不出现） |
 | `model` | CLI 每会话实际模型上报（HTTP `/gateway/model-report` 落值即群发，唯一不走 `/clients` WS 的信号；底栏模型 seat 实时校准源，见 [web-ui.md](web-ui.md) §5） |
 | `ws-failed` | web 独立会话启动失败 |
+
+## 生图能力层（输出侧，后端概念）
+
+| 规范名 | 实体 | 说明 | 旧称 |
+|---|---|---|---|
+| 生图能力层 | `services/imagegen/` | provider-neutral 输出侧生图：能力判定 → 选 adapter → 生成（超时/重试）→ 落盘 → `![](文件名)` 回填 → 合成 Anthropic 响应。展示链（`.claude/images/` + `/gateway/file` + CLI/web 渲染）与厂商无关，零改动复用 | Gemini 生图/Gemini adapter（架构本身） |
+| 生图 adapter | `services/imagegen/adapters/*.ts` | **厂商协议差异唯一所在**：`supports(ctx)` + `generate(req,ctx)`，import 即自注册进注册表；新增一家只写一个 adapter | 厂商分支/特判 |
+| 能力声明 | `ProviderConfig.imageCapabilities` | 每模型 `{inputImage,outputImage,imageEdit,multiTurnImage}`；**`outputImage` = 请求交给生图能力层的唯一判据**；与 `modelVision`（输入侧识图）并列独立、互不覆盖；缺省 = 功能关闭。姊妹字段 `imageModel?`（主模型编排时**选用的生图模型 id**，缺省 = `ImageGeneration` 工具关闭）；顶层 `CredentialsFile.imageProvider?`（provider 名）= **回落目标**：会话 provider 无生图能力时工具改用它的生图模型/端点/钥匙（会话自带可出图 `imageModel` 时优先） | 生图模型清单 |
+| 生图落盘名 | `{provider}-{模型短名}-{YYYYMMDDHHmmss}[-{n}].{ext}` | 落 `<cwd>/.claude/images/`（与 `/gateway/file` 同口径），原子写；模型短名去尾 `-preview`；`seq` 防同秒多图互覆；超 4MB 先压后落 | |
+| 会话生图上下文 | `services/imagegen/sessionContext.ts` | 记住本会话**最近生成的一张图**（内存 Map + 写透盘 sidecar `.imagegen-context.json`），使「继续把刚才那张改成夜景」无需重新附图。输入图装配优先级：**显式附图 > `@图片引用` > 上下文回注**；门控 `imageEdit\|\|multiTurnImage` 且本轮无其它附图，命中加正文标记「（基于上一张图继续编辑）」。条目 `path`=展示图、可选 `sourcePath`=全保真原图；**回注读 `sourcePath ?? path`** | 多轮改图记忆 |
+| `@图片引用` | `[@文件:<工作区相对路径>]` 图片令牌 | web `@` chip 产出的**纯文本令牌**；生图会话不传 tools ⇒ 由 `mentionImages.ts` 在**请求装配期**解析成 `InputImage`（服务端、前端中立）。门控 `inputImage`；基准 `getPortableRoot()`；`resolveRealWithinRoot` realpath 复核挡符号链接/junction 逃逸 + 拒非普通文件；非图扩展名静默跳过、失败进警告回正文 | @图片路径 |
+| 生图原图（`.source/`） | `<cwd>/.claude/images/.source/<名>` | **全保真原图**（隐藏子目录、**永不被 markdown 引用**）。展示图恒扁平落 `<dir>`（web `MD_IMG_CODE` 只认单文件名）+ 受 4MB 上限；**仅当压缩过**才把原始字节按源扩展名写 `.source/`，`PersistedImage.sourcePath` 指原图、未压缩时 `=== path`（零额外写盘）。改图回注基于原图而非降质预览 | — |
+| `ImageGeneration` 工具（主模型编排） | `tools/ImageGenerationTool/` | **文本模型编排生图入口**：运行态门控 `isImageGenerationToolEnabled({target, sessionCaps, sessionModel})`——存在**可出图的生图目标**（`selectImageTarget`，**会话 provider 优先**、否则回落顶层 `imageProvider`）且**会话模型非生图模型**（与直连链互斥）。**`sessionModel` = `getMainLoopModel()`（含 /model override / web 切换），非 provider 快照 `getActiveModel()`**；生图模型不用 sessionModel（回落时连端点/钥匙都取 `imageProvider` 的）。入参 `{prompt, image_path?, aspect_ratio?}`；复用 `generateImages` 核心。**可见性靠模型回显**：结果文本含 `![](文件名)` + 指示模型原样输出（web 只渲染 assistant 文本 ⇒ 零前端改动） | image_generation |

@@ -14,7 +14,7 @@ import { renderTransient, claimStartTs, syncTurnLive, takeover, clearTakeover, s
 import { renderProjSeat, closeProjPop } from '../inputbar/commands.js'
 import { renderCtxMeter } from '../inputbar/ctx-meter.js'
 import { closeMentionPop } from '../inputbar/mention.js'
-import { applySessionModel } from '../inputbar/model-select.js'
+import { applySessionModel, syncSeatToGlobalDefault } from '../inputbar/model-select.js'
 import { gwSend, syncGwSend } from '../inputbar/send.js'
 import { renderMgr } from '../sidebar/mgr.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
@@ -226,6 +226,8 @@ import { hydrateExtCardId } from '../engine/ext-runtime.js'
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
+    // 回首页无待定新会话选择 → 模型 seat 回落凭据池全局默认（web 不再改全局默认，2026-10-11）
+    syncSeatToGlobalDefault()
     openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }

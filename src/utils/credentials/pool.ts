@@ -103,6 +103,10 @@ export function loadCredentials(): CredentialsFile {
     if (typeof data.pricing === 'object' && data.pricing !== null) {
       creds.pricing = data.pricing as PricingConfig
     }
+    // 同理由：顶层生图回落 provider 名必须原样带走，否则 /key 轮换会清掉回落配置
+    if (typeof data.imageProvider === 'string' && data.imageProvider.trim()) {
+      creds.imageProvider = data.imageProvider.trim()
+    }
     return creds
   } catch {
     return createDefaultCredentials()
@@ -118,8 +122,8 @@ export function saveCredentials(creds: CredentialsFile): void {
 
 // ── 会话级供应商绑定（2026-09-10）────────────────────────────────────────────
 // 一个 CLI 进程 = 一个会话，请求凭据（baseUrl / apiKey / 默认模型）必须由本进程
-// 自己决定：全局 activeProvider / activeModel 的任何写入——其它会话切模型、首页设
-// 默认模型、/model 命令写池——都不得漂移已运行会话的供应商。否则会出现
+// 自己决定：全局 activeProvider / activeModel 的任何写入——2026-10-11 起已无写入者
+// （全局默认只由直接编辑 credentials.json 决定）——都不得漂移已运行会话的供应商。否则会出现
 // 「模型名属于 A、endpoint/key 属于 B」的 400（2026-09-10 实测：
 // 新会话界面切 deepseek → 全局池被改写 → 两个在跑的 GLM 会话拿 glm-5.3-flash
 // 打 api.deepseek.com/anthropic 全数 400）。
@@ -236,6 +240,48 @@ export function getActiveProviderProtocol(): string {
 }
 
 /**
+ * Per-model image-generation capabilities of this session's bound provider
+ * (2026-10-11). Session-bound like protocol/baseUrl/apiKey (same invariant) —
+ * the 生图能力层 dispatch is credential-adjacent and must not drift across
+ * sessions. Returns null when the provider declares none (features off).
+ */
+export function getActiveProviderImageCapabilities(): ProviderConfig['imageCapabilities'] {
+  return getActiveProviderConfig()?.imageCapabilities ?? null
+}
+
+/**
+ * This provider's designated image-generation model for main-model orchestration
+ * (2026-10-11) — consumed by the `ImageGeneration` tool. Session-bound like the
+ * capabilities accessor above (same invariant). Returns null when unset
+ * (tool disabled for this provider; the direct dispatch path is unaffected).
+ */
+export function getActiveProviderImageModel(): string | null {
+  return getActiveProviderConfig()?.imageModel ?? null
+}
+
+/**
+ * 顶层 `imageProvider` 指定的生图 provider（2026-10-11）——**全局**、不随会话绑定
+ * 漂移。文本会话 provider 自身无生图能力时，`ImageGeneration` 工具回落到它。返回
+ * `null` = 未指定或指定名不存在（回落失败 ⇒ 工具保持关闭）。
+ */
+export function getImageProviderConfig(): { name: string; config: ProviderConfig } | null {
+  const creds = loadCredentials()
+  const name = creds.imageProvider?.trim()
+  if (!name) return null
+  const config = creds.providers[name]
+  return config ? { name, config } : null
+}
+
+/**
+ * 指定 provider 的当前可用 API key（钥池可用性语义同 `getActiveApiKey`：跳过
+ * 仍处于冷却期的 exhausted 钥匙）。用于回落 provider——会话绑定访问器够不着它。
+ */
+export function getProviderApiKey(config: ProviderConfig): string | null {
+  const entry = config.keys[config.activeKeyIndex]
+  return _isKeyUsable(entry) ? entry.value : null
+}
+
+/**
  * Get this session's default model name (used when nothing overrides the model
  * in-process). Bound to the session provider: without an explicit override it
  * answers the boot snapshot's model, so another session writing the pool's
@@ -332,38 +378,9 @@ export function findModelProvider(model: string): string | null {
   return null
 }
 
-/**
- * Switch model globally: resolve the owning provider, switch to it and write
- * its activeModel. Always writes. Global default only — session-level model
- * switches bind the provider in-process (setSessionProviderOverride) and must
- * NOT come through here (2026-09-10: that write used to leak across sessions).
- * Returns false if no provider lists the model.
- */
-export function switchModelAuto(model: string): boolean {
-  const owner = findModelProvider(model)
-  if (!owner) return false
-  const creds = loadCredentials()
-  creds.activeProvider = owner
-  const cfg = creds.providers[owner]
-  if (cfg && Array.isArray(cfg.models) && cfg.models.includes(model)) {
-    cfg.activeModel = model
-  }
-  saveCredentials(creds)
-  return true
-}
-
-/**
- * Switch to a model within the current provider.
- */
-export function switchModel(model: string): boolean {
-  const creds = loadCredentials()
-  const provider = creds.providers[creds.activeProvider]
-  if (!provider) return false
-  if (!provider.models.includes(model)) return false
-  provider.activeModel = model
-  saveCredentials(creds)
-  return true
-}
+// 全局默认模型写入器（switchModelAuto / switchModel）2026-10-11 已删除：全局默认（activeProvider
+// + 该 provider 的 activeModel）唯一调整入口 = 直接编辑 credentials.json，无运行期写入者。
+// 会话级切换走 setSessionProviderOverride（进程内绑定，不落池），见文件头解析序注释。
 
 /**
  * Get the explicit vision override for a model in the current provider.

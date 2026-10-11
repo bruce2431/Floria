@@ -17,6 +17,7 @@ import {
 import {
   getActiveApiKey,
   getActiveBaseUrl,
+  getActiveProviderImageCapabilities,
   getActiveProviderProtocol,
 } from 'src/utils/credentials/pool.js'
 import { getUserAgent } from 'src/utils/http.js'
@@ -38,6 +39,7 @@ import {
 } from '../../utils/envUtils.js'
 import { createCodexFetch } from './codex-fetch-adapter.js'
 import { resolveProtocolFetch } from './protocol-fetch.js'
+import { createImageGenDispatchFetch } from 'src/services/imagegen/service.js'
 
 /**
  * Environment variables for different client types:
@@ -336,12 +338,25 @@ export async function getAnthropicClient({
     baseUrl: poolBaseUrl,
     apiKey: poolApiKey,
   })
+  // 生图能力层分流（2026-10-11）：provider 声明了 imageCapabilities 时才装覆写，
+  // 覆写内只按 `outputImage` 能力判定——命中转 imagegen/service.ts（厂商差异全在
+  // adapter），否则逐字透传给 protocolFetch/ARGS.fetch。未声明 = 不装覆写 ⇒ 文本
+  // 链路零改动（缺省关闭 + 回归探针锁死）。
+  const imagegenFetch = getActiveProviderImageCapabilities()
+    ? createImageGenDispatchFetch({
+        inner: (protocolFetch ?? ARGS.fetch) as typeof globalThis.fetch | undefined,
+      })
+    : null
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
     apiKey: apiKey || (poolBaseUrl ? poolApiKey : getAnthropicApiKey()),
     // Set baseURL from credential pool
     ...(poolBaseUrl ? { baseURL: poolBaseUrl } : {}),
     ...ARGS,
-    ...(protocolFetch && { fetch: protocolFetch }),
+    ...(imagegenFetch
+      ? { fetch: imagegenFetch }
+      : protocolFetch
+        ? { fetch: protocolFetch }
+        : {}),
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
 

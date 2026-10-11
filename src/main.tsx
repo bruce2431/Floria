@@ -2112,7 +2112,8 @@ async function run(): Promise<CommanderCommand> {
       effectiveModel = parseUserSpecifiedModel(mainThreadAgentDefinition.model);
     }
     // Pj16 2026-08-30 会话模型严格隔离（用户定案）：未显式指定模型时把凭据池 activeModel 固化为
-    // 本会话覆盖——全局默认（模型 tab switchModelAuto）此后切换仅对之后新启动的会话生效，
+    // 本会话覆盖——全局默认（credentials.json，2026-10-11 起无运行期写入者）此后变化仅对之后
+    // 新启动的会话生效，
     // 运行中会话不再被「每轮实时读池」带走。会话内显式切模型（/model / 弹层路由 'default' 清覆盖）
     // 仍走 GatewayControlBridge 语义不变。
     if (!effectiveModel) {

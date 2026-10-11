@@ -11,6 +11,9 @@ import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
+// 生图（主模型编排）：运行态门控（provider 声明 imageCapabilities + imageModel 且
+// 会话模型非生图模型）——未配置的 provider 该工具经 isEnabled() 过滤，文本链路零影响。
+import { ImageGenerationTool } from './tools/ImageGenerationTool/ImageGenerationTool.js'
 // Dead code elimination: conditional import for ant-only tools
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const REPLTool =
@@ -254,6 +257,7 @@ export function getAllBaseTools(): Tools {
     ...(MonitorTool ? [MonitorTool] : []),
     ...(ReviewArtifactTool ? [ReviewArtifactTool] : []),
     BriefTool,
+    ImageGenerationTool,
     ...(SendUserFileTool ? [SendUserFileTool] : []),
     ...(PushNotificationTool ? [PushNotificationTool] : []),
     ...(SubscribePRTool ? [SubscribePRTool] : []),

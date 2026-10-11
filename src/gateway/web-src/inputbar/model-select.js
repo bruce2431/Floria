@@ -53,6 +53,13 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
   // 用户本次会话内主动切换过模型 → 不再被 /gateway/session 旧上报覆盖（切换会话时重置）。避免
   // POST /gateway/model 尚未落地前的一次刷新把刚切的选择回滚成旧值。
   let modelUserPicked = false
+  // 首页（新会话）模型选择（2026-10-11 定案）：全局默认模型不再由 web 调整——唯一入口 = 直接改
+  // 凭据池 credentials.json（agent 侧）。首页选的模型只作用于**这一次新建的会话**：记入本槽，
+  // 发送首条消息时随会话级切换（POST /gateway/model 带 sessionId，见 send.js 空态分支）落到新会话，
+  // 消费即清；回首页且无待定选择时 seat 回落凭据池全局默认（syncSeatToGlobalDefault）。
+  let newSessionModel = ''
+  function getNewSessionModel() { return newSessionModel }
+  function setNewSessionModel(v) { newSessionModel = typeof v === 'string' ? v : '' }
   // 用 CLI 上报的会话实际模型校准模型 seat（2026-10-10 分层治理 4B 自 engine/sessions.js 反转迁入：
   // 「校准 seat」是输入栏行为，归 feature 层——engine 不再 import feature，故本函数随状态同处）。
   // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
@@ -120,6 +127,17 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
     if (!c && !needToken() && !MODELS_LOADING && !MODELS && !MODELS_ERR) {
       loadModelsData(false).then(() => renderModelSeat()).catch(() => {})
     }
+  }
+  // 回首页（无会话）且无待定新会话选择 → seat 显示源回落凭据池全局默认（web 不再改全局默认）
+  function syncSeatToGlobalDefault() {
+    if (state.currentHash || newSessionModel) return
+    const g = MODELS && (MODELS.activeModel || (MODELS.model ? String(MODELS.model) : ''))
+    if (!g) return
+    const prov = MODELS.activeProvider || MODEL_CUR.provider
+    if (MODEL_CUR.model === g && MODEL_CUR.provider === prov) return
+    setModelCur({ ...MODEL_CUR, model: g, provider: prov })
+    saveModelCur()
+    renderModelSeat()
   }
   function toggleModelPop() {
     if (msel.open) { closeModelPop(); return }
@@ -243,13 +261,18 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
       renderModelSeat()
       closeModelPop()
       // 2026-09-10 会话级供应商绑定：有会话 → 会话级覆盖（网关随路由下发该模型归属供应商，
-      // 目标 CLI 进程内绑定 baseUrl/key，只影响本会话）；首页/新会话 → defaultModel（写全局池，
-      // 只影响之后新建的会话）。两条路都不再改动其它在跑会话的供应商。
+      // 目标 CLI 进程内绑定 baseUrl/key，只影响本会话）。
+      // 2026-10-11 定案：首页（/新会话）不再写全局默认池（未传 defaultModel 即不下发 POST）——
+      // 全局默认只由凭据池 credentials.json 决定（agent 直接改文件）；首页选中的模型记入
+      // newSessionModel 待定槽，发送首条消息时随新会话做会话级切换（send.js），只影响那一次新建的会话。
       const home = !state.currentHash
-      void apiSetModel(home ? { defaultModel: id } : { model: id, sessionId: state.currentHash })
-        .then(ok => toast(ok
-          ? (home ? `新会话默认模型已设为 ${id}` : `模型已切换为 ${id}`)
-          : (home ? '设置失败 · 网关未连接' : '切换失败 · 目标会话未在线或网关未连接')))
+      if (home) {
+        setNewSessionModel(id)
+        toast(`新会话将使用 ${id}（仅本次）`)
+        return
+      }
+      void apiSetModel({ model: id, sessionId: state.currentHash })
+        .then(ok => toast(ok ? `模型已切换为 ${id}` : '切换失败 · 目标会话未在线或网关未连接'))
     } else if (msel.pane === 'effort') {
       const eff = row.effort === undefined ? undefined : row.effort
       if (MODEL_CUR.effortLevel === eff) { closeModelPop(); return }
@@ -279,6 +302,9 @@ export {
   modelDir,
   modelEscape,
   modelUserPicked,
+  getNewSessionModel,
+  setNewSessionModel,
+  syncSeatToGlobalDefault,
   mselChoose,
   mselMove,
   mselRows,

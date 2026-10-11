@@ -1872,6 +1872,8 @@ function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort
     setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 首页无事务归属：丢弃 hash='' 残留项（防主张气泡飘上空态）
     setChar(1) // 首页空态 → 默认形象
     renderProjSeat()
+    // 回首页无待定新会话选择 → 模型 seat 回落凭据池全局默认（web 不再改全局默认，2026-10-11）
+    syncSeatToGlobalDefault()
     openCard('session') // 整卡换回会话卡（须先于 flipInput：隐藏卡的矩形为零，FLIP 会退化成硬切）
     flipInput(true) // docked/in-session 移除 + 挂回 stage 一并由 FLIP 处理（旧位取变更前矩形）
   }
@@ -7617,6 +7619,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 用户本次会话内主动切换过模型 → 不再被 /gateway/session 旧上报覆盖（切换会话时重置）。避免
   // POST /gateway/model 尚未落地前的一次刷新把刚切的选择回滚成旧值。
   let modelUserPicked = false
+  // 首页（新会话）模型选择（2026-10-11 定案）：全局默认模型不再由 web 调整——唯一入口 = 直接改
+  // 凭据池 credentials.json（agent 侧）。首页选的模型只作用于**这一次新建的会话**：记入本槽，
+  // 发送首条消息时随会话级切换（POST /gateway/model 带 sessionId，见 send.js 空态分支）落到新会话，
+  // 消费即清；回首页且无待定选择时 seat 回落凭据池全局默认（syncSeatToGlobalDefault）。
+  let newSessionModel = ''
+  function getNewSessionModel() { return newSessionModel }
+  function setNewSessionModel(v) { newSessionModel = typeof v === 'string' ? v : '' }
   // 用 CLI 上报的会话实际模型校准模型 seat（2026-10-10 分层治理 4B 自 engine/sessions.js 反转迁入：
   // 「校准 seat」是输入栏行为，归 feature 层——engine 不再 import feature，故本函数随状态同处）。
   // 网关的每会话模型是权威源（CLI 上报即真，见 reportCurrentModel），web 一律采纳；唯一例外是
@@ -7973,6 +7982,17 @@ function setFirstSendHash(v) { firstSendHash = v }
       loadModelsData(false).then(() => renderModelSeat()).catch(() => {})
     }
   }
+  // 回首页（无会话）且无待定新会话选择 → seat 显示源回落凭据池全局默认（web 不再改全局默认）
+  function syncSeatToGlobalDefault() {
+    if (state.currentHash || newSessionModel) return
+    const g = MODELS && (MODELS.activeModel || (MODELS.model ? String(MODELS.model) : ''))
+    if (!g) return
+    const prov = MODELS.activeProvider || MODEL_CUR.provider
+    if (MODEL_CUR.model === g && MODEL_CUR.provider === prov) return
+    setModelCur({ ...MODEL_CUR, model: g, provider: prov })
+    saveModelCur()
+    renderModelSeat()
+  }
   function toggleModelPop() {
     if (msel.open) { closeModelPop(); return }
     if (cmd.open) closeCmdPop()
@@ -8095,13 +8115,18 @@ function setFirstSendHash(v) { firstSendHash = v }
       renderModelSeat()
       closeModelPop()
       // 2026-09-10 会话级供应商绑定：有会话 → 会话级覆盖（网关随路由下发该模型归属供应商，
-      // 目标 CLI 进程内绑定 baseUrl/key，只影响本会话）；首页/新会话 → defaultModel（写全局池，
-      // 只影响之后新建的会话）。两条路都不再改动其它在跑会话的供应商。
+      // 目标 CLI 进程内绑定 baseUrl/key，只影响本会话）。
+      // 2026-10-11 定案：首页（/新会话）不再写全局默认池（未传 defaultModel 即不下发 POST）——
+      // 全局默认只由凭据池 credentials.json 决定（agent 直接改文件）；首页选中的模型记入
+      // newSessionModel 待定槽，发送首条消息时随新会话做会话级切换（send.js），只影响那一次新建的会话。
       const home = !state.currentHash
-      void apiSetModel(home ? { defaultModel: id } : { model: id, sessionId: state.currentHash })
-        .then(ok => toast(ok
-          ? (home ? `新会话默认模型已设为 ${id}` : `模型已切换为 ${id}`)
-          : (home ? '设置失败 · 网关未连接' : '切换失败 · 目标会话未在线或网关未连接')))
+      if (home) {
+        setNewSessionModel(id)
+        toast(`新会话将使用 ${id}（仅本次）`)
+        return
+      }
+      void apiSetModel({ model: id, sessionId: state.currentHash })
+        .then(ok => toast(ok ? `模型已切换为 ${id}` : '切换失败 · 目标会话未在线或网关未连接'))
     } else if (msel.pane === 'effort') {
       const eff = row.effort === undefined ? undefined : row.effort
       if (MODEL_CUR.effortLevel === eff) { closeModelPop(); return }
@@ -9619,6 +9644,11 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       const tgt = newSessionProject() // work 模式 = 工作项目（seat 只读，见 state.newSessionProject）
       const prevNew = state.newProject // 回滚用：清的是「目标项目」这一个槽，work 模式压根不读它
       state.newProject = null // 消费即清：目标项目一次性，下一次回默认全局
+      // 首页模型选择（2026-10-11）：待定槽消费即清，失败回滚时还原（同 newProject 一次性语义）。
+      // 它只作用于本次新建会话——发送首条消息前做一次会话级切换（见下方 apiSetModel），
+      // 不改全局默认（全局默认唯一入口 = 凭据池 credentials.json，见 model-select.js 注释）。
+      const prevModel = getNewSessionModel()
+      setNewSessionModel('')
       // 丝滑过渡（2026-08-30）：不等 wsession 返回（spawn CLI 窗口+注册常 >1s，期间空态冻结
       // 是「不丝滑」根源）——发送瞬间即进会话视觉：输入栏 FLIP 沉底 + 趴栏淡出 + 首条消息
       // 乐观上屏（气泡+正在处理折叠）。pre 标记 + hash 暂空：renderSession 创建中不洗
@@ -9641,6 +9671,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
         inputEl.textContent = text
         syncGwSend()
         state.newProject = prevNew
+        setNewSessionModel(prevModel)
         inputEl.focus()
         return true
       }
@@ -9653,6 +9684,13 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       // webSessionProjectRoot）——jsonl 落盘前会话记录尚不存在，响应带回是首条消息唯一 cwd 源。
       // 乐观文本不含文件占位（absorb 为 includes 子串匹配仍命中）；落盘文本带相对占位。
       if (d.cwd) setSessionCwd(d.cwd)
+      // 首页选的模型 → 新会话的会话级切换（与「会话内切模型」同一链路：网关按 sessionId 精确路由
+      // 并随带归属供应商，只影响本会话；本分支不写全局默认池）。await 先行于首条消息发送——model
+      // 事件先写入网关→CLI 通道，CLI 按序消费（同拍化：回合边界落地），首轮即用所选模型。
+      if (prevModel) {
+        const ok = await apiSetModel({ model: prevModel, sessionId: d.hash })
+        if (!ok) toast(`模型 ${prevModel} 未切换成功，本次会话按全局默认运行`)
+      }
       const fph = files.map((f) => `[文件:${relUploadPath(f.abs)}]`).join(' ')
       const sendText = fph ? (text ? text + ' ' + fph : fph) : text
       gws.send(JSON.stringify({ type: 'send', text: sendText, sessionId: d.hash, ...imgPayload }))

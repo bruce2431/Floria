@@ -76,6 +76,34 @@ export interface ProviderConfig {
    * | 'medium' | 'high' | 'max'. Absent = web falls back to Off/Low/High/Max.
    */
   effortLevels?: string[]
+  /**
+   * Per-model image-generation capabilities (2026-10-11). Declared by hand in
+   * credentials.json, read-only at runtime — the provider-neutral 生图能力层
+   * (services/imagegen/) uses `outputImage` as its single dispatch predicate,
+   * and `inputImage`/`imageEdit`/`multiTurnImage` as capability dimensions
+   * (kept separate from `modelVision`, which is the input-side vision gate).
+   * Absent entirely (old credentials.json) = features off → text path unchanged.
+   */
+  imageCapabilities?: Record<
+    string,
+    {
+      /** 能吃图（图片作为输入） */
+      inputImage?: boolean
+      /** 能出图 —— 请求是否交给生图能力层的唯一判据 */
+      outputImage?: boolean
+      /** 能改图（带图编辑） */
+      imageEdit?: boolean
+      /** 支持多轮带图编辑（本版不启用自动回灌，仅作声明维度保留） */
+      multiTurnImage?: boolean
+    }
+  >
+  /**
+   * 主模型编排生图时选用的生图模型 id（2026-10-11）。文本模型会话经
+   * `ImageGeneration` 工具生图时用它；须同时在该 provider 的 `imageCapabilities`
+   * 里声明且 `outputImage: true`。缺省 = `ImageGeneration` 工具对该 provider 关闭
+   * （直连链不受影响：直连用会话模型本身做生图模型）。
+   */
+  imageModel?: string
 }
 
 export interface CredentialsFile {
@@ -83,6 +111,14 @@ export interface CredentialsFile {
   activeProvider: string
   /** All configured providers, keyed by name */
   providers: Record<string, ProviderConfig>
+  /**
+   * 顶层生图 provider 名（2026-10-11）。**回落目标**：本会话 provider 未声明可出图的
+   * `imageModel` 时，`ImageGeneration` 工具改用此 provider 的生图模型 / 端点 / 钥匙
+   * ——文本会话 provider 无生图能力（如只有 deepseek）时仍能编排另一 provider 的生图
+   * 模型。**会话 provider 自身的 `imageModel` 优先**：仅当它缺席或不可出图时才回落。
+   * 缺省 = 无回落（工具仅在会话 provider 声明生图能力时出现）。
+   */
+  imageProvider?: string
   /**
    * WebSearch tool backend configuration (global pool section).
    * `undefined` = never configured → tool hidden unless a default applies.

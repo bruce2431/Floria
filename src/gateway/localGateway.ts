@@ -54,8 +54,9 @@ import {
 
 // 复用官方凭据池：模型校验与 CLI 同一来源（credentials.json activeProvider.models），
 // 每会话切换不写全局凭据池（不 switchModel）；getActiveModel 与 CLI getUserSpecifiedModelSetting 同源。
-// 设为默认模型 = switchModel 写凭据池 activeModel（全局默认，2026-08-23）。
-import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, loadCredentials, switchModelAuto } from '../utils/credentials/pool.js'
+// 全局默认模型（credentials.json activeProvider/activeModel）2026-10-11 起无运行期写入者——
+// 唯一调整入口 = 直接改凭据池文件；网关只读全局值下发，写侧一律走会话级路由。
+import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, loadCredentials } from '../utils/credentials/pool.js'
 import { modelSupportsVision } from '../utils/model/vision.js'
 // 神经元可视化数据源（/gateway/neurons[/graph]，只读）：复用 neturon config/db 读取层
 import { buildNeuronGraph, listNeuronsForGateway } from './neuronViz.js'
@@ -2173,16 +2174,16 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 2026-08-22 模型/思考等级切换（受上方 /gateway/* token 校验保护）：
-  //   POST /gateway/model {model?, effortLevel?, sessionId?, defaultModel?}
+  //   POST /gateway/model {model?, effortLevel?, sessionId?}
   //   - model → 每会话切换：校验放宽到凭据池全部供应商（findModelProvider），随
   //     {type:'model', provider} 按 sessionId 精确路由到对应 CLI 进程（该进程进程内绑定该
   //     供应商的 baseUrl/key + STATE 模型覆盖），只影响本会话；未在线拒绝、无 sessionId 拒绝。
   //     2026-09-10 根治：本分支不再写全局凭据池（原先 ensureProviderForModel 全局切
   //     activeProvider，导致切一个会话的模型毒害其它在跑会话——模型名/endpoint 错配 400）。
-  //   - defaultModel → 全局默认模型（switchModelAuto 写池），只对之后新建的会话生效；
-  //     已运行会话按启动快照绑定，不受影响。
   //   - effortLevel → 写 settings.json effortLevel（全局持久化，过 toPersistableEffort 守卫：
   //     'max' 非 ant 为 session-scoped 不落盘=删键跟随默认，运行时经广播实时生效）。
+  //   （2026-10-11 删除 defaultModel 分支：全局默认模型不再有运行期写入口，改全局默认 =
+  //     直接编辑凭据池 credentials.json，见文件头注释。）
   if (req.method === 'POST' && url.pathname === '/gateway/model') {
     try {
       const parsed = await readReportBody(req)
@@ -2191,12 +2192,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         typeof parsed.sessionId === 'string' && parsed.sessionId.trim() ? parsed.sessionId.trim() : undefined
       const rawEffort =
         typeof parsed.effortLevel === 'string' && parsed.effortLevel.trim() ? parsed.effortLevel.trim() : undefined
-      const defaultModel =
-        typeof parsed.defaultModel === 'string' && parsed.defaultModel.trim() ? parsed.defaultModel.trim() : undefined
       // 'off'/'auto'/'default' = 清除思考等级（delete settings.effortLevel + 广播 null → CLI effortValue=undefined）
       const effortLevel =
         rawEffort === 'off' || rawEffort === 'auto' || rawEffort === 'default' ? null : rawEffort
-      if (model === undefined && effortLevel === undefined && defaultModel === undefined) {
+      if (model === undefined && effortLevel === undefined) {
         sendJson(res, 400, { error: 'invalid body' })
         return
       }
@@ -2206,15 +2205,6 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         modelProvider = findModelProvider(model)
         if (!modelProvider) {
           sendJson(res, 400, { error: `model "${model}" 不在凭据池任何供应商模型清单中` })
-          return
-        }
-      }
-      if (defaultModel !== undefined) {
-        // 设为全局默认模型：2026-08-29 起跨供应商自动切换——switchModelAuto 解析归属供应商、
-        // 切 activeProvider + 写该商 activeModel（原 switchModel 仅限当前供应商清单内）；
-        // 仅全局默认、不广播不路由，当前会话不受影响（2026-08-23 用户定案）
-        if (!switchModelAuto(defaultModel)) {
-          sendJson(res, 400, { error: `model "${defaultModel}" 不在凭据池任何供应商模型清单中` })
           return
         }
       }
@@ -2245,7 +2235,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         }
       }
       if (effortLevel !== undefined) broadcastToClients({ type: 'effort', value: effortLevel })
-      sendJson(res, 200, { ok: true, model: model ?? null, effortLevel: effortLevel ?? null, defaultModel: defaultModel ?? null })
+      sendJson(res, 200, { ok: true, model: model ?? null, effortLevel: effortLevel ?? null })
     } catch (error) {
       sendReportBodyError(res, error)
     }

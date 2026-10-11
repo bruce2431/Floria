@@ -106,19 +106,29 @@ export interface ProviderConfig {
   imageModel?: string
 }
 
+/**
+ * 一个模型-backed 工具能力的绑定（2026-10-11）——用哪个 provider 的哪个模型。
+ * 凭据池 `tools.<能力名>` 模块的条目；能力名如 `'image'`（生图归档化）。
+ */
+export interface ToolBinding {
+  /** credentials.json.providers 的键名。 */
+  provider: string
+  /** 该能力使用的模型 id；缺省 = 该 provider 的 imageModel（image 能力）。 */
+  model?: string
+}
+
 export interface CredentialsFile {
   /** Name of the currently active provider */
   activeProvider: string
   /** All configured providers, keyed by name */
   providers: Record<string, ProviderConfig>
   /**
-   * 顶层生图 provider 名（2026-10-11）。**回落目标**：本会话 provider 未声明可出图的
-   * `imageModel` 时，`ImageGeneration` 工具改用此 provider 的生图模型 / 端点 / 钥匙
-   * ——文本会话 provider 无生图能力（如只有 deepseek）时仍能编排另一 provider 的生图
-   * 模型。**会话 provider 自身的 `imageModel` 优先**：仅当它缺席或不可出图时才回落。
-   * 缺省 = 无回落（工具仅在会话 provider 声明生图能力时出现）。
+   * 按能力分槽的工具绑定（2026-10-11，取代旧的单字段 `imageProvider`）。键 = 能力名
+   * （当前只 `'image'`），值 = 该能力的 provider / model 绑定。**回落目标**：本会话
+   * provider 自身不能服务该能力时，对应工具改用绑定的 provider 的端点 / 钥匙 / 模型。
+   * 缺省 = 无回落（工具仅在会话 provider 自带能力时出现）。
    */
-  imageProvider?: string
+  tools?: Record<string, ToolBinding>
   /**
    * WebSearch tool backend configuration (global pool section).
    * `undefined` = never configured → tool hidden unless a default applies.

@@ -1,7 +1,7 @@
 import type { Command } from '../../commands.js'
 import { shouldInferenceConfigCommandBeImmediate } from '../../utils/immediateCommand.js'
 import { getMainLoopModel, renderModelName } from '../../utils/model/model.js'
-import { loadCredentials } from '../../utils/credentials/pool.js'
+import { isToolBoundModel, loadCredentials } from '../../utils/credentials/pool.js'
 
 export default {
   type: 'local-jsx',
@@ -19,10 +19,12 @@ export default {
     const seen = new Set<string>()
     const out: string[] = []
     for (const n of names) {
-      const models = creds.providers[n]?.models
+      const cfg = creds.providers[n]
+      const models = cfg?.models
       if (!Array.isArray(models)) continue
       for (const m of models) {
-        if (m && !seen.has(m)) {
+        // 工具绑定模型（生图等）不出现在可切换补全里（2026-10-11）：仅隐藏，直连链仍可达
+        if (m && !seen.has(m) && !isToolBoundModel(n, cfg, m)) {
           seen.add(m)
           out.push(m)
         }

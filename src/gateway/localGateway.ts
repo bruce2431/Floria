@@ -56,7 +56,7 @@ import {
 // 每会话切换不写全局凭据池（不 switchModel）；getActiveModel 与 CLI getUserSpecifiedModelSetting 同源。
 // 全局默认模型（credentials.json activeProvider/activeModel）2026-10-11 起无运行期写入者——
 // 唯一调整入口 = 直接改凭据池文件；网关只读全局值下发，写侧一律走会话级路由。
-import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, loadCredentials } from '../utils/credentials/pool.js'
+import { findModelProvider, getGlobalActiveModel, getGlobalActiveProviderConfig, isToolBoundModel, loadCredentials } from '../utils/credentials/pool.js'
 import { modelSupportsVision } from '../utils/model/vision.js'
 // 神经元可视化数据源（/gateway/neurons[/graph]，只读）：复用 neturon config/db 读取层
 import { buildNeuronGraph, listNeuronsForGateway } from './neuronViz.js'
@@ -72,6 +72,7 @@ import { webAssets } from './web-assets.generated.js'
 // userSettings 在便携模式下解析到便携根 .claude/settings.json。
 import { getSettingsFilePathForSource, getSettingsForSource, updateSettingsForSource } from '../utils/settings/settings.js'
 import type { SettingsJson } from '../utils/settings/types.js'
+import type { ProviderConfig } from '../utils/credentials/types.js'
 // effort 持久化守卫（2026-09-18）：与 CLI 同源——parseEffortValue 做边界解析，toPersistableEffort
 // 保证落盘值合法（'max' 是 session-scoped，非 ant 不持久化；settings schema 非 ant 无 max，写进即整文件作废）。
 import { parseEffortValue, toPersistableEffort } from '../utils/effort.js'
@@ -1895,6 +1896,8 @@ function listModels(root: string): Record<string, unknown> {
     const label = modelProviderLabel(name)
     for (const m of models) {
       if (poolSet.has(m)) continue
+      // 工具绑定模型（生图等）不出现在可切换列表（2026-10-11）：仅隐藏，直连链仍可达
+      if (isToolBoundModel(name, cfg as unknown as ProviderConfig, m)) continue
       poolSet.add(m)
       // provider=真实归属供应商标签（2026-08-29 直接切模型自动切供应商：前端据此分组/跨商直选，免启发式前缀判定）
       poolRows.push({
@@ -1924,7 +1927,11 @@ function listModels(root: string): Record<string, unknown> {
     activeProvider: creds.activeProvider || null,
     activeModel,
     // 当前供应商可切换的模型清单（每会话模型切换的校验集；前端模型浮窗据此渲染）
-    providerModels: activeCfg && Array.isArray(activeCfg.models) ? (activeCfg.models as string[]) : [],
+    // 工具绑定模型（生图等）同样剔除（2026-10-11）：否则前端 model-select 的 fallback 分支仍会漏出
+    providerModels:
+      activeCfg && Array.isArray(activeCfg.models)
+        ? (activeCfg.models as string[]).filter((m) => !isToolBoundModel(creds.activeProvider, activeCfg, m))
+        : [],
     effortLevel: settings.effortLevel !== undefined ? String(settings.effortLevel) : null,
     source: getSettingsFilePathForSource('userSettings') ?? null,
     items: [...poolRows, ...cfgItems],

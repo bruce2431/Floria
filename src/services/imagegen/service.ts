@@ -98,7 +98,7 @@ export interface ImageTargetSource {
 
 /** 选定的生图目标：**裸模型 id** + 其能力 + 来源 provider（供装配运行上下文）。 */
 export interface ImageGenTarget {
-  /** 'session' = 本会话 provider 自有生图；'designated' = 回落顶层 `imageProvider`。 */
+  /** 'session' = 本会话 provider 自有生图；'designated' = 回落凭据池 `tools.image`。 */
   source: 'session' | 'designated'
   provider: string
   model: string
@@ -108,7 +108,7 @@ export interface ImageGenTarget {
 /**
  * **单一真源**：为本会话选出生图目标（纯函数，便于探针）。**会话 provider 优先**
  * ——本会话 provider 声明了可出图的 `imageModel` 就用它；否则回落到 `designated`
- * （顶层 `imageProvider`）——让无生图能力的文本会话（如只有 deepseek）仍能编排另
+ * （凭据池 `tools.image`）——让无生图能力的文本会话（如只有 deepseek）仍能编排另
  * 一 provider 的生图模型。都没有 ⇒ null（工具关闭）。
  */
 export function selectImageTarget(o: {
@@ -130,7 +130,7 @@ export function selectImageTarget(o: {
 
 /**
  * `ImageGeneration` 工具是否对当前会话可用（纯函数，便于探针）。规则：存在一个可
- * 出图的生图目标（`selectImageTarget`——会话 provider 优先，回落顶层 `imageProvider`）；
+ * 出图的生图目标（`selectImageTarget`——会话 provider 优先，回落凭据池 `tools.image`）；
  * 且**会话模型本身不是生图模型**——否则请求已由直连链（fetch 覆写）接管，工具只是
  * 重复入口。两模式互斥。
  */

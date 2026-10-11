@@ -4,7 +4,8 @@
  * 覆盖：
  *  - 运行态门控 `isImageGenerationToolEnabled` 真值矩阵（与直连链互斥）；
  *  - **生图目标回落** `selectImageTarget`：会话 provider 自有 `imageModel` 优先，缺失
- *    时回落顶层 `imageProvider`（工具在其上取该 provider 的 baseUrl/钥匙）；
+ *    时回落凭据池 `tools.image`（工具在其上取该 provider 的 baseUrl/钥匙）；
+ *    另覆盖 `getToolProviderConfig` / `isToolBoundModel`（列表排除谓词）；
  *  - **门控会话模型来源**：`ImageGenerationTool.isEnabled()` 取主循环真实模型
  *    `getMainLoopModel()`（含 /model override / web 切换），而非 provider 启动快照
  *    `getActiveModel()`——临时配置根 + setSessionProviderOverride/setMainLoopModelOverride
@@ -34,7 +35,11 @@ import {
   type ImageGenRunContext,
 } from '../src/services/imagegen/service.js'
 import { ImageGenerationTool } from '../src/tools/ImageGenerationTool/ImageGenerationTool.js'
-import { setSessionProviderOverride } from '../src/utils/credentials/pool.js'
+import {
+  getToolProviderConfig,
+  isToolBoundModel,
+  setSessionProviderOverride,
+} from '../src/utils/credentials/pool.js'
 import { runWithCwdOverride } from '../src/utils/cwd.js'
 import { detectImageFormatFromBuffer } from '../src/utils/imageResizer.js'
 import { getMainLoopModel } from '../src/utils/model/model.js'
@@ -56,8 +61,8 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const CAPS = { inputImage: true, outputImage: true, imageEdit: true, multiTurnImage: true }
 
 /**
- * 门控便捷壳（对齐工具内部解析）：生图目标 = 会话 provider 优先、回落顶层
- * `imageProvider`（此处以 `designated` 注入）；会话模型本身是生图模型时关闭。
+ * 门控便捷壳（对齐工具内部解析）：生图目标 = 会话 provider 优先、回落凭据池
+ * `tools.image`（此处以 `designated` 注入）；会话模型本身是生图模型时关闭。
  */
 function gate(o: {
   caps: Record<string, any> | null | undefined
@@ -113,36 +118,36 @@ async function run() {
       'prefixed imageModel resolves via unified resolver → enabled',
     )
 
-    // ── 回落顶层 imageProvider ──────────────────────────────────────────
+    // ── 回落凭据池 tools.image ─────────────────────────────────────────
     const designated = { provider: 'img-prov', capabilities: caps, imageModel: 'img-model' }
     ok(
       gate({ caps: null, sessionModel: 'deepseek-chat', imageModel: null, designated }),
-      'session provider has no image capability + valid imageProvider → enabled (fallback)',
+      'session provider has no image capability + valid tools.image → enabled (fallback)',
     )
     ok(
       selectImageTarget({
         session: { provider: 'sess', capabilities: caps, imageModel: 'img-model' },
         designated,
       })?.source === 'session',
-      'both declare → session provider target wins (imageProvider unused)',
+      'both declare → session provider target wins (tools.image unused)',
     )
     ok(
       selectImageTarget({
         session: { provider: 'sess', capabilities: null, imageModel: null },
         designated,
       })?.source === 'designated',
-      'session declares none → designated (imageProvider) target chosen',
+      'session declares none → designated (tools.image) target chosen',
     )
     ok(
       selectImageTarget({
         session: { provider: 'sess', capabilities: caps, imageModel: 'nope' },
         designated,
       })?.source === 'designated',
-      'session imageModel unresolvable → falls back to imageProvider',
+      'session imageModel unresolvable → falls back to tools.image',
     )
     ok(
       gate({ caps, sessionModel: 'img-model', imageModel: 'img-model', designated }) === false,
-      'session model IS image model → disabled even with imageProvider (direct path owns it)',
+      'session model IS image model → disabled even with tools.image (direct path owns it)',
     )
     ok(
       gate({
@@ -151,7 +156,7 @@ async function run() {
         imageModel: null,
         designated: { provider: 'img-prov', capabilities: caps, imageModel: null },
       }) === false,
-      'session none + imageProvider without imageModel → disabled',
+      'session none + tools.image without imageModel → disabled',
     )
     ok(
       gate({
@@ -160,7 +165,7 @@ async function run() {
         imageModel: null,
         designated: { provider: 'img-prov', capabilities: { 'img-model': { outputImage: false } }, imageModel: 'img-model' },
       }) === false,
-      'session none + imageProvider imageModel without outputImage → disabled',
+      'session none + tools.image imageModel without outputImage → disabled',
     )
   }
 
@@ -346,8 +351,8 @@ async function run() {
     ok(String(res?.data?.text).includes('![]('), 'tool result carries a ![](文件名) line for the model to echo')
   }
 
-  // ── 回落：会话 provider 无生图能力 → 顶层 imageProvider 接管（端点/钥匙随它） ──
-  console.log('Test U: imageProvider fallback (session provider without imageModel)')
+  // ── 回落：会话 provider 无生图能力 → 凭据池 tools.image 接管（端点/钥匙随它） ──
+  console.log('Test U: tools.image fallback (session provider without imageModel)')
   {
     const cfgDir = mkdtempSync(join(tmpdir(), 'floria-imgtool-fallback-cfg-'))
     process.env.CLAUDE_CONFIG_DIR = cfgDir
@@ -357,7 +362,7 @@ async function run() {
         credsPath,
         JSON.stringify({
           activeProvider: 'fb-text',
-          imageProvider: 'fb-img',
+          tools: { image: { provider: 'fb-img' } },
           providers: {
             // 文本会话 provider：不声明生图能力（如 deepseek）——可选择性声明自带生图供后半段用
             'fb-text': {
@@ -393,7 +398,46 @@ async function run() {
     setSessionProviderOverride('fb-text')
     setMainLoopModelOverride(undefined)
     ok(getMainLoopModel() === 'text-model', 'session = text-only provider (no image capability)')
-    ok(ImageGenerationTool.isEnabled() === true, 'text-only session + imageProvider fallback → tool enabled')
+    ok(ImageGenerationTool.isEnabled() === true, 'text-only session + tools.image fallback → tool enabled')
+
+    // getToolProviderConfig 解析绑定（provider 名 + 其 config；model 未显式给出时 undefined）
+    const tpc = getToolProviderConfig('image')
+    ok(tpc?.name === 'fb-img', `getToolProviderConfig('image') resolves provider (got ${tpc?.name})`)
+    ok(tpc?.config.baseUrl === 'http://img.invalid/v1', 'getToolProviderConfig exposes the bound provider config')
+    ok(tpc?.model === undefined, 'binding without model → model undefined (falls back to provider imageModel)')
+    ok(getToolProviderConfig('nope') === null, 'unbound tool name → null')
+    ok(getToolProviderConfig('tts') === null, 'no such capability key → null')
+
+    // isToolBoundModel：outputImage 模型 / tools.model 引用模型 → true；纯文本模型 → false
+    const fbImgCfg = { imageCapabilities: { 'img-model': { outputImage: true } } } as any
+    const fbTextCfg = { models: ['text-model'] } as any
+    ok(isToolBoundModel('fb-img', fbImgCfg, 'img-model') === true, 'outputImage model → tool-bound true')
+    ok(isToolBoundModel('fb-text', fbTextCfg, 'text-model') === false, 'plain text model → tool-bound false')
+    ok(
+      isToolBoundModel('fb-text', fbTextCfg, 'nope') === false,
+      'unrelated model on a tool provider → false',
+    )
+    // tools.<*>.model 显式引用的模型（即便无 outputImage 声明）也判定为工具绑定模型
+    writeFileSync(
+      credsPath,
+      JSON.stringify({
+        activeProvider: 'fb-text',
+        tools: { image: { provider: 'fb-img', model: 'weird-model' } },
+        providers: {
+          'fb-text': { baseUrl: 'http://text.invalid/v1', models: ['text-model'], activeModel: 'text-model', keys: [{ value: 'TK', exhausted: false }], activeKeyIndex: 0 },
+          'fb-img': { baseUrl: 'http://img.invalid/v1', models: ['weird-model'], activeModel: 'weird-model', keys: [{ value: 'IK', exhausted: false }], activeKeyIndex: 0 },
+        },
+      }),
+    )
+    ok(
+      getToolProviderConfig('image')?.model === 'weird-model',
+      'binding.model is surfaced by getToolProviderConfig',
+    )
+    ok(
+      isToolBoundModel('fb-img', {} as any, 'weird-model') === true,
+      'model referenced by tools.image.model → tool-bound true (even without outputImage)',
+    )
+    writeCreds(false) // restore the fallback fixture before the dispatch assertions below
 
     const root = mkdtempSync(join(tmpdir(), 'floria-imgtool-fallback-cwd-'))
     let cap: { provider?: string; model?: string; baseUrl?: string; apiKey?: string } = {}
@@ -414,19 +458,19 @@ async function run() {
         (ImageGenerationTool as any).call({ prompt: '画只猫' }, { abortController: new AbortController() }),
       )
     const res = await callTool()
-    ok(res?.data?.ok === true, 'tool call routed to imageProvider succeeds')
-    ok(cap.provider === 'fb-img', `adapter ctx.provider = imageProvider name (got ${cap.provider})`)
-    ok(cap.model === 'img-model', `adapter ctx.model = imageProvider's imageModel (got ${cap.model})`)
-    ok(cap.baseUrl === 'http://img.invalid/v1', 'adapter ctx.baseUrl = imageProvider baseUrl (not session)')
-    ok(cap.apiKey === 'IK', 'adapter ctx.apiKey = imageProvider key (not session)')
+    ok(res?.data?.ok === true, 'tool call routed to tools.image provider succeeds')
+    ok(cap.provider === 'fb-img', `adapter ctx.provider = tools.image provider name (got ${cap.provider})`)
+    ok(cap.model === 'img-model', `adapter ctx.model = tools.image provider's imageModel (got ${cap.model})`)
+    ok(cap.baseUrl === 'http://img.invalid/v1', 'adapter ctx.baseUrl = tools.image provider baseUrl (not session)')
+    ok(cap.apiKey === 'IK', 'adapter ctx.apiKey = tools.image provider key (not session)')
 
     // 会话 provider 自带可出图 imageModel 时**优先**，回落不启用。
     writeCreds(true)
     cap = {}
     const res2 = await callTool()
     ok(res2?.data?.ok === true, 'session-with-image call still succeeds')
-    ok(cap.provider === 'fb-text', `session provider's own imageModel wins over imageProvider (got ${cap.provider})`)
-    ok(cap.model === 'fb-text-img', `session imageModel used, not imageProvider (got ${cap.model})`)
+    ok(cap.provider === 'fb-text', `session provider's own imageModel wins over tools.image (got ${cap.provider})`)
+    ok(cap.model === 'fb-text-img', `session imageModel used, not tools.image (got ${cap.model})`)
     ok(cap.baseUrl === 'http://text.invalid/v1', 'session provider credentials used when it owns the image model')
   }
 

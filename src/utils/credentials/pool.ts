@@ -12,11 +12,13 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { safeParseJSON } from '../json.js'
+import { logForDebugging } from '../debug.js'
 import type {
   ApiKeyEntry,
   CredentialsFile,
   PricingConfig,
   ProviderConfig,
+  ToolBinding,
   WebSearchCredentials,
 } from './types.js'
 
@@ -103,9 +105,10 @@ export function loadCredentials(): CredentialsFile {
     if (typeof data.pricing === 'object' && data.pricing !== null) {
       creds.pricing = data.pricing as PricingConfig
     }
-    // 同理由：顶层生图回落 provider 名必须原样带走，否则 /key 轮换会清掉回落配置
-    if (typeof data.imageProvider === 'string' && data.imageProvider.trim()) {
-      creds.imageProvider = data.imageProvider.trim()
+    // 同理由：按能力分槽的工具绑定（tools.image 等）必须原样带走，否则 /key 轮换
+    // 会清掉回落配置（这是任何 load→save 白名单外字段都会蒸发的既有纪律）
+    if (typeof data.tools === 'object' && data.tools !== null) {
+      creds.tools = data.tools as Record<string, ToolBinding>
     }
     return creds
   } catch {
@@ -260,16 +263,48 @@ export function getActiveProviderImageModel(): string | null {
 }
 
 /**
- * 顶层 `imageProvider` 指定的生图 provider（2026-10-11）——**全局**、不随会话绑定
- * 漂移。文本会话 provider 自身无生图能力时，`ImageGeneration` 工具回落到它。返回
- * `null` = 未指定或指定名不存在（回落失败 ⇒ 工具保持关闭）。
+ * 某工具能力绑定的 provider（2026-10-11，`tools.<toolName>`）——**全局**、不随会话
+ * 绑定漂移。文本会话 provider 自身不能服务该能力时，对应工具回落到它（取它的端点 /
+ * 钥匙 / 模型）。返回 `null` = 未绑定、或绑定的 provider 名不存在（回落失败 ⇒ 工具
+ * 保持关闭，**不静默改用别的 provider**）。
  */
-export function getImageProviderConfig(): { name: string; config: ProviderConfig } | null {
+export function getToolProviderConfig(
+  toolName: string,
+): { name: string; model?: string; config: ProviderConfig } | null {
   const creds = loadCredentials()
-  const name = creds.imageProvider?.trim()
-  if (!name) return null
+  const binding = creds.tools?.[toolName]
+  if (!binding || typeof binding.provider !== 'string' || !binding.provider.trim()) {
+    return null
+  }
+  const name = binding.provider.trim()
   const config = creds.providers[name]
-  return config ? { name, config } : null
+  if (!config) {
+    logForDebugging(
+      `[credentials] tools.${toolName} 绑定的 provider "${name}" 不存在于 providers，忽略该绑定`,
+    )
+    return null
+  }
+  return { name, model: binding.model, config }
+}
+
+/**
+ * 该模型是否「仅服务于工具能力」——不应出现在可切换聊天模型列表（2026-10-11）。
+ * 判据：`imageCapabilities[model].outputImage === true`（生图模型）**或**被任一
+ * `tools.<*>.model` 引用且其 provider === providerName。web `/gateway/models` 与
+ * CLI `/model` 补全共用此谓词，判据单点。
+ */
+export function isToolBoundModel(
+  providerName: string,
+  config: ProviderConfig,
+  model: string,
+): boolean {
+  if (config.imageCapabilities?.[model]?.outputImage === true) return true
+  const tools = loadCredentials().tools
+  if (!tools) return false
+  for (const binding of Object.values(tools)) {
+    if (binding.provider === providerName && binding.model === model) return true
+  }
+  return false
 }
 
 /**

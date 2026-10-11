@@ -7,7 +7,7 @@
  *
  * 运行态门控（`isEnabled`）：存在一个可出图的**生图目标** + **当前会话主循环模型**
  * 本身非生图模型（与直连链互斥）。生图目标**会话 provider 优先**（自有 `imageModel`
- * 可出图即用），否则回落顶层 `imageProvider` 指定的 provider——文本会话 provider 无
+ * 可出图即用），否则回落凭据池 `tools.image` 绑定的 provider——文本会话 provider 无
  * 生图能力（如只有 deepseek）时仍能编排另一 provider 的生图模型；两者都不行则关闭。
  * 会话模型取自 `getMainLoopModel()`——它含 `/model` 会话 override / web 切换结果，而非
  * provider 启动快照（`getActiveModel()` 只看绑定 provider 的 activeModel，会漏掉本会话
@@ -30,9 +30,9 @@ import {
   getActiveBaseUrl,
   getActiveProviderImageCapabilities,
   getActiveProviderImageModel,
-  getImageProviderConfig,
   getProviderApiKey,
   getSessionProviderName,
+  getToolProviderConfig,
 } from '../../utils/credentials/pool.js'
 import { getMainLoopModel } from '../../utils/model/model.js'
 import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
@@ -45,12 +45,17 @@ import {
   type ImageGenRunContext,
 } from '../../services/imagegen/service.js'
 import type { ImageCapabilities, InputImage } from '../../services/imagegen/types.js'
+import {
+  renderToolResultMessage,
+  renderToolUseErrorMessage,
+  renderToolUseRejectedMessage,
+} from './UI.js'
 
 export const IMAGE_GENERATION_TOOL_NAME = 'ImageGeneration'
 
 /**
  * 本会话的生图目标 + 运行凭据。**会话 provider 优先**（自有 `imageModel` 可出图即用），
- * 否则回落顶层 `imageProvider` 指定的 provider（其 `imageCapabilities` / `imageModel` /
+ * 否则回落凭据池 `tools.image` 绑定的 provider（其 `imageCapabilities` / `imageModel` /
  * `baseUrl` / 钥匙）。都没有 ⇒ null（工具关闭）。凭据随目标来源取——回落 provider 的
  * 端点/钥匙由该 provider 自己的配置给出，与会话绑定无关（会话访问器够不着它）。
  */
@@ -61,7 +66,7 @@ function resolveImageTarget(): {
   apiKey: string
 } | null {
   const sessionCaps = getActiveProviderImageCapabilities()
-  const designated = getImageProviderConfig()
+  const designated = getToolProviderConfig('image')
   const target = selectImageTarget({
     session: {
       provider: getSessionProviderName(),
@@ -72,7 +77,7 @@ function resolveImageTarget(): {
       ? {
           provider: designated.name,
           capabilities: designated.config.imageCapabilities,
-          imageModel: designated.config.imageModel,
+          imageModel: designated.model ?? designated.config.imageModel,
         }
       : null,
   })
@@ -138,7 +143,7 @@ export const ImageGenerationTool = buildTool({
   isEnabled() {
     // sessionModel 取**主循环真实模型**（含 /model override / web 切换），
     // 不用 provider 启动快照 getActiveModel()——否则本会话切到文本模型后工具仍关。
-    // 目标源：会话 provider 自有生图优先，回落顶层 imageProvider（见 resolveImageTarget）。
+    // 目标源：会话 provider 自有生图优先，回落凭据池 tools.image（见 resolveImageTarget）。
     const r = resolveImageTarget()
     return isImageGenerationToolEnabled({
       target: r?.target ?? null,
@@ -233,15 +238,11 @@ export const ImageGenerationTool = buildTool({
   renderToolUseMessage(input) {
     return input.prompt
   },
-  renderToolResultMessage(output) {
-    return output.text
-  },
-  renderToolUseRejectedMessage() {
-    return '生图已取消'
-  },
-  renderToolUseErrorMessage() {
-    return '生图出错'
-  },
+  // 三者返回 React 元素（见 UI.tsx）——返回值会被裸插进 <Box>/作为组件根，
+  // 返回字符串会触发 Ink "Text string … must be rendered inside <Text>" 崩溃。
+  renderToolResultMessage,
+  renderToolUseRejectedMessage,
+  renderToolUseErrorMessage,
   renderToolUseProgressMessage() {
     return null
   },

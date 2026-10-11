@@ -29,7 +29,7 @@
 
 ## 2. Feature Flags 活审计
 
-本仓库现引用 88 个 `feature('FLAG')` 编译期旗标。逐一按当前 external-build defines 与 externals 打包复核结果：
+本仓库现引用 91 个 `feature('FLAG')` 编译期旗标。下列打包复核分类为上次全量扫描结果：
 
 - 74 个旗标可干净打包
 - 13 个仍打包失败（其中 5 个已恢复，见 §2.6；10 个远程/云端方向已定案放弃不恢复：CCR 认证族五 flag `BRIDGE_MODE`/`CCR_AUTO_CONNECT`/`CCR_MIRROR`/`CCR_REMOTE_SETUP`/`DAEMON` + `DIRECT_CONNECT`/`SSH_REMOTE`/`KAIROS`/`KAIROS_DREAM`/`PROACTIVE`——均不在任何 feature 集，源码门控保留（编译期 tree-shake））

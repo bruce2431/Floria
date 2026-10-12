@@ -29,6 +29,13 @@
     // 根治「Pj18 顶栏残留 Pj16 会话胶囊」的跨项目泄露）。增/删/切换唯一口 = sidebar/work.js（wkEnsureTab /
     // wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
     wkChats: [],
+    // wkFiles = 下沉区打开的文件 tab 开放集（与 wkChats 完全同构的浏览器 tab 模型，2026-10-12 加入）：
+    // 条目 = **项目内相对 POSIX 路径**（如 MATH/main.tex —— 顶栏标签必须带目录段才认得出是哪一本）；
+    // 激活项仍是单值 state.workFile（照旧持久化，恢复上次那篇）。同样**纯运行时、不持久化、按项目重置**
+    // （见 selectProject）。增唯一口 = sidebar/work/work-layout.js wkEnsureFileTab（applyPanes 兜底并入
+    // 当前 workFile）；删/切换 = work-editor.js closeWkFile。**非激活 tab 不保留编辑器态**——本模型是
+    // 单编辑器 + 切前 flush，刻意不承诺「各自保留未保存内容」。
+    wkFiles: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
     // 无槽 = 用 WK_PANES_DEF（sidebar/work-state.js）；未选项目（workProj 空）不落槽。

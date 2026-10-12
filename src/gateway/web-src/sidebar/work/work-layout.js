@@ -72,6 +72,10 @@
     return (s && s.title) || '未命名会话'
   }
   function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 打开的**文件** tab 开放集（与聊天胶囊同构，2026-10-12）：真源 state.wkFiles（项目内相对路径），
+  // 激活项 = 单值 state.workFile。并入唯一口在此（applyPanes 按当前 workFile 兜底 ⇒ 刷新恢复的
+  // workFile 也有一枚 pill）；移除/切换在 work-editor.js closeWkFile（要 flush 编辑器，故不在此）。
+  function wkEnsureFileTab(p) { if (p && !state.wkFiles.includes(p)) state.wkFiles.push(p) }
   // 关一枚 tab（× 只从顶栏移除，不删会话）。激活项被关 → 切右邻 / 左邻；一枚不剩且文件 tab 与预览
   // 都不在场 → 保底重开空对话 tab（守「聊天 / 文件 / 预览至少一栏在场」不变量）。
   function wkCloseTab(key) {
@@ -125,6 +129,7 @@
         toast('至少保留一栏')
       }
       if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')
       chatArea.classList.toggle('wk-show-file', shown === 'file')

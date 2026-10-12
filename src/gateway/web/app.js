@@ -225,6 +225,13 @@
     // 根治「Pj18 顶栏残留 Pj16 会话胶囊」的跨项目泄露）。增/删/切换唯一口 = sidebar/work.js（wkEnsureTab /
     // wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
     wkChats: [],
+    // wkFiles = 下沉区打开的文件 tab 开放集（与 wkChats 完全同构的浏览器 tab 模型，2026-10-12 加入）：
+    // 条目 = **项目内相对 POSIX 路径**（如 MATH/main.tex —— 顶栏标签必须带目录段才认得出是哪一本）；
+    // 激活项仍是单值 state.workFile（照旧持久化，恢复上次那篇）。同样**纯运行时、不持久化、按项目重置**
+    // （见 selectProject）。增唯一口 = sidebar/work/work-layout.js wkEnsureFileTab（applyPanes 兜底并入
+    // 当前 workFile）；删/切换 = work-editor.js closeWkFile。**非激活 tab 不保留编辑器态**——本模型是
+    // 单编辑器 + 切前 flush，刻意不承诺「各自保留未保存内容」。
+    wkFiles: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
     // 无槽 = 用 WK_PANES_DEF（sidebar/work-state.js）；未选项目（workProj 空）不落槽。
@@ -4868,11 +4875,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     return WK_TOOL_DEFS.length ? WK_TOOL_DEFS[0].id : ''
   }
 
-  // tab 条渲染（唯一口）：数据源 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // tab 条渲染（唯一口）：首枚恒为「预览」页签（data-wkpv="" → state.wkPvTab='' 回预览态），
+  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // 注：data-wkpv="" 仍被 [data-wkpv] 属性存在选择器命中，故点击委托（work-mount.js）不用改。
   function renderWkToolTabs() {
     const box = $('wk-pv-tabs')
     if (!box) return
-    box.innerHTML = wkToolDefs().map(
+    const head = '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>'
+    box.innerHTML = head + wkToolDefs().map(
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')
   }
@@ -4882,15 +4892,16 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
-  // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
-  // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
+  // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
+  // （侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
   // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 右栏卡）。下沉区顶部一条
-  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚
-  // （命名 = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
+  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件 pill×N] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话
+  // 一枚（命名 = 会话标题），文件 pill = 开放集 state.wkFiles 一路径一枚（命名 = 项目内相对路径，两族 ×
+  // 都关掉；开放集纯运行时、切项目重置）；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
   // 文件）；右栏（#work-preview，与下沉区同属 #chat-area 三列之一）两态由 state.wkPvTab 定：'' = 预览态
   // （挂项目预览帧）/ 工具 id = 工具态（顶 tab 条 + 该工具 pane，注册表 sidebar/work-tools.js），顶栏
   // 「工具栏」胶囊切这两态（工具态时变「关闭」）。不变量 = 聊天 / 文件 / 右栏 **至少一栏在场**，唯一
@@ -5034,6 +5045,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     return (s && s.title) || '未命名会话'
   }
   function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 打开的**文件** tab 开放集（与聊天胶囊同构，2026-10-12）：真源 state.wkFiles（项目内相对路径），
+  // 激活项 = 单值 state.workFile。并入唯一口在此（applyPanes 按当前 workFile 兜底 ⇒ 刷新恢复的
+  // workFile 也有一枚 pill）；移除/切换在 work-editor.js closeWkFile（要 flush 编辑器，故不在此）。
+  function wkEnsureFileTab(p) { if (p && !state.wkFiles.includes(p)) state.wkFiles.push(p) }
   // 关一枚 tab（× 只从顶栏移除，不删会话）。激活项被关 → 切右邻 / 左邻；一枚不剩且文件 tab 与预览
   // 都不在场 → 保底重开空对话 tab（守「聊天 / 文件 / 预览至少一栏在场」不变量）。
   function wkCloseTab(key) {
@@ -5087,6 +5102,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         toast('至少保留一栏')
       }
       if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')
       chatArea.classList.toggle('wk-show-file', shown === 'file')
@@ -5109,16 +5125,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     return !t || !t.pane
   }
 
-  // 右栏 UI 落地（唯一处，纯渲染、不挂帧）：预览态 → 显 #wk-pv-body、隐 tab 条与全部工具 pane；
-  // 工具态 → 隐预览帧、显 tab 条（active = state.wkPvTab）+ 该注册工具 pane（其余 pane 恒隐）。
-  // 顶栏「工具栏」胶囊跟着走：预览态 = 「工具栏」+ 插件图标（点入工具态），工具态 = 「关闭」+ ✕
-  // （点回预览态）。未注册的 wkPvTab（旧持久化值 / 工具被摘）落成「无 pane 在场」，切一次 tab 即归一。
+  // 右栏 UI 落地（唯一处，纯渲染、不挂帧）：预览态 → 显 #wk-pv-body、隐全部工具 pane；工具态 → 隐预览帧、
+  // 显该注册工具 pane（其余 pane 恒隐）。tab 条随栏在场常驻（首枚恒为「预览」，预览态下即 active）。
+  // 顶栏「工具栏」胶囊跟着走：栏不在场 = 「工具栏」+ 插件图标（点它开栏），在场 = 「关闭」+ ✕（点它收栏）。
+  // 未注册的 wkPvTab（旧持久化值 / 工具被摘）落成「无 pane 在场」，切一次 tab 即归一。
   function applyPvTab() {
     const id = state.wkPvTab
     const tool = id ? wkToolDef(id) : null
     const bar = $('wk-pv-tabs')
-    if (bar) bar.hidden = !tool
-    document.querySelectorAll('#work-preview .wk-pv-tab').forEach((b) => b.classList.toggle('on', !!tool && b.dataset.wkpv === id))
+    if (bar) bar.hidden = !state.wkPreview
+    document.querySelectorAll('#work-preview .wk-pv-tab').forEach((b) => b.classList.toggle('on', b.dataset.wkpv === id))
     for (const t of wkToolDefs()) {
       const el = t.pane ? $(t.pane) : null
       if (el) el.hidden = !tool || t.id !== id
@@ -5129,22 +5145,32 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (body) body.hidden = !!tool && !!tool.pane
     const cap = $('wk-tb-tool')
     if (!cap) return
-    cap.classList.toggle('on', !!tool)
-    cap.title = tool ? '关闭' : '工具栏'
+    const on = state.wkPreview
+    cap.classList.toggle('on', on)
+    cap.title = on ? '关闭' : '工具栏'
     const ico = cap.querySelector('.wk-tb-ico')
-    if (ico) ico.innerHTML = tool ? I.dshClose : I.plug
+    if (ico) ico.innerHTML = on ? I.dshClose : I.plug
     const nm = cap.querySelector('.wk-tb-name')
-    if (nm) nm.textContent = tool ? '关闭' : '工具栏'
+    if (nm) nm.textContent = on ? '关闭' : '工具栏'
   }
 
-  // 切右栏页态（唯一入口）：'' / 未注册 id → 预览态，已注册 id → 工具态。切到工具态顺带确保栏在场
+  // 右栏页态唯一写口（两维一次写）：on = 这一列在不在场；page = 省略则保持当前页，'' = 回预览页，
+  // id = 工具页。两个入口一律经此：setPvTab（右栏 tab 条，含首枚「预览」页签）与 setPane('workspace')（顶栏
+  // 「工具栏」胶囊，work-files.js）——顶栏不另立链路，故两条入口行为必然同源。
+  // 注：page !== '' 时才走 wkToolNormId（未注册 id 会回落到首枚工具，不能拿它表达「回预览态」）。
+  function setPvPane(on, page) {
+    state.wkPreview = !!on
+    if (!on) state.wkPvTab = ''
+    else if (page !== undefined) state.wkPvTab = page === '' ? '' : wkToolNormId(page)
+    applyPanes()
+    if (state.wkPreview) syncPvContent()
+    saveWork()
+  }
+
+  // 切右栏页态（薄壳）：'' / 未注册 id → 预览态，已注册 id → 工具态。切到工具态顺带确保栏在场
   // （点 tab 就是要看这栏）。落地后补内容：工具态调该工具的 mount（注册表契约），预览态挂预览帧。
   function setPvTab(id) {
-    state.wkPreview = true
-    state.wkPvTab = wkToolNormId(id)
-    applyPanes()
-    syncPvContent()
-    saveWork()
+    setPvPane(true, id)
   }
 
   // 页态落地后的内容补挂（唯一处）：预览态 → renderWorkPreview（挂/复挂预览帧）；工具态 → 该工具
@@ -5177,18 +5203,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     return body ? body.querySelector('.preview-frame') : null
   }
 
-  // 顶栏「工具栏」胶囊：预览态 → 切工具态（首枚注册工具，即评论）；工具态 → 「关闭」回预览态。
-  function toggleToolbar() {
-    if (state.wkPvTab) {
-      state.wkPvTab = ''
-      applyPanes()
-      syncPvContent() // 回预览态：预览帧按需挂（同项目已挂则不重建）
-      saveWork()
-      return
-    }
-    setPvTab('comments')
-  }
-
   // 预览帧挂载（唯一处）：内容渲染一律走 preview-card 的 mountPreview（与槽位预览卡同一份后端容器 /
   // 静态页 / 默认页三级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
   function hasPreviewOf(label) {
@@ -5213,9 +5227,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
   }
 
-  // 顶栏 tab 条（唯一渲染口）：[聊天胶囊 × N] [文件名]。聊天胶囊 = 开放集 state.wkChats 一条一枚，
-  // 命名用会话标题（空对话 = 「新对话」）；active = 当前路由命中项（wkActiveKey），与下沉区显示同源
-  // （wkShownTab，点浮起后胶囊自然熄、文件 pill 亮）。文件 pill 不变。× 关 tab 由点击委托处理。
+  // 顶栏 tab 条（唯一渲染口）：[聊天胶囊 × N] [文件 pill × N]（2026-10-12 文件 pill 起多枚并存）。
+  // 聊天胶囊 = 开放集 state.wkChats 一条一枚，命名用会话标题（空对话 = 「新对话」）；
+  // 文件 pill = 开放集 state.wkFiles 一条一枚，命名用**项目内相对路径**（MATH/main.tex）——不能用
+  // baseOf，两本书的 main.tex 会渲染成一模一样的两枚、认不出也切不动；超宽从**左侧**截断（尾部文件名
+  // 才是唯一区分段，右截断会把目录段切掉，见 styles.css 的 .wk-tb-name[dir='rtl'] 规则）。
+  // active 与下沉区显示同源（wkShownTab）：聊天 = 路由命中项、文件 = state.workFile（故点助手头部
+  // 「浮起」后聊天胶囊自然熄、文件 pill 亮）。点文件 pill = openWorkFile（唯一口，含广播）；× 关 tab
+  // 由点击委托处理。
   function renderTopbar() {
     const box = $('wk-tb-tabs')
     if (!box) return
@@ -5229,9 +5248,10 @@ function setFirstSendHash(v) { firstSendHash = v }
         parts.push(`<button class="wk-tb-pill${shown === 'chat' && key === active ? ' on' : ''}" data-wkchat="${esc(key)}" title="${name}"><span class="wk-tb-name">${name}</span><span class="wk-tb-x" title="关闭">×</span></button>`)
       }
     }
-    if (state.workFile) {
-      const fname = esc(baseOf(state.workFile))
-      parts.push(`<button class="wk-tb-pill${shown === 'file' ? ' on' : ''}" data-wktb="file" title="${fname}"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name">${fname}</span><span class="wk-tb-x" title="关闭">×</span></button>`)
+    for (const p of state.wkFiles) {
+      const on = shown === 'file' && p === state.workFile ? ' on' : ''
+      const full = esc(p)
+      parts.push(`<button class="wk-tb-pill${on}" data-wkftab="${full}" title="${full}"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name" dir="rtl"><span dir="ltr">${full}</span></span><span class="wk-tb-x" title="关闭">×</span></button>`)
     }
     const html = parts.join('')
     if (box.innerHTML !== html) box.innerHTML = html
@@ -5479,13 +5499,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       return
     }
     if (k === 'workspace') {
-      state.wkPreview = on
-      if (!on) state.wkPvTab = '' // 关栏即回预览态：不留「栏不在场却停在工具态」的悬空页态
-      applyPanes()
-      if (on) syncPvContent() // 开栏：预览帧按需挂 / 工具内容按需拉（同项目已挂则不重建）
-      saveWork()
+      // 右栏开/关的**唯一 api**（顶栏「工具栏」胶囊直调此处，见 work-mount.js）：只管在场维，页态归
+      // work-preview.js 的 setPvPane。省略 page ⇒ 保持当前页；关栏时 setPvPane 内部顺带回预览态
+      // （不留「栏不在场却停在工具态」的悬空页态）。
       // 评论内容不随开关走：cmtLoad/cmtRender 在选项目（selectProject）与事后补拉（ensureWork）
       // 两处恒跑（原文标记也需要它），开关只管这一列的显隐。
+      setPvPane(on)
       return
     }
     // 助手开关（浮层已不含助手行；只剩助手头部的 × 走到这里）：关掉后若下沉格再没有别的可显，
@@ -5639,6 +5658,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     state.workFile = ''
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
+    state.wkFiles = [] // 同上：文件 pill 开放集也随项目重置（旧项目的文件路径在新项目里无意义）
     wkOpen.clear()
     renderWorkChrome()
     saveWork()
@@ -6214,6 +6234,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     await wkEdReload()
   }
 
+  // 打开一个文件（**唯一口**：侧栏文件树行 / 搜索浮窗行 / 顶栏文件 pill / 评论定位 / 预览卡 src-open 全走这里）。
+  // 顶栏文件 pill 的多枚开放集由 applyPanes 兜底并入（`wkEnsureFileTab(state.workFile)`），故此处不必另加。
   async function openWorkFile(p) {
     if (!p) return
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
@@ -6224,14 +6246,23 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderWorkBody()
     // 「用户打开了某文件」是一条**事实**，广播给当前工作项目的在场卡（Pj18 预览卡据此切到该篇 PDF）；
     // 内容判断（只认 .tex / 目录段推书稿名）由卡片自己定，宿主不替卡做过滤。带 label 限定 = 不跨项目串台。
+    // 切激活项（点另一枚 pill）同样走这里 ⇒ 每次都重发一次；卡侧按路径去重，重复广播不会 reload。
     if (state.workProj) cardBus.broadcast({ label: state.workProj }, 'file-open', { path: p })
     await renderEditor() // 等文档真正进编辑器再返回（调用方据此在正确文档上定位行）
   }
 
-  // 关掉打开的文件（顶栏文件 pill 的 ×）：pending 编辑先落盘（不因关 tab 丢改动），清 workFile，
-  // 下沉格回聊天 tab（applyPanes 的不变量会保底——聊天栏不在则文件/预览仍在即可）。
-  async function closeWkFile() {
+  // 关一枚文件 tab（顶栏文件 pill 的 ×，p = 该 pill 的路径）：从开放集 state.wkFiles 移除。关的是
+  // **激活项** → 切右邻 / 左邻（落点语义同 wkCloseTab）；一枚不剩 → 清 workFile、下沉格回聊天 tab
+  // （「聊天 / 文件 / 预览至少一栏」由 applyPanes 保底）。非激活 tab 没有文档态（单编辑器模型，切前
+  // flush），故只有关激活项才需要落盘 pending 编辑——绝不因关 tab 丢改动。
+  async function closeWkFile(p) {
+    const i = state.wkFiles.indexOf(p)
+    if (i < 0) return
+    state.wkFiles.splice(i, 1)
+    if (p !== state.workFile) { applyPanes(); return } // 关非激活项：只少一枚 pill，文档与路由不动
     if (wkEdDirty) await wkEdFlush()
+    const next = state.wkFiles[i] != null ? state.wkFiles[i] : state.wkFiles[i - 1]
+    if (next != null) return openWorkFile(next) // 切到邻枚：载入 + 广播 file-open，预览卡跟着切
     state.workFile = ''
     state.wkMainTab = 'chat'
     saveWork()
@@ -6399,8 +6430,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('wk-new').innerHTML = I.dshPlus
     // 视图开关图标与 chat 的 #panel-collapse 同款（I.collapse，2026-10-10 用户定案：两模式第三槽同图标）
     $('wk-view').innerHTML = I.collapse
-    // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按页态写（预览态 = 插件图标 + 「工具栏」，工具态 = ✕ +
-    // 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
+    // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按「右栏在不在场」写（不在场 = 插件图标 + 「工具栏」，
+    // 在场 = ✕ + 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
     // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
     // 按需拉+渲）。外部注册 = 任意模块调 registerWkTool 追加，本模块不感知其内容。
     registerWkTool({
@@ -6423,10 +6454,14 @@ function setFirstSendHash(v) { firstSendHash = v }
       refreshMarks: cmtApplyMarks,
     })
     cmtMount()
-    // 顶栏两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
-    $('wk-tb-tool').addEventListener('click', () => toggleToolbar())
+    // 顶栏三种 pill 的点击一律**直调侧栏那条同一个函数**，不在此自写 state（顶栏不另立链路）。
+    // 「工具栏」胶囊 = 右栏整列开/关：调 setPane('workspace', on)（其内落 setPvPane：在场维 + 关栏时
+    // 顺带回预览态）。文件 pill（可多枚）= 见下面 data-wkftab 分支（调 openWorkFile / closeWkFile）。
+    $('wk-tb-tool').addEventListener('click', () => setPane('workspace', !state.wkPreview))
     // 右栏工具 tab 条：唯一切换口 = setPvTab（渲染 + 内容补挂 + 持久化都在其内）。tab 条由
     // work-tools.js 的 renderWkToolTabs 重渲 → 事件必须委托在容器上（逐钮绑定会被下次重渲抹掉）。
+    // 首枚「预览」页签 data-wkpv="" → setPvTab('') → setPvPane(true, '')，经其中 `page === ''` 特判回预览态；
+    // 切勿自以为要过 wkToolNormId——它会回落首枚工具（评论），表达不了「回预览」。
     $('wk-pv-tabs').addEventListener('click', (e) => {
       const b = e.target.closest('[data-wkpv]')
       if (b) setPvTab(b.dataset.wkpv)
@@ -6464,12 +6499,14 @@ function setFirstSendHash(v) { firstSendHash = v }
         saveWork()
         return
       }
-      const b = e.target.closest('[data-wktb]')
-      if (!b || b.dataset.wktb !== 'file') return
-      if (e.target.closest('.wk-tb-x')) { closeWkFile(); return } // × = 关掉打开的文件
-      state.wkMainTab = 'file'
-      applyPanes()
-      saveWork()
+      const b = e.target.closest('[data-wkftab]')
+      if (!b) return
+      const fp = b.dataset.wkftab
+      if (e.target.closest('.wk-tb-x')) { closeWkFile(fp); return } // × = 关掉这枚文件 tab
+      // 点文件 pill = 明确要看这个文件：调**侧栏文件行那条同一个函数** openWorkFile（载入 + 切下沉区到
+      // 编辑卡 renderEditor + cardBus 广播 file-open 让预览卡跟着切）。原先此处自写 wkMainTab+applyPanes，
+      // 是顶栏独有的一条残链——预览卡收不到广播，故「侧栏点文件」与「顶栏点 pill」表现不一致。
+      openWorkFile(fp)
     })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')

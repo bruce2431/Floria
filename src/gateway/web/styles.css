@@ -2521,6 +2521,11 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-tb-ico { display: flex; flex: none; }
 .wk-tb-ico svg { width: 14px; height: 14px; display: block; }
 .wk-tb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 文件 pill 名 = 项目内相对路径（MATH/main.tex），超宽须**从左侧**截断——尾部文件名才是唯一区分段，
+   右截断会把目录段切掉、两本书的 pill 长成一模一样。dir="rtl" 让 text-overflow 的省略号落在行首，
+   内层 dir="ltr" 保路径本身仍按 LTR 顺序渲染（renderTopbar 渲的嵌套结构）；text-align:left 抵消
+   rtl 的默认右对齐（未溢出时仍左齐，与聊天胶囊对齐一致）。 */
+.wk-tb-name[dir='rtl'] { text-align: left; }
 /* 聊天胶囊右端的关闭钮（×）：只从顶栏移除该 tab，不删会话。 */
 .wk-tb-x { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: -5px; border-radius: 4px; color: var(--text-3); font-size: 15px; line-height: 1; }
 .wk-tb-x:hover { background: var(--border); color: var(--text); }

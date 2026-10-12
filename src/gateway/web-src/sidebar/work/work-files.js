@@ -26,13 +26,12 @@
       return
     }
     if (k === 'workspace') {
-      state.wkPreview = on
-      if (!on) state.wkPvTab = '' // 关栏即回预览态：不留「栏不在场却停在工具态」的悬空页态
-      applyPanes()
-      if (on) syncPvContent() // 开栏：预览帧按需挂 / 工具内容按需拉（同项目已挂则不重建）
-      saveWork()
+      // 右栏开/关的**唯一 api**（顶栏「工具栏」胶囊直调此处，见 work-mount.js）：只管在场维，页态归
+      // work-preview.js 的 setPvPane。省略 page ⇒ 保持当前页；关栏时 setPvPane 内部顺带回预览态
+      // （不留「栏不在场却停在工具态」的悬空页态）。
       // 评论内容不随开关走：cmtLoad/cmtRender 在选项目（selectProject）与事后补拉（ensureWork）
       // 两处恒跑（原文标记也需要它），开关只管这一列的显隐。
+      setPvPane(on)
       return
     }
     // 助手开关（浮层已不含助手行；只剩助手头部的 × 走到这里）：关掉后若下沉格再没有别的可显，
@@ -186,6 +185,7 @@
     state.workFile = ''
     state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
     state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
+    state.wkFiles = [] // 同上：文件 pill 开放集也随项目重置（旧项目的文件路径在新项目里无意义）
     wkOpen.clear()
     renderWorkChrome()
     saveWork()

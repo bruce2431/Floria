@@ -227,6 +227,8 @@
     await wkEdReload()
   }
 
+  // 打开一个文件（**唯一口**：侧栏文件树行 / 搜索浮窗行 / 顶栏文件 pill / 评论定位 / 预览卡 src-open 全走这里）。
+  // 顶栏文件 pill 的多枚开放集由 applyPanes 兜底并入（`wkEnsureFileTab(state.workFile)`），故此处不必另加。
   async function openWorkFile(p) {
     if (!p) return
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
@@ -237,14 +239,23 @@
     renderWorkBody()
     // 「用户打开了某文件」是一条**事实**，广播给当前工作项目的在场卡（Pj18 预览卡据此切到该篇 PDF）；
     // 内容判断（只认 .tex / 目录段推书稿名）由卡片自己定，宿主不替卡做过滤。带 label 限定 = 不跨项目串台。
+    // 切激活项（点另一枚 pill）同样走这里 ⇒ 每次都重发一次；卡侧按路径去重，重复广播不会 reload。
     if (state.workProj) cardBus.broadcast({ label: state.workProj }, 'file-open', { path: p })
     await renderEditor() // 等文档真正进编辑器再返回（调用方据此在正确文档上定位行）
   }
 
-  // 关掉打开的文件（顶栏文件 pill 的 ×）：pending 编辑先落盘（不因关 tab 丢改动），清 workFile，
-  // 下沉格回聊天 tab（applyPanes 的不变量会保底——聊天栏不在则文件/预览仍在即可）。
-  async function closeWkFile() {
+  // 关一枚文件 tab（顶栏文件 pill 的 ×，p = 该 pill 的路径）：从开放集 state.wkFiles 移除。关的是
+  // **激活项** → 切右邻 / 左邻（落点语义同 wkCloseTab）；一枚不剩 → 清 workFile、下沉格回聊天 tab
+  // （「聊天 / 文件 / 预览至少一栏」由 applyPanes 保底）。非激活 tab 没有文档态（单编辑器模型，切前
+  // flush），故只有关激活项才需要落盘 pending 编辑——绝不因关 tab 丢改动。
+  async function closeWkFile(p) {
+    const i = state.wkFiles.indexOf(p)
+    if (i < 0) return
+    state.wkFiles.splice(i, 1)
+    if (p !== state.workFile) { applyPanes(); return } // 关非激活项：只少一枚 pill，文档与路由不动
     if (wkEdDirty) await wkEdFlush()
+    const next = state.wkFiles[i] != null ? state.wkFiles[i] : state.wkFiles[i - 1]
+    if (next != null) return openWorkFile(next) // 切到邻枚：载入 + 广播 file-open，预览卡跟着切
     state.workFile = ''
     state.wkMainTab = 'chat'
     saveWork()

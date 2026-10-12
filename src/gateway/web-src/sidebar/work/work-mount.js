@@ -64,8 +64,8 @@
     $('wk-new').innerHTML = I.dshPlus
     // 视图开关图标与 chat 的 #panel-collapse 同款（I.collapse，2026-10-10 用户定案：两模式第三槽同图标）
     $('wk-view').innerHTML = I.collapse
-    // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按页态写（预览态 = 插件图标 + 「工具栏」，工具态 = ✕ +
-    // 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
+    // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按「右栏在不在场」写（不在场 = 插件图标 + 「工具栏」，
+    // 在场 = ✕ + 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
     // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
     // 按需拉+渲）。外部注册 = 任意模块调 registerWkTool 追加，本模块不感知其内容。
     registerWkTool({
@@ -88,10 +88,14 @@
       refreshMarks: cmtApplyMarks,
     })
     cmtMount()
-    // 顶栏两个 pill 的点击只切 wkMainTab/助手形态，渲染由 renderTopbar 收口。
-    $('wk-tb-tool').addEventListener('click', () => toggleToolbar())
+    // 顶栏三种 pill 的点击一律**直调侧栏那条同一个函数**，不在此自写 state（顶栏不另立链路）。
+    // 「工具栏」胶囊 = 右栏整列开/关：调 setPane('workspace', on)（其内落 setPvPane：在场维 + 关栏时
+    // 顺带回预览态）。文件 pill（可多枚）= 见下面 data-wkftab 分支（调 openWorkFile / closeWkFile）。
+    $('wk-tb-tool').addEventListener('click', () => setPane('workspace', !state.wkPreview))
     // 右栏工具 tab 条：唯一切换口 = setPvTab（渲染 + 内容补挂 + 持久化都在其内）。tab 条由
     // work-tools.js 的 renderWkToolTabs 重渲 → 事件必须委托在容器上（逐钮绑定会被下次重渲抹掉）。
+    // 首枚「预览」页签 data-wkpv="" → setPvTab('') → setPvPane(true, '')，经其中 `page === ''` 特判回预览态；
+    // 切勿自以为要过 wkToolNormId——它会回落首枚工具（评论），表达不了「回预览」。
     $('wk-pv-tabs').addEventListener('click', (e) => {
       const b = e.target.closest('[data-wkpv]')
       if (b) setPvTab(b.dataset.wkpv)
@@ -129,12 +133,14 @@
         saveWork()
         return
       }
-      const b = e.target.closest('[data-wktb]')
-      if (!b || b.dataset.wktb !== 'file') return
-      if (e.target.closest('.wk-tb-x')) { closeWkFile(); return } // × = 关掉打开的文件
-      state.wkMainTab = 'file'
-      applyPanes()
-      saveWork()
+      const b = e.target.closest('[data-wkftab]')
+      if (!b) return
+      const fp = b.dataset.wkftab
+      if (e.target.closest('.wk-tb-x')) { closeWkFile(fp); return } // × = 关掉这枚文件 tab
+      // 点文件 pill = 明确要看这个文件：调**侧栏文件行那条同一个函数** openWorkFile（载入 + 切下沉区到
+      // 编辑卡 renderEditor + cardBus 广播 file-open 让预览卡跟着切）。原先此处自写 wkMainTab+applyPanes，
+      // 是顶栏独有的一条残链——预览卡收不到广播，故「侧栏点文件」与「顶栏点 pill」表现不一致。
+      openWorkFile(fp)
     })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')

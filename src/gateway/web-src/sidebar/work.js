@@ -18,15 +18,16 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
 /* @module sidebar/work.js */
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
-  // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层两开关
-  // （预览 / 侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
+  // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
+  // （侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
   // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 右栏卡）。下沉区顶部一条
-  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件名] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话一枚
-  // （命名 = 会话标题，× 关掉），文件 tab 一枚；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
+  // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件 pill×N] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话
+  // 一枚（命名 = 会话标题），文件 pill = 开放集 state.wkFiles 一路径一枚（命名 = 项目内相对路径，两族 ×
+  // 都关掉；开放集纯运行时、切项目重置）；同一时刻只显一个内容（#session-card = 聊天 / #work-editor =
   // 文件）；右栏（#work-preview，与下沉区同属 #chat-area 三列之一）两态由 state.wkPvTab 定：'' = 预览态
   // （挂项目预览帧）/ 工具 id = 工具态（顶 tab 条 + 该工具 pane，注册表 sidebar/work-tools.js），顶栏
   // 「工具栏」胶囊切这两态（工具态时变「关闭」）。不变量 = 聊天 / 文件 / 右栏 **至少一栏在场**，唯一

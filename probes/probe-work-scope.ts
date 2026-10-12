@@ -199,10 +199,12 @@ ok('H4 产物 app.js 内两个新口定义唯一', count(appJs, /function stashW
 // 顶栏 [＋][聊天][文件名] pill 由 renderTopbar 单口渲染，active 与下沉区实际显示同源（wkShownTab）。
 ok('I1 index.html 含顶栏结构（.wk-topbar / #wk-tb-new / #wk-tb-tabs）', ['wk-topbar', 'wk-tb-new', 'wk-tb-tabs'].every((c) => idx.includes(c)))
 ok('I1 index.html 旧链清除（#wk-ed-back 已删）', !idx.includes('wk-ed-back'))
-ok('I1 视图浮层两行（预览 / 侧边栏，四行退场）', ['data-wkpane="workspace"', 'data-wkpane="sidebar"'].every((c) => idx.includes(c)) && !idx.includes('data-wkpane="editor"') && !idx.includes('data-wkpane="assist"'))
+// 2026-10-12 变更单1/2：右栏开合唯走顶栏「工具栏」胶囊（setPane('workspace', on)），浮层「预览」行已删，
+// 免得浮层与顶栏两条链路并存。
+ok('I1 视图浮层单行（侧边栏；预览行已删）', idx.includes('data-wkpane="sidebar"') && !idx.includes('data-wkpane="workspace"') && !idx.includes('data-wkpane="editor"') && !idx.includes('data-wkpane="assist"'))
 const rt = body(workJs, 'function renderTopbar()')
 ok('I2 renderTopbar active 与下沉显示同源（读 wkShownTab）', rt.includes('wkShownTab()') && rt.includes('wk-tb-pill'))
-ok('I2 顶栏 tab 数据键 data-wktb（点文件切 wkMainTab=file）', body(workJs, 'function mountWork()').includes('data-wktb') && workJs.includes("state.wkMainTab = 'file'"))
+ok('I2 顶栏文件 pill 数据键 data-wkftab（点它调 openWorkFile，顶栏不自有链路）', body(workJs, 'function mountWork()').includes('data-wkftab') && body(workJs, 'function openWorkFile(').includes("state.wkMainTab = 'file'"))
 ok('I2 顶栏 + 按钮接线 newWorkChat（新建聊天唯一口）', mw.includes("$('wk-tb-new')") && mw.includes('newWorkChat()'))
 ok('I3 CSS Grid 三列（下沉区 | 7px 分界条 | --wk-pw 预览列）', /#chat-area\.work \{[\s\S]*?display: grid;[\s\S]*?grid-template-columns: minmax\(0, 1fr\) 7px var\(--wk-pw, 420px\)/.test(styles))
 ok('I3 预览关 → 单列退化（:not(.wk-preview)）', /#chat-area\.work:not\(\.wk-preview\) \{ grid-template-columns: minmax\(0, 1fr\)/.test(styles))
@@ -252,9 +254,18 @@ ok('J6 产物 app.js 胶囊口定义唯一', count(appJs, /function wkCloseTab\(
 
 // ---------- ⑭ 四 bug 修复（2026-10-06）：文件 tab 关闭钮 / 点会话切聊天 tab / 模式白块 / 模式色钩子 ----------
 // K1 打开的文件顶栏 pill 带关闭钮（× → closeWkFile：先 flush 编辑 → 清 workFile → 切回聊天 tab）
-ok('K1 文件 pill 带 ×（renderTopbar 文件分支渲 .wk-tb-x）', /data-wktb="file"[\s\S]{0,300}wk-tb-x/.test(rt))
-ok('K1 × 接线到 closeWkFile（mountWork 文件分支）', body(workJs, 'function mountWork()').includes('closeWkFile()'))
-ok('K1 closeWkFile 先 flush 再清 workFile + 切聊天 tab', /async function closeWkFile\(\)[\s\S]{0,300}wkEdFlush\(\)[\s\S]{0,200}workFile = ''[\s\S]{0,200}wkMainTab = 'chat'/.test(workJs))
+ok('K1 文件 pill 带 ×（renderTopbar 文件分支渲 .wk-tb-x）', /data-wkftab=[\s\S]{0,400}wk-tb-x/.test(rt))
+ok('K1 × 接线到 closeWkFile（mountWork 文件分支，带该 pill 的路径）', body(workJs, 'function mountWork()').includes('closeWkFile(fp)'))
+ok('K1 closeWkFile 关激活项先 flush 再清 workFile + 切聊天 tab', /async function closeWkFile\(p\)[\s\S]{0,600}wkEdFlush\(\)[\s\S]{0,400}workFile = ''[\s\S]{0,200}wkMainTab = 'chat'/.test(workJs))
+// K6 文件 pill 多枚并存（2026-10-12）：真源 state.wkFiles 开放集（与 wkChats 同构），激活项 = 单值
+// state.workFile；命名用项目内相对路径（baseOf 会把两本书都渲成 main.tex）；超宽从**左侧**截断。
+ok('K6 state.js wkFiles 初值（开放集）', /wkFiles: \[\]/.test(stateJs))
+ok('K6 按项目重置（selectProject 随 wkChats 一起清）', /state\.wkChats = \[\]/.test(workJs) && /state\.wkFiles = \[\]/.test(workJs))
+ok('K6 applyPanes 兜底并入当前 workFile（刷新恢复的也有 pill）', body(workJs, 'function applyPanes()').includes('wkEnsureFileTab(state.workFile)'))
+ok('K6 renderTopbar 遍历 wkFiles 渲多枚 + data-wkftab（命名不再用 baseOf 单枚）', rt.includes('for (const p of state.wkFiles)') && rt.includes('data-wkftab=') && !rt.includes('baseOf('))
+ok('K6 左侧截断（dir=rtl 嵌套 + CSS 规则）', rt.includes('dir="rtl"') && /\.wk-tb-name\[dir='rtl'\]/.test(styles))
+ok('K6 × 关落点：切邻枚 / 全关回聊天 tab', body(workJs, 'function closeWkFile(').includes('wkFiles[i]') && body(workJs, 'function closeWkFile(').includes("wkMainTab = 'chat'"))
+ok('K6 产物 app.js 新口定义唯一', count(appJs, /function wkEnsureFileTab\(/g) === 1 && count(appJs, /function closeWkFile\(/g) === 1)
 // K2 work 侧栏点会话 → 强制聊天 tab 顶上来（否则文件 tab 占着下沉格，看着像「点了没反应」）
 ok('K2 sess-item 分支强制 wkMainTab=chat + 助手靠回栏', /closest\('\.sess-item'\)[\s\S]{0,400}wkMainTab = 'chat'[\s\S]{0,200}wkAssist = true[\s\S]{0,120}wkAssistMode = 'side'/.test(workJs))
 // K3 模式 tab：切换器**不含任何胶囊元素**（无轨道 / 无滑动白块），卡面上只有唯一一块「空位」，

@@ -1,6 +1,8 @@
-// work 工具页注册表（2026-10-07，参考 Prism）：work 右栏（#work-preview）**工具态**顶部水平标签栏的
-// 工具登记处。右栏两态——**预览态**（默认，渲项目预览帧 #wk-pv-body）与**工具态**（顶 tab 条 + 各工具
-// pane 互斥显隐）；态与 active 工具共用一个状态源 state.wkPvTab（'' = 预览态，工具 id = 工具态）。
+// work 工具页注册表（2026-10-07，参考 Prism；2026-10-12 单链路：开合归胶囊、页态归本 tab 条）：
+// work 右栏（#work-preview）顶部水平标签栏的登记处。**右栏开/关 = 顶栏胶囊直调侧栏 api
+// setPane('workspace', on)（唯一动作，见 work-mount.js）**；**显示哪一页 = 本 tab 条**
+// （首枚恒为「预览」页签，其后是已注册工具）；active 与页态共用一个状态源 state.wkPvTab
+// （'' = 预览页，工具 id = 工具页）。右栏在场时 tab 条常驻（applyPvTab 按 wkPreview 显隐）。
 // 任何模块可调 registerWkTool({ id, title, pane, mount }) 挂一枚工具 tab——本表只做「注册 → 按序渲 tab →
 // 交调用方切内容」，不写任何工具内容（与 engine/registry.js 视图卡同思路）。
 //   内置（work.js 注册）：'comments' 评论（sidebar/comments.js 渲染进 #wk-cmt）；外部注册 = 任意模块调
@@ -61,11 +63,14 @@ import { esc } from '../core/util.js'
     return WK_TOOL_DEFS.length ? WK_TOOL_DEFS[0].id : ''
   }
 
-  // tab 条渲染（唯一口）：数据源 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // tab 条渲染（唯一口）：首枚恒为「预览」页签（data-wkpv="" → state.wkPvTab='' 回预览态），
+  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // 注：data-wkpv="" 仍被 [data-wkpv] 属性存在选择器命中，故点击委托（work-mount.js）不用改。
   function renderWkToolTabs() {
     const box = $('wk-pv-tabs')
     if (!box) return
-    box.innerHTML = wkToolDefs().map(
+    const head = '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>'
+    box.innerHTML = head + wkToolDefs().map(
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')
   }

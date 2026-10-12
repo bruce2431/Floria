@@ -791,7 +791,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 - **物理边界（为什么宿主是唯一 broker）**：iframe 之间不共享 `window`、跨源拿不到对方的 `contentWindow` ⇒ **卡片永远只认识 `parent` 一个对象**；这既是「卡↔卡不能直连」的原因，也是鉴权的天然边界（**不给卡片加 token**）。
 - **信封**（`<ns>` = 卡片自定义命名空间，Pj18 = `floria-pv`；宿主从消息 `type` 前缀推导，不要求卡额外申报）：
-  - 宿主→卡 `{ type:'<ns>-cmd', cmd, ...参数平铺 }`（参数**平铺**，不裹一层 `args`）
+  - 宿主→卡 `{ type:'<ns>-cmd', cmd, ...参数平铺 }`（**指令**：只发给一张卡，恒有 ack；参数**平铺**，不裹一层 `args`）
+  - 宿主→卡 `{ type:'<ns>-broadcast', ev, ...数据 }`（**事实**：发给所有匹配的在场帧，**无配对 ack**）——发送时逐帧翻译成 `<ns>-broadcast`，**调用方不必知道卡的命名空间**（同 `callCard` 拼 `<ns>-cmd` 手法）
   - 卡→宿主 `{ type:'<ns>-event', ev, ...数据 }`——**ack 也走此处**（`ev:'ack'`，用 `cmd` 与在途命令配对，**不用 callId**；每帧串行队列是配对的前提）
   - 卡↔卡 `{ type:'floria-card-call', callId, target, cmd, args }` / `{ type:'floria-card-result', callId, ok, ... }`（保留前缀，与卡 ns 零撞车）
 - **约定**：① 每条命令恒回一条 ack（成功失败都在 ack 里）；② 未注册命令回 `{ok:false,error:'未注册的命令 X'}` 不静默；③ 命令**无状态、幂等优先**，长动作卡内等完再 ack，宿主只做超时兜底；④ **命令里不塞身份**（权限判断全在宿主）；⑤ `path` 口径 = 项目根相对 POSIX（与 `/gateway/file?label=&path=` 同）。
@@ -800,9 +801,11 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **帧挂点**：`feature/preview-frame.js`（一处挂点覆盖 slot/work 两消费方，换 label 硬拆前注销、软重入/新建后注册）、`views/cards/ext/ext-card.js`（外置/应用卡）；第一方内联卡经总线 `registerInlineCard`（无 iframe，命令走 `handlers` 直调）。
 - **src-open（卡内点「跳源码」→ 宿主开文件 + 定位行）**：卡发 `<ns>-event{ev:'src-open', path, line}` → 总线门禁（`frame.label` 必须是当前工作项目，否则 toast 丢弃，防跨项目越权）→ 交付**一个**口 `setSourceOpener({open(path,line)})`。**载入是异步的**（读文件 → 灌编辑器），故「开 + 定位」合成一个口交给宿主自己排序——`work-editor.js` 的 `renderEditor()` 返回载入 Promise、`openWorkFile` await 它，调用方据此在**正确文档**上定位（总线不揣测文档何时就位）。
 - **能力表 + 上报**：`listCaps()` = 各在场帧的 `{label, instanceId, kind, ns, cmds, ready}`。触发点 = 帧注册/注销、卡 `ready`、WS `onopen`；表变 50ms 防抖。上行口由 `engine/gateway.js` 注入（`cardBus.setGatewaySender`，engine 内不成环，同 `setTabRefresh`/`setExtCardRenderer` 手法）。
+- **广播（一事实、多收听者）**：`cardBus.broadcast(target, ev, data)`——与命令的区别在**语义**：广播是**事实**（如「用户打开了某文件」），无 ack、不指定单一收件人；命令是**指令**、只发给一张卡且恒有 ack。发送前按 `target`（`label`/`ns`/`instanceId`）筛一遍在场帧（防跨项目串台），`ns` 由卡在 `ready` 里申报、发送时逐帧翻译。**`lastNotes` 记最近广播，帧 `ready` 时补发**（`replayNotes`）——故宿主侧「先发生事实、后挂帧」不丢（例：先开文件、预览帧后挂）。
+- **首个实例（file-open）**：用户在侧栏文件树**点开一个文件** → 唯一开点 `openWorkFile(p)` 广播 `cardBus.broadcast({label: state.workProj}, 'file-open', {path: p})` → Pj18 预览卡据 `path` 的目录段推书稿名并切 PDF。**内容判断（只认 `.tex` / 目录段推名）在卡侧**，宿主不替卡过滤（广播是事实，别的卡各自反应）。
 - **agent→卡**：模型工具 `CardCall`（`action:'list'|'call'`）→ 网关 `POST /gateway/card-call` → WS 下行 `card-call` → `gws.onmessage` 交 `cardBus.handleGatewayCall` → 目标卡 → ack 上行 `card-result` → 网关按 callId 配对落成 HTTP。网关侧端点/帧型/选设备和错误码见 [gateway.md](gateway.md) §18。
 - **与既有 postMessage 通道的关系**：本总线是**叠加**，不动既有 5 条（`floria-rail-*` / `floria-quote-*` / `floria-wk-tool-*` / `floria-open-session` 等）——它们对新帧型早退，互不干扰。
-- **cache-bust**：v518。
-- **探针锚点**：`probes/probe-web-cards-api.ts`（31 断言：总线单顶层名 / 信封与保留前缀字面量 / ack 配对键 / 帧挂点 / 前端网关接线 / 网关帧型与路由状态码真值表 / 工具与 feature 门控 / cache-bust 版本一致）、`probes/probe-web-card-boundary.ts`（`engine/card-bus.js` 入卡片小底座白名单）、`probes/probe-web-module-scope.ts`（cardBus 单顶层名无撞名）。
+- **cache-bust**：v519。
+- **探针锚点**：`probes/probe-web-cards-api.ts`（34 断言：总线单顶层名 / 信封与保留前缀字面量 / 广播信道与 ready 补发 / ack 配对键 / 帧挂点 / 文件打开广播 / 前端网关接线 / 网关帧型与路由状态码真值表 / 工具与 feature 门控 / cache-bust 版本一致）、`probes/probe-web-card-boundary.ts`（`engine/card-bus.js` 入卡片小底座白名单）、`probes/probe-web-module-scope.ts`（cardBus 单顶层名无撞名）。
 
 

@@ -58,6 +58,13 @@ else bad('宿主→卡信封 `${f.ns}-cmd` 缺失')
 if (bus.includes("d.type.slice(-6) !== '-event'") && '-event'.length === 6) ok("卡→宿主信封判定 = type 后缀 '-event'（6 字符切片）")
 else bad("卡→宿主信封判定 slice(-6)!=='-event' 缺失")
 
+// 广播信道：宿主→卡（事实、多收听者、无 ack）——逐帧翻译成 `<ns>-broadcast`
+if (bus.includes('type: `${f.ns}-broadcast`')) ok('宿主→卡广播信封 = `${f.ns}-broadcast`（调用方不必知道卡的 ns）')
+else bad('宿主→卡广播信封 `${f.ns}-broadcast` 缺失')
+// 迟到入场的帧补发最近广播（ns 在 ready 才确定）：onCardEvent 的 ready 分支调 replayNotes(f)
+if (/ev === 'ready'[\s\S]{0,400}replayNotes\(f\)/.test(bus)) ok('ready 分支补发最近广播 replayNotes(f)（先开文件、后挂帧不丢事实）')
+else bad('ready 分支未调 replayNotes(f)（迟到帧丢事实）')
+
 // 跨卡保留前缀（宿主 brokered）：认 call、回 result
 if (bus.includes("d.type === 'floria-card-call'")) ok('跨卡请求前缀 floria-card-call 被总线识别')
 else bad('总线未识别 floria-card-call')
@@ -72,9 +79,10 @@ else bad('ack 配对（ev===\'ack\' + queue[0].cmd）缺失')
 if (bus.includes('未注册的命令')) ok('未注册命令显式回 ok:false（不静默）')
 else bad('未注册命令未显式报错')
 
-// 导出面：11 个公开 API
+// 导出面：12 个公开 API
 for (const api of [
   'addCardEventListener',
+  'broadcast',
   'callCard',
   'frames',
   'handleGatewayCall',
@@ -90,7 +98,7 @@ for (const api of [
   if (new RegExp(`(^|\\s)${api}[,:]`, 'm').test(bus)) continue
   bad(`总线导出面缺 ${api}`)
 }
-ok('总线导出面 11 个 API 齐备')
+ok('总线导出面 12 个 API 齐备')
 
 // ---------- B. 帧挂点 ----------
 const preview = read('src/gateway/web-src/feature/preview-frame.js')
@@ -110,6 +118,12 @@ else bad('work-mount.js 未注入 setSourceOpener')
 const workFacade = read('src/gateway/web-src/sidebar/work.js')
 if (/from '\.\.\/engine\/card-bus\.js'/.test(workFacade)) ok('sidebar/work.js 门面持有 cardBus import（拆件不带 import）')
 else bad('sidebar/work.js 门面缺 cardBus import')
+
+// 侧栏点开文件 → 广播事实 file-open（Pj18 预览卡据此切书稿）：唯一开点 openWorkFile 内，带 label 限定
+const workEditor = read('src/gateway/web-src/sidebar/work/work-editor.js')
+if (/cardBus\.broadcast\(\{ label: state\.workProj \}, 'file-open', \{ path: p \}\)/.test(workEditor))
+  ok("openWorkFile 广播 'file-open'（label 限定当前工作项目，不跨项目串台）")
+else bad("work-editor.js openWorkFile 未广播 'file-open'")
 
 // ---------- C. 前端网关客户端（gateway.js）----------
 if (/from '\.\/card-bus\.js'/.test(gwJs) && /cardBus\.setGatewaySender\(/.test(gwJs)) ok('gateway.js 注入 setGatewaySender（唯一 WS 上行口）')

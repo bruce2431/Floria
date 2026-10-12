@@ -4,7 +4,8 @@
 // contentWindow ⇒ 卡片永远只认识 `parent` 一个对象（浏览器物理约束 = 鉴权天然边界），故「卡↔卡」一律
 // 经宿主转译，且**不给卡片加 token**。
 // 信封（`<ns>` = 卡片自定义命名空间，Pj18 = `floria-pv`；宿主从消息 type 前缀推导，不要求卡额外申报）：
-//   宿主→卡  { type:'<ns>-cmd', cmd, ...参数平铺 }
+//   宿主→卡  { type:'<ns>-cmd', cmd, ...参数平铺 }              ← 指令：只发给一张卡，恒有 ack
+//   宿主→卡  { type:'<ns>-broadcast', ev, ...数据 }             ← 事实：发给所有匹配的在场卡，无 ack
 //   卡→宿主  { type:'<ns>-event', ev, ...数据 }   ← ack 也走此处（ev:'ack'，用 cmd 配对）
 //   卡↔卡    { type:'floria-card-call', callId, target, cmd, args } / { type:'floria-card-result', callId, ok, ... }
 // 约定（同设想文档 §3）：① 每条命令恒回一条 ack；② 未注册命令回 ok:false 不静默；③ 命令无状态、幂等
@@ -203,6 +204,34 @@ const cardBus = (function () {
       .catch(() => { /* 文件打不开：静默（编辑器自会提示） */ })
   }
 
+  // ---------- 宿主→卡 广播（一事实、多收听者）----------
+  // 与命令的区别：广播是**事实**（如「用户打开了某文件」），无配对 ack、不指定单一收件人；命令是**指令**、
+  // 只发给一张卡且恒有 ack。发送前仍按目标（label/ns/instanceId）筛一遍在场帧，避免跨项目串台。
+  // 帧的 ns 由卡自己在 `ready` 里申报，发送时逐帧翻译成 `<ns>-broadcast`——**调用方不必知道卡的命名空间**
+  // （与 callCard 拼 `<ns>-cmd` 同一手法）。迟到入场的帧由 ready 时补发（见 onCardEvent），故宿主侧
+  // 「先开文件、后挂帧」不丢事实。
+  const lastNotes = new Map() // ev → { target, data }
+  function broadcast(target, ev, data) {
+    const t = target && typeof target === 'object' ? target : {}
+    const payload = data && typeof data === 'object' ? data : {}
+    lastNotes.set(String(ev), { target: t, data: payload })
+    for (const f of liveFrames()) sendNote(f, t, ev, payload)
+  }
+  function matchesTarget(f, t) {
+    if (t.instanceId && f.key !== t.instanceId) return false
+    if (t.ns && f.ns !== t.ns) return false
+    if (t.label && f.label !== t.label) return false
+    return true
+  }
+  // 只发 iframe 帧：inline 卡没有 window，广播无落点（需要时另开 handlers 口，勿在此伪造）
+  function sendNote(f, t, ev, data) {
+    if (!f.el || !f.el.contentWindow || !f.ns || !matchesTarget(f, t)) return
+    try { f.el.contentWindow.postMessage({ type: `${f.ns}-broadcast`, ev, ...data }, '*') } catch { /* 帧已销毁：丢弃 */ }
+  }
+  function replayNotes(f) {
+    for (const [ev, rec] of lastNotes) sendNote(f, rec.target, ev, rec.data)
+  }
+
   // ---------- 单一 message 分发 ----------
   // 与既有 5 条 addEventListener('message')（rail-ext / quote / work-mount / msg-actions / ctx-meter）
   // **并存**：那些 handler 对未知 d.type 早退，互不干扰。本件只认卡片 API 信封（<ns>-cmd 的回执、
@@ -239,6 +268,8 @@ const cardBus = (function () {
       f.updatedAt = Date.now()
       scheduleCaps()
       emitEvent('ready', d, f)
+      // 迟到入场的帧补发最近广播（ns 此刻才确定）：「用户先开了文件、预览帧后挂」不丢事实
+      replayNotes(f)
       return
     }
     if (ev === 'state') { f.latestState = d; f.updatedAt = Date.now() }
@@ -288,6 +319,7 @@ const cardBus = (function () {
 
   return {
     addCardEventListener,
+    broadcast,
     callCard,
     frames: liveFrames,
     handleGatewayCall,

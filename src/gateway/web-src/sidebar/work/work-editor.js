@@ -235,6 +235,9 @@
     saveWork()
     applyPanes()
     renderWorkBody()
+    // 「用户打开了某文件」是一条**事实**，广播给当前工作项目的在场卡（Pj18 预览卡据此切到该篇 PDF）；
+    // 内容判断（只认 .tex / 目录段推书稿名）由卡片自己定，宿主不替卡做过滤。带 label 限定 = 不跨项目串台。
+    if (state.workProj) cardBus.broadcast({ label: state.workProj }, 'file-open', { path: p })
     await renderEditor() // 等文档真正进编辑器再返回（调用方据此在正确文档上定位行）
   }
 

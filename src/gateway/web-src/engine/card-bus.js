@@ -10,6 +10,11 @@
 //   卡↔卡    { type:'floria-card-call', callId, target, cmd, args } / { type:'floria-card-result', callId, ok, ... }
 // 约定（同设想文档 §3）：① 每条命令恒回一条 ack；② 未注册命令回 ok:false 不静默；③ 命令无状态、幂等
 // 优先，长动作卡内等完再 ack，宿主只做超时兜底；④ 命令里不塞身份（权限判断全在宿主）。
+// 宿主保留动词（2026-10-13 整卡显隐 API 化）：`card:open` / `card:close` / `card:delete`（close 与 delete
+// 同义 = 隐藏）是**总线保留前缀**，卡自定义命令不得申报（同 floria-card-call/-result 的保留段）。语义 =
+// 整卡显隐（宿主槽位/路由层），与卡内组件级标准动词（卡实现的 close/delete/open、scroll{line}、locate——
+// 走既有 <ns>-cmd 转发）正交。执行口 = setSlotHost 注入：中枢是**既有路由/槽位**（sidebar 驱动的现状源），
+// API 只是又一条驱动同源的通道——无双真相；card:open 的对象（未显示的卡）不在帧表，按 label 走路由链。
 // 本件是 engine 层契约：**永不 import views/feature/sidebar**——外部能力（WS 发送、打开源文件）一律走
 // 回调注入（同 setTabRefresh / setExtCardRenderer 手法）。唯一顶层名 `cardBus`（单 IIFE 拼接，避免与
 // 既有 20+ 模块顶层名撞车）。唯一手改处，web/app.js 为生成物。
@@ -108,10 +113,45 @@ const cardBus = (function () {
     return { frame: list[0] }
   }
 
+  // ---------- 宿主保留动词（card:*，整卡显隐，2026-10-13）----------
+  // `card:open` / `card:close` / `card:delete`（同义）由总线自答、不发给卡：执行口 slotHost 由宿主侧
+  // （feature/preview-frame.js）注入——open = 路由链 '#preview/<label>'（与用户点侧栏项目预览同链），
+  // close = 回主页（renderHome 清槽）。card:open 的对象（未显示的卡）不在帧表、不可帧寻址，故按
+  // args.label 寻址；card:close/delete 先按 target 验证该卡在场（不在场显式报错，绝不静默退别的卡），
+  // inline 卡无宿主槽位显式报错。slotHost 未注入 = 显隐中枢未接，报错不静默。
+  let slotHost = null
+  function setSlotHost(o) {
+    slotHost = o && typeof o.open === 'function' && typeof o.close === 'function' ? o : null
+  }
+  function callSlotVerb(t, cmd, args) {
+    if (!slotHost) return Promise.resolve({ ok: false, error: '宿主未接入显隐中枢（setSlotHost 未注入）' })
+    if (cmd === 'card:open') {
+      const label = args && typeof args.label === 'string' ? args.label.trim() : ''
+      if (!label) return Promise.resolve({ ok: false, error: 'card:open 需要 args.label（项目 label）' })
+      return Promise.resolve()
+        .then(() => slotHost.open(label))
+        .then(
+          () => ({ ok: true, result: { card: 'preview', label } }),
+          (e) => ({ ok: false, error: String((e && e.message) || e) }),
+        )
+    }
+    const r = resolveTarget(t)
+    if (r.error) return Promise.resolve({ ok: false, error: r.error })
+    if (r.frame.handlers) return Promise.resolve({ ok: false, error: 'inline 卡无宿主槽位，不支持 card:close/card:delete' })
+    return Promise.resolve()
+      .then(() => slotHost.close())
+      .then(
+        () => ({ ok: true, result: { hidden: true } }),
+        (e) => ({ ok: false, error: String((e && e.message) || e) }),
+      )
+  }
+
   // ---------- 命令通道（卡↔宿主）----------
   // 恒 resolve 一个 ack 对象（**不 reject**：与 gatewayClient 的 sendSessionMessage 同口径，调用方按
   // ok 判成败）；超时由宿主兜底，长动作由卡自己等完再 ack。
   function callCard(target, cmd, args, opts) {
+    // 宿主保留动词（整卡显隐）先行分流：总线自答，不发给卡
+    if (cmd === 'card:open' || cmd === 'card:close' || cmd === 'card:delete') return callSlotVerb(target, cmd, args)
     const r = resolveTarget(target)
     if (r.error) return Promise.resolve({ ok: false, error: r.error })
     const f = r.frame
@@ -328,6 +368,7 @@ const cardBus = (function () {
     registerInlineCard,
     reportCaps,
     setGatewaySender,
+    setSlotHost,
     setSourceOpener,
     unregisterFrame,
   }

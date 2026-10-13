@@ -62,20 +62,28 @@
     }
   }
   // 文件树行源：文件与目录同一套菜单（目录删除 = 整棵子树进 .trash/）；操作对象 = 行的项目内相对路径。
+  // 「下载」仅文件行出（2026-10-13 待办 1）：目录整棵打包无既有实现，不新造。
   function registerWorkRows() {
     registerRowMenu({
       sel: '.wk-row',
       key: (el) => el.dataset.wkfile || el.dataset.wkdir || null,
       items: (el) =>
-        el.dataset.wkfile || el.dataset.wkdir
+        el.dataset.wkfile
           ? [
               { a: 'rename', icon: I.dshEdit, label: '重命名' },
+              { a: 'download', label: '下载' },
               { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
             ]
-          : [],
+          : el.dataset.wkdir
+            ? [
+                { a: 'rename', icon: I.dshEdit, label: '重命名' },
+                { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
+              ]
+            : [],
       pick: (a, el) => {
         const p = el.dataset.wkfile || el.dataset.wkdir
         if (a === 'rename') openFileRename(p)
+        else if (a === 'download') downloadWorkEntry(p)
         else deleteWorkEntry(p)
       },
     })

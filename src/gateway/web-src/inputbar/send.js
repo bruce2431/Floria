@@ -3,7 +3,7 @@
 import { pendingUserMsgs, addUser } from '../chat/messages.js'
 import { navigate, mountInput, flipInput, renderSession } from '../chat/route.js'
 import { stage } from '../chat/stage.js'
-import { GATEWAY, gws, apiSetModel } from '../engine/gateway.js'
+import { GATEWAY, gws } from '../engine/gateway.js'
 import { refreshSession } from '../engine/live.js'
 import { chatArea, messagesEl, inputWrap, inputEl, sendBtn, state, live } from '../engine/state.js'
 import { toast, newSessionProject } from '../core/util.js'
@@ -49,7 +49,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
       const prevNew = state.newProject // 回滚用：清的是「目标项目」这一个槽，work 模式压根不读它
       state.newProject = null // 消费即清：目标项目一次性，下一次回默认全局
       // 首页模型选择（2026-10-11）：待定槽消费即清，失败回滚时还原（同 newProject 一次性语义）。
-      // 它只作用于本次新建会话——发送首条消息前做一次会话级切换（见下方 apiSetModel），
+      // 它只作用于本次新建会话——随建会话请求下发，网关 spawn 时落 --model 启动参数（见 newWebSession），
       // 不改全局默认（全局默认唯一入口 = 凭据池 credentials.json，见 model-select.js 注释）。
       const prevModel = getNewSessionModel()
       setNewSessionModel('')
@@ -65,7 +65,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
       addUser(text, imgs, files)
       inputEl.textContent = ''
       syncGwSend()
-      const d = await newWebSession(tgt || undefined)
+      const d = await newWebSession(tgt || undefined, prevModel || undefined)
       if (!d || !d.hash) {
         setFirstSendHash('') // 事务终止：创建失败，乐观 DOM 随下方空态回滚一并清空
         setPendingUserMsgs(pendingUserMsgs.filter((p) => p.hash)) // 丢弃无归属（hash=''）的乐观项
@@ -88,13 +88,11 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
       // webSessionProjectRoot）——jsonl 落盘前会话记录尚不存在，响应带回是首条消息唯一 cwd 源。
       // 乐观文本不含文件占位（absorb 为 includes 子串匹配仍命中）；落盘文本带相对占位。
       if (d.cwd) setSessionCwd(d.cwd)
-      // 首页选的模型 → 新会话的会话级切换（与「会话内切模型」同一链路：网关按 sessionId 精确路由
-      // 并随带归属供应商，只影响本会话；本分支不写全局默认池）。await 先行于首条消息发送——model
-      // 事件先写入网关→CLI 通道，CLI 按序消费（同拍化：回合边界落地），首轮即用所选模型。
-      if (prevModel) {
-        const ok = await apiSetModel({ model: prevModel, sessionId: d.hash })
-        if (!ok) toast(`模型 ${prevModel} 未切换成功，本次会话按全局默认运行`)
-      }
+      // 首页选的模型（2026-10-13 待办 12 根修）：已随 newWebSession 的 wsession body.model 下发，
+      // 网关 spawn 时落 --model 启动参数——CLI 启动即固化会话覆盖（先于一切帧与消息），首轮请求
+      // 即用所选模型。旧「建会话后 apiSetModel 补投」链退役：wsession 自 2026-09-06 异步化（预分配
+      // sid 立即返回、spawn+注册后台进行），补投时目标 CLI 尚未注册 → routeToClient 恒 miss 400，
+      // 「启动后仍用默认模型」即此竞速；--model 从出生固化，无时序问题。
       const fph = files.map((f) => `[文件:${relUploadPath(f.abs)}]`).join(' ')
       const sendText = fph ? (text ? text + ' ' + fph : fph) : text
       gws.send(JSON.stringify({ type: 'send', text: sendText, sessionId: d.hash, ...imgPayload }))

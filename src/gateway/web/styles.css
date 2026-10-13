@@ -2802,3 +2802,42 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .math-block { display: block; margin: 14px 0; padding: 2px 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
 .math-block .katex-display { margin: 0; }
 .md-math .katex, .math-block .katex { font-size: 1.06em; } /* KaTeX 默认 1.21em 相对正文偏大，收敛一档 */
+
+/* ---------- 触屏（iPad/iOS）编辑区手势修复（2026-10-13，WS2 待办 6） ----------
+   iOS Safari 对 contenteditable（CM6 的 .cm-content 自带 -webkit-user-modify）落在 flex 滚动容器
+   （.cm-scroller 默认 display:flex !important）里时，触摸滑动默认被当作文本选择手势而非滚动——
+   手势冒泡落到 body（overflow:hidden，全 app 锚定布局）⇒ 编辑器上划失灵，且聚焦定位随之错乱
+   （「看不到文字 / 无法上划」）。修法 = 生产项目通行做法（ViperIDE "Fix touch interaction on iOS"，
+   Obsidian 移动端同为 Capacitor WebView 跑 CM6）：显式声明 pan 手势允许平移，把滚动语义还给
+   .cm-scroller；overscroll-behavior: contain 防滚到边界后穿透 body 橡皮筋。
+   同时消灭双滚动歧义：.wk-ed-body（外层）与 .cm-scroller（内层）都能滚，iOS 的滚动路由在此
+   结构下不确定——编辑器恒 height:100% 填满外层（外层本就无滚动的必要，图片分支不受影响，
+   见 .wk-ed-img 的 min-height:100%），编辑器在场时外层 overflow 关死，滚动唯一化到 .cm-scroller。 */
+.wk-ed-cm .cm-scroller,
+.wk-ed-cm .cm-content {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; /* iOS 惯性滚动（13+ 默认，旧 WebView 兜底，无害） */
+}
+.wk-ed-body:has(> .wk-ed-cm) { overflow: hidden; }
+
+/* ---------- .canvas 图形预览（2026-10-13，WS2 待办 7；work-canvas.js 渲染） ----------
+   .wk-cv 是 CM6 block replace 装饰的宿主：顶栏（摘要 + 切源码钮）+ SVG 画布。画布手势（单指 pan /
+   双指捏合 / Ctrl+滚轮缩放）由模块内 JS 处理并 stopPropagation，touch-action: none 让浏览器不抢手势、
+   也不让触摸落进 contenteditable。颜色：canvas 自定色走内联 rgba（模块内算），令牌色走本表 class。 */
+.wk-cv { display: flex; flex-direction: column; min-height: 200px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.wk-cv-bar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 4px 8px; }
+.wk-cv-cnt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-3); }
+.wk-cv-btn { flex: none; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; color: var(--text-2); background: var(--bg); }
+.wk-cv-btn:hover { color: var(--text); background: var(--hover); }
+.wk-cv-open { margin: 0 0 0 8px; padding: 1px 8px; font-size: 11px; vertical-align: middle; } /* 源码态首行行前的小钮 */
+.wk-cv-svg { flex: 1; min-height: 0; width: 100%; display: block; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; }
+.wk-cv-dot { fill: var(--border); opacity: 0.55; }
+.wk-cv-arrow { fill: var(--text-3); }
+.wk-cv-edge { stroke: var(--text-3); stroke-width: 1.5; }
+.wk-cv-elabel { font-size: 11px; fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.wk-cv-glabel { font-size: 12px; font-weight: 600; fill: var(--text-2); }
+.wk-cv-box { fill: transparent; stroke: var(--border); }
+.wk-cv-text { color: var(--text); font-size: 12px; line-height: 1.5; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wk-cv-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 12.5px; color: var(--text-3); text-align: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; }
+.wk-cv-bad { color: var(--danger-fg); }

@@ -248,7 +248,8 @@ const gatewaySrc = readFileSync(fileURLToPath(new URL('../src/gateway/localGatew
 check(
   'I10 网关先 spawn 再投递（复用既有 spawnWebSession，不另造 spawn 链）',
   gatewaySrc.includes("if (m.type === 'session-create')") &&
-    gatewaySrc.includes('spawnWebSession(undefined, project, newSid)'),
+    // 2026-10-13：session-create 可选带 model → spawnWebSession 第 4 参透传（{model} 或 undefined），仍是同一条 spawn 链
+    /spawnWebSession\(undefined, project, newSid(?:, modelRaw \? \{ model: modelRaw \} : undefined)?\)/.test(gatewaySrc),
 )
 check(
   'I10 新会话命名走 applySessionTitle（落盘+内存成对，rename handler 同一条链）',

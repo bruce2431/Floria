@@ -52,10 +52,13 @@ import { state } from './ui-state.js'
     state.wkPreview = val('workspace')
     state.panelPinned = val('sidebar')
   }
-  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽。
+  // wkChats/wkFiles（顶栏标签开放集）自 2026-10-13 起一并持久化（用户待办 11「已打开标签页刷新后
+  // 消失」）：存档总与当前 workProj 同次写入（切换项目时 selectProject 先清空再 saveWork），故恢复
+  // 即当前项目的开放集，无跨项目串台。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
   function saveWork() {
     stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkChats: state.wkChats, wkFiles: state.wkFiles })
   }
   function loadWork(def) {
     try {
@@ -72,8 +75,12 @@ import { state } from './ui-state.js'
       loadWorkPanes(state.workProj, def) // 两开关 = 恢复项目的槽（无槽回落缺省）
       if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
       if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
-      // wkChats（work 顶栏聊天胶囊开放集）不持久化：纯运行时状态，刷新即空、切项目重置（2026-10-07 定案），
-      // 恢复态一律从空开始，由路由/侧栏操作自然重建。
+      // wkChats/wkFiles（work 顶栏标签开放集）2026-10-13 起持久化（用户待办 11）：刷新恢复已打开的
+      // 聊天胶囊与文件 pill（此前 2026-10-07 定案为不持久化，被本待办推翻）。存档与 workProj 同次
+      // 写入（切项目先清空），恢复无须再按项目过滤；非字符串条目一律丢弃（持久化区是外部边界）。
+      // 「切换工作项目即清空」的语义不变（selectProject 显式清空 + saveWork），跨项目绝不残留。
+      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((x) => typeof x === 'string' && x)
+      if (Array.isArray(d.wkFiles)) state.wkFiles = d.wkFiles.filter((x) => typeof x === 'string' && x)
       if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
       // wkPvTab（右栏页态：'' = 预览态 / 工具 id）全局一份，不按项目分槽；未注册的旧 id 由
       // applyPvTab 的 pane 判定自然落成「无 pane 在场」，切一次 tab 即归一（见 work.js setPvTab）。

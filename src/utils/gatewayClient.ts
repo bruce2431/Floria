@@ -742,6 +742,9 @@ export function createSessionAndSend(
   project: string,
   text: string,
   from: SessionSource,
+  /** 2026-10-13（待办 14）：可选模型（池内全名）——随帧透传，网关 spawn --model 落地；
+   *  未指定 = 新会话跟随全局默认（行为不变）。 */
+  model?: string,
 ): Promise<SessionMessageResult> {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ ok: false, error: '本地网关未连接：无法拉起新会话' })
@@ -761,6 +764,7 @@ export function createSessionAndSend(
           project,
           text,
           from: { sid: from.sid, title: from.title },
+          ...(model && model.trim() ? { model: model.trim() } : {}),
         }),
       )
     } catch {

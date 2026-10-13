@@ -35,6 +35,7 @@ import {
   sendSessionMessage,
 } from '../../utils/gatewayClient.js'
 import { lazySchema } from '../../utils/lazySchema.js'
+import { findModelProvider } from '../../utils/credentials/pool.js'
 import {
   resolveSendMode,
   resolveSessionTarget,
@@ -99,6 +100,12 @@ const inputSchema = lazySchema(() =>
       .optional()
       .describe(
         '新会话落在哪个项目：label 取 /gateway/sessions 的 groups 中 scope=project 的项（仅 new_session: true 时有效，必填）',
+      ),
+    model: z
+      .string()
+      .optional()
+      .describe(
+        '新会话使用的模型（仅 new_session: true 时有效，可选）：凭据池内模型全名（GET /gateway/models 或 recall 凭据池记录可得），网关以 --model 启动参数落地；不填 = 跟随全局默认。发给已有会话时不可指定（模型由目标会话自己决定）',
       ),
     text: z
       .string()
@@ -168,6 +175,15 @@ export const SessionSendTool = buildTool({
     if (mode.kind === 'invalid') {
       return { result: false, message: mode.error, errorCode: 9 }
     }
+    // 新会话模型（2026-10-13 待办 14）：必须 ∈ 凭据池供应商模型清单（findModelProvider 与
+    // 网关 /gateway/model 同源）——早失败在调用侧，网关 spawn 前还有同款校验兜形。
+    if (mode.kind === 'new' && mode.model && !findModelProvider(mode.model)) {
+      return {
+        result: false,
+        message: `model "${mode.model}" 不在凭据池任何供应商模型清单中（可先 GET /gateway/models 查可用清单）`,
+        errorCode: 9,
+      }
+    }
     if (input.text.trim().length === 0) {
       return { result: false, message: 'text must not be empty', errorCode: 9 }
     }
@@ -209,14 +225,15 @@ export const SessionSendTool = buildTool({
         }
       }
       const { project, self } = await resolveNewSession(mode.project)
-      const r = await createSessionAndSend(project, input.text, self)
+      // model（2026-10-13 待办 14）：随 session-create 帧透传，网关 spawn --model 落地
+      const r = await createSessionAndSend(project, input.text, self, mode.model)
       return {
         data: {
           // to 对新会话形态 = 新会话 sid（后续寻址凭据）；失败时回落项目 label 便于定位
           delivered: r.ok,
           to: r.ok && r.sid ? r.sid : project,
           message: r.ok
-            ? `已创建会话（项目：${project}）sid=${r.sid} 并投递首条消息`
+            ? `已创建会话（项目：${project}${mode.model ? `，模型：${mode.model}` : ''}）sid=${r.sid} 并投递首条消息`
             : `投递失败：${r.error}`,
         },
       }

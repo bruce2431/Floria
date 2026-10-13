@@ -12,11 +12,20 @@
  *      渲染完经 wkEdScrollToLine → EditorView.scrollIntoView 滚到该行 + 闪标。
  *   4) styles.css 有对应样式；cache-bust 两处同值。
  */
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 
 const ROOT = resolve(import.meta.dir, '..')
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8')
+// work 家族（2026-10-13）：`sidebar/work.js` 的 God Module 纯搬迁拆分后，CM6 编辑器 / 渲染 / 挂载分居
+// `sidebar/work/*.js`——断言锁的是「整族源码」的结构不变量，搬迁只是函数换文件、语义不变，故按族拼接读取。
+const WORK_DIR = 'src/gateway/web-src/sidebar/work'
+const work = [
+  'src/gateway/web-src/sidebar/work.js',
+  ...readdirSync(resolve(ROOT, WORK_DIR))
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => `${WORK_DIR}/${f}`),
+].map(read).join('\n')
 
 let pass = 0
 let fail = 0
@@ -30,7 +39,6 @@ const bad = (m: string) => {
 }
 
 const cmt = read('src/gateway/web-src/sidebar/comments.js')
-const work = read('src/gateway/web-src/sidebar/work.js')
 const md = read('src/gateway/web-src/core/markdown.js')
 const css = read('src/gateway/web/styles.css')
 const bundle = read('scripts/bundle-web-modules.ts')

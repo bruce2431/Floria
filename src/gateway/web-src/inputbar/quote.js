@@ -233,12 +233,15 @@ import { gwSend, syncGwSend } from './send.js'
     const snap = quoteSnapOf()
     if (snap) openQuotePop(snap)
   })
-  // 点浮窗外任意处 / 滚动 / 窗口尺寸变化 / Esc → 关（fixed 浮窗会漂离锚点）
+  // 点浮窗外任意处 / 滚动 / 窗口尺寸变化 / Esc → 关（fixed 浮窗会漂离锚点）。
+  // 滚动关闭守护的不变量 = 「锚点漂移」：只有**浮窗外**的滚动才会让选区滚动走、浮窗漂离锚点。
+  // 浮窗内输入框自己的内容滚动（qp-in 超宽横滚 / 长文本纵滚）不改变锚点关系，不得关窗——
+  // 否则输入多行/长文本的瞬间（内容一滚）浮窗即消失（capture 监听 window 也能收到元素 scroll）。
   document.addEventListener('mousedown', (e) => {
     if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
-  window.addEventListener('scroll', () => { if (quotePop) closeQuotePop() }, { passive: true, capture: true })
+  window.addEventListener('scroll', (e) => { if (quotePop && !quotePop.contains(e.target)) closeQuotePop() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
 
   // ---------- 5. 项目预览桥（floria-quote-open / floria-quote-close / floria-quote-action）----------

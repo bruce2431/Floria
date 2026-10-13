@@ -8,7 +8,19 @@ import { esc } from '../core/util.js'
 import { deactivateCard, openCard, viewBody } from '../engine/registry.js'
 import { clearExtCards, clearQuoteActions, registerExtCards, registerQuoteActions } from '../engine/ext-runtime.js'
 import { cardBus } from '../engine/card-bus.js'
+import { navigate } from '../chat/route.js'
 /* @module feature/preview-frame.js */
+  // ---------- 整卡显隐中枢接线（2026-10-13 card:* 保留动词）----------
+  // 执行口 = 既有路由链（navigate → route，与用户点侧栏完全同链）：open = '#preview/<label>'
+  // （route 内含 sbMode 强制回 chat、state.preview、openProjectPreview(true) 全套）；close = 回主页
+  // （renderHome 清槽）。work 模式的卡片显隐不经此口（work 面板归 sidebar 域），显式报错不静默。
+  cardBus.setSlotHost({
+    open: (label) => { navigate('#preview/' + encodeURIComponent(label)) },
+    close: () => {
+      if (state.sbMode === 'work') throw new Error('work 模式的卡片显隐不经宿主槽位口')
+      navigate('#/')
+    },
+  })
   // 项目预览申报表同步（外部卡 卡片化二期 + 浮窗动作 2026-09-28）：两表同属「当前 .preview-frame
   // 所指项目」——与 clearRailExt 同点调用（iframe 换 src / 新文档重挂）。网关侧已按同一份规则校过
   // preview.json，registerExtCards / registerQuoteActions 再校一遍（postMessage 那条不过网关，

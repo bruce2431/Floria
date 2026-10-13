@@ -337,6 +337,58 @@ const sessionActivity = new Map<string, { status: string; pid: number; cwd?: str
 // 纯引擎内存态镜像，CLI 断开随 detach 删除（重连由 open reportCurrentModel 补报对齐）。
 // 无时间 TTL（09-16：与 CLI「载荷不变不发」矛盾，见 sweepStaleMaps 注）。
 const sessionModels = new Map<string, { model: string; updatedAt: number }>()
+
+// 会话启动模型表（2026-10-13，待办 12「重启会话模型不保持」根治）：
+//   sid → { model, provider?, updatedAt }，落盘 .claude/gateway/sessionmodels.json（变更即写，
+//   网关启动 loadSessionModelLaunch() 恢复，与 websessions.json 同构）。
+// 语义 = 「该会话**下一次启动**用什么模型」的唯一状态源（区别于 sessionModels 的「在线会话
+// 当前模型镜像」——后者 CLI 断开即 detach 清，进程死后无从取）。写入点两处：
+//   ① POST /gateway/model 会话级路由成功（用户在 web 切模型，意图即「本会话此后用它」）；
+//   ② POST /gateway/model-report 落值（CLI 自报实际生效模型，含启动 --model 的 open 补报——
+//      由它闭环：新建时经 spawn --model 启动 → CLI open 补报 → 表记录 → 下次 resume 带同值）。
+// 消费点唯一：spawnWebSession resume 时查表补 --model 启动参数。条目不删（sid 为 uuid 不复用，
+// 孤儿条目无害；会话转录删除后条目永不再命中）。
+const sessionModelLaunchPath = (): string => join(gatewayDir(), 'sessionmodels.json')
+const sessionModelLaunch = new Map<string, { model: string; provider?: string; updatedAt: number }>()
+function persistSessionModelLaunch(): void {
+  try {
+    const p = sessionModelLaunchPath()
+    mkdirSync(join(p, '..'), { recursive: true })
+    const entries: Array<{ sessionId: string; model: string; provider?: string; updatedAt: number }> = []
+    for (const [sid, v] of sessionModelLaunch) {
+      entries.push({ sessionId: sid, model: v.model, ...(v.provider ? { provider: v.provider } : {}), updatedAt: v.updatedAt })
+    }
+    writeFileSync(p, JSON.stringify(entries), 'utf8')
+  } catch {
+    /* 落盘失败不影响运行：最坏情况重启后 resume 不带模型，退化为跟随全局默认 */
+  }
+}
+function loadSessionModelLaunch(): void {
+  const p = sessionModelLaunchPath()
+  if (!existsSync(p)) return
+  try {
+    const raw: unknown = JSON.parse(readFileSync(p, 'utf8'))
+    if (!Array.isArray(raw)) return
+    for (const e of raw as Array<{ sessionId?: unknown; model?: unknown; provider?: unknown; updatedAt?: unknown }>) {
+      if (!e || typeof e.sessionId !== 'string' || !e.sessionId) continue
+      if (typeof e.model !== 'string' || !e.model.trim()) continue
+      sessionModelLaunch.set(e.sessionId, {
+        model: e.model.trim(),
+        ...(typeof e.provider === 'string' && e.provider.trim() ? { provider: e.provider.trim() } : {}),
+        updatedAt: Number.isFinite(e.updatedAt) ? Number(e.updatedAt) : Date.now(),
+      })
+    }
+  } catch {
+    /* 坏文件当不存在：启动模型回落全局默认，与表缺席同语义 */
+  }
+}
+/** 写入并落盘（两个写入点共用；provider 可省——resume 消费只用 model 名，--model 启动后
+ *  CLI 自会按 findModelProvider 补绑 provider，见 main.tsx 启动段）。 */
+function recordSessionModelLaunch(sid: string, model: string, provider?: string): void {
+  if (!sid || !model.trim()) return
+  sessionModelLaunch.set(sid, { model: model.trim(), ...(provider ? { provider } : {}), updatedAt: Date.now() })
+  persistSessionModelLaunch()
+}
 // 2026-08-30 共同后端队列快照（接力文档清单#2）：CLI 侧 /clients WS queue-state 上报的当前
 // 排队项（仅用户 prompt）。web 排队区置底数据源：/gateway/session.queued 首载 + SSE queue-state 增量。
 // 纯引擎内存态镜像，CLI 断开即随 detach 删除。无时间 TTL（09-12：与 CLI「载荷不变不发」矛盾，
@@ -1017,7 +1069,7 @@ export function sanitizeEntryName(raw: string): string {
 
 /** 文件树写操作结果。code 与 HTTP 状态同码，由 /gateway/file/* 端点直译。 */
 export type EntryOpResult =
-  | { ok: true; path?: string; name?: string; trash?: string }
+  | { ok: true; path?: string; name?: string; trash?: string; size?: number }
   | { ok: false; code: number; error: string }
 
 /** 文件内容写结果。成功附新 mtime（= 下次编辑的冲突基线）。 */
@@ -1092,6 +1144,80 @@ export function writeProjectFile(projRoot: string, rel: string, content: string,
   }
   writeFileSync(abs, String(content ?? ''), 'utf8')
   return { ok: true, path: rel.replace(/\\/g, '/').replace(/^\/+/, ''), mtime: statSync(abs).mtimeMs }
+}
+
+/**
+ * 项目内新建文件 / 目录（2026-10-13 work 侧栏「创建文件 / 文件夹」，#wk-new-pop 接入）。
+ * relDir = 落点目录（'' = 项目根本身，合法）；名称走 sanitizeEntryName。
+ * 不变量：**显式输入不静默换名**——目标已存在 → 409（与 renameProjectEntry 同判，不自动序号）；
+ * 落点目录必须已存在（新建不做多级 mkdir——用户逐级建，路径树与 /gateway/project 文件树一致）→ 404。
+ * 抽成纯函数让探针直测真实现（probe-file-create.ts）。
+ */
+export function createProjectEntry(projRoot: string, relDir: string, rawName: string, isDir: boolean): EntryOpResult {
+  let dirAbs: string | null = null
+  if (String(relDir || '').trim()) {
+    dirAbs = resolveWithinRoot(projRoot, relDir)
+    if (!dirAbs) return { ok: false, code: 403, error: 'forbidden' }
+  } else {
+    dirAbs = projRoot
+  }
+  let dirIsDir = false
+  try {
+    dirIsDir = statSync(dirAbs).isDirectory()
+  } catch {
+    dirIsDir = false
+  }
+  if (!dirIsDir) return { ok: false, code: 404, error: 'directory not found' }
+  const name = sanitizeEntryName(rawName)
+  if (!name) return { ok: false, code: 400, error: '名称不合法' }
+  const target = join(dirAbs, name)
+  if (existsSync(target)) return { ok: false, code: 409, error: '同名条目已存在' }
+  if (isDir) mkdirSync(target)
+  else writeFileSync(target, '', 'utf8')
+  const base = String(relDir || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
+  return { ok: true, name, path: base ? `${base}/${name}` : name }
+}
+
+/**
+ * 项目内上传文件（2026-10-13 work 侧栏「上传文件 / 文件夹」，#wk-new-pop 接入）。落点语义与
+ * /gateway/upload 同一套：**同名不覆盖 → -1/-2 序号**（上传是批量动作，序号避让是上传领域先例；
+ * 与 create/rename 的「显式输入 409」刻意区分——那两处用户看得见名字，这里由文件系统带来）。
+ * 落点目录 mkdirSync(recursive)——「上传文件夹」的目录段来自用户所选文件夹的结构，递归建目录
+ * 即该语义本身；落盘范围仍由 resolveWithinRoot 锁死在项目根内（越界 403）。
+ * 字节上限由 handler 的 readBodyWithLimit 管（20 MB，对齐 /gateway/upload）。
+ * 抽成纯函数让探针直测真实现（probe-file-create.ts）。
+ */
+export function uploadProjectFile(projRoot: string, relDir: string, rawName: string, buf: Buffer): EntryOpResult {
+  const dir = resolveWithinRoot(projRoot, relDir)
+  if (!dir) return { ok: false, code: 403, error: 'forbidden' }
+  const name = sanitizeEntryName(rawName)
+  if (!name) return { ok: false, code: 400, error: '名称不合法' }
+  let target = join(dir, name)
+  try {
+    mkdirSync(dir, { recursive: true })
+  } catch {
+    return { ok: false, code: 500, error: 'mkdir failed' }
+  }
+  if (existsSync(target)) {
+    const ext = extname(name)
+    const stem = name.slice(0, name.length - ext.length)
+    let i = 1
+    while (existsSync(join(dir, `${stem}-${i}${ext}`))) i++
+    target = join(dir, `${stem}-${i}${ext}`)
+  }
+  try {
+    writeFileSync(target, buf)
+  } catch {
+    return { ok: false, code: 500, error: 'write failed' }
+  }
+  const base = String(relDir || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
+  const finalName = basename(target)
+  return {
+    ok: true,
+    name: finalName,
+    path: base ? `${base}/${finalName}` : finalName,
+    size: buf.length,
+  }
 }
 
 /**
@@ -2240,6 +2366,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
           sendJson(res, 400, { error: '目标会话未在线，无法切换模型' })
           return
         }
+        // 路由成功即记入启动模型表：用户对该会话的切换意图 = 「此后（含重启后）用它」；
+        // CLI 随后的 model-report 上报会以实际生效值校正本条（挂起对在回合边界落地的窗口内
+        // 表值先行，进程死在该窗口时表值 = 用户意图，resume 仍按意图恢复）。
+        if (sessionId) recordSessionModelLaunch(sessionId, model, modelProvider ?? undefined)
       }
       if (effortLevel !== undefined) broadcastToClients({ type: 'effort', value: effortLevel })
       sendJson(res, 200, { ok: true, model: model ?? null, effortLevel: effortLevel ?? null })
@@ -2259,12 +2389,26 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       // 2026-08-24 指定项目：project = findProjects 命中的项目 label → 会话落该项目 .claude/projects
       const project =
         typeof parsed.project === 'string' && parsed.project.trim() ? parsed.project.trim() : undefined
+      // 2026-10-13 待办 12：新建会话可带模型（首页模型选择器 → spawn --model 从启动固化，替代
+      // 旧「建会话后 apiSetModel 补投」链——后者在 wsession 异步化后必 miss：POST 立即返回时
+      // CLI 尚未注册，routeToClient 恒 400）。校验与 /gateway/model 同源（findModelProvider 池内
+      // 全名）。resume 的模型源唯一 = 启动模型表（显式 model 传给 spawnWebSession 仍恒优先，
+      // 本端不传），故此处仅新建分支携带。
+      let launchModel: string | undefined
+      if (typeof parsed.model === 'string' && parsed.model.trim()) {
+        const m = parsed.model.trim()
+        if (!findModelProvider(m)) {
+          sendJson(res, 400, { error: `model "${m}" 不在凭据池任何供应商模型清单中` })
+          return
+        }
+        launchModel = m
+      }
       // 2026-09-06 异步化（首条消息单状态根治，用户「可不可以只有一个状态」）：预分配 sid 立即
       // 返回，spawn+注册后台进行——前端瞬时进会话态（乐观气泡直通落盘），消除同步等注册 1-2s 的
       // 「创建中」中间态。spawn 期间到达的 send 经 pendingDeliveries 暂存、CLI 注册钩子补投；
       // 失败/注册超时经 SSE ws-failed 群发（前端清合成条目+回滚首条事务+报错），不留静默。
       const sid = resume ?? randomUUID()
-      spawnWebSession(resume, project, sid).catch((e) => {
+      spawnWebSession(resume, project, sid, launchModel ? { model: launchModel } : undefined).catch((e) => {
         console.error(`[gateway] wsession: 后台启动失败 sid=${sid}`, e)
         pendingDeliveries.delete(sid)
         const s = `data: ${JSON.stringify({ type: 'ws-failed', session: sid, error: e?.message ?? String(e) })}\n\n`
@@ -2485,6 +2629,34 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       sendJson(res, 400, { error: 'missing cmd' })
       return
     }
+    // 整卡显隐 · card:open（打开项目预览卡，2026-10-13）：对象（未显示的卡）不在能力表、不可帧寻址
+    // ——按 args.label 寻址、选「最近上报」的持卡设备执行（不查能力表、绝不广播）。真值表差异：
+    // card:open 不走 409（目标本就常不在场）；无持卡设备按 503。
+    if (ccCmd === 'card:open') {
+      const coArgs = cc.args && typeof cc.args === 'object' ? (cc.args as Record<string, unknown>) : {}
+      const coLabel = typeof coArgs.label === 'string' ? coArgs.label.trim() : ''
+      if (!coLabel) {
+        sendJson(res, 400, { error: 'card:open 需要 args.label（项目 label）' })
+        return
+      }
+      if (!sockets.size) {
+        sendJson(res, 503, { error: '当前无浏览器在线，卡片命令无处可达' })
+        return
+      }
+      const coHit = pickLatestHolder()
+      if (!coHit) {
+        sendJson(res, 503, { error: '在线浏览器均未上报卡片能力表，无法执行整卡显隐' })
+        return
+      }
+      const coTimeout = Math.max(500, Math.min(Number.isFinite(cc.timeoutMs) ? Number(cc.timeoutMs) : 8000, 60000))
+      const coOut = await callBrowserCard(coHit.ws, { label: coLabel }, ccCmd, { label: coLabel }, coTimeout)
+      const coWhere = { instanceId: coHit.cap.instanceId, label: coHit.cap.label, ns: coHit.cap.ns }
+      if (coOut.kind === 'ok') sendJson(res, 200, { ok: true, result: coOut.result, card: coWhere })
+      else if (coOut.kind === 'err') sendJson(res, 200, { ok: false, error: coOut.error, card: coWhere })
+      else if (coOut.kind === 'timeout') sendJson(res, 504, { error: `卡片命令超时（${coTimeout}ms）：${ccCmd}`, card: coWhere })
+      else sendJson(res, 504, { error: '持卡设备已断开', card: coWhere })
+      return
+    }
     const ccTarget = {
       label: typeof cc.label === 'string' ? cc.label : '',
       ns: typeof cc.ns === 'string' ? cc.ns : '',
@@ -2667,6 +2839,68 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       const dOut = trashProjectEntry(resolve(dProj.dir, '..', '..'), typeof dp.path === 'string' ? dp.path : '')
       if (!dOut.ok) sendJson(res, dOut.code, { error: dOut.error })
       else sendJson(res, 200, dOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内新建文件 / 目录：POST /gateway/file/create {label, path, name, dir}（2026-10-13 work 侧栏
+  // 「创建文件 / 文件夹」）。语义与防护全在 createProjectEntry（纯函数，探针 probe-file-create 直测）；
+  // 此处只管解析 label。path = 落点目录（'' = 项目根）。受上方 /gateway/* token 校验保护。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/create') {
+    try {
+      const cp = await readReportBody(req)
+      const cProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof cp.label === 'string' ? cp.label : ''),
+      )
+      if (!cProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const cOut = createProjectEntry(
+        resolve(cProj.dir, '..', '..'),
+        typeof cp.path === 'string' ? cp.path : '',
+        typeof cp.name === 'string' ? cp.name : '',
+        cp.dir === true,
+      )
+      if (!cOut.ok) sendJson(res, cOut.code, { error: cOut.error })
+      else sendJson(res, 200, cOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内上传文件：POST /gateway/file/upload?label=&path=<落点目录>&name=<文件名>，body=原始字节
+  // （2026-10-13 work 侧栏「上传文件 / 文件夹」）。语义与防护全在 uploadProjectFile（纯函数，
+  // probe-file-create 直测）：同名 -1/-2 序号避让（对齐 /gateway/upload 先例）、落点目录 recursive
+  // 创建（承载「上传文件夹」的子目录结构）、越界 403、单文件上限 20 MB（对齐 /gateway/upload）。
+  // 受上方 /gateway/* token 校验保护。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/upload') {
+    try {
+      const upLabel = url.searchParams.get('label') || ''
+      const uProj = findProjects(root).find((g) => g.scope === 'project' && g.label === upLabel)
+      if (!uProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      let uBuf: Buffer
+      try {
+        uBuf = await readBodyWithLimit(req, 20 * 1024 * 1024)
+      } catch (e) {
+        if (e instanceof ReportBodyTooLargeError) {
+          sendReportBodyError(res, e)
+          return
+        }
+        throw e
+      }
+      const uOut = uploadProjectFile(
+        resolve(uProj.dir, '..', '..'),
+        url.searchParams.get('path') || '',
+        url.searchParams.get('name') || '',
+        uBuf,
+      )
+      if (!uOut.ok) sendJson(res, uOut.code, { error: uOut.error })
+      else sendJson(res, 200, uOut)
     } catch (e) {
       sendError(res, e)
     }
@@ -3015,6 +3249,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       }
       const modelTs = Date.now()
       sessionModels.set(sid, { model, updatedAt: modelTs })
+      // 同值记入启动模型表（2026-10-13）：CLI 自报的是本会话实际生效模型——含 spawn --model
+      // 启动后的 open 补报（闭环：新建带模型启动 → 表记录 → 下次 resume 带同值）与运行期
+      // 切换生效后的上报（校正 /gateway/model 先记的意图值）。
+      recordSessionModelLaunch(sid, model)
       sweepStaleMaps()
       // 2026-09-19 实时化：落值后 SSE 群发 {type:'model', session, model, modelTs}（与 queue-state/
       // task-state 同款「镜像存储 + 转发」）——此前 web 只能等下一次 /gateway/session 拉取才校准，
@@ -3337,6 +3575,15 @@ function pickCardHolder(t: { label: string; ns: string; instanceId: string }): {
       }
       if (!best || h.at > best.at) best = { ws: h.ws, cap: c, at: h.at }
     }
+  }
+  return best ? { ws: best.ws, cap: best.cap } : null
+}
+
+/** card:open 用：不按能力表筛（打开的对象本就常不在场），取「最近上报」的那台持卡设备执行整卡显隐 */
+function pickLatestHolder(): { ws: WebSocket; cap: CardCap } | null {
+  let best: { ws: WebSocket; cap: CardCap; at: number } | null = null
+  for (const h of cardHolders.values()) {
+    if (!best || h.at > best.at) best = { ws: h.ws, cap: h.caps[0], at: h.at }
   }
   return best ? { ws: best.ws, cap: best.cap } : null
 }
@@ -3987,7 +4234,17 @@ function flushPendingDeliveries(sessionId: string): void {
   for (const frame of q) t.send(JSON.stringify(frame))
 }
 
-function spawnWebSession(resume: string | undefined, project: string | undefined, sidForNew?: string): Promise<string> {
+function spawnWebSession(
+  resume: string | undefined,
+  project: string | undefined,
+  sidForNew?: string,
+  /** 会话启动模型（2026-10-13）：新建 = 调用方显式指定（wsession body.model / session-create 帧
+   *  model，均为池内模型名，校验在调用方）；resume 缺省查 sessionModelLaunch 启动模型表。
+   *  显式传参恒优先于表（表只做缺省回落）。落到 --model 启动参数——CLI 启动段把 options.model
+   *  固化为会话覆盖并按 findModelProvider 绑定 provider（凭据与模型名同源），先于一切帧与消息，
+   *  无投递时序问题。复用分支（活进程/近期注册痕迹）不消费模型：活进程已在跑，不注入切换。 */
+  opts?: { model?: string },
+): Promise<string> {
   // 幂等：resume 的会话进程已在跑（前端切走再切回）→ 复用现有进程，不重复 spawn（双进程会双写同一 jsonl）
   // 2026-09-10 复用前验活：账面记录 ≠ 进程活性（死记录直接 resolve → 注入轮询 5s miss → 消息
   // 未注入丢失）。死记录清理后走正常 spawn；防双写不破——死进程不写盘，活进程重连窗口仍由
@@ -4025,6 +4282,10 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
   }
   const p = new Promise<string>((resolve, reject) => {
     const args = resume ? ['--resume', resume] : ['--session-id', sid]
+    // 启动模型（2026-10-13）：显式指定 > 启动模型表（仅 resume 有表可查，新建 sid 全新无表）；
+    // 校验在调用方（wsession/session-create 均经 findModelProvider），此处透传。
+    const launchModel = opts?.model?.trim() || (resume ? sessionModelLaunch.get(sid)?.model : undefined)
+    if (launchModel) args.push('--model', launchModel)
     // cwd = 项目根（指定项目 → 该项目根）：会话 jsonl 落盘到 <项目根>/.claude/projects/<sessionId>.jsonl（与 CLI 同目录）
     const cwd = webSessionProjectRoot(effectiveProject)
     // 2026-09-07 根治定案：wt.exe -w last nt 直并最近 WT 窗口（无窗自动开新窗），启动链彻底脱离
@@ -4039,7 +4300,7 @@ function spawnWebSession(resume: string | undefined, project: string | undefined
     const gwUrl = `http://127.0.0.1:${currentPort}`
     // 2026-08-31 取证日志（20260830222122 事故：spawn 全程零日志，「日志无失败记录」是假象）
     console.log(
-      `[gateway] wsession: spawn 开始 resume=${resume ?? '新建'} sid=${sid} project=${effectiveProject ?? '(笔/全局根)'} exe=${exe} cwd=${cwd}`,
+      `[gateway] wsession: spawn 开始 resume=${resume ?? '新建'} sid=${sid} project=${effectiveProject ?? '(笔/全局根)'} model=${launchModel ?? '(默认)'} exe=${exe} cwd=${cwd}`,
     )
     let child: import('node:child_process').ChildProcess
     try {
@@ -4306,6 +4567,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   // 收养上一代网关遗留的存活 web 会话窗口（注册表落盘，重启不杀窗 → 必须收养，否则 resume 幂等失效双开进程）
   adoptWebSessions()
   loadTurnEndAt() // 2026-09-07 恢复上一代网关的打断收口时刻（落盘见 turnEndAt 注）
+  loadSessionModelLaunch() // 2026-10-13 恢复会话启动模型表（resume 带 --model 的缺省源，见表注）
   // 启动即挂上空闲回收计时：此时无任何连接，若后续一直无人使用，到点自动关闭
   scheduleIdleShutdown()
   // backend（2026-08-19）与 web 会话（2026-08-23）空闲回收合并定时器（P2 收敛，独立于网关自身空闲回收）
@@ -4585,6 +4847,9 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             const requestId = typeof m.requestId === 'string' ? m.requestId : ''
             const project = typeof m.project === 'string' ? m.project.trim() : ''
             const text = typeof m.text === 'string' ? m.text : ''
+            // 2026-10-13 待办 14：可选 model（池内全名），随 spawn --model 落地（校验与
+            // /gateway/model 同源 findModelProvider）；未指定 = 回落池默认，行为不变。
+            const modelRaw = typeof m.model === 'string' && m.model.trim() ? m.model.trim() : ''
             const f = m.from as { sid?: unknown; title?: unknown } | undefined
             const from: { sid?: string; title?: string } =
               f && typeof f === 'object' && typeof f.title === 'string' && f.title
@@ -4611,9 +4876,10 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
             }
             if (!project) reply(false, '缺少 project：新建会话必须指定项目')
             else if (!text.trim()) reply(false, '消息内容为空')
+            else if (modelRaw && !findModelProvider(modelRaw)) reply(false, `model "${modelRaw}" 不在凭据池任何供应商模型清单中`)
             else {
               const newSid = randomUUID()
-              spawnWebSession(undefined, project, newSid)
+              spawnWebSession(undefined, project, newSid, modelRaw ? { model: modelRaw } : undefined)
                 .then(async () => {
                   const p = join(webSessionProjectRoot(project), '.claude', 'projects', `${newSid}.jsonl`)
                   try {

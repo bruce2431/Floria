@@ -155,6 +155,8 @@ web 独立会话 = 本地可见交互 REPL 窗口（`/clients` 注册，不再 h
 
 **网关关停不杀 web 会话窗口 + pid 注册表收养**：**web 会话与普通 CLI 会话同等权重，网关 off/restart/空闲退出/SIGINT 一律不杀存活窗口**（gatewayClient 自动重连新网关；与 backend 解耦同构；否则 `/server restart` 会把正在执行 restart 的那个会话自己杀掉）。代价是重启后内存 `webSessions` 丢失 → resume 幂等失效，故有**运行 pid 注册表落盘** `.claude/gateway/websessions.json`（`[{sessionId,pid,startedAt}]`，变更即写防 kill -9 留脏；`persistWebSessions` 在 set/各 delete 点调用），网关启动 `adoptWebSessions()` 读表收养 isPidAlive 条目（同 backend 收养先例）。**与旧 web-sessions.json 区别**：旧表是「web 创建来源标记」（已由磁盘定位取代，勿复辟）；本表是「运行进程 pid 表」（与 backends.json 同构）。`stopWebSession`（taskkill 窗口）仅剩显式关闭单会话端点与超时清理使用，网关关停路径不得调用。
 
+**会话启动模型表（`--model` 落地唯一状态源，2026-10-13）**：`.claude/gateway/sessionmodels.json`（`[{sessionId, model, provider?, updatedAt}]`）= 「该会话下次启动用哪个模型」的唯一真相。写入点两处：①`POST /gateway/model` 会话级路由成功；②`POST /gateway/model-report` 落值（CLI 侧 `/model` 切换经此）。消费点**仅** `spawnWebSession` resume 分支——未显式传 `opts.model` 时查表补 `--model`。携带 `model` 的入口两处（均池内全名，经 `findModelProvider` 校验，池外 400）：`POST /gateway/wsession` body（仅新建分支消费，resume 的模型源唯一 = 本表）、`/clients` 上行 `session-create` 帧（§13）。显式 `opts.model` 恒优先。不变量：跨供应商模型名必须与其供应商凭据同源——故 CLI 启动段命中池内模型即 `setSessionProviderOverride(该供应商)`（见 [core.md](core.md) 模型解析）。条目不删（sid 不复用，孤儿无害）。
+
 **SSE 关停显式 end()**：WS 被显式 `close()` → 页面自动重连成功；但 HTTP `server.close()` **只停止接受新连接、不断开既有连接**，`sseClients.clear()` 只清引用——浏览器 EventSource 收不到 TCP FIN → `onerror` 永不触发 → 前端永不重连 → 消息区实时链静默死亡。故关停时对 `sseClients` 逐个显式 `c.res.end()` 再清集合：客户端收流结束 → onerror → 3s 后 `initLive` 重连新网关 → hello → `refreshSession` 全量对账，旧页面**不刷新自动恢复**（与 WS 侧对称，不加状态源）。
 
 **状态点链路**：REPL `sendSessionActivity` 上报 → 网关 `sessionActivity` 内存 Map → `/gateway/sessions` 附 `state` → 侧栏着色。三件套保证不丢点：①REPL 上报 useEffect 带 60s 心跳（网关 `ACTIVITY_TTL_MS=10min` 清扫后点不消失）；②前端 `refreshList` 签名 `listSigOf()` 纳入各会话 state 拼串（状态翻转必触发重渲染）；③`/gateway/activity` 收报即向 sseClients 群发轻量 `{type:'activity',session,state}`，前端 `refreshList()`（只刷列表不刷会话区）。语义：waiting 独立橘点 `.st-ask #f59e0b`（等待用户）· busy 绿（运行中）· idle 红（暂停/已完成）· 无（进程退出/未打开）；网关重启后已开 CLI 靠首个心跳（≤60s）恢复点。
@@ -243,7 +245,7 @@ CLI（`src/utils/gatewayClient.ts`）主动上报的会话态信号经 `/clients
 回执：{type:'session-message-result', requestId, ok, error?, sessionId?}   ← sessionId 仅 session-create 成功时携带
 ```
 
-**`session-create` 上行（2026-09-20，`session_send` 的 `new_session` 形态）**：同一回执帧、另一条投递链——网关先 `spawnWebSession(undefined, project, randomUUID())`（复用 §7 的 web 新建会话链，无 `--resume`，落盘 `<项目根>/.claude/projects/<sid>.jsonl`），**注册完成后**才走 `deliverToSession` 投首条消息，并回执 `sessionId=sid`。要点：① 形状校验只两条（缺 `project` / 空文本 → 回执错误），**label 是否存在于目录由 CLI 侧工具前置校验**——网关对未知 label 的既有语义是回退全局根，本支不校验也不依赖；② 命名 = 「<from.title>拉起的会话」，走 `applySessionTitle`（与 `/gateway/session/rename` 同一条「落盘 + `routeToClient` 内存同步」链，**成对不可拆**），先于投递且失败不阻断投递（只补诊断轨迹）；③ 创建/注册失败如实回执原因，**不做乐观回 sid**（对比 `POST /gateway/wsession` 的预分配语义：那对 web 有效，对工具调用是撒谎）；④ CLI 侧超时 25s > 网关注册超时 20s。
+**`session-create` 上行（2026-09-20，`session_send` 的 `new_session` 形态）**：同一回执帧、另一条投递链——网关先 `spawnWebSession(undefined, project, randomUUID())`（复用 §7 的 web 新建会话链，无 `--resume`，落盘 `<项目根>/.claude/projects/<sid>.jsonl`），**注册完成后**才走 `deliverToSession` 投首条消息，并回执 `sessionId=sid`。要点：① 形状校验只两条（缺 `project` / 空文本 → 回执错误），**label 是否存在于目录由 CLI 侧工具前置校验**——网关对未知 label 的既有语义是回退全局根，本支不校验也不依赖；② 命名 = 「<from.title>拉起的会话」，走 `applySessionTitle`（与 `/gateway/session/rename` 同一条「落盘 + `routeToClient` 内存同步」链，**成对不可拆**），先于投递且失败不阻断投递（只补诊断轨迹）；③ 创建/注册失败如实回执原因，**不做乐观回 sid**（对比 `POST /gateway/wsession` 的预分配语义：那对 web 有效，对工具调用是撒谎）；④ CLI 侧超时 25s > 网关注册超时 20s。⑤ **自 2026-10-13 起本帧可选带 `model`**（池内模型全名，`findModelProvider` 校验，池外 → 回执错误不 spawn）：网关以 `spawnWebSession(undefined, project, sid, {model})` 的 `--model <model>` 落地；`session_send` 工具新增可选入参 `model`（仅 `new_session` 形态有效，`SessionSendTool/prompt.ts` 有说明），缺省回落池默认（行为同前）。
 
 **职责分界（定案）**：
 
@@ -287,7 +289,7 @@ web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
 
-## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`）
+## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`、`/gateway/file/create`、`/gateway/file/upload`）
 
 work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两端点只解析 `label` 找项目根，语义与防护全在导出纯函数里——端点即「纯函数结果码 → HTTP 码」的直译，写法与 `/gateway/fs` 复用 `resolveWithinRoot` 同源。
 
@@ -299,7 +301,11 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 **`POST /gateway/file/write`**（2026-10-05，work 编辑区写回侧，[web-ui.md](web-ui.md) §54）body `{label, path, content, baseMtime?}` → `writeProjectFile(projRoot, path, content, baseMtime)`。**只改已存在文件的内容，不新建/不删除**；`path` 越界与空 `path` → **403**，不存在或为目录 → **404**。**乐观并发（不静默覆盖）**：给了 `baseMtime` 即与当前 `statSync().mtimeMs` **精确比对**（非区间容差），不等 → **409 `conflict`**（磁盘已被外部改动，调用方须显式处置）；不给则强制覆盖。成功 → `{ok, path, mtime}`（新 mtime = 下次保存的基线）。body 上限 `MAX_FILE_WRITE_BYTES = 4 MB`（对齐读侧，超限 413）。**读侧配套**：`GET /gateway/file` 新增 `ETag: "<mtimeMs>"` + `Last-Modified`（ETag 用毫秒级 mtime——`Last-Modified` 只有秒级、无法表达同一秒内两次写），编辑区即以此作基线回传。
 
-- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清；评论读写 10 例见 §17）。
+**`POST /gateway/file/create`**（2026-10-13，work「+」菜单新建，[web-ui.md](web-ui.md) §45）body `{label, dir, name, kind:'file'|'dir'}` → `createProjectEntry(projRoot, dir, name, kind)`。`dir` = 落点目录（项目根相对，缺省/空串 = 项目根，**不自建多级**，父不存在 → **404**）；`name` 走 `sanitizeEntryName`（同 rename 清洗口径）；同名已存在 → **409**（不覆盖、不自动序号）；落点逃逸/空 `dir` 越界 → **403**；空名 → **400**。成功 `{ok, path, kind}`。
+
+**`POST /gateway/file/upload`**（2026-10-13，work「+」菜单上传）body `{label, dir, name, contentBase64}` → `uploadProjectFile(projRoot, dir, name, buf)`。前端多选逐个发；同名自动加 `-1`/`-2` 序号避让（**不覆盖**）；名含路径段按 basename 化解（不可能逃出落点）；落点逃逸 → **403**；单件上限 **20 MB** → 413。成功 `{ok, path, size}`（`EntryOpResult` 新增可选 `size`）。
+
+- **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清；评论读写 10 例见 §17）；`probes/probe-file-create.ts`（create/upload：26 例——创建文件/目录、落点 ''=项目根、409 不覆盖、落点逃逸 403、落点目录不存在 404、保留名清洗、空名 400、上传落盘/序号避让/递归建目录/逃逸 403/basename 化解）。
 
 ## 17. 项目评论批注端点（`/gateway/comments`，2026-10-06）
 
@@ -322,6 +328,7 @@ agent 驱动浏览器里「在场卡片」的网关侧链路（总设计 → [we
 - **`GET /gateway/cards`** → `{devices, cards:[{label,instanceId,kind,ns,cmds,ready,device}]}`（只读能力表，供 `CardCall` 的 list）。`sanitizeCaps` 落表前收口：**无 `instanceId` 的条目直接丢**（不可寻址）、`cmds` 截 64、最多 200 条。
 - **`POST /gateway/card-call`** body `{label?,ns?,instanceId?,cmd,args?,timeoutMs?}` → 选设备 `pickCardHolder`（**instanceId 最精确 > ns > label**，可叠加 `label` 收窄 ns；多台命中取**最近上报**的那台——**绝不广播猜测**，否则 PC+iPad 的卡同时动）→ 下行 → 等 `card-result` 配对 → HTTP 响应。
 - **错误语义（真值表）**：缺 `cmd` 或三个寻址键全空 → **400**；无浏览器在线（`sockets` 空）→ **503**；有浏览器但无匹配卡 → **409**（附当场能力表 `{target, cards}`，agent 可直接改址重试）；卡超时 / 持卡设备中途断开 → **504**。**卡内命令失败（卡回 `ok:false`，如「未注册的命令 x」）走 HTTP 200 `{ok:false,error,card}`**——那是卡的正常答复而非传输错误，混成 4xx/5xx 会让 agent 误以为链路坏了而反复重试。超时 clamp `500..60000ms`。
+- **`card:open` 特判（2026-10-13）**：`POST /gateway/card-call` 的 `cmd='card:open'` 走**独立分支**（`pickLatestHolder` 选最近上报设备、**不查能力表**）：缺 `args.label` → **400**、无浏览器 → **503**、超时/断开 → **504**；**不发 409**（整卡 open 不需要目标卡已在场，语义=打开该项目预览卡）。其余 `card:*` 动词（`card:close`/`card:delete`）走常规能力表路由（须命中在场帧，否则 409）。命令词表与卡侧契约 → [web-ui.md](web-ui.md) §61。
 - **CLI 侧出口**：`src/utils/gatewayClient.ts` 的 `listGatewayCards()` / `callGatewayCard()`（HTTP 超时取 `timeoutMs+2000`，让网关的 504 先到）+ 模型工具 `CardCall`（`src/tools/CardCallTool/`，`feature('CARD_API')` 门控，进 `defaultFeatures`）。
 - **探针锚点**：`probes/probe-web-cards-api.ts`（§ 网关帧型/路由/状态码真值表 与 CLI 侧 `listGatewayCards`/`callGatewayCard`、工具/feature 登记的字面量一致性）。
 

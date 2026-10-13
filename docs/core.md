@@ -24,6 +24,16 @@
 
 复验锚点 `probes/probe-openai-chat-adapter.ts`（离线 28 断言：流式文本+tool_call / 非流式 / 透传；`--live` 加真 Gemini 往返 + 真 Anthropic SDK 走适配器端到端）。
 
+## 模型解析与会话级凭据绑定（`utils/model/model.ts` + `utils/credentials/pool.ts`）
+
+**模型解析优先级**（`getUserSpecifiedModelSetting` → `getMainLoopModel`，高→低）：① 会话内 override（`/model`、web 切换，`getMainLoopModelOverride()`）② 启动 override（`--model` 启动参数，`setMainLoopModelOverride`）③ 凭据池 activeModel（`getActiveModel()`）④ `ANTHROPIC_MODEL` 环境变量 ⑤ `settings.model` ⑥ 内置默认。池模型绕过 availableModels 白名单（自定义 provider 模型清单内即可）。**家族别名落回**：绑 provider 会话里 `haiku`/`sonnet`/`opus` 等一律解析为**该会话绑定 provider 的模型**（`getActiveModel()`），不回落 Anthropic 一号 ID（见下条）。
+
+**会话级凭据绑定（不变量）**：`pool.ts` 三档解析 **显式 override > 进程启动快照（`_bootProviderSnapshot`）> 池文件现值**；`getActiveProviderConfig()` / `getActiveApiKey()` / `getActiveBaseUrl()` / `getActiveModel()` 全走会话有效值，**本进程请求凭据只随本进程状态变化**——池文件被改（换默认供应商）不影响已在跑的进程（新会话才取新值）。`getGlobalActive*()` 供管理视图读池现值。
+
+**启动段配对（跨供应商模型名必须与其供应商凭据同源）**：`main.tsx` 启动段 `effectiveModel = userSpecifiedModel(--model) || agentDef.model || getActiveModel()` → `findModelProvider(effectiveModel)` 命中池内模型即 `setSessionProviderOverride(该供应商)`（先于 `setMainLoopModelOverride`）——否则模型名与 baseUrl/apiKey 分属两家。池外模型（firstParty/Bedrock/Vertex 等 `findModelProvider` 落空）保持启动快照原样。**同款配对语义见 [gateway.md](gateway.md) §7 会话启动模型表**（`--model` 落地状态源、`session_send` 的 `model` 入参 → `session-create` 帧）。
+
+复验锚点 `probes/probe-session-model.ts`（31 断言：`resolveSendMode` 的 model 归属、网关启动模型表/spawn `--model`、main.tsx 启动段 provider 配对、`session_send` 工具链、前端待定模型随 wsession 下发、cache-bust 三处同号）。
+
 ## 生图能力层（provider-neutral，`services/imagegen/`）
 
 生图模型（如 Gemini `*-image`）走 `chat/completions` 时 Google 兼容层**不回传生成图**（有时 400 `Image generation is not yet supported on the chat.completions endpoint`，有时 200 但 `message.content` 为空＝**静默丢图**）。故生图请求绕开协议适配器，改由**与厂商无关的能力层**直接对接各厂商原生接口。**Gemini 是第一个实现，不是架构本身**——新增一家（OpenAI/GLM/Grok…）= 实现 `ImageGenerationAdapter` + `registerImageAdapter()`，公共层与展示链零改动。

@@ -60,8 +60,8 @@
     return state.workFile ? 'file' : ''
   }
 
-  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats。**纯运行时、不持久化、按项目重置**
-  // （2026-10-07 用户定案）——切换工作项目即清空（见 selectProject），故他项目的会话胶囊绝不残留。
+  // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats。**持久化、按项目重置**
+  // （2026-10-13 用户待办 11 推翻 2026-10-07 的不持久化定案；切项目清空的防线不变，见 selectProject）。
   // 条目 = 会话 hash 或 WK_NEW_TAB。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
   // 增/删/渲染的唯一口都在本模块。
   const wkActiveKey = () => state.currentHash || WK_NEW_TAB
@@ -75,6 +75,7 @@
   // 打开的**文件** tab 开放集（与聊天胶囊同构，2026-10-12）：真源 state.wkFiles（项目内相对路径），
   // 激活项 = 单值 state.workFile。并入唯一口在此（applyPanes 按当前 workFile 兜底 ⇒ 刷新恢复的
   // workFile 也有一枚 pill）；移除/切换在 work-editor.js closeWkFile（要 flush 编辑器，故不在此）。
+  // 开放集的落盘统一收口在 applyPanes 末尾的 saveWork（2026-10-13 待办 11）。
   function wkEnsureFileTab(p) { if (p && !state.wkFiles.includes(p)) state.wkFiles.push(p) }
   // 关一枚 tab（× 只从顶栏移除，不删会话）。激活项被关 → 切右邻 / 左邻；一枚不剩且文件 tab 与预览
   // 都不在场 → 保底重开空对话 tab（守「聊天 / 文件 / 预览至少一栏在场」不变量）。
@@ -141,4 +142,8 @@
     applyWorkCols()
     renderTopbar()
     applyPvTab()
+    saveWork() // 布局落地即持久化（2026-10-13 待办 11）：顶栏开放集（wkChats/wkFiles）的入列/移除
+    // 路径分散在 ensure 兜底、syncWorkTabs、closeWkFile（关非激活）等处，并非每处都 saveWork——
+    // 统一收口在布局落地这一条链上，凡可见状态变化必已过 applyPanes ⇒ 凡变化必落盘。saveWork
+    // 只 patch localStorage、不回头调 applyPanes，无环。
   }

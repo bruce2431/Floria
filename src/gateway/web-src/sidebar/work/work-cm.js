@@ -48,6 +48,8 @@
     CM.setTableCellRenderer(mdInlineText)
     wkEdProgAnn = CM.Annotation.define()
     wkEdCmtEffect = CM.StateEffect.define()
+    // 评论行装饰 field。StateField 只存状态不渲染——必须 provide 接到 view 的 decorations facet
+    // 才会进 DOM（缺接线则行标记永不渲染，2026-10-07 统一编辑器迁移时引入的静默失效）。
     const cmtField = CM.StateField.define({
       create: () => CM.Decoration.none,
       update: (deco, tr) => {
@@ -55,6 +57,7 @@
         for (const e of tr.effects) if (e.is(wkEdCmtEffect)) next = wkEdBuildCmtDeco(e.value, tr.state)
         return next
       },
+      provide: (f) => CM.EditorView.decorations.from(f),
     })
     wkEdHost = document.createElement('div')
     wkEdHost.className = 'wk-ed-cm'
@@ -116,12 +119,14 @@
   }
 
   // 扩展名 → 语言扩展。markdown = Live Preview 全套（语法 + live-preview 装饰 + 公式/表格/链接/代码块）；
+  // .canvas = JSON Canvas 图形预览（work-canvas.js wkCvExt：默认 SVG 画布，可切源码编辑）；
   // 代码/纯文本 = 对应语言包 + 基础高亮；无匹配扩展名 = 纯文本（无高亮）。
   function wkEdLangExt(path) {
     const CM = wkEdCM
     if (!CM) return []
     const m = /\.([a-z0-9]+)$/i.exec(path || '')
     const e = m ? m[1].toLowerCase() : ''
+    if (e === 'canvas') return wkCvExt(CM)
     if (/^(md|markdown)$/.test(e)) {
       return [
         // base=markdownLanguage 本身已含 GFM（commonmark.configure([GFM,…])，Table 在其中）⇒ 不必再传 extensions:[Table]

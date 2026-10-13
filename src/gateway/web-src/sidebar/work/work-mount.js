@@ -193,9 +193,10 @@
     })
     $('wk-new-pop').addEventListener('click', (e) => {
       e.stopPropagation()
-      if (!e.target.closest('[data-wknew]')) return
+      const nb = e.target.closest('[data-wknew]')
+      if (!nb) return
       $('wk-new-pop').hidden = true
-      toast('创建 / 上传功能暂未接入')
+      wkNewPick(nb.dataset.wknew) // 四项接入（2026-10-13）：创建文件/文件夹 + 上传文件/文件夹，实现在 work-tabmenu.js
     })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {

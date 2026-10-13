@@ -292,10 +292,13 @@ import { esc, toast } from '../core/util.js'
     cmtPop = pop
   }
 
-  // 点浮层外 / 滚动 / Esc → 关（fixed 浮层会漂离锚点；与 quote.js 浮窗同策略）
+  // 点浮层外 / 滚动 / Esc → 关（fixed 浮层会漂离锚点；与 quote.js 浮窗同策略）。
+  // 滚动关闭守护的不变量 = 「锚点漂移」：只有**浮层外**的滚动才让选区滚走、浮层漂离锚点；
+  // 浮层内 cmp-in 自己的内容滚动（评论正文超出可见行数后的纵向滚动）不改变锚点关系，
+  // 不得关窗——否则输入长评论的瞬间（textarea 内容一滚）浮层即死（capture 监听 window 也收到元素 scroll）。
   document.addEventListener('mousedown', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cmtPop) cmtClosePop() })
-  window.addEventListener('scroll', () => { if (cmtPop) cmtClosePop() }, { passive: true, capture: true })
+  window.addEventListener('scroll', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() }, { passive: true, capture: true })
 
 export {
   cmtClosePop,

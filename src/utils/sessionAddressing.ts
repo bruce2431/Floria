@@ -71,16 +71,20 @@ export function resolveSessionTarget(
  */
 export type SendMode =
   | { kind: 'existing'; to: string }
-  | { kind: 'new'; project: string }
+  | { kind: 'new'; project: string; model?: string }
   | { kind: 'invalid'; error: string }
 
 export function resolveSendMode(input: {
   to?: string
   new_session?: boolean
   project?: string
+  /** 2026-10-13（待办 14）：新会话指定模型（池内全名）。仅 new_session 形态有效；
+   *  是否 ∈ 凭据池由调用方校验（本模块保持纯函数、零 import），此处只做形状归属判定。 */
+  model?: string
 }): SendMode {
   const to = (input.to ?? '').trim()
   const project = (input.project ?? '').trim()
+  const model = (input.model ?? '').trim()
   if (input.new_session === true) {
     if (to) {
       return {
@@ -94,12 +98,18 @@ export function resolveSendMode(input: {
         error: 'new_session 必须指定 project（新会话落在哪个项目）',
       }
     }
-    return { kind: 'new', project }
+    return { kind: 'new', project, ...(model ? { model } : {}) }
   }
   if (project) {
     return {
       kind: 'invalid',
       error: 'project 仅在 new_session: true 时有效（发给已有会话请用 to 寻址）',
+    }
+  }
+  if (model) {
+    return {
+      kind: 'invalid',
+      error: 'model 仅在 new_session: true 时有效（发给已有会话的模型由目标会话自己决定）',
     }
   }
   if (!to) {

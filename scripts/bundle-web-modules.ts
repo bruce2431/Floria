@@ -85,8 +85,15 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'sidebar/work/work-assist.js', part: 1 },
   { file: 'sidebar/work/work-files.js', part: 1 },
   { file: 'sidebar/work/work-cm.js', part: 1 },
+  // JSON Canvas 图形预览（2026-10-13）：wkCvExt 由 work-cm.js 的 wkEdLangExt 在扩展名为 .canvas 时调用，
+  // 故须排在 work-cm.js 之后（函数声明提升，序位按依赖就近）。
+  { file: 'sidebar/work/work-canvas.js', part: 1 },
   { file: 'sidebar/work/work-editor.js', part: 1 },
   { file: 'sidebar/work/work-rows.js', part: 1 },
+  // work「+」新建菜单接入（创建文件/文件夹 + 上传文件/文件夹）+ 行「下载」（2026-10-13）：
+  // wkNewPick / downloadWorkEntry 被 work-rows.js 与 work-mount.js 调用，排两者之间
+  // （拼接后单 IIFE 函数声明提升，序位按语义就近）。
+  { file: 'sidebar/work/work-tabmenu.js', part: 1 },
   { file: 'sidebar/work/work-mount.js', part: 1 },
   // 项目评论批注：排在 work.js 之后（其 cmtLoad/cmtRender 由 work.js 调），排在启动序列之前。
   { file: 'sidebar/comments.js', part: 1 },

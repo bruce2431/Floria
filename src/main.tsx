@@ -115,7 +115,7 @@ import { safeParseJSON } from './utils/json.js';
 import { logError } from './utils/log.js';
 import { getModelDeprecationWarning } from './utils/model/deprecation.js';
 import { getDefaultMainLoopModel, getUserSpecifiedModelSetting, normalizeModelStringForAPI, parseUserSpecifiedModel } from './utils/model/model.js';
-import { getActiveModel } from './utils/credentials/pool.js';
+import { findModelProvider, getActiveModel, setSessionProviderOverride } from './utils/credentials/pool.js';
 import { ensureModelStringsInitialized } from './utils/model/modelStrings.js';
 import { PERMISSION_MODES } from './utils/permissions/PermissionMode.js';
 import { checkAndDisableBypassPermissions, getAutoModeEnabledStateIfCached, initializeToolPermissionContext, initialPermissionModeFromCLI, isDefaultPermissionModeAuto, parseToolListFromCLI, removeDangerousPermissions, stripDangerousPermissionsForAutoMode, verifyAutoModeGateAccess } from './utils/permissions/permissionSetup.js';
@@ -2118,6 +2118,15 @@ async function run(): Promise<CommanderCommand> {
     // 仍走 GatewayControlBridge 语义不变。
     if (!effectiveModel) {
       effectiveModel = getActiveModel() ?? undefined;
+    }
+    // Pj16 2026-10-13（待办 12/14）：--model/ANTHROPIC_MODEL/回落指定**池内模型**时同步绑定
+    // 该供应商（findModelProvider → setSessionProviderOverride）——与 /model 直选的配对语义同源
+    //（model.tsx handleSelect），补全启动口的凭据同源不变量：网关 spawn --model 传跨供应商
+    // 模型时若无此绑定，凭据仍取启动快照 provider → 「模型名 A、endpoint/key B」400（2026-09-10
+    // 事故同型）。池外模型（firstParty/Bedrock/Vertex 等 findModelProvider 落空）保持启动快照原样。
+    const bootModelProvider = effectiveModel ? findModelProvider(effectiveModel) : null;
+    if (bootModelProvider) {
+      setSessionProviderOverride(bootModelProvider);
     }
     setMainLoopModelOverride(effectiveModel);
 

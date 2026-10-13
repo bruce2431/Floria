@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 /**
- * probe-web-cards-api —— 卡片公开 API 的接线完整性 + 契约字面量一致性（2026-10-11）
+ * probe-web-cards-api —— 卡片公开 API 的接线完整性 + 契约字面量一致性（2026-10-11；2026-10-13 扩
+ * 宿主保留动词 card:* 与整卡显隐中枢接线，43 断言）
  *
  * 卡片公开 API 是一条**跨四层**的链：卡（iframe）→ 宿主总线（web-src/engine/card-bus.js）→
  * 前端网关客户端（engine/gateway.js）→ 网关注册/路由（src/gateway/localGateway.ts）→ agent 工具
@@ -79,7 +80,22 @@ else bad('ack 配对（ev===\'ack\' + queue[0].cmd）缺失')
 if (bus.includes('未注册的命令')) ok('未注册命令显式回 ok:false（不静默）')
 else bad('未注册命令未显式报错')
 
-// 导出面：12 个公开 API
+// 宿主保留动词（2026-10-13 整卡显隐）：card:open / card:close / card:delete 总线拦截自答（不发给卡），
+// 卡自定义命令不得申报该前缀（与 floria-card-call/-result 同级保留段）
+if (/cmd === 'card:open' \|\| cmd === 'card:close' \|\| cmd === 'card:delete'/.test(bus) && bus.includes('callSlotVerb'))
+  ok('宿主保留动词 card:open/card:close/card:delete 由 callCard 先行分流（callSlotVerb 总线自答）')
+else bad('card:* 保留动词拦截缺失')
+if (bus.includes("'宿主未接入显隐中枢（setSlotHost 未注入）'")) ok('slotHost 未注入显式报错（不静默）')
+else bad('slotHost 未注入未显式报错')
+if (bus.includes("'card:open 需要 args.label（项目 label）'")) ok('card:open 缺 args.label 显式报错')
+else bad('card:open 缺 label 校验缺失')
+if (bus.includes("'inline 卡无宿主槽位，不支持 card:close/card:delete'")) ok('inline 卡 card:close/delete 显式报错')
+else bad('inline 卡 card:close/delete 未显式报错')
+// 卡内组件级标准动词词表（卡实现、走既有 <ns>-cmd 转发；宿主侧唯一词表定义处 = 本件头注）
+if (bus.includes('scroll{line}') && bus.includes('locate')) ok('卡内标准动词词表（scroll{line}/locate）在总线头注有定义')
+else bad('总线头注缺卡内标准动词词表')
+
+// 导出面：13 个公开 API
 for (const api of [
   'addCardEventListener',
   'broadcast',
@@ -91,6 +107,7 @@ for (const api of [
   'registerInlineCard',
   'reportCaps',
   'setGatewaySender',
+  'setSlotHost',
   'setSourceOpener',
   'unregisterFrame',
 ]) {
@@ -98,7 +115,7 @@ for (const api of [
   if (new RegExp(`(^|\\s)${api}[,:]`, 'm').test(bus)) continue
   bad(`总线导出面缺 ${api}`)
 }
-ok('总线导出面 12 个 API 齐备')
+ok('总线导出面 13 个 API 齐备')
 
 // ---------- B. 帧挂点 ----------
 const preview = read('src/gateway/web-src/feature/preview-frame.js')
@@ -118,6 +135,15 @@ else bad('work-mount.js 未注入 setSourceOpener')
 const workFacade = read('src/gateway/web-src/sidebar/work.js')
 if (/from '\.\.\/engine\/card-bus\.js'/.test(workFacade)) ok('sidebar/work.js 门面持有 cardBus import（拆件不带 import）')
 else bad('sidebar/work.js 门面缺 cardBus import')
+
+// 整卡显隐中枢接线（2026-10-13）：preview-frame.js 模块体注入 setSlotHost——执行口 = 既有路由链
+// （navigate '#preview/<label>' / '#/'），与用户点侧栏完全同链（无双真相）；work 模式显式报错不静默
+if (/cardBus\.setSlotHost\(\{/.test(preview) && /navigate\('#preview\/' \+ encodeURIComponent\(label\)\)/.test(preview))
+  ok('preview-frame.js 注入 setSlotHost（card:open 走路由链 #preview/<label>，与侧栏同链）')
+else bad('preview-frame.js 未注入 setSlotHost 或 card:open 未走路由链')
+if (/navigate\('#\/'\)/.test(preview) && /work 模式的卡片显隐不经宿主槽位口/.test(preview))
+  ok('slotHost.close = navigate(\'#/\') 回主页清槽；work 模式显式报错')
+else bad('slotHost.close 接线或 work 模式守卫缺失')
 
 // 侧栏点开文件 → 广播事实 file-open（Pj18 预览卡据此切书稿）：唯一开点 openWorkFile 内，带 label 限定
 const workEditor = read('src/gateway/web-src/sidebar/work/work-editor.js')
@@ -150,6 +176,14 @@ if ((gwTs.match(/sendJson\(res, 504,/g) || []).length >= 2) ok('卡超时 / 设�
 else bad('缺 504 分支')
 if (gwTs.includes('sendJson(res, 200, { ok: false, error: ccOut.error, card: ccWhere })')) ok('卡内命令失败 → HTTP 200 ok:false（非传输错误）')
 else bad('卡内命令失败未走 200 ok:false')
+
+// 整卡显隐 card:open（2026-10-13）：网关特判分支——不查能力表、选最近上报设备、不 409（对象常不在场）
+if (gwTs.includes("if (ccCmd === 'card:open')") && gwTs.includes("'card:open 需要 args.label（项目 label）'"))
+  ok('网关 card:open 特判分支（缺 args.label → 400）')
+else bad('网关缺 card:open 特判分支或缺 label 400')
+if (/const coHit = pickLatestHolder\(\)/.test(gwTs) && /function pickLatestHolder\(\)/.test(gwTs))
+  ok('card:open 选最近上报持卡设备 pickLatestHolder（不查能力表、不广播）')
+else bad('网关缺 pickLatestHolder 或 card:open 未走它')
 
 // ---------- E. 工具侧 ----------
 for (const f of ['CardCallTool.ts', 'constants.ts', 'prompt.ts', 'UI.tsx']) {

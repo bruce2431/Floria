@@ -488,13 +488,18 @@ import { renderList, renderProject } from './mgr.js'
   // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setFirstSendHash）——每次现读，
   // 调用方严禁缓存返回值。
   function getFirstSendHash() { return firstSendHash }
-  async function newWebSession(projectLabel) {
+  async function newWebSession(projectLabel, model) {
     if (needToken()) return toast('请先完成 token 验证')
     if (webCreating) return null
     webCreating = true
     toast(projectLabel ? `正在 ${projectLabel} 打开本地 CLI 窗口…` : '正在全局根打开本地 CLI 窗口…')
     try {
-      const res = await fetch(apiUrl('/gateway/wsession'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(projectLabel ? { project: projectLabel } : {}) })
+      // 2026-10-13 待办 12：首页选的模型随 wsession body.model 下发（池内全名），网关 spawn 时
+      // 落 --model 启动参数——CLI 启动即固化会话覆盖，首轮请求即用所选模型（不再事后补投）。
+      const body = {}
+      if (projectLabel) body.project = projectLabel
+      if (model) body.model = model
+      const res = await fetch(apiUrl('/gateway/wsession'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await res.json()
       if (!d.hash || !d.id) throw new Error(d.error || 'bad response')
       // 首条消息事务 hash 回填必须在 navigate 之前：navigate 同步 route → renderSession，

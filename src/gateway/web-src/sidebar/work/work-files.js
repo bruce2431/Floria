@@ -58,11 +58,11 @@
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = state.workProj || '选择项目'
+    if (lab) lab.textContent = wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -73,16 +73,21 @@
     const box = $('wk-proj-pop')
     if (!box) return
     const ps = wkProjGroups()
-    box.innerHTML = ps.length
+    // 「工作区」行与项目并列（2026-10-14 待办 9 返修）：全局根散件的浏览入口，不是第三枚 tab。
+    const rows = ps.length
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj && wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
+    box.innerHTML =
+      rows +
+      `<button class="wkp-row${wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
+      `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
@@ -187,22 +192,37 @@
     }
     return h
   }
-  async function loadWsDir(path) {
-    if (needToken()) return
-    wkWsLoading = true
-    wkWsErr = ''
-    wkWsEntries = null
-    renderWorkBody()
+  async function loadWsDir(path, silent) {
+    const seq = ++wkWsSeq
+    if (!silent) {
+      wkWsLoading = true
+      wkWsErr = ''
+      wkWsEntries = null
+      renderWorkBody()
+    }
     try {
       const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
       const data = await res.json()
+      if (seq !== wkWsSeq) return false
       if (!res.ok || data.error) throw new Error(data.error || '加载失败')
       wkWsPath = String(path || '')
       wkWsEntries = Array.isArray(data.entries) ? data.entries : []
     } catch (e) {
+      if (seq !== wkWsSeq) return false
+      if (silent) return false // 对账轮失败静默保留旧层（同 loadProjectTree silent 口径）
       wkWsErr = e.message || String(e)
     }
     wkWsLoading = false
+    renderWorkBody()
+    return seq === wkWsSeq
+  }
+  // 工作区视图入口（2026-10-14 待办 9 返修）：项目下拉里的「工作区」行——与项目并列呈现，
+  // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
+  function enterWsView() {
+    hideWkPops()
+    wkTab = 'ws'
+    if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
+    renderWorkChrome()
     renderWorkBody()
   }
 
@@ -274,6 +294,11 @@
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    if (wkTab === 'ws') {
+      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；wkTab 的 on 类只在 tab 点击 handler 里切换）
+      wkTab = 'files'
+      document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
+    }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
@@ -312,7 +337,8 @@
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (state.workProj) await loadProjectTree(state.workProj, silent)
+    if (wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
+    else if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
   }
@@ -356,6 +382,7 @@
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
+    if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）

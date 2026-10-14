@@ -1018,21 +1018,14 @@ body.kb-open #input-wrap { transition: none; }
   box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
   font-size: 16px; line-height: 24px;
 }
-/* 文本区（contenteditable 承载 @chip；样式同 dsh .input/.mirror 共享的 34:10434：
-   pl16/pr12/pt4、pre-wrap、break-word、anywhere；最小 2 行 52px，14 行 336px 封顶滚动） */
-#input {
-  box-sizing: border-box;
-  border: none; outline: none; resize: none; background: transparent;
-  padding: 4px 12px 0 16px;
-  font: inherit; line-height: inherit; color: var(--ink); text-align: left;
-  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
-  min-height: 52px; max-height: 336px; overflow-y: auto;
-}
-/* contenteditable 占位符（:empty + data-ph），只读态由 JS 换 data-ph（dsh caption 色） */
-#input:empty:before { content: attr(data-ph); color: var(--ink-4); pointer-events: none; }
-/* 2026-08-21 高度对齐 dsh：docked composer 折叠到内容高度（单行 28px = 4px 顶垫 + 24px 行高），
-   hero 空态保留 52px 两行地板（dsh InputBar .hero .mirror min-h 52 仅 hero 生效） */
-#input-wrap.docked #input { min-height: 28px; }
+/* CM6 接管底栏（2026-10-14 #17 B 口径）：文本区 = #cm-host 内 CM EditorView，
+   几何/滚动/占位/字色由 composer-cm.js cmThemeSpec 内联主题承担；此处只补最小地板：
+   .cm-content 顶垫 4px（主题内），52px = 4 + 48（两行 24px），docked 28px = 4 + 24（单行） */
+#cm-host { flex: 1 1 auto; min-width: 0; }
+#cm-host .cm-content { min-height: 48px; }
+#input-wrap.docked #cm-host .cm-content { min-height: 24px; }
+/* 引用块正文行（回复/PDF 引用的锚点令牌与收尾令牌之间的可见文本行）：blockquote 同族观感 */
+#cm-host .cm-quote-body { color: var(--text-2); border-left: 2px solid var(--border); padding-left: 6px; margin-left: 10px; }
 /* 底部工具行（dsh .row）：textarea 与工具行 gap 12px；左 .tools / 右 .trailing。
    flex-wrap: nowrap（2026-09-25 根修）：工具行与右侧发送组恒为一行。此前 wrap 让「分行」先于
    「收缩」发生——分行判据是未收缩的 hypothetical main size（basis），min-width:0 那套收缩链
@@ -1306,25 +1299,28 @@ body.kb-open #input-wrap { transition: none; }
 .mention.ref .m-ic { width: 16px; height: 16px; color: var(--blue); }
 .mention.ref .m-ic svg { width: 16px; height: 16px; }
 .mention.ref .m-nm { max-width: 220px; }
-.msg .mention-chip.m-ref {
+/* 2026-10-14 待办 21 根修：chip 族样式去 `.msg` 祖先绑定——mdHtml 渲染器有两个宿主（消息气泡
+   .msg 与底栏 md 渲染层 #input-md），样式归渲染器所有而非消息层；绑死 .msg 时渲染层里的
+   .mc-ic svg 无任何尺寸约束 → 默认 300×150 放大成巨型黑色星弧盖屏（用户截图实锤）。 */
+.mention-chip.m-ref {
   background: transparent; border: none; padding: 0; border-radius: 0;
   font-size: inherit; line-height: inherit; color: var(--blue);
   gap: 4px; max-width: min(100%, 320px);
 }
-.msg .mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--blue); }
-.msg .mention-chip.m-ref .mc-ic svg { width: 1em; height: 1em; }
-.msg .mention-chip.m-ref .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--blue); }
+.mention-chip.m-ref .mc-ic svg { width: 1em; height: 1em; }
+.mention-chip.m-ref .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* 消息气泡里渲染的 @ chip（2026-08-15 19:2x 透明胶囊：去图标/背景/阴影，仅细边圆角轮廓 + 名称文本） */
-.msg .mention-chip {
+.mention-chip {
   display: inline-flex; align-items: center; vertical-align: middle;
   background: transparent; border: 1px solid var(--border); border-radius: 999px;
   padding: 0 9px; font-size: 12.5px; line-height: 1.7; color: var(--text);
   white-space: nowrap; max-width: 100%;
 }
 /* 目录 / 文件 chip（@ 路径可长）：内层 .mc-t 承担省略号（inline-flex 直挂文本无法 text-overflow） */
-.msg .mention-chip.m-path { max-width: min(100%, 320px); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.msg .mention-chip.m-path .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mention-chip.m-path { max-width: min(100%, 320px); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.mention-chip.m-path .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ===== 项目选择器 #proj-root（2026-09-02）：初始界面工具行 + 右侧目标项目切换 =====
    外观=dsh .trigger 同族（28px chip）；弹层=cmd-pop 同表面（r12 白底 shadow-lv3，向上弹出）。
@@ -1390,13 +1386,8 @@ body.kb-open #input-wrap { transition: none; }
   outline: none;
 }
 #cmd-pop[hidden] { display: none; }
-/* dsh PopupSelectView 内部类名（PopupSelectView.module.css）：.search 输入 + .status/.error[.errorText+.retry] + .viewport[.row[.label+.detail+.check]] */
-#cmd-pop .search {
-  flex: none; margin: 2px 2px 4px; padding: 6px 8px;
-  border: 1px solid transparent; border-radius: 8px;
-  background: transparent; font-size: 13px; color: var(--ink); outline: none;
-}
-#cmd-pop .search::placeholder { color: var(--ink-4); }
+/* dsh PopupSelectView 内部类名（PopupSelectView.module.css）：.status/.error[.errorText+.retry] + .viewport[.row[.label+.detail+.check]]。
+   独立 .search 输入已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框，随打字自动过滤。 */
 #cmd-pop .status { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 #cmd-pop .error { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12px; color: #ec1313; }
 #cmd-pop .error .errorText { flex: 1; overflow: hidden; text-overflow: ellipsis; }
@@ -2459,8 +2450,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    让位；work 下沉区此前后不消费 ⇒ 编辑器盒（grid row2）顶部延伸进屏外带，光标上方的文本永远在
    屏幕外且 .cm-scroller 内部滚动够不着。修法同口径：顶栏格加高 --kb-total，把内容格（row2,
    minmax(0,1fr)）整体压回可视窗内——编辑器盒恒可见，光标行由 .cm-scroller 内部滚动自然可达。
-   手机 ≤720 单列 flex 同样吃这条（顶栏 margin 撑高、编辑器 flex 收缩），一式两用。 */
-body.kb-open #chat-area.work > .wk-topbar { margin-top: calc(var(--kb-total, 0px) + 2px); }
+   手机 ≤720 单列 flex 同样吃这条（顶栏 margin 撑高、编辑器 flex 收缩），一式两用。
+   2026-10-14 返修：限定 .wk-show-file（文件 tab）——聊天 tab 顶栏不吃位移，否则与
+   #chat-scroll 自身的 margin-top: var(--kb-total) 双重让位（聊天区被压成 52px 缝）。 */
+body.kb-open #chat-area.work.wk-show-file > .wk-topbar { margin-top: calc(var(--kb-total, 0px) + 2px); }
 /* 上半区渐隐板（2026-10-09，镜像 #composer-mask）：贴在**内容格顶部**（标签页 tab 条正下方），
    使卡内内容滚到顶栏下沿时自然淡出。底栏板贴卡底、本板贴卡顶——方向镜像。
    高度定 18px：前 9px 实心盖住卡顶 padding，其下 9px 为渐隐区。
@@ -2830,6 +2823,7 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-cv { display: flex; flex-direction: column; min-height: 200px; touch-action: none; user-select: none; -webkit-user-select: none; }
 .wk-cv-bar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 4px 8px; }
 .wk-cv-cnt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-3); }
+.wk-cv-hint { flex: none; font-size: 11px; color: var(--text-3); opacity: 0.75; }
 .wk-cv-btn { flex: none; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; color: var(--text-2); background: var(--bg); }
 .wk-cv-btn:hover { color: var(--text); background: var(--hover); }
 .wk-cv-open { margin: 0 0 0 8px; padding: 1px 8px; font-size: 11px; vertical-align: middle; } /* 源码态首行行前的小钮 */
@@ -2850,25 +2844,6 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-cv-text { color: var(--text); font-size: 12px; line-height: 1.5; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wk-cv-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 12.5px; color: var(--text-3); text-align: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; }
 .wk-cv-bad { color: var(--danger-fg); }
-
-/* ===== md 就地渲染（2026-10-14 待办 17，用户改判不弹独立预览卡）：#input-md 顶替 #input 显示渲染态 =====
-   盒几何/内距与 #input 完全同族（换层时输入栏不跳动）；内容复用消息流渲染器（core/markdown.js mdHtml）
-   ⇒ 外层套 .blocks 即吃同一套 .msg .blocks 样式，.msg .blocks 未覆盖的块级间距按 .tr-body 口径补齐。
-   单真值 = #input 原文；#input-md 纯派生视图（聚焦即弃）。交互 = 失焦显渲染 / 聚焦回编辑。 */
-#input-md {
-  box-sizing: border-box;
-  padding: 4px 12px 0 16px;
-  font: inherit; line-height: inherit; color: var(--ink); text-align: left;
-  word-break: break-word; overflow-wrap: anywhere;
-  min-height: 52px; max-height: 336px; overflow-y: auto;
-  cursor: text;
-}
-#input-md[hidden] { display: none; }
-#input-wrap.docked #input-md { min-height: 28px; }
-#input-md h1, #input-md h2, #input-md h3 { margin: 0.6em 0 0.3em; }
-#input-md p, #input-md ul, #input-md ol, #input-md blockquote, #input-md pre { margin: 0.4em 0; }
-#input-md ul, #input-md ol { padding-left: 1.4em; }
-#input-md blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text-2); }
 
 /* ===== work 编辑卡补全弹层（2026-10-14 Pj18 转派待办 6）：@codemirror/autocomplete 默认浅色 tooltip
    换成项目变量（日夜随动）；.cm-editor 作用域只管编辑卡，不碰消息流/底栏。 ===== */

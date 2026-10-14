@@ -9,9 +9,9 @@ import { selectionMd } from '../core/markdown.js'
 import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../engine/state.js'
 import { toast, isMobile } from '../core/util.js'
 import { renderSettle, btnMode } from './approval.js'
-import { cmd, msel, cmdPop, modelPop, modelSeatEl, psel, projPop, projSeatEl, closeProjPop, toggleCmdPop, closeCmdPop, closeRiskModal, cmdMove, cmdSelect } from './commands.js'
+import { cmd, msel, cmdPop, modelPop, modelSeatEl, psel, projPop, projSeatEl, closeProjPop, toggleCmdPop, closeCmdPop, closeRiskModal, cmdMove, cmdSelect, renderCmdPop } from './commands.js'
 import { pendingImages, pendingFiles, renderImgPills, addImageFiles, addUploadFiles } from './images.js'
-import { mention, closeMentionPop, moveMentionSel, selectMention, removeChip, mentionBeforeCaret } from './mention.js'
+import { mention, closeMentionPop, moveMentionSel, selectMention } from './mention.js'
 import { toggleModelPop, closeModelPop, modelEscape, mselMove } from './model-select.js'
 import { gwSend } from './send.js'
 import { setPanel } from '../sidebar/recent.js'
@@ -91,8 +91,9 @@ import { setPanel } from '../sidebar/recent.js'
       const dlg = rm.querySelector('.dialog')
       if (dlg && !dlg.contains(e.target)) { closeRiskModal(); return }
     }
-    // 命令菜单：点卡片外（+ 按钮除外，其 click toggle 接管开合）= 关闭（dsh PopupSelectView pointerdown capture）
-    if (cmd.open && !cmdPop.contains(e.target) && !$('cmd-btn').contains(e.target)) closeCmdPop()
+    // 命令菜单：点卡片外（+ 按钮除外，其 click toggle 接管开合）= 关闭（dsh PopupSelectView pointerdown capture）。
+    // 底栏输入框不算外（2026-10-14 待办 20 返修）：过滤文本就在底栏，点击聚焦/打字不得关掉浮窗
+    if (cmd.open && !cmdPop.contains(e.target) && !$('cmd-btn').contains(e.target) && !inputEl.contains(e.target)) closeCmdPop()
     // 模型菜单：点 root 外（模型 trigger 除外，其 click toggle 接管开合）= 关闭（dsh ModelSelect mousedown + rootRef.contains）
     if (msel.open && !modelPop.contains(e.target) && !modelSeatEl.contains(e.target)) closeModelPop()
     // 项目选择器：点 root 外（seat 除外，其 click toggle 接管开合）= 关闭
@@ -100,12 +101,8 @@ import { setPanel } from '../sidebar/recent.js'
   })
   // 点击空白关闭弹层（@ 浮窗 / 整理会话 / 最近气泡）
   document.addEventListener('click', (e) => {
-    // @ 浮窗：点浮窗外任意处关闭；点输入内 chip 的 × 删除该 chip
-    if (e.target.closest('.mention .m-x')) {
-      const chip = e.target.closest('.mention')
-      if (chip) removeChip(chip)
-      return
-    }
+    // 输入内 chip 的 × 删除归 composer-cm widget 自有监听（CM 事务删除，DOM 直删会腐蚀 doc）；
+    // 此处只管 @ 浮窗外点关闭
     if (!e.target.closest('#mention-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
     if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
@@ -140,19 +137,8 @@ import { setPanel } from '../sidebar/recent.js'
     else pendingImages.splice(+x.dataset.i, 1)
     renderImgPills()
   })
-  inputEl.addEventListener('paste', (e) => {
-    if (gateAwait) return
-    const cd = e.clipboardData
-    const files = Array.from((cd && cd.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) { e.preventDefault(); addImageFiles(files); return }
-    // 2026-09-18 纯文本粘贴：contentEditable 默认吃剪贴板 text/html（从网页/IDE/Office 复制
-    // 粘入会保留颜色/粗体/背景等原格式），拦截改只取 text/plain 于光标处插入——与上方
-    // 2026-09-06「纯文本复制」copy 方向对称；insertText 保留 undo 栈且不破坏 mention chip
-    const text = cd ? cd.getData('text/plain') : ''
-    if (!text) return
-    e.preventDefault()
-    document.execCommand('insertText', false, text)
-  })
+  // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
+  // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
   // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
   // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
@@ -211,45 +197,8 @@ import { setPanel } from '../sidebar/recent.js'
     }
     if (!gwSend()) toast('只读查看 · 无法发送')
   })
-  inputEl.addEventListener('keydown', (e) => {
-    // token 门态：输入框只做 token 提交
-    if (gateAwait) {
-      if (e.key === 'Enter') { e.preventDefault(); gateSubmit() }
-      return
-    }
-    // 命令菜单打开：方向键/回车/ESC 走选择逻辑（2026-08-21 dsh 移植，不移动光标、不发送）
-    if (cmd.open) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); cmdMove(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); cmdMove(-1); return }
-      if (e.key === 'Enter') { e.preventDefault(); cmdSelect(); return }
-      if (e.key === 'Escape') { e.preventDefault(); closeCmdPop(); return }
-      return
-    }
-    // 模型菜单打开：ESC 从 drill 面板退一级再关；方向键移动焦点（2026-08-21 dsh 移植）
-    if (msel.open) {
-      if (e.key === 'Escape') { e.preventDefault(); modelEscape(); return }
-      if (e.key === 'ArrowDown') { e.preventDefault(); mselMove(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); mselMove(-1); return }
-      return
-    }
-    // @ 浮窗打开：方向键/回车/ESC 走选择逻辑（不移动光标、不发送）
-    if (mention.open) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); moveMentionSel(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); moveMentionSel(-1); return }
-      if (e.key === 'Enter') { e.preventDefault(); selectMention(); return }
-      if (e.key === 'Escape') { e.preventDefault(); closeMentionPop(); return }
-    }
-    // 退格删除光标前的 @chip（含尾随空格）
-    if (e.key === 'Backspace' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      const chip = mentionBeforeCaret()
-      if (chip) { e.preventDefault(); removeChip(chip); return }
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      if (gateAwait) { gateSubmit(); return } // token 门态：回车 = 提交 token
-      if (!gwSend()) toast('只读查看 · 无法发送')
-    }
-  })
+  // 底栏 keydown（token 门/IME/cmd/msel/mention/退格删 chip/Enter 发送）已迁 composer-cm.js
+  // cmOnKeydown（CM domEventHandlers，判定次序逐分支原样保留）。
 
   // 路由
   // 2026-08-28 pushState 配套：popstate 兜底浏览器前进/后退（navigate 同步 route 后同值跳过）；

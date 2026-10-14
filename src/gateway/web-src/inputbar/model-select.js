@@ -147,7 +147,7 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
     msel.pane = 'root'
     msel.active = 0
     renderModelPop()
-    if (!isTouch()) inputEl.focus({ preventScroll: true }) // 焦点留输入栏：方向键/ESC 走 keydown；触屏跳过防 iOS 弹键盘
+    if (!isTouch()) composerFocus() // 焦点留输入栏：方向键/ESC 走 keydown；触屏跳过防 iOS 弹键盘
   }
   function closeModelPop() {
     if (!msel.open) return

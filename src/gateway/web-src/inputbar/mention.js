@@ -27,7 +27,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
-  let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
+  // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
+  let mention = { open: false, anchor: 0, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
   // searchOff：搜索/浏览模式开关（2026-10-14 待办 20）——false 且查询非空 = 全局搜索模式；
   // 下钻/返回目录后翻 true（回到层内浏览），浮窗重开（refreshPick）复位 false。
@@ -255,41 +256,15 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
   }
 
-  // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
+  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，
+  // doc 单真源 ⇒ serializeInput 退化为 doc.toString()。签名与语义冻结（接缝不变量）。
   function serializeInput() {
-    let out = ''
-    const walk = (nodes) => {
-      for (const n of nodes) {
-        if (n.nodeType === 3) { out += n.nodeValue; continue }
-        if (n.nodeType !== 1) continue
-        if (n.classList && n.classList.contains('mention')) {
-          // 会话 chip 带 sid → `[会话:标题|sid]`：sid 是会话的稳定键（改名免疫），CLI 侧会话暴露
-          // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
-          // 路径 chip → `[@目录:路径]` / `[@文件:路径]`（路径相对工作区根，与网关 /gateway/fs 同基准）。
-          const k = n.dataset.kind
-          // 选中引用 chip：文件类出位置令牌、回复类展开原文（见 refToken）
-          if (k === 'ref') { out += refToken(n.dataset); continue }
-          out += k === 'session'
-            ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
-            : k === 'path'
-              ? `[@${n.dataset.ptype === 'dir' ? '目录' : '文件'}:${n.dataset.name}]`
-              : `[插件:${n.dataset.name}]`
-        } else if (n.tagName === 'BR') {
-          out += '\n'
-        } else {
-          walk(n.childNodes)
-          if (/^(DIV|P)$/.test(n.tagName)) out += '\n'
-        }
-      }
-    }
-    walk(inputEl.childNodes)
-    return out.replace(/\u00A0/g, ' ')
+    return composerDocText()
   }
 
   function closeMentionPop() {
-    if (mention.sentinel && mention.sentinel.isConnected) mention.sentinel.remove()
     mention.open = false
-    mention.sentinel = null
+    mention.anchor = 0
     mention.q = ''
     mention.items = []
     mention.sel = 0
@@ -297,26 +272,10 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     if (pop) pop.hidden = true
   }
 
-  // 在光标处插入零宽锚点（紧跟 @），作为「@查询区间」标记；后续输入夹在 @ 与锚点之间
-  function ensureSentinel() {
-    if (mention.sentinel && mention.sentinel.isConnected) return mention.sentinel
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount) return null
-    const r = sel.getRangeAt(0)
-    if (!r.collapsed) return null
-    const sp = document.createElement('span')
-    sp.className = 'm-sentinel'
-    r.insertNode(sp)
-    r.setStartAfter(sp); r.setEndAfter(sp)
-    sel.removeAllRanges(); sel.addRange(r)
-    mention.sentinel = sp
-    return sp
-  }
-
   function openMentionPopAtCaret() {
-    const sp = ensureSentinel()
-    if (!sp) return
+    if (!cmView) return
     mention.open = true
+    mention.anchor = cmView.state.selection.main.from - 1 // '@' 的 doc 位置（composer onInputMention 判定后调）
     mention.sel = 0
     mention.q = ''
     renderMentionPop()
@@ -418,82 +377,34 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     if (it) selectMentionItem(it)
   }
 
-  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后。sid 仅会话 chip 有（寻址键，
-  // 序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
+  // 选中项 → 令牌 + 尾随空格替换 @查询区间（[mention.anchor, 光标]），光标到空格后。sid 仅会话
+  // chip 有（寻址键，序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
   function insertMention(kind, name, sid, ptype) {
-    const sp = mention.sentinel
-    if (sp && sp.isConnected) {
-      const prev = sp.previousSibling
-      if (prev && prev.nodeType === 3 && /@$/.test(prev.nodeValue || '')) {
-        prev.nodeValue = prev.nodeValue.replace(/@$/, '')
-        if (!prev.nodeValue) prev.remove()
-      }
-      let nx = sp.nextSibling
-      while (nx && nx.nodeType === 3) { const t = nx; nx = nx.nextSibling; t.remove() }
-      const chip = buildMentionChip(kind, name, sid, ptype)
-      sp.replaceWith(chip)
-      const space = document.createTextNode('\u00A0')
-      chip.after(space)
-      const sel = window.getSelection()
-      const r = document.createRange()
-      r.setStartAfter(space); r.collapse(true)
-      sel.removeAllRanges(); sel.addRange(r)
-    }
+    const token = kind === 'session'
+      ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
+      : kind === 'path'
+        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        : `[插件:${name}]`
+    const pos = cmView ? cmView.state.selection.main.from : mention.anchor
+    composerReplaceRange(mention.anchor, pos, token + ' ')
     closeMentionPop()
-    inputEl.focus()
     syncGwSend()
   }
 
-  function removeChip(chip) {
-    let nx = chip.nextSibling
-    if (nx && nx.nodeType === 3 && /^\s*$/.test(nx.nodeValue)) nx.remove()
-    chip.remove()
-    syncGwSend()
-  }
-
-  // 光标前的 @chip（跳过尾随空格文本），供退格/× 删除
-  function mentionBeforeCaret() {
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null
-    const node = sel.anchorNode
-    if (!node) return null
-    let prev = null
-    if (node.nodeType === 3) {
-      const off = sel.anchorOffset
-      if (off === 0) prev = node.previousSibling
-      else if (off >= node.nodeValue.length && /^\s*$/.test(node.nodeValue)) prev = node.previousSibling
-      else if (/^\s+$/.test(node.nodeValue.slice(0, off))) prev = node.previousSibling
-      else return null
-    } else if (node.nodeType === 1) {
-      // 光标落在根元素（contenteditable 本体）边界：取光标前一个子节点（跳过随后的空白后找 chip）；
-      // 落在其它子元素（块级 div/p）时沿用「其前一个兄弟」。
-      prev = (node === inputEl) ? node.childNodes[sel.anchorOffset - 1] : node.previousSibling
-    }
-    while (prev && prev.nodeType === 3 && /^\s*$/.test(prev.nodeValue || '')) prev = prev.previousSibling
-    if (prev && prev.nodeType === 1 && prev.classList && prev.classList.contains('mention')) return prev
-    return null
-  }
-
-  // input 事件：检测 @ 触发 / 维护已打开的 @查询（光标前是 @ 则开浮窗）
+  // doc/选区变化：检测 @ 触发 / 维护已打开的 @查询（光标前是 @ 则开浮窗）。锚点 = '@' 的 doc 位置
   function onInputMention() {
-    if (!GATEWAY || gateAwait || state.mgr) { closeMentionPop(); return }
-    if (mention.sentinel && mention.sentinel.isConnected) {
-      const sp = mention.sentinel
-      const prev = sp.previousSibling
-      const ok = prev && prev.nodeType === 3 && /@$/.test(prev.nodeValue || '')
-      if (!ok) { closeMentionPop(); return }
-      let q = ''
-      let nx = sp.nextSibling
-      while (nx && nx.nodeType === 3) { q += nx.nodeValue; nx = nx.nextSibling }
+    if (!GATEWAY || gateAwait || state.mgr || !cmView) { closeMentionPop(); return }
+    const st = cmView.state
+    const pos = st.selection.main.from
+    if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
+    if (mention.open) {
+      const between = st.doc.sliceString(mention.anchor, pos)
+      if (pos <= mention.anchor || /[\n\r]/.test(between)) { closeMentionPop(); return }
+      const q = between.slice(1)
       if (q !== mention.q) { mention.q = q; renderMentionPop() }
       return
     }
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || !sel.isCollapsed) return
-    const node = sel.anchorNode
-    if (node && node.nodeType === 3 && node.nodeValue.slice(0, sel.anchorOffset).endsWith('@')) {
-      openMentionPopAtCaret()
-    }
+    if (pos > 0 && st.doc.sliceString(pos - 1, pos) === '@') openMentionPopAtCaret()
   }
   function onInputChange() { syncGwSend(); onInputMention() }
 
@@ -514,11 +425,9 @@ export {
   buildMentionChip,
   groupOf,
   closeMentionPop,
-  ensureSentinel,
   insertMention,
   loadPickPath,
   mention,
-  mentionBeforeCaret,
   mentionChipHtml,
   mentionChipIcon,
   mentionItems,
@@ -537,7 +446,6 @@ export {
   quoteRefChipHtml,
   quoteReplyChipHtml,
   refreshPick,
-  removeChip,
   renderMentionPop,
   renderUserText,
   selectMention,

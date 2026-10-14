@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=535" />
+  <link rel="stylesheet" href="/styles.css?v=539" />
 </head>
 <body>
 <div id="app">
@@ -105,8 +105,6 @@
           </div>
           <div class="wk-tabs">
             <button class="wk-tab on" data-wktab="files">文件</button>
-            <!-- 工作区 tab（2026-10-14 待办 9）：工作区全局根散落文件的可见性（/gateway/fs，只读） -->
-            <button class="wk-tab" data-wktab="ws">工作区</button>
             <button class="wk-tab" data-wktab="chat">聊天</button>
             <div class="wk-tools">
               <button id="wk-new" class="wk-ico" title="新建聊天" aria-haspopup="menu"></button>
@@ -256,11 +254,10 @@
             <div id="input-bar">
               <!-- 附件胶囊（2026-08-28 图片 / 2026-09-12 文件）：待发送附件行；入口在 + 浮窗「上传」组 -->
               <div id="img-pills" hidden></div>
-              <div id="input" contenteditable="true" role="textbox" aria-multiline="true" data-ph="输入消息，Enter 发送"></div>
-              <!-- md 就地渲染（2026-10-14 待办 17，用户改判：不弹独立预览卡）：失焦且有内容时顶替 #input
-                   显示渲染态（mdHtml(serializeInput())，与消息流同渲染器），点击它 = 回编辑态聚焦 #input。
-                   单真值 = #input 原文（渲染视图纯派生，聚焦即弃）。逻辑在 inputbar/md-preview.js -->
-              <div id="input-md" hidden></div>
+              <!-- CM6 底栏接管（2026-10-14 #17 B 口径，真所见即所得）：挂载点由 inputbar/composer-cm.js
+                   建 EditorView（work 编辑区同款 live preview，输入即渲染）。doc 单真源 = CM State，
+                   序列化令牌原文直接进 doc、chip 是其原子装饰视图（逻辑在 inputbar/composer-cm.js） -->
+              <div id="cm-host"></div>
               <div class="row">
                 <div class="tools">
                   <input id="img-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
@@ -375,7 +372,7 @@
 <script src="/vendor/katex/katex.min.js?v=473"></script>
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
-<script src="/vendor/codemirror/live-markdown.js?v=5"></script>
-<script src="/app.js?v=535"></script>
+<script src="/vendor/codemirror/live-markdown.js?v=6"></script>
+<script src="/app.js?v=539"></script>
 </body>
 </html>

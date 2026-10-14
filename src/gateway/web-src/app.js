@@ -178,7 +178,7 @@ import { renderCtxMeter } from './inputbar/ctx-meter.js'
     initWork()
     route()
     if (GATEWAY) initGateway()
-    else { inputEl.contentEditable = 'false'; inputEl.dataset.ph = '只读查看 · 无法发送' } // 只读查看器：输入不可编辑
+    else { composerSetEditable(false); composerPlaceholder('只读查看 · 无法发送') } // 只读查看器：输入不可编辑
     if (HOT_RELOAD) {
       // 开发审阅热重载：server.mjs HOT_RELOAD=1 时，public/ 文件变化经 SSE 通知 → 自动刷新
       const hr = new EventSource('/gateway/hotreload')

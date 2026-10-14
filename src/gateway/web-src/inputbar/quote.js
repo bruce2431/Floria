@@ -36,9 +36,6 @@ import { gwSend, syncGwSend } from './send.js'
   let quoteSkipNextUp = false // 「点浮窗外关窗」的那一下 mousedown 已消费：紧随的 mouseup 不得重开
 
   // ---------- 1. 选区 → 快照 ----------
-  function quoteBase(p) {
-    return String(p || '').split('/').pop()
-  }
   // 编辑区行号唯一来源 = CodeMirror 文档：整篇恒渲染为编辑器（无渲染 DOM 行锚、无 textarea），
   // Range 端点经 posAtDOM 反查源行号（sidebar/work.js wkEdQuoteLines，同处一个 IIFE 作用域可直接按名调用）。
   // 拿不到 → null（令牌退化为纯路径，不编造行号）。
@@ -80,41 +77,21 @@ import { gwSend, syncGwSend } from './send.js'
   }
 
   // ---------- 2. 引用胶囊（输入栏内）----------
-  // 复用 .mention 类：× 删除与退格删除由 ctx-meter.js 的既有委托按 .mention 统一处理，勿另写一套。
+  // CM6 接管（2026-10-14 #17 B 口径）：胶囊 = 引用令牌（refToken）进 doc 的原子装饰视图。
+  // 序列化即 doc 原文——「回复/PDF 原文块进消息」的语义由令牌块自身承载（不再藏 dataset）。
   function insertRefChip(snap) {
-    const chip = document.createElement('span')
-    chip.className = 'mention ref'
-    chip.contentEditable = 'false'
-    chip.dataset.kind = 'ref'
-    chip.dataset.rkind = snap.kind
-    let inner
-    if (snap.kind === 'pdf') {
-      // PDF 引用（2026-09-28）：位置 = 路径 + 页码（跨页 s-e）。**原文必须进消息**（PDF 定位不精确、
-      // 大 PDF 必须给页码提示、选中原文才是要引用的 payload）⇒ dataset.quote 与回复引用同款带上。
-      chip.dataset.file = snap.file
-      chip.dataset.proj = snap.proj || ''
-      chip.dataset.quote = snap.text
-      if (snap.p0) { chip.dataset.p0 = String(snap.p0); if (snap.p1) chip.dataset.p1 = String(snap.p1) }
-      const pages = snap.p0 ? ' · 第 ' + snap.p0 + (snap.p1 && snap.p1 !== snap.p0 ? '-' + snap.p1 : '') + ' 页' : ''
-      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}${pages}</span>`
-    } else if (snap.kind === 'file') {
-      chip.dataset.file = snap.file
-      chip.dataset.proj = snap.proj || ''
-      if (snap.l0) { chip.dataset.l0 = String(snap.l0); chip.dataset.l1 = String(snap.l1) }
-      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}</span>`
-    } else {
-      chip.dataset.quote = snap.text
-      chip.dataset.title = snap.title || '本会话'
-      chip.dataset.idx = String(snap.idx || 0)
-      inner = `<span class="m-ic">${I.msg}</span><span class="m-nm">引用自「${esc(snap.title || '本会话')}」· 第 ${snap.idx} 条回复</span>`
-    }
-    chip.innerHTML = inner + '<span class="m-x" title="删除">×</span>'
-    // 追加到输入栏末尾：与 @ chip 一样前后各留一个 nbsp 作分隔（序列化时还原成空格）
-    inputEl.appendChild(document.createTextNode('\u00A0'))
-    inputEl.appendChild(chip)
-    inputEl.appendChild(document.createTextNode('\u00A0'))
+    composerAppendRef(refToken({
+      rkind: snap.kind,
+      file: snap.file,
+      proj: snap.proj || '',
+      quote: snap.text,
+      p0: snap.p0, p1: snap.p1,
+      l0: snap.l0, l1: snap.l1,
+      title: snap.title,
+      idx: snap.idx,
+    }))
     syncGwSend()
-    return chip
+    return null
   }
 
   // ---------- 3. 浮窗 ----------
@@ -127,33 +104,18 @@ import { gwSend, syncGwSend } from './send.js'
     if (!snap) return
     const note = (quotePop.querySelector('.qp-in').value || '').trim()
     insertRefChip(snap)
-    if (note) {
-      inputEl.appendChild(document.createTextNode(' '))
-      inputEl.appendChild(document.createTextNode(note))
-    }
+    if (note) composerAppendText(note)
     closeQuotePop()
-    inputEl.focus()
+    composerFocus()
     await gwSend()
   }
   // 只入输入栏（「使用 AI 编辑」行 / 触屏选中栏同款语义）：不发送，关浮窗把焦点交还输入栏，
-  // **光标落在胶囊之后**（用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
+  // **光标落在胶囊之后**（composerAppendRef 已落块尾；用户 2026-09-28 定案：接着打字就是给这条引用的说明）。
   function quoteStash(snap) {
     if (!snap) return
-    const chip = insertRefChip(snap)
+    insertRefChip(snap)
     closeQuotePop()
-    inputEl.focus()
-    caretAfter(chip)
-  }
-  // 折叠光标到 node 之后（与 mention.js insertMention 落光标同一手法）
-  function caretAfter(node) {
-    if (!node || !node.parentNode) return
-    const sel = window.getSelection()
-    if (!sel) return
-    const r = document.createRange()
-    r.setStartAfter(node)
-    r.collapse(true)
-    sel.removeAllRanges()
-    sel.addRange(r)
+    composerFocus()
   }
   // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
@@ -300,12 +262,10 @@ import { gwSend, syncGwSend } from './send.js'
 export {
   QUOTE_FRAME_SEL,
   QUOTE_ZONE,
-  caretAfter,
   closeQuotePop,
   insertRefChip,
   openQuotePop,
   quoteActionRows,
-  quoteBase,
   quoteEditorLines,
   quoteFrameBySource,
   quoteFrameRect,

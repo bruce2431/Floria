@@ -317,8 +317,8 @@ import { firstSendHash } from '../sidebar/recent.js'
     // 2026-09-26：.bar-takeover 退场由 display:none 改脱流隐藏（根修注释见 styles.css）后，浏览器不再
     // 顺带让聚焦的 contenteditable 失焦——显式补上。不变量 = 接管卡在场输入栏不可编辑 ⇒ isEditing()
     // 必为假（否则 viewport.js 的键盘几何与整页平移会把已经收起的软键盘当仍在编辑态处理，界面卡在上移位）。
-    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。
-    inputEl.blur()
+    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。CM6 接管后 = contentDOM blur
+    composerBlur()
     const t = takeoverEl()
     if (t) { t.innerHTML = html; t.hidden = false }
     takeover = kind

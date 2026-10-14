@@ -20,7 +20,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
     let text = serializeInput().trim()
     const imgs = pendingImages.slice()
     const files = pendingFiles.slice()
-    if (!text && !imgs.length && !files.length) { inputEl.focus(); return true }
+    if (!text && !imgs.length && !files.length) { composerFocus(); return true }
     if (!gws || gws.readyState !== 1) { toast('未连接，无法发送'); return true }
     // 2026-08-28 图片占位：[Image #N] 与 pastedContents id 一一对应。
     // 2026-09-02 防撞根修：id 由本端分配全会话唯一（从已用最大 imageId+1 起，对齐 CLI
@@ -63,7 +63,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
       // navigate 之前回填，创建失败回滚空态（还原输入文本与图片胶囊）。
       flipInput(false)
       addUser(text, imgs, files)
-      inputEl.textContent = ''
+      composerSetText('')
       syncGwSend()
       const d = await newWebSession(tgt || undefined, prevModel || undefined)
       if (!d || !d.hash) {
@@ -72,11 +72,11 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
         messagesEl.innerHTML = ''
         renderTransient() // 暂态区对账：空主张 → 摘区/停主张计时/turnLive 复位
         flipInput(true) // 回滚空态（FLIP 滑回 stage，docked/in-session 一并移除）
-        inputEl.textContent = text
+        composerSetText(text)
         syncGwSend()
         state.newProject = prevNew
         setNewSessionModel(prevModel)
-        inputEl.focus()
+        composerFocus()
         return true
       }
       clearPendingImages()
@@ -118,7 +118,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
     // 2026-09-07 两区重构：乐观「正在处理」主张折叠由 renderTransient 从 pendingUserMsgs
     // 统一渲染（回合间隙发送 = 开启主张气泡+主张折叠；回合运行中 = 排队成员，不开折叠）——
     // 原 procOpen 直挂 DOM 链退役（幻影折叠根源：proc 变量跨整页重建悬挂，收养/幂等皆失灵）。
-    inputEl.textContent = ''
+    composerSetText('')
     clearPendingImages()
     clearPendingFiles()
     syncGwSend()
@@ -132,7 +132,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
     setBtnMode(turnLive && !hasContent ? 'stop' : 'send')
     const on = turnLive || (GATEWAY && gws && gws.readyState === 1 && hasContent)
     sendBtn.classList.toggle('enabled', on)
-    mdPreviewRefresh() // md 实时预览（待办 17）：输入变化全汇到 syncGwSend 这一口，开着就跟着重渲
+    // md 就地渲染链（mdPreviewRefresh）随 CM6 接管退役：live preview 输入即渲染，无换层刷新口
   }
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型

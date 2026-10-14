@@ -103,6 +103,9 @@ const PIECES: { file: string; part: number }[] = [
   // 网关客户端（engine/gateway.js）四段：定义段 / 在线态 setConn / connect / initGateway，原 IIFE 分处四地。
   { file: 'engine/gateway.js', part: 1 },
   { file: 'inputbar/mention.js', part: 1 },
+  // CM6 接管底栏（2026-10-14 #17 B 口径）：须在 mention.js 后（挂载读 #cm-host / inputEl 已声明；
+  // 运行期函数跨 IIFE 提升，序位按 eval 期依赖就近）。
+  { file: 'inputbar/composer-cm.js', part: 1 },
   // 命令菜单与模型选择两件在产物中交错（原 IIFE 物理序）。
   { file: 'inputbar/commands.js', part: 1 },
   { file: 'inputbar/model-select.js', part: 1 },
@@ -119,7 +122,6 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'engine/auth.js', part: 3 },
   { file: 'inputbar/images.js', part: 1 },
   { file: 'inputbar/send.js', part: 1 },
-  { file: 'inputbar/md-preview.js', part: 1 },
   // 键盘适配（engine/viewport.js）须在启动序列之前（initViewport 调用时模块顶层 let 已初始化）。
   { file: 'engine/viewport.js', part: 1 },
   { file: 'engine/gateway.js', part: 4 },
@@ -157,8 +159,22 @@ async function loadModuleBodies(): Promise<Map<string, string[]>> {
     }
     bodies.set(file, lines.slice(i, end))
     const setters: string[] = []
-    for (const ln of lines.slice(end)) {
-      if (/^export function set\w+\(/.test(ln)) setters.push(ln.replace(/^export /, ''))
+    const tail = lines.slice(end)
+    for (let j = 0; j < tail.length; j++) {
+      if (!/^export function \w+\(/.test(tail[j])) continue
+      // 多行函数按花括号配平整段收（尾段 `// —— 跨模块写入口` 之后不再有 body 责任，2026-10-14
+      // forceWsReconnect 漏拼事故：旧口径只收 `set\w+` 单行，非 set 前缀的多行 export function 被截体）
+      let depth = 0
+      let k = j
+      for (; k < tail.length; k++) {
+        for (const ch of tail[k]) {
+          if (ch === '{') depth++
+          else if (ch === '}') depth--
+        }
+        if (depth <= 0 && k >= j) break
+      }
+      setters.push(...tail.slice(j, k + 1).map((ln) => ln.replace(/^export /, '')))
+      j = k
     }
     bodies.set(file + '::setters', setters)
   }

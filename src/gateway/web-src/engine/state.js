@@ -11,7 +11,9 @@ import { state } from '../core/ui-state.js'
   const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
   const messagesEl = $('messages')
   const inputWrap = $('input-wrap')
-  const inputEl = $('input')
+  // CM6 底栏接管（2026-10-14 #17 B 口径）：#input contenteditable 退役，inputEl 由 composer-cm
+  // cmMount 指到 EditorView.contentDOM（focus()/contains() 等既有读法不变；let 因 composer 后赋值）
+  let inputEl = null
   const inputBarEl = $('input-bar')
   const sendBtn = $('send-btn')
   const ctxMeterEl = $('ctx-meter')

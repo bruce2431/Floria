@@ -42,7 +42,7 @@ import { toast } from '../core/util.js'
       if (bootSwVer == null) { bootSwVer = m[1]; return }
       if (m[1] === bootSwVer) return
       bootSwVer = m[1]
-      if (inputEl.textContent.trim()) { toast('前端有新版本，请手动刷新页面'); return }
+      if (serializeInput().trim()) { toast('前端有新版本，请手动刷新页面'); return }
       toast('前端已更新，正在刷新…')
       setTimeout(() => location.reload(), 800)
     } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
@@ -279,10 +279,10 @@ import { toast } from '../core/util.js'
               return String(p.text || '').replace(/\s*\[Image #\d+\]/g, '').trim() !== t0
             }))
             if (liveStatePort.getPendingUserMsgs().length !== n0) liveUiPort.renderTransient()
-            if (!inputEl.textContent.trim()) {
-              inputEl.textContent = ev.text
+            if (!serializeInput().trim()) {
+              composerSetText(ev.text)
               liveUiPort.syncGwSend()
-              inputEl.focus()
+              composerFocus()
             }
             const t = ev.text.trim()
             const bubbles = [...messagesEl.querySelectorAll('.msg.user[data-t="u"]')].filter(el => (el.querySelector('.body')?.textContent || '').trim() === t)

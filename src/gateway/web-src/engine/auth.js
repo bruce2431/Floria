@@ -120,7 +120,7 @@ import { syncGlobalPlugins } from './ext-runtime.js'
       history.replaceState(null, '', u.pathname + u.search + u.hash)
     } catch { /* 忽略 */ }
     gVid.pause()
-    inputEl.dataset.ph = '输入消息，Enter 发送' // 占位符复位（token 提示 → 正常输入）
+    composerPlaceholder('输入消息，Enter 发送') // 占位符复位（token 提示 → 正常输入）
     // gate-screen 淡出后隐藏，与空态（同款渐变背景）交叉过渡 → 切换平滑浮现，不做硬切
     gateScreen.classList.add('fade-out')
     clearTimeout(hideGateTimer)

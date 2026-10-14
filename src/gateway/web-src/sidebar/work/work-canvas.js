@@ -88,27 +88,34 @@
     if (side === 'bottom') return [n.x + n.w / 2, n.y + n.h]
     return null
   }
-  // 连线几何：端点锚（缺省按两节点中心连线的主轴取最近侧——水平位移为主取左/右，竖直为主取上/
-  // 下；旧实现恒按水平取侧，上下堆叠的节点连线会从侧腰横着出去再拐弯，方向观感即「不对」）
-  // + 三次贝塞尔控制点 + t=0.5 中点（放 label）。fromSide/toSide 显式声明时仍按声明取锚（spec 语义）。
-  function wkCvDefaultAnchor(n, tx, ty) {
+  // 连线几何：端点锚 + 出线方向法线。显式 fromSide/toSide 按声明取锚与法线；缺省按两节点中心
+  // 连线的主轴取最近侧（水平位移为主取左/右、竖直为主取上/下）。贝塞尔控制点 = 各自锚点沿该侧
+  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入（旧实现控制点按整体主轴生成，
+  // 声明侧向与实际走向冲突时出线方向观感即「起点终点不对」，此为返修根因）。
+  const WKCV_SIDE_DIRS = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }
+  function wkCvAnchorDir(n, side, tx, ty) {
+    if (side && WKCV_SIDE_DIRS[side]) {
+      const p = wkCvAnchor(n, side)
+      if (p) return { p, n: WKCV_SIDE_DIRS[side] }
+    }
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2
-    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) return tx < cx ? [n.x, cy] : [n.x + n.w, cy]
-    return ty < cy ? [cx, n.y] : [cx, n.y + n.h]
+    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) {
+      return tx < cx ? { p: [n.x, cy], n: WKCV_SIDE_DIRS.left } : { p: [n.x + n.w, cy], n: WKCV_SIDE_DIRS.right }
+    }
+    return ty < cy ? { p: [cx, n.y], n: WKCV_SIDE_DIRS.top } : { p: [cx, n.y + n.h], n: WKCV_SIDE_DIRS.bottom }
   }
   function wkCvEdgeGeom(e) {
-    let a = wkCvAnchor(e.from, e.fs)
-    if (!a) a = wkCvDefaultAnchor(e.from, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
-    let b = wkCvAnchor(e.to, e.ts)
-    if (!b) b = wkCvDefaultAnchor(e.to, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
-    const dx = b[0] - a[0], dy = b[1] - a[1]
-    const horiz = Math.abs(dx) >= Math.abs(dy)
-    const d = horiz
-      ? `M ${a[0]} ${a[1]} C ${a[0] + dx / 2} ${a[1]}, ${b[0] - dx / 2} ${b[1]}, ${b[0]} ${b[1]}`
-      : `M ${a[0]} ${a[1]} C ${a[0]} ${a[1] + dy / 2}, ${b[0]} ${b[1] - dy / 2}, ${b[0]} ${b[1]}`
-    // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8
-    const mx = (a[0] + 3 * (a[0] + (horiz ? dx / 2 : 0)) + 3 * (b[0] - (horiz ? dx / 2 : 0)) + b[0]) / 8
-    const my = (a[1] + 3 * (a[1] + (horiz ? 0 : dy / 2)) + 3 * (b[1] - (horiz ? 0 : dy / 2)) + b[1]) / 8
+    const A = wkCvAnchorDir(e.from, e.fs, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
+    const B = wkCvAnchorDir(e.to, e.ts, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
+    const a = A.p, b = B.p
+    const kA = Math.max(24, Math.abs((b[0] - a[0]) * A.n[0] + (b[1] - a[1]) * A.n[1]) / 2)
+    const kB = Math.max(24, Math.abs((b[0] - a[0]) * B.n[0] + (b[1] - a[1]) * B.n[1]) / 2)
+    const c1 = [a[0] + A.n[0] * kA, a[1] + A.n[1] * kA]
+    const c2 = [b[0] + B.n[0] * kB, b[1] + B.n[1] * kB]
+    const d = `M ${a[0]} ${a[1]} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${b[0]} ${b[1]}`
+    // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8（放 label）
+    const mx = (a[0] + 3 * c1[0] + 3 * c2[0] + b[0]) / 8
+    const my = (a[1] + 3 * c1[1] + 3 * c2[1] + b[1]) / 8
     return { d, mx, my }
   }
 
@@ -248,6 +255,12 @@
         view.dispatch({ effects: wkCvToggle.of() })
       })
       bar.appendChild(cnt)
+      // 编辑手段提示（2026-10-14 返修）：拖动/双击无任何可见 affordance，「无法编辑」的反馈里有
+      // 一部分是能力存在但不可发现——顶栏常驻一行操作提示，源码态同隐藏。
+      const hint = document.createElement('span')
+      hint.className = 'wk-cv-hint'
+      hint.textContent = '拖动移动 · 双击改文字 · 拖组带成员 · 捏合/滚轮缩放'
+      bar.appendChild(hint)
       bar.appendChild(srcBtn)
       root.appendChild(bar)
       if (data.err) {

@@ -40,7 +40,13 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // 2026-08-22 取代 MOCK_MODEL_DIR（anthropic 上游）。
 
 /* @module inputbar/commands.js #2 */
-  const cmd = { open: false, status: 'pending', items: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  const cmd = { open: false, status: 'pending', items: [], active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  // 过滤查询唯一来源 = 底栏输入框文本（2026-10-14 待办 20 返修）：弃独立搜索框——旧框每次 input 都
+  // innerHTML 重渲并**重建框自身**，IME 组合期被打断 = 中文打不进；底栏文本驱动则渲染只碰浮窗，
+  // 底栏 contenteditable 原样不动，中文 IME 正常。命令前缀 / 由 cmdEntries 剥。
+  function barQuery() {
+    return serializeInput().trim()
+  }
   // 模型菜单状态（对齐 dsh ModelSelect Pane：root | model | effort）
   const msel = { open: false, pane: 'root', active: 0 }
   const cmdPop = $('cmd-pop')
@@ -134,7 +140,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
   // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
   function cmdEntries() {
-    const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
+    const q = barQuery().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩' }]
     // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
@@ -148,7 +154,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
     // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
-    items.push(...pickItems(cmd.search))
+    items.push(...pickItems(barQuery()))
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
     const arranged = arrangeItems(items)
     pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
@@ -160,12 +166,14 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     closeMentionPop()
     cmd.open = true
     cmd.status = 'ready'
-    cmd.search = ''
     cmd.active = 0
     cmd.confirming = null
     cmd.acknowledged = false
     cmd.error = null
     renderCmdPop()
+    // 过滤在底栏打字（待办 20 返修）：焦点回底栏，用户继续输入列表即变；触屏不抢焦点（iOS 弹键盘，
+    // 与旧搜索框同一处置——用户自己点输入框唤起）
+    if (!isTouch()) composerFocus()
     // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
     loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
     refreshPick(() => { if (cmd.open) renderCmdPop() })
@@ -183,9 +191,11 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (!cmd.open) return
     // dsh confirmation gate：确认态下命令卡隐藏，改由全屏 RiskConfirmation 模态接管
     if (cmd.confirming) { cmdPop.hidden = true; renderRiskModal(); return }
-    // 2026-09-09 二轮：单页分组渲染（无 tab）——搜索框 + 已选图片缩略图 + 四组行列表
+    // 2026-09-09 二轮：单页分组渲染（无 tab）——已选图片缩略图 + 四组行列表。
+    // 独立搜索框已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框（barQuery），列表随底栏
+    // 打字自动变化（ctx-meter 在底栏 input 事件里调 renderCmdPop）。
     cmd.items = cmdEntries()
-    let html = `<input class="search" type="text" placeholder="搜索全部类别…" aria-label="搜索" autocomplete="off"/>`
+    let html = ''
     if (cmd.error !== null) {
       html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
@@ -195,7 +205,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       }
       let lastGrp = ''
       // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
-      if (!cmd.items.length && cmd.search.trim() && !pick.searchOff && !pickAll.items) {
+      if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
         html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
       } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
@@ -211,19 +221,6 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     }
     cmdPop.innerHTML = html
     cmdPop.hidden = false
-    // 搜索输入：本地过滤（dsh 语义——敲字不重查选项；←→ 保留原生光标）
-    const box = cmdPop.querySelector('.search')
-    if (box) {
-      box.value = cmd.search
-      box.addEventListener('input', () => { cmd.search = box.value; cmd.active = 0; renderCmdPop() })
-      box.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowDown') { e.preventDefault(); cmdMove(1) }
-        if (e.key === 'ArrowUp') { e.preventDefault(); cmdMove(-1) }
-        if (e.key === 'Enter') { e.preventDefault(); cmdSelect() }
-        if (e.key === 'Escape') { e.preventDefault(); closeCmdPop() }
-      })
-      if (!isTouch()) box.focus() // 触屏不聚焦：iOS 会弹键盘；搜索仍可手动点输入框唤起
-    }
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
     cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
       pendingImages.splice(+x.dataset.i, 1)
@@ -297,20 +294,16 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
     cmdSettle(o)
   }
-  // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
-  // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
+  // 浮窗直选落地（无 @ 光标锚点）：令牌追加到输入栏末尾 + 尾随空格，光标到末尾（CM6 接管后
+  // chip = doc 令牌文本的装饰视图，composerAppendToken 落 doc 即成 chip）。
   function appendMentionChip(kind, name, sid, ptype) {
-    const chip = buildMentionChip(kind, name, sid, ptype)
-    inputEl.appendChild(chip)
-    chip.after(document.createTextNode('\u00A0'))
+    const token = kind === 'session'
+      ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
+      : kind === 'path'
+        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        : `[插件:${name}]`
+    composerAppendToken(token)
     syncGwSend()
-    inputEl.focus()
-    const sel = window.getSelection()
-    if (sel) {
-      const r = document.createRange()
-      r.selectNodeContents(inputEl); r.collapse(false)
-      sel.removeAllRanges(); sel.addRange(r)
-    }
   }
   function cmdAck(v) { cmd.acknowledged = v; renderCmdPop() }
   function cmdConfirm() {
@@ -324,12 +317,12 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   function cmdSettle(o) {
     setInputText(o.claim ? `/${o.name} ` : `/${o.name}`)
     closeCmdPop()
-    inputEl.focus()
+    composerFocus()
     toast(`命令已写入输入栏：/${o.name}（回车发送）`)
   }
+  // CM6 接管后 = doc 全文替换（composerSetText 内含 readOnly 阀 + 触发 updateListener → syncGwSend）
   function setInputText(text) {
-    if (inputEl.contentEditable !== 'true') return
-    inputEl.textContent = text
+    composerSetText(text)
     syncGwSend()
   }
 

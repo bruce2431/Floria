@@ -301,9 +301,8 @@ import { noteWsOpen, noteWsClosed } from './live.js' // SSE 连接监督者联�
     // 连接状态徽章已改为 Floria 品牌名后的浅灰小字（index.html #floria-conn），不再动态建 #conn-badge。
     // 空态图标不隐藏：进会话时的隐藏由 #chat-area.in-session 的 CSS 承担，
     // 永久 display:none 会让首页图标只在网关检测完成前瞬间可见、刷新即消失。
-    inputEl.contentEditable = 'true'
-    inputEl.dataset.ph = '输入消息，Enter 发送'
-    inputEl.addEventListener('input', gwMention.onInputChange)
+    // 输入区启用/占位/输入监听已随 CM6 接管归 composer-cm.js（updateListener 汇流 syncGwSend + onInputMention）
+    composerPlaceholder('输入消息，Enter 发送')
     setConn(false, '连接中…')
     // 2026-08-28 token 出 URL：统一先 connect()——已授权设备（floria_auth cookie）WS 直接通过进空态；
     // 未授权（无 cookie 无首链 token）WS 被拒 → onclose 回 token 门。REVIEW 模式仍要求 URL 带 token。

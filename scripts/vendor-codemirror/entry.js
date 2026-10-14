@@ -5,7 +5,7 @@ import {
   EditorState, EditorSelection, Annotation, StateEffect, StateField,
   RangeSetBuilder, Compartment, Prec,
 } from '@codemirror/state'
-import { EditorView, Decoration, keymap, WidgetType, ViewPlugin } from '@codemirror/view'
+import { EditorView, Decoration, keymap, WidgetType, ViewPlugin, placeholder, drawSelection } from '@codemirror/view'
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands'
 import {
   autocompletion, closeCompletion, startCompletion, completionKeymap,
@@ -33,7 +33,7 @@ window.CMLiveMarkdown = {
   // @codemirror/state
   EditorState, EditorSelection, Annotation, StateEffect, StateField, RangeSetBuilder, Compartment, Prec,
   // @codemirror/view
-  EditorView, Decoration, keymap, WidgetType, ViewPlugin,
+  EditorView, Decoration, keymap, WidgetType, ViewPlugin, placeholder, drawSelection,
   // @codemirror/commands
   history, defaultKeymap, historyKeymap, indentWithTab,
   // @codemirror/autocomplete（2026-10-14：work 编辑卡 VSCode 式补全，Pj18 待办 6 转派）

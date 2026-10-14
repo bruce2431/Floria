@@ -247,7 +247,9 @@
   const sessionCard = $('session-card') // 会话卡（视图注册表 tab:false 一条；常驻 index.html，靠 hidden 退场）
   const messagesEl = $('messages')
   const inputWrap = $('input-wrap')
-  const inputEl = $('input')
+  // CM6 底栏接管（2026-10-14 #17 B 口径）：#input contenteditable 退役，inputEl 由 composer-cm
+  // cmMount 指到 EditorView.contentDOM（focus()/contains() 等既有读法不变；let 因 composer 后赋值）
+  let inputEl = null
   const inputBarEl = $('input-bar')
   const sendBtn = $('send-btn')
   const ctxMeterEl = $('ctx-meter')
@@ -1280,7 +1282,7 @@ function setSessionCwd(v) { sessionCwd = v }
       if (bootSwVer == null) { bootSwVer = m[1]; return }
       if (m[1] === bootSwVer) return
       bootSwVer = m[1]
-      if (inputEl.textContent.trim()) { toast('前端有新版本，请手动刷新页面'); return }
+      if (serializeInput().trim()) { toast('前端有新版本，请手动刷新页面'); return }
       toast('前端已更新，正在刷新…')
       setTimeout(() => location.reload(), 800)
     } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
@@ -1517,10 +1519,10 @@ function setSessionCwd(v) { sessionCwd = v }
               return String(p.text || '').replace(/\s*\[Image #\d+\]/g, '').trim() !== t0
             }))
             if (liveStatePort.getPendingUserMsgs().length !== n0) liveUiPort.renderTransient()
-            if (!inputEl.textContent.trim()) {
-              inputEl.textContent = ev.text
+            if (!serializeInput().trim()) {
+              composerSetText(ev.text)
               liveUiPort.syncGwSend()
-              inputEl.focus()
+              composerFocus()
             }
             const t = ev.text.trim()
             const bubbles = [...messagesEl.querySelectorAll('.msg.user[data-t="u"]')].filter(el => (el.querySelector('.body')?.textContent || '').trim() === t)
@@ -5042,16 +5044,18 @@ function setFirstSendHash(v) { firstSendHash = v }
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图，2026-10-14 待办 9）
+  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图；入口 = 项目下拉「工作区」行，
+                           // 与项目并列，2026-10-14 待办 9 返修——不再设独立 tab）
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
-  // 工作区 tab 状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
+  // 工作区视图状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
   // 重型目录、每层 ≤50）。path 相对工作区根，'' = 根。entries null = 未加载。纯运行时，不持久化。
   let wkWsPath = ''
   let wkWsEntries = null
   let wkWsLoading = false
   let wkWsErr = ''
+  let wkWsSeq = 0          // 工作区层加载序号：快速连点目录时丢弃迟到的旧响应（同 loadPickPath 口径）
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
   let edSeq = 0            // 编辑区读取序号：快速连点文件时丢弃迟到的旧响应
 
@@ -5688,11 +5692,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = state.workProj || '选择项目'
+    if (lab) lab.textContent = wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -5703,16 +5707,21 @@ function setFirstSendHash(v) { firstSendHash = v }
     const box = $('wk-proj-pop')
     if (!box) return
     const ps = wkProjGroups()
-    box.innerHTML = ps.length
+    // 「工作区」行与项目并列（2026-10-14 待办 9 返修）：全局根散件的浏览入口，不是第三枚 tab。
+    const rows = ps.length
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj && wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
+    box.innerHTML =
+      rows +
+      `<button class="wkp-row${wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
+      `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
@@ -5817,22 +5826,37 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     return h
   }
-  async function loadWsDir(path) {
-    if (needToken()) return
-    wkWsLoading = true
-    wkWsErr = ''
-    wkWsEntries = null
-    renderWorkBody()
+  async function loadWsDir(path, silent) {
+    const seq = ++wkWsSeq
+    if (!silent) {
+      wkWsLoading = true
+      wkWsErr = ''
+      wkWsEntries = null
+      renderWorkBody()
+    }
     try {
       const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
       const data = await res.json()
+      if (seq !== wkWsSeq) return false
       if (!res.ok || data.error) throw new Error(data.error || '加载失败')
       wkWsPath = String(path || '')
       wkWsEntries = Array.isArray(data.entries) ? data.entries : []
     } catch (e) {
+      if (seq !== wkWsSeq) return false
+      if (silent) return false // 对账轮失败静默保留旧层（同 loadProjectTree silent 口径）
       wkWsErr = e.message || String(e)
     }
     wkWsLoading = false
+    renderWorkBody()
+    return seq === wkWsSeq
+  }
+  // 工作区视图入口（2026-10-14 待办 9 返修）：项目下拉里的「工作区」行——与项目并列呈现，
+  // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
+  function enterWsView() {
+    hideWkPops()
+    wkTab = 'ws'
+    if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
+    renderWorkChrome()
     renderWorkBody()
   }
 
@@ -5904,6 +5928,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
+    if (wkTab === 'ws') {
+      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；wkTab 的 on 类只在 tab 点击 handler 里切换）
+      wkTab = 'files'
+      document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
+    }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
     state.workProj = label
@@ -5942,7 +5971,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (state.workProj) await loadProjectTree(state.workProj, silent)
+    if (wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
+    else if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
   }
@@ -5986,6 +6016,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
+    if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
@@ -6455,27 +6486,34 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (side === 'bottom') return [n.x + n.w / 2, n.y + n.h]
     return null
   }
-  // 连线几何：端点锚（缺省按两节点中心连线的主轴取最近侧——水平位移为主取左/右，竖直为主取上/
-  // 下；旧实现恒按水平取侧，上下堆叠的节点连线会从侧腰横着出去再拐弯，方向观感即「不对」）
-  // + 三次贝塞尔控制点 + t=0.5 中点（放 label）。fromSide/toSide 显式声明时仍按声明取锚（spec 语义）。
-  function wkCvDefaultAnchor(n, tx, ty) {
+  // 连线几何：端点锚 + 出线方向法线。显式 fromSide/toSide 按声明取锚与法线；缺省按两节点中心
+  // 连线的主轴取最近侧（水平位移为主取左/右、竖直为主取上/下）。贝塞尔控制点 = 各自锚点沿该侧
+  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入（旧实现控制点按整体主轴生成，
+  // 声明侧向与实际走向冲突时出线方向观感即「起点终点不对」，此为返修根因）。
+  const WKCV_SIDE_DIRS = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }
+  function wkCvAnchorDir(n, side, tx, ty) {
+    if (side && WKCV_SIDE_DIRS[side]) {
+      const p = wkCvAnchor(n, side)
+      if (p) return { p, n: WKCV_SIDE_DIRS[side] }
+    }
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2
-    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) return tx < cx ? [n.x, cy] : [n.x + n.w, cy]
-    return ty < cy ? [cx, n.y] : [cx, n.y + n.h]
+    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) {
+      return tx < cx ? { p: [n.x, cy], n: WKCV_SIDE_DIRS.left } : { p: [n.x + n.w, cy], n: WKCV_SIDE_DIRS.right }
+    }
+    return ty < cy ? { p: [cx, n.y], n: WKCV_SIDE_DIRS.top } : { p: [cx, n.y + n.h], n: WKCV_SIDE_DIRS.bottom }
   }
   function wkCvEdgeGeom(e) {
-    let a = wkCvAnchor(e.from, e.fs)
-    if (!a) a = wkCvDefaultAnchor(e.from, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
-    let b = wkCvAnchor(e.to, e.ts)
-    if (!b) b = wkCvDefaultAnchor(e.to, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
-    const dx = b[0] - a[0], dy = b[1] - a[1]
-    const horiz = Math.abs(dx) >= Math.abs(dy)
-    const d = horiz
-      ? `M ${a[0]} ${a[1]} C ${a[0] + dx / 2} ${a[1]}, ${b[0] - dx / 2} ${b[1]}, ${b[0]} ${b[1]}`
-      : `M ${a[0]} ${a[1]} C ${a[0]} ${a[1] + dy / 2}, ${b[0]} ${b[1] - dy / 2}, ${b[0]} ${b[1]}`
-    // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8
-    const mx = (a[0] + 3 * (a[0] + (horiz ? dx / 2 : 0)) + 3 * (b[0] - (horiz ? dx / 2 : 0)) + b[0]) / 8
-    const my = (a[1] + 3 * (a[1] + (horiz ? 0 : dy / 2)) + 3 * (b[1] - (horiz ? 0 : dy / 2)) + b[1]) / 8
+    const A = wkCvAnchorDir(e.from, e.fs, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
+    const B = wkCvAnchorDir(e.to, e.ts, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
+    const a = A.p, b = B.p
+    const kA = Math.max(24, Math.abs((b[0] - a[0]) * A.n[0] + (b[1] - a[1]) * A.n[1]) / 2)
+    const kB = Math.max(24, Math.abs((b[0] - a[0]) * B.n[0] + (b[1] - a[1]) * B.n[1]) / 2)
+    const c1 = [a[0] + A.n[0] * kA, a[1] + A.n[1] * kA]
+    const c2 = [b[0] + B.n[0] * kB, b[1] + B.n[1] * kB]
+    const d = `M ${a[0]} ${a[1]} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${b[0]} ${b[1]}`
+    // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8（放 label）
+    const mx = (a[0] + 3 * c1[0] + 3 * c2[0] + b[0]) / 8
+    const my = (a[1] + 3 * c1[1] + 3 * c2[1] + b[1]) / 8
     return { d, mx, my }
   }
 
@@ -6615,6 +6653,12 @@ function setFirstSendHash(v) { firstSendHash = v }
         view.dispatch({ effects: wkCvToggle.of() })
       })
       bar.appendChild(cnt)
+      // 编辑手段提示（2026-10-14 返修）：拖动/双击无任何可见 affordance，「无法编辑」的反馈里有
+      // 一部分是能力存在但不可发现——顶栏常驻一行操作提示，源码态同隐藏。
+      const hint = document.createElement('span')
+      hint.className = 'wk-cv-hint'
+      hint.textContent = '拖动移动 · 双击改文字 · 拖组带成员 · 捏合/滚轮缩放'
+      bar.appendChild(hint)
       bar.appendChild(srcBtn)
       root.appendChild(bar)
       if (data.err) {
@@ -7507,7 +7551,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('wk-proj-pop').addEventListener('click', (e) => {
       e.stopPropagation()
       const b = e.target.closest('[data-wkproj]')
-      if (b) selectProject(b.dataset.wkproj)
+      if (!b) return
+      // 「工作区」行 = 与项目并列的全局散件浏览入口（2026-10-14 待办 9 返修），不走 selectProject
+      if (b.dataset.wkproj === '__ws__') enterWsView()
+      else selectProject(b.dataset.wkproj)
     })
     // 侧栏收起钮：与 chat 的 #panel-collapse 同语义（只管把侧栏收起；再开走折叠态的汉堡）
     $('wk-view').addEventListener('click', (e) => {
@@ -7539,8 +7586,6 @@ function setFirstSendHash(v) { firstSendHash = v }
         wkTab = b.dataset.wktab
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
-        // 工作区 tab（2026-10-14 待办 9）：首切未加载过才拉；失败/加载中不重复打
-        if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
       }),
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
@@ -7550,8 +7595,27 @@ function setFirstSendHash(v) { firstSendHash = v }
       const wd = e.target.closest('[data-wsdir]')
       if (wd) { loadWsDir(wd.dataset.wsdir); return }
       const wf = e.target.closest('[data-wsfile]')
-      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析
-      if (wf) { window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wf.dataset.wsfile)), '_blank'); return }
+      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析。
+      // PDF（2026-10-14 待办#15 返修）不走直开：网关 MIME 表无 .pdf → 二进制嗅探落
+      // application/octet-stream → window.open 即触发下载。根修在前端入口：fetch 原始字节、
+      // blob 强制 application/pdf 类型后开 blob URL —— 浏览器自带 viewer 直显不下载（后端内容
+      // 分类与「展示策略」解耦，不为展示扩 MIME 表）。
+      if (wf) {
+        const wsp = wf.dataset.wsfile
+        if (/\.pdf$/i.test(wsp)) {
+          fetch(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)))
+            .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() })
+            .then((b) => {
+              const url = URL.createObjectURL(new Blob([b], { type: 'application/pdf' }))
+              window.open(url, '_blank')
+              setTimeout(() => URL.revokeObjectURL(url), 120000) // viewer 载入后即无需持有，2 分钟兜底回收
+            })
+            .catch((er) => toast('PDF 打开失败：' + (er.message || er)))
+          return
+        }
+        window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)), '_blank')
+        return
+      }
       const d = e.target.closest('[data-wkdir]')
       if (d) {
         const p = d.dataset.wkdir
@@ -8119,8 +8183,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       const dlg = rm.querySelector('.dialog')
       if (dlg && !dlg.contains(e.target)) { closeRiskModal(); return }
     }
-    // 命令菜单：点卡片外（+ 按钮除外，其 click toggle 接管开合）= 关闭（dsh PopupSelectView pointerdown capture）
-    if (cmd.open && !cmdPop.contains(e.target) && !$('cmd-btn').contains(e.target)) closeCmdPop()
+    // 命令菜单：点卡片外（+ 按钮除外，其 click toggle 接管开合）= 关闭（dsh PopupSelectView pointerdown capture）。
+    // 底栏输入框不算外（2026-10-14 待办 20 返修）：过滤文本就在底栏，点击聚焦/打字不得关掉浮窗
+    if (cmd.open && !cmdPop.contains(e.target) && !$('cmd-btn').contains(e.target) && !inputEl.contains(e.target)) closeCmdPop()
     // 模型菜单：点 root 外（模型 trigger 除外，其 click toggle 接管开合）= 关闭（dsh ModelSelect mousedown + rootRef.contains）
     if (msel.open && !modelPop.contains(e.target) && !modelSeatEl.contains(e.target)) closeModelPop()
     // 项目选择器：点 root 外（seat 除外，其 click toggle 接管开合）= 关闭
@@ -8128,12 +8193,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   })
   // 点击空白关闭弹层（@ 浮窗 / 整理会话 / 最近气泡）
   document.addEventListener('click', (e) => {
-    // @ 浮窗：点浮窗外任意处关闭；点输入内 chip 的 × 删除该 chip
-    if (e.target.closest('.mention .m-x')) {
-      const chip = e.target.closest('.mention')
-      if (chip) removeChip(chip)
-      return
-    }
+    // 输入内 chip 的 × 删除归 composer-cm widget 自有监听（CM 事务删除，DOM 直删会腐蚀 doc）；
+    // 此处只管 @ 浮窗外点关闭
     if (!e.target.closest('#mention-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
     if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
@@ -8168,19 +8229,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     else pendingImages.splice(+x.dataset.i, 1)
     renderImgPills()
   })
-  inputEl.addEventListener('paste', (e) => {
-    if (gateAwait) return
-    const cd = e.clipboardData
-    const files = Array.from((cd && cd.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) { e.preventDefault(); addImageFiles(files); return }
-    // 2026-09-18 纯文本粘贴：contentEditable 默认吃剪贴板 text/html（从网页/IDE/Office 复制
-    // 粘入会保留颜色/粗体/背景等原格式），拦截改只取 text/plain 于光标处插入——与上方
-    // 2026-09-06「纯文本复制」copy 方向对称；insertText 保留 undo 栈且不破坏 mention chip
-    const text = cd ? cd.getData('text/plain') : ''
-    if (!text) return
-    e.preventDefault()
-    document.execCommand('insertText', false, text)
-  })
+  // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
+  // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
   // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
   // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
@@ -8239,45 +8289,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     if (!gwSend()) toast('只读查看 · 无法发送')
   })
-  inputEl.addEventListener('keydown', (e) => {
-    // token 门态：输入框只做 token 提交
-    if (gateAwait) {
-      if (e.key === 'Enter') { e.preventDefault(); gateSubmit() }
-      return
-    }
-    // 命令菜单打开：方向键/回车/ESC 走选择逻辑（2026-08-21 dsh 移植，不移动光标、不发送）
-    if (cmd.open) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); cmdMove(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); cmdMove(-1); return }
-      if (e.key === 'Enter') { e.preventDefault(); cmdSelect(); return }
-      if (e.key === 'Escape') { e.preventDefault(); closeCmdPop(); return }
-      return
-    }
-    // 模型菜单打开：ESC 从 drill 面板退一级再关；方向键移动焦点（2026-08-21 dsh 移植）
-    if (msel.open) {
-      if (e.key === 'Escape') { e.preventDefault(); modelEscape(); return }
-      if (e.key === 'ArrowDown') { e.preventDefault(); mselMove(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); mselMove(-1); return }
-      return
-    }
-    // @ 浮窗打开：方向键/回车/ESC 走选择逻辑（不移动光标、不发送）
-    if (mention.open) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); moveMentionSel(1); return }
-      if (e.key === 'ArrowUp') { e.preventDefault(); moveMentionSel(-1); return }
-      if (e.key === 'Enter') { e.preventDefault(); selectMention(); return }
-      if (e.key === 'Escape') { e.preventDefault(); closeMentionPop(); return }
-    }
-    // 退格删除光标前的 @chip（含尾随空格）
-    if (e.key === 'Backspace' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      const chip = mentionBeforeCaret()
-      if (chip) { e.preventDefault(); removeChip(chip); return }
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      if (gateAwait) { gateSubmit(); return } // token 门态：回车 = 提交 token
-      if (!gwSend()) toast('只读查看 · 无法发送')
-    }
-  })
+  // 底栏 keydown（token 门/IME/cmd/msel/mention/退格删 chip/Enter 发送）已迁 composer-cm.js
+  // cmOnKeydown（CM domEventHandlers，判定次序逐分支原样保留）。
 
   // 路由
   // 2026-08-28 pushState 配套：popstate 兜底浏览器前进/后退（navigate 同步 route 后同值跳过）；
@@ -8557,7 +8570,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
-  let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
+  // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
+  let mention = { open: false, anchor: 0, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
   // searchOff：搜索/浏览模式开关（2026-10-14 待办 20）——false 且查询非空 = 全局搜索模式；
   // 下钻/返回目录后翻 true（回到层内浏览），浮窗重开（refreshPick）复位 false。
@@ -8785,41 +8799,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
   }
 
-  // 序列化 contenteditable → 纯文本（chip → [插件:X]/[会话:X]，nbsp→空格，块级→换行）
+  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，
+  // doc 单真源 ⇒ serializeInput 退化为 doc.toString()。签名与语义冻结（接缝不变量）。
   function serializeInput() {
-    let out = ''
-    const walk = (nodes) => {
-      for (const n of nodes) {
-        if (n.nodeType === 3) { out += n.nodeValue; continue }
-        if (n.nodeType !== 1) continue
-        if (n.classList && n.classList.contains('mention')) {
-          // 会话 chip 带 sid → `[会话:标题|sid]`：sid 是会话的稳定键（改名免疫），CLI 侧会话暴露
-          // 集合据此精确命中（重名也能寻址）；无 sid（不该发生，兜住手改 DOM）回落纯标题形态。
-          // 路径 chip → `[@目录:路径]` / `[@文件:路径]`（路径相对工作区根，与网关 /gateway/fs 同基准）。
-          const k = n.dataset.kind
-          // 选中引用 chip：文件类出位置令牌、回复类展开原文（见 refToken）
-          if (k === 'ref') { out += refToken(n.dataset); continue }
-          out += k === 'session'
-            ? (n.dataset.sid ? `[会话:${n.dataset.name}|${n.dataset.sid}]` : `[会话:${n.dataset.name}]`)
-            : k === 'path'
-              ? `[@${n.dataset.ptype === 'dir' ? '目录' : '文件'}:${n.dataset.name}]`
-              : `[插件:${n.dataset.name}]`
-        } else if (n.tagName === 'BR') {
-          out += '\n'
-        } else {
-          walk(n.childNodes)
-          if (/^(DIV|P)$/.test(n.tagName)) out += '\n'
-        }
-      }
-    }
-    walk(inputEl.childNodes)
-    return out.replace(/\u00A0/g, ' ')
+    return composerDocText()
   }
 
   function closeMentionPop() {
-    if (mention.sentinel && mention.sentinel.isConnected) mention.sentinel.remove()
     mention.open = false
-    mention.sentinel = null
+    mention.anchor = 0
     mention.q = ''
     mention.items = []
     mention.sel = 0
@@ -8827,26 +8815,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (pop) pop.hidden = true
   }
 
-  // 在光标处插入零宽锚点（紧跟 @），作为「@查询区间」标记；后续输入夹在 @ 与锚点之间
-  function ensureSentinel() {
-    if (mention.sentinel && mention.sentinel.isConnected) return mention.sentinel
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount) return null
-    const r = sel.getRangeAt(0)
-    if (!r.collapsed) return null
-    const sp = document.createElement('span')
-    sp.className = 'm-sentinel'
-    r.insertNode(sp)
-    r.setStartAfter(sp); r.setEndAfter(sp)
-    sel.removeAllRanges(); sel.addRange(r)
-    mention.sentinel = sp
-    return sp
-  }
-
   function openMentionPopAtCaret() {
-    const sp = ensureSentinel()
-    if (!sp) return
+    if (!cmView) return
     mention.open = true
+    mention.anchor = cmView.state.selection.main.from - 1 // '@' 的 doc 位置（composer onInputMention 判定后调）
     mention.sel = 0
     mention.q = ''
     renderMentionPop()
@@ -8948,84 +8920,342 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (it) selectMentionItem(it)
   }
 
-  // 选中项 → 用 chip + 尾随空格替换 @查询区间，光标放到空格后。sid 仅会话 chip 有（寻址键，
-  // 序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
+  // 选中项 → 令牌 + 尾随空格替换 @查询区间（[mention.anchor, 光标]），光标到空格后。sid 仅会话
+  // chip 有（寻址键，序列化为 `[会话:标题|sid]`；插件/技能无 sid）。
   function insertMention(kind, name, sid, ptype) {
-    const sp = mention.sentinel
-    if (sp && sp.isConnected) {
-      const prev = sp.previousSibling
-      if (prev && prev.nodeType === 3 && /@$/.test(prev.nodeValue || '')) {
-        prev.nodeValue = prev.nodeValue.replace(/@$/, '')
-        if (!prev.nodeValue) prev.remove()
-      }
-      let nx = sp.nextSibling
-      while (nx && nx.nodeType === 3) { const t = nx; nx = nx.nextSibling; t.remove() }
-      const chip = buildMentionChip(kind, name, sid, ptype)
-      sp.replaceWith(chip)
-      const space = document.createTextNode('\u00A0')
-      chip.after(space)
-      const sel = window.getSelection()
-      const r = document.createRange()
-      r.setStartAfter(space); r.collapse(true)
-      sel.removeAllRanges(); sel.addRange(r)
-    }
+    const token = kind === 'session'
+      ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
+      : kind === 'path'
+        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        : `[插件:${name}]`
+    const pos = cmView ? cmView.state.selection.main.from : mention.anchor
+    composerReplaceRange(mention.anchor, pos, token + ' ')
     closeMentionPop()
-    inputEl.focus()
     syncGwSend()
   }
 
-  function removeChip(chip) {
-    let nx = chip.nextSibling
-    if (nx && nx.nodeType === 3 && /^\s*$/.test(nx.nodeValue)) nx.remove()
-    chip.remove()
-    syncGwSend()
-  }
-
-  // 光标前的 @chip（跳过尾随空格文本），供退格/× 删除
-  function mentionBeforeCaret() {
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null
-    const node = sel.anchorNode
-    if (!node) return null
-    let prev = null
-    if (node.nodeType === 3) {
-      const off = sel.anchorOffset
-      if (off === 0) prev = node.previousSibling
-      else if (off >= node.nodeValue.length && /^\s*$/.test(node.nodeValue)) prev = node.previousSibling
-      else if (/^\s+$/.test(node.nodeValue.slice(0, off))) prev = node.previousSibling
-      else return null
-    } else if (node.nodeType === 1) {
-      // 光标落在根元素（contenteditable 本体）边界：取光标前一个子节点（跳过随后的空白后找 chip）；
-      // 落在其它子元素（块级 div/p）时沿用「其前一个兄弟」。
-      prev = (node === inputEl) ? node.childNodes[sel.anchorOffset - 1] : node.previousSibling
-    }
-    while (prev && prev.nodeType === 3 && /^\s*$/.test(prev.nodeValue || '')) prev = prev.previousSibling
-    if (prev && prev.nodeType === 1 && prev.classList && prev.classList.contains('mention')) return prev
-    return null
-  }
-
-  // input 事件：检测 @ 触发 / 维护已打开的 @查询（光标前是 @ 则开浮窗）
+  // doc/选区变化：检测 @ 触发 / 维护已打开的 @查询（光标前是 @ 则开浮窗）。锚点 = '@' 的 doc 位置
   function onInputMention() {
-    if (!GATEWAY || gateAwait || state.mgr) { closeMentionPop(); return }
-    if (mention.sentinel && mention.sentinel.isConnected) {
-      const sp = mention.sentinel
-      const prev = sp.previousSibling
-      const ok = prev && prev.nodeType === 3 && /@$/.test(prev.nodeValue || '')
-      if (!ok) { closeMentionPop(); return }
-      let q = ''
-      let nx = sp.nextSibling
-      while (nx && nx.nodeType === 3) { q += nx.nodeValue; nx = nx.nextSibling }
+    if (!GATEWAY || gateAwait || state.mgr || !cmView) { closeMentionPop(); return }
+    const st = cmView.state
+    const pos = st.selection.main.from
+    if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
+    if (mention.open) {
+      const between = st.doc.sliceString(mention.anchor, pos)
+      if (pos <= mention.anchor || /[\n\r]/.test(between)) { closeMentionPop(); return }
+      const q = between.slice(1)
       if (q !== mention.q) { mention.q = q; renderMentionPop() }
       return
     }
-    const sel = window.getSelection()
-    if (!sel || !sel.rangeCount || !sel.isCollapsed) return
-    const node = sel.anchorNode
-    if (node && node.nodeType === 3 && node.nodeValue.slice(0, sel.anchorOffset).endsWith('@')) {
-      openMentionPopAtCaret()
-    }
+    if (pos > 0 && st.doc.sliceString(pos - 1, pos) === '@') openMentionPopAtCaret()
   }
   function onInputChange() { syncGwSend(); onInputMention() }
+
+  // vendor 全局（index.html 先于 app.js 载入，eval 期取值安全；work-cm.js 同款别名）
+  const CMG = window.CMLiveMarkdown
+  let cmView = null
+  let cmCM = null
+  let cmEditComp = null // 可编辑 compartment（只读查看器 app.js 切换口）
+  let cmPhComp = null   // 占位符 compartment（token 门/只读态换 ph）
+  let cmPhText = '输入消息，Enter 发送'
+
+  // ---------- 令牌表（doc 文本 ↔ chip 装饰的唯一真源；正则与 core/mention-syntax.js 同族形态） ----------
+  const CM_TOKENS = [
+    { re: /\[会话:([^\]\n]+)\]/g, spec: (m) => ({ kind: 'session', name: m[1] }) },
+    { re: /\[插件:([^\]\n]+)\]/g, spec: (m) => ({ kind: 'plugin', name: m[1] }) },
+    { re: /\[@(目录|文件):([^\]\n]+)\]/g, spec: (m) => ({ kind: 'path', ptype: m[1] === '目录' ? 'dir' : 'file', name: m[2] }) },
+    { re: /\[@引用:([^\]#\n]+?)(?:#L(\d+)-L?(\d+))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'file', file: m[1], l0: m[2], l1: m[3] }) },
+    { re: /\[@引用PDF:([^\]#\n]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'pdf', file: m[1], p0: m[2], p1: m[3] }) },
+    { re: /\[@引用回复:(\d+)\|([^\]\n]*)\]/g, spec: (m) => ({ kind: 'ref', rkind: 'reply', idx: m[1], title: m[2] }) },
+  ]
+  // 引用块收口令牌（回复/PDF 原文块结束行）：渲染为空（隐藏），同样原子——原文块在消息里本就整块剥掉只留锚点胶囊
+  const CM_TOKEN_CLOSE = /\[\/(引用回复|引用PDF)\]/g
+
+  function cmTokenRanges(doc) {
+    const text = doc.toString()
+    const out = []
+    for (const t of CM_TOKENS) {
+      t.re.lastIndex = 0
+      let m
+      while ((m = t.re.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: t.spec(m), close: false })
+    }
+    CM_TOKEN_CLOSE.lastIndex = 0
+    let m
+    while ((m = CM_TOKEN_CLOSE.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: null, close: true })
+    return out.sort((a, b) => a.from - b.from)
+  }
+
+  function cmRefLabel(spec) {
+    if (spec.rkind === 'reply') return `引用自「${spec.title || '本会话'}」· 第 ${spec.idx} 条回复`
+    const name = String(spec.file || '').split('/').pop()
+    if (spec.rkind === 'pdf') return `引用自 ${name}${spec.p0 ? ' · 第 ' + spec.p0 + (spec.p1 && spec.p1 !== spec.p0 ? '-' + spec.p1 : '') + ' 页' : ''}`
+    return `引用自 ${name}`
+  }
+  // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label+×）
+  function cmChipDom(spec) {
+    if (spec.kind === 'ref') {
+      const chip = document.createElement('span')
+      chip.className = 'mention ref'
+      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : I.dshFile}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
+      return chip
+    }
+    if (spec.kind === 'session') {
+      const t = splitSessionToken(spec.name)
+      return buildMentionChip('session', t.title, t.sid)
+    }
+    return buildMentionChip(spec.kind, spec.name, '', spec.ptype)
+  }
+
+  class CmChipWidget extends CMG.WidgetType {
+    constructor(spec, len) { super(); this.spec = spec; this.len = len }
+    eq(o) { return o.len === this.len && JSON.stringify(o.spec) === JSON.stringify(this.spec) }
+    // ignoreEvent true：事件交给 widget 自有监听（× 删除），其余冒泡回 CM
+    ignoreEvent() { return true }
+    toDOM() {
+      const chip = cmChipDom(this.spec)
+      chip.addEventListener('mousedown', (e) => {
+        if (!e.target.closest('.m-x')) return
+        e.preventDefault()
+        e.stopPropagation()
+        cmRemoveTokenAt(cmView.posAtDOM(chip))
+      })
+      return chip
+    }
+  }
+
+  function cmRemoveTokenAt(pos) {
+    if (!cmView || cmView.state.readOnly) return
+    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from === pos)
+    if (!hit) return
+    const text = cmView.state.doc.toString()
+    let to = hit.to
+    if (text[to] === ' ') to++ // 连同尾随分隔空格一起删（旧 removeChip 同语义）
+    cmView.dispatch({ changes: { from: hit.from, to } })
+  }
+
+  // 令牌扫描插件 + 原子化：chip 区间游标进不去、退格整块删（CM atomicRanges 语义）
+  const cmChipPlugin = CMG.ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = cmBuildDeco(view) }
+    update(u) { if (u.docChanged || u.viewportChanged) this.decorations = cmBuildDeco(u.view) }
+  }, { decorations: (v) => v.decorations })
+
+  function cmBuildDeco(view) {
+    const doc = view.state.doc
+    const text = doc.toString()
+    const items = cmTokenRanges(doc)
+    const arr = []
+    // 引用块（回复/PDF）正文行标：锚点令牌行与收口令牌行之间加 .cm-quote-body（正文可见可编辑，
+    // 与旧「原文只在 dataset 里不可见」不同——真所见即所得：用户消息将包含他在编辑器里看到的每一行）
+    for (const it of items) {
+      if (it.close || !it.spec || it.spec.kind !== 'ref' || it.spec.rkind === 'file') continue
+      const closeRe = it.spec.rkind === 'pdf' ? '[/引用PDF]' : '[/引用回复]'
+      const ci = text.indexOf(closeRe, it.to)
+      if (ci < 0) continue
+      for (let n = doc.lineAt(it.to).number + 1; n <= doc.lineAt(ci).number - 1; n++) {
+        arr.push(CMG.Decoration.line({ class: 'cm-quote-body' }).range(doc.line(n).from))
+      }
+    }
+    for (const it of items) {
+      if (it.close) arr.push(CMG.Decoration.replace({}).range(it.from, it.to))
+      else arr.push(CMG.Decoration.replace({ widget: new CmChipWidget(it.spec, it.to - it.from) }).range(it.from, it.to))
+    }
+    return CMG.Decoration.set(arr, true)
+  }
+  const cmAtomic = CMG.EditorView.atomicRanges.of((view) => {
+    const p = view.plugin(cmChipPlugin)
+    return p ? p.decorations : CMG.Decoration.none
+  })
+
+  // ---------- 键程/粘贴（自 ctx-meter.js 的 #input 监听原样迁入，不改判定次序） ----------
+  function cmOnKeydown(event, view) {
+    // token 门态：输入框只做 token 提交
+    if (gateAwait) {
+      if (event.key === 'Enter') { event.preventDefault(); gateSubmit(); return true } // 真 = 阻断 CM keymap 回车换行
+      return false
+    }
+    // IME 组合期（中文/日文拼字中）全放行——组合中的 Enter 是「确认候选」不是发送/选择。
+    // CM 原生组合安全：不逐击换 DOM（旧 contenteditable 逐击改 DOM 的三面冲突随之消失）
+    if (event.isComposing || event.keyCode === 229) return false
+    // 命令菜单打开：方向键/回车/ESC 走选择逻辑（不移动光标、不发送）
+    if (cmd.open) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); cmdMove(1); return true }
+      if (event.key === 'ArrowUp') { event.preventDefault(); cmdMove(-1); return true }
+      if (event.key === 'Enter') { event.preventDefault(); cmdSelect(); return true }
+      if (event.key === 'Escape') { event.preventDefault(); closeCmdPop(); return true }
+      return false
+    }
+    if (msel.open) {
+      if (event.key === 'Escape') { event.preventDefault(); modelEscape(); return true }
+      if (event.key === 'ArrowDown') { event.preventDefault(); mselMove(1); return true }
+      if (event.key === 'ArrowUp') { event.preventDefault(); mselMove(-1); return true }
+      return false
+    }
+    if (mention.open) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); moveMentionSel(1); return true }
+      if (event.key === 'ArrowUp') { event.preventDefault(); moveMentionSel(-1); return true }
+      if (event.key === 'Enter') { event.preventDefault(); selectMention(); return true }
+      if (event.key === 'Escape') { event.preventDefault(); closeMentionPop(); return true }
+    }
+    // 退格删除光标前的 chip 令牌（跳过其前空白；含尾随一个分隔空格）
+    if (event.key === 'Backspace' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (cmBackspaceChip(view)) { event.preventDefault(); return true }
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (!gwSend()) toast('只读查看 · 无法发送')
+      return true
+    }
+    return false
+  }
+
+  function cmBackspaceChip(view) {
+    const st = view.state
+    const r = st.selection.main
+    if (!r.empty) return false
+    const pos = r.from
+    const text = st.doc.toString()
+    let hit = null
+    for (const it of cmTokenRanges(st.doc)) {
+      if (it.to <= pos && /^\s*$/.test(text.slice(it.to, pos))) hit = it
+    }
+    if (!hit) return false
+    let to = pos
+    if (hit.to === pos && text[pos] === ' ') to = pos + 1
+    view.dispatch({ changes: { from: hit.from, to } })
+    return true
+  }
+
+  function cmOnPaste(event, view) {
+    if (gateAwait) return false
+    const cd = event.clipboardData
+    const files = Array.from((cd && cd.files) || []).filter((f) => /^image\//.test(f.type))
+    if (files.length) { event.preventDefault(); addImageFiles(files); return true }
+    // 纯文本粘贴：CM 天然只收文本（无 text/html 富格式问题），走原生事务保 undo 栈
+    if (!cd || !cd.getData('text/plain')) return false
+    return false // 文本粘贴交 CM 默认（等价旧 execCommand insertText 的纯文本语义）
+  }
+
+  // ---------- 输入汇流口（旧 input 事件 → updateListener） ----------
+  function cmOnUpdate(update) {
+    if (update.docChanged) {
+      syncGwSend()
+      if (cmd.open) renderCmdPop() // + 浮窗过滤挂底栏：每敲一字列表随文本变（含 IME 组合期）
+    }
+    if (update.docChanged || update.selectionSet) onInputMention()
+  }
+
+  // ---------- 建视图（模块求值期一次；live-markdown.js 在 app.js 之前加载，全局必在） ----------
+  function cmMount() {
+    if (cmView) return cmView
+    cmCM = window.CMLiveMarkdown
+    if (!cmCM) throw new Error('CodeMirror 未加载（window.CMLiveMarkdown 缺失）')
+    cmEditComp = new cmCM.Compartment()
+    cmPhComp = new cmCM.Compartment()
+    const st = cmCM.EditorState.create({
+      doc: '',
+      extensions: [
+        cmCM.history(),
+        cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap]),
+        cmCM.EditorView.lineWrapping,
+        cmEditComp.of([cmCM.EditorView.editable.of(true), cmCM.EditorState.readOnly.of(false)]),
+        cmPhComp.of(cmCM.placeholder(cmPhText)),
+        // md Live Preview 全套（work 编辑区同款）：输入即渲染 = 真所见即所得
+        cmCM.markdown({ base: cmCM.markdownLanguage }),
+        cmCM.collapseOnSelectionFacet.of(true),
+        cmCM.mouseSelectingField,
+        cmCM.livePreviewPlugin,
+        cmCM.markdownStylePlugin,
+        cmCM.mathPlugin,
+        cmCM.blockMathField,
+        cmCM.tableField,
+        cmCM.linkPlugin(),
+        ...cmCM.codeBlockField(),
+        cmChipPlugin,
+        cmAtomic,
+        cmCM.editorTheme,
+        cmThemeSpec(),
+        cmCM.EditorView.updateListener.of(cmOnUpdate),
+      ],
+    })
+    cmView = new cmCM.EditorView({ state: st, parent: $('cm-host') })
+    // 键/粘贴走 contentDOM **捕获阶段**直挂（不 domEventHandlers）：本 vendor 实测 keymap.of(defaultKeymap)
+    // 的 Enter 绑定先于 domEventHandlers 吞键（探针 2026-10-14，np=false 且键程分支未触）——捕获监听先于
+    // CM 自身气泡链，true = preventDefault+stopPropagation 阻断 keymap 默认行为。
+    const capDom = (type, fn) => cmView.contentDOM.addEventListener(type, (e) => { if (fn(e, cmView) === true) { e.preventDefault(); e.stopPropagation() } }, true)
+    capDom('keydown', cmOnKeydown)
+    capDom('paste', cmOnPaste)
+    inputEl = cmView.contentDOM // state.js 的 inputEl 再指向 CM contentDOM：focus()/contains() 等既有读法不变
+    try { cmCM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（同 work 编辑器） */ }
+    return cmView
+  }
+
+  // 几何随 #input 旧口径（pl16/pr12/pt4、行高 24、52/336px、docked 28px）——min-height 由 styles.css 承担
+  function cmThemeSpec() {
+    return cmCM.EditorView.theme({
+      '&': { height: 'auto', maxHeight: '336px', fontSize: 'inherit', backgroundColor: 'transparent' },
+      '.cm-scroller': { overflow: 'auto', fontFamily: 'inherit', lineHeight: 'inherit' },
+      '.cm-content': { padding: '4px 12px 0 16px', color: 'var(--ink)', caretColor: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere' },
+      '.cm-line': { padding: '0' },
+      '&.cm-focused': { outline: 'none' },
+      '.cm-placeholder': { color: 'var(--ink-4)', pointerEvents: 'none' },
+    })
+  }
+
+  // ---------- 公开 API（接缝 + 各依赖链改道口） ----------
+  function composerDocText() { return cmView ? cmView.state.doc.toString() : '' }
+  function composerSetText(text) {
+    if (!cmView || cmView.state.readOnly) return
+    const cur = cmView.state.doc.toString()
+    const next = String(text || '')
+    if (cur === next) return
+    cmView.dispatch({ changes: { from: 0, to: cur.length, insert: next }, selection: { anchor: next.length } })
+  }
+  // 令牌/文本追加到输入栏末尾（旧 appendMentionChip / insertRefChip 尾随落点同语义），光标到末尾
+  function composerAppendToken(text) {
+    if (!cmView || cmView.state.readOnly) return
+    const doc = cmView.state.doc
+    const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
+    const ins = sep + text + ' '
+    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    cmView.focus()
+  }
+  // 引用令牌追加（quote.js）：块形态（含原文）单独起行，单行文件引用以空格衔接；光标落块尾 = 接着打字就是给引用的说明
+  function composerAppendRef(token) {
+    if (!cmView || cmView.state.readOnly) return
+    const doc = cmView.state.doc
+    const block = String(token).indexOf('\n') >= 0
+    const sep = doc.length ? (block ? '\n' : ' ') : ''
+    const ins = sep + token
+    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    cmView.focus()
+  }
+  function composerAppendText(text) {
+    if (!cmView || cmView.state.readOnly) return
+    const doc = cmView.state.doc
+    const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
+    const ins = sep + text
+    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    cmView.focus()
+  }
+  // 区间替换（@ 提及落地：@查询区间 → 令牌 + 空格），光标落 ins 尾
+  function composerReplaceRange(from, to, ins) {
+    if (!cmView || cmView.state.readOnly) return
+    cmView.dispatch({ changes: { from, to, insert: ins }, selection: { anchor: from + ins.length } })
+    cmView.focus()
+  }
+  function composerFocus() { if (cmView) cmView.focus() }
+  function composerBlur() { if (cmView) cmView.contentDOM.blur() }
+  // 只读查看器（app.js 非网关模式）：editable+readOnly 双阀，CM 不再与手改 contentEditable 拉锯
+  function composerSetEditable(on) {
+    if (!cmView) return
+    cmView.dispatch({ effects: cmEditComp.reconfigure([cmCM.EditorView.editable.of(!!on), cmCM.EditorState.readOnly.of(!on)]) })
+  }
+  function composerPlaceholder(text) {
+    cmPhText = String(text || cmPhText)
+    if (cmView) cmView.dispatch({ effects: cmPhComp.reconfigure(cmCM.placeholder(cmPhText)) })
+  }
+
+  cmMount()
 
   // ---------- 命令菜单 + 模型选择（2026-08-21 dsh 输入栏逻辑移植）----------
   // ⚠️ 数据源 = 本地内置展示数据（⚠️ 非 dsh 真实注册表、非网关接口）：
@@ -9129,7 +9359,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
   // 命令菜单状态（对齐 dsh PopupState：open/status/options/search/active/submitting/confirming/acknowledged/error）
   // 2026-09-09 二轮定案：去 tab 单页分组（上传/技能/引用会话/指令堆放一页）；items=渲染时平铺条目（键盘索引基准）
-  const cmd = { open: false, status: 'pending', items: [], search: '', active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  const cmd = { open: false, status: 'pending', items: [], active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  // 过滤查询唯一来源 = 底栏输入框文本（2026-10-14 待办 20 返修）：弃独立搜索框——旧框每次 input 都
+  // innerHTML 重渲并**重建框自身**，IME 组合期被打断 = 中文打不进；底栏文本驱动则渲染只碰浮窗，
+  // 底栏 contenteditable 原样不动，中文 IME 正常。命令前缀 / 由 cmdEntries 剥。
+  function barQuery() {
+    return serializeInput().trim()
+  }
   // 模型菜单状态（对齐 dsh ModelSelect Pane：root | model | effort）
   const msel = { open: false, pane: 'root', active: 0 }
   const cmdPop = $('cmd-pop')
@@ -9223,7 +9459,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
   // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
   function cmdEntries() {
-    const q = cmd.search.trim().toLowerCase().replace(/^\//, '')
+    const q = barQuery().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩' }]
     // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
@@ -9237,7 +9473,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
     // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
-    items.push(...pickItems(cmd.search))
+    items.push(...pickItems(barQuery()))
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
     const arranged = arrangeItems(items)
     pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
@@ -9249,12 +9485,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     closeMentionPop()
     cmd.open = true
     cmd.status = 'ready'
-    cmd.search = ''
     cmd.active = 0
     cmd.confirming = null
     cmd.acknowledged = false
     cmd.error = null
     renderCmdPop()
+    // 过滤在底栏打字（待办 20 返修）：焦点回底栏，用户继续输入列表即变；触屏不抢焦点（iOS 弹键盘，
+    // 与旧搜索框同一处置——用户自己点输入框唤起）
+    if (!isTouch()) composerFocus()
     // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
     loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
     refreshPick(() => { if (cmd.open) renderCmdPop() })
@@ -9272,9 +9510,11 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!cmd.open) return
     // dsh confirmation gate：确认态下命令卡隐藏，改由全屏 RiskConfirmation 模态接管
     if (cmd.confirming) { cmdPop.hidden = true; renderRiskModal(); return }
-    // 2026-09-09 二轮：单页分组渲染（无 tab）——搜索框 + 已选图片缩略图 + 四组行列表
+    // 2026-09-09 二轮：单页分组渲染（无 tab）——已选图片缩略图 + 四组行列表。
+    // 独立搜索框已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框（barQuery），列表随底栏
+    // 打字自动变化（ctx-meter 在底栏 input 事件里调 renderCmdPop）。
     cmd.items = cmdEntries()
-    let html = `<input class="search" type="text" placeholder="搜索全部类别…" aria-label="搜索" autocomplete="off"/>`
+    let html = ''
     if (cmd.error !== null) {
       html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
@@ -9284,7 +9524,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       let lastGrp = ''
       // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
-      if (!cmd.items.length && cmd.search.trim() && !pick.searchOff && !pickAll.items) {
+      if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
         html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
       } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
@@ -9300,19 +9540,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     cmdPop.innerHTML = html
     cmdPop.hidden = false
-    // 搜索输入：本地过滤（dsh 语义——敲字不重查选项；←→ 保留原生光标）
-    const box = cmdPop.querySelector('.search')
-    if (box) {
-      box.value = cmd.search
-      box.addEventListener('input', () => { cmd.search = box.value; cmd.active = 0; renderCmdPop() })
-      box.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowDown') { e.preventDefault(); cmdMove(1) }
-        if (e.key === 'ArrowUp') { e.preventDefault(); cmdMove(-1) }
-        if (e.key === 'Enter') { e.preventDefault(); cmdSelect() }
-        if (e.key === 'Escape') { e.preventDefault(); closeCmdPop() }
-      })
-      if (!isTouch()) box.focus() // 触屏不聚焦：iOS 会弹键盘；搜索仍可手动点输入框唤起
-    }
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
     cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
       pendingImages.splice(+x.dataset.i, 1)
@@ -9386,20 +9613,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
     cmdSettle(o)
   }
-  // 浮窗直选落地（无 @ 光标锚点）：同构 chip 追加到输入栏末尾 + 尾随空格，光标到末尾。
-  // serializeInput 把 .mention chip 序列化为 [插件:X]/[会话:X] 令牌，发送链与 @ 提及完全同路。
+  // 浮窗直选落地（无 @ 光标锚点）：令牌追加到输入栏末尾 + 尾随空格，光标到末尾（CM6 接管后
+  // chip = doc 令牌文本的装饰视图，composerAppendToken 落 doc 即成 chip）。
   function appendMentionChip(kind, name, sid, ptype) {
-    const chip = buildMentionChip(kind, name, sid, ptype)
-    inputEl.appendChild(chip)
-    chip.after(document.createTextNode('\u00A0'))
+    const token = kind === 'session'
+      ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
+      : kind === 'path'
+        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        : `[插件:${name}]`
+    composerAppendToken(token)
     syncGwSend()
-    inputEl.focus()
-    const sel = window.getSelection()
-    if (sel) {
-      const r = document.createRange()
-      r.selectNodeContents(inputEl); r.collapse(false)
-      sel.removeAllRanges(); sel.addRange(r)
-    }
   }
   function cmdAck(v) { cmd.acknowledged = v; renderCmdPop() }
   function cmdConfirm() {
@@ -9413,12 +9636,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   function cmdSettle(o) {
     setInputText(o.claim ? `/${o.name} ` : `/${o.name}`)
     closeCmdPop()
-    inputEl.focus()
+    composerFocus()
     toast(`命令已写入输入栏：/${o.name}（回车发送）`)
   }
+  // CM6 接管后 = doc 全文替换（composerSetText 内含 readOnly 阀 + 触发 updateListener → syncGwSend）
   function setInputText(text) {
-    if (inputEl.contentEditable !== 'true') return
-    inputEl.textContent = text
+    composerSetText(text)
     syncGwSend()
   }
 
@@ -9485,7 +9708,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     msel.pane = 'root'
     msel.active = 0
     renderModelPop()
-    if (!isTouch()) inputEl.focus({ preventScroll: true }) // 焦点留输入栏：方向键/ESC 走 keydown；触屏跳过防 iOS 弹键盘
+    if (!isTouch()) composerFocus() // 焦点留输入栏：方向键/ESC 走 keydown；触屏跳过防 iOS 弹键盘
   }
   function closeModelPop() {
     if (!msel.open) return
@@ -10223,8 +10446,8 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
     // 2026-09-26：.bar-takeover 退场由 display:none 改脱流隐藏（根修注释见 styles.css）后，浏览器不再
     // 顺带让聚焦的 contenteditable 失焦——显式补上。不变量 = 接管卡在场输入栏不可编辑 ⇒ isEditing()
     // 必为假（否则 viewport.js 的键盘几何与整页平移会把已经收起的软键盘当仍在编辑态处理，界面卡在上移位）。
-    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。
-    inputEl.blur()
+    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。CM6 接管后 = contentDOM blur
+    composerBlur()
     const t = takeoverEl()
     if (t) { t.innerHTML = html; t.hidden = false }
     takeover = kind
@@ -10954,7 +11177,7 @@ function setApprovalPending(v) { approvalPending = v }
       history.replaceState(null, '', u.pathname + u.search + u.hash)
     } catch { /* 忽略 */ }
     gVid.pause()
-    inputEl.dataset.ph = '输入消息，Enter 发送' // 占位符复位（token 提示 → 正常输入）
+    composerPlaceholder('输入消息，Enter 发送') // 占位符复位（token 提示 → 正常输入）
     // gate-screen 淡出后隐藏，与空态（同款渐变背景）交叉过渡 → 切换平滑浮现，不做硬切
     gateScreen.classList.add('fade-out')
     clearTimeout(hideGateTimer)
@@ -11116,7 +11339,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     let text = serializeInput().trim()
     const imgs = pendingImages.slice()
     const files = pendingFiles.slice()
-    if (!text && !imgs.length && !files.length) { inputEl.focus(); return true }
+    if (!text && !imgs.length && !files.length) { composerFocus(); return true }
     if (!gws || gws.readyState !== 1) { toast('未连接，无法发送'); return true }
     // 2026-08-28 图片占位：[Image #N] 与 pastedContents id 一一对应。
     // 2026-09-02 防撞根修：id 由本端分配全会话唯一（从已用最大 imageId+1 起，对齐 CLI
@@ -11159,7 +11382,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       // navigate 之前回填，创建失败回滚空态（还原输入文本与图片胶囊）。
       flipInput(false)
       addUser(text, imgs, files)
-      inputEl.textContent = ''
+      composerSetText('')
       syncGwSend()
       const d = await newWebSession(tgt || undefined, prevModel || undefined)
       if (!d || !d.hash) {
@@ -11168,11 +11391,11 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
         messagesEl.innerHTML = ''
         renderTransient() // 暂态区对账：空主张 → 摘区/停主张计时/turnLive 复位
         flipInput(true) // 回滚空态（FLIP 滑回 stage，docked/in-session 一并移除）
-        inputEl.textContent = text
+        composerSetText(text)
         syncGwSend()
         state.newProject = prevNew
         setNewSessionModel(prevModel)
-        inputEl.focus()
+        composerFocus()
         return true
       }
       clearPendingImages()
@@ -11214,7 +11437,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     // 2026-09-07 两区重构：乐观「正在处理」主张折叠由 renderTransient 从 pendingUserMsgs
     // 统一渲染（回合间隙发送 = 开启主张气泡+主张折叠；回合运行中 = 排队成员，不开折叠）——
     // 原 procOpen 直挂 DOM 链退役（幻影折叠根源：proc 变量跨整页重建悬挂，收养/幂等皆失灵）。
-    inputEl.textContent = ''
+    composerSetText('')
     clearPendingImages()
     clearPendingFiles()
     syncGwSend()
@@ -11228,7 +11451,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     setBtnMode(turnLive && !hasContent ? 'stop' : 'send')
     const on = turnLive || (GATEWAY && gws && gws.readyState === 1 && hasContent)
     sendBtn.classList.toggle('enabled', on)
-    mdPreviewRefresh() // md 实时预览（待办 17）：输入变化全汇到 syncGwSend 这一口，开着就跟着重渲
+    // md 就地渲染链（mdPreviewRefresh）随 CM6 接管退役：live preview 输入即渲染，无换层刷新口
   }
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型
@@ -11247,60 +11470,6 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   }
   function relUploadPath(abs) {
     return sessionCwd ? relPath(sessionCwd, abs) : abs
-  }
-
-  // 换层禁用窗口：@ 浮窗 / 命令菜单 / 模型·项目下拉 / 审批接管在场时，插入链（sentinel/选区 DOM 操作）
-  // 依赖 #input 的选区与可见性——display:none 会毁掉选区，此时保持编辑态不换层（守护的不变量 =
-  // 「弹层插入链运行期输入区 DOM 不得被替换」；弹层关闭后随下次输入/blur 自然恢复换层判定）。
-  function mdSwapBlocked() {
-    const tk = $('composer-takeover')
-    if (tk && !tk.hidden) return true
-    if (mention && mention.open) return true
-    for (const id of ['mention-pop', 'cmd-pop', 'model-pop', 'proj-pop']) {
-      const el = $(id)
-      if (el && !el.hidden) return true
-    }
-    return false
-  }
-
-  function mdPreviewRefresh() {
-    const raw = $('input')
-    const view = $('input-md')
-    if (!raw || !view) return
-    const focused = document.activeElement === raw
-    // 编辑态或无内容：渲染视图弃掉（单真值原则——不保留第二份文本），原文归位
-    if (focused || !serializeInput().trim() || mdSwapBlocked()) {
-      view.hidden = true
-      view.innerHTML = ''
-      raw.hidden = false
-      return
-    }
-    view.innerHTML = `<div class="blocks">${mdHtml(serializeInput())}</div>`
-    view.hidden = false
-    raw.hidden = true
-  }
-
-  // 点击渲染态 = 要继续编辑：焦点交回 #input（focus 事件走 mdPreviewRefresh 换回编辑态）。
-  // 光标落点：contenteditable 被 hidden 过，选区丢失 → 归到文末（就近续写，回执已声明）。
-  const mdView = $('input-md')
-  if (mdView) {
-    mdView.addEventListener('mousedown', (e) => {
-      e.preventDefault()
-      inputEl.focus()
-      const sel = window.getSelection()
-      if (sel) {
-        const r = document.createRange()
-        r.selectNodeContents(inputEl)
-        r.collapse(false)
-        sel.removeAllRanges()
-        sel.addRange(r)
-      }
-    })
-  }
-  const mdRaw = $('input')
-  if (mdRaw) {
-    mdRaw.addEventListener('blur', mdPreviewRefresh)
-    mdRaw.addEventListener('focus', mdPreviewRefresh)
   }
 
 
@@ -11458,9 +11627,8 @@ function setViewportAdapter(a) { stageSyncFn = a.syncStage }
     // 连接状态徽章已改为 Floria 品牌名后的浅灰小字（index.html #floria-conn），不再动态建 #conn-badge。
     // 空态图标不隐藏：进会话时的隐藏由 #chat-area.in-session 的 CSS 承担，
     // 永久 display:none 会让首页图标只在网关检测完成前瞬间可见、刷新即消失。
-    inputEl.contentEditable = 'true'
-    inputEl.dataset.ph = '输入消息，Enter 发送'
-    inputEl.addEventListener('input', gwMention.onInputChange)
+    // 输入区启用/占位/输入监听已随 CM6 接管归 composer-cm.js（updateListener 汇流 syncGwSend + onInputMention）
+    composerPlaceholder('输入消息，Enter 发送')
     setConn(false, '连接中…')
     // 2026-08-28 token 出 URL：统一先 connect()——已授权设备（floria_auth cookie）WS 直接通过进空态；
     // 未授权（无 cookie 无首链 token）WS 被拒 → onclose 回 token 门。REVIEW 模式仍要求 URL 带 token。
@@ -11482,6 +11650,10 @@ function setViewportAdapter(a) { stageSyncFn = a.syncStage }
 
 function setGateAwait(v) { gateAwait = v }
 function setGateVerified(v) { gateVerified = v }
+function forceWsReconnect() {
+  clearTimeout(reconnectTimer)
+  if (gws) { try { gws.close() } catch { /* 已断忽略 */ } }
+}
 function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMention = p.mention }
   // ---------- 选中引用（quote）----------
   // 两个来源：① #work-editor（只读编辑区，引用**文件 + 行范围**）② #chat-scroll（消息流，引用**会话锚点 + 原文**）。
@@ -11510,9 +11682,6 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
   let quoteSkipNextUp = false // 「点浮窗外关窗」的那一下 mousedown 已消费：紧随的 mouseup 不得重开
 
   // ---------- 1. 选区 → 快照 ----------
-  function quoteBase(p) {
-    return String(p || '').split('/').pop()
-  }
   // 编辑区行号唯一来源 = CodeMirror 文档：整篇恒渲染为编辑器（无渲染 DOM 行锚、无 textarea），
   // Range 端点经 posAtDOM 反查源行号（sidebar/work.js wkEdQuoteLines，同处一个 IIFE 作用域可直接按名调用）。
   // 拿不到 → null（令牌退化为纯路径，不编造行号）。
@@ -11554,41 +11723,21 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
   }
 
   // ---------- 2. 引用胶囊（输入栏内）----------
-  // 复用 .mention 类：× 删除与退格删除由 ctx-meter.js 的既有委托按 .mention 统一处理，勿另写一套。
+  // CM6 接管（2026-10-14 #17 B 口径）：胶囊 = 引用令牌（refToken）进 doc 的原子装饰视图。
+  // 序列化即 doc 原文——「回复/PDF 原文块进消息」的语义由令牌块自身承载（不再藏 dataset）。
   function insertRefChip(snap) {
-    const chip = document.createElement('span')
-    chip.className = 'mention ref'
-    chip.contentEditable = 'false'
-    chip.dataset.kind = 'ref'
-    chip.dataset.rkind = snap.kind
-    let inner
-    if (snap.kind === 'pdf') {
-      // PDF 引用（2026-09-28）：位置 = 路径 + 页码（跨页 s-e）。**原文必须进消息**（PDF 定位不精确、
-      // 大 PDF 必须给页码提示、选中原文才是要引用的 payload）⇒ dataset.quote 与回复引用同款带上。
-      chip.dataset.file = snap.file
-      chip.dataset.proj = snap.proj || ''
-      chip.dataset.quote = snap.text
-      if (snap.p0) { chip.dataset.p0 = String(snap.p0); if (snap.p1) chip.dataset.p1 = String(snap.p1) }
-      const pages = snap.p0 ? ' · 第 ' + snap.p0 + (snap.p1 && snap.p1 !== snap.p0 ? '-' + snap.p1 : '') + ' 页' : ''
-      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}${pages}</span>`
-    } else if (snap.kind === 'file') {
-      chip.dataset.file = snap.file
-      chip.dataset.proj = snap.proj || ''
-      if (snap.l0) { chip.dataset.l0 = String(snap.l0); chip.dataset.l1 = String(snap.l1) }
-      inner = `<span class="m-ic">${I.dshFile}</span><span class="m-nm">引用自 ${esc(quoteBase(snap.file))}</span>`
-    } else {
-      chip.dataset.quote = snap.text
-      chip.dataset.title = snap.title || '本会话'
-      chip.dataset.idx = String(snap.idx || 0)
-      inner = `<span class="m-ic">${I.msg}</span><span class="m-nm">引用自「${esc(snap.title || '本会话')}」· 第 ${snap.idx} 条回复</span>`
-    }
-    chip.innerHTML = inner + '<span class="m-x" title="删除">×</span>'
-    // 追加到输入栏末尾：与 @ chip 一样前后各留一个 nbsp 作分隔（序列化时还原成空格）
-    inputEl.appendChild(document.createTextNode('\u00A0'))
-    inputEl.appendChild(chip)
-    inputEl.appendChild(document.createTextNode('\u00A0'))
+    composerAppendRef(refToken({
+      rkind: snap.kind,
+      file: snap.file,
+      proj: snap.proj || '',
+      quote: snap.text,
+      p0: snap.p0, p1: snap.p1,
+      l0: snap.l0, l1: snap.l1,
+      title: snap.title,
+      idx: snap.idx,
+    }))
     syncGwSend()
-    return chip
+    return null
   }
 
   // ---------- 3. 浮窗 ----------
@@ -11601,33 +11750,18 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
     if (!snap) return
     const note = (quotePop.querySelector('.qp-in').value || '').trim()
     insertRefChip(snap)
-    if (note) {
-      inputEl.appendChild(document.createTextNode(' '))
-      inputEl.appendChild(document.createTextNode(note))
-    }
+    if (note) composerAppendText(note)
     closeQuotePop()
-    inputEl.focus()
+    composerFocus()
     await gwSend()
   }
   // 只入输入栏（「使用 AI 编辑」行 / 触屏选中栏同款语义）：不发送，关浮窗把焦点交还输入栏，
-  // **光标落在胶囊之后**（用户 2026-09-28 定案：接着打字就是给这条引用的说明，光标不该留在胶囊前面）。
+  // **光标落在胶囊之后**（composerAppendRef 已落块尾；用户 2026-09-28 定案：接着打字就是给这条引用的说明）。
   function quoteStash(snap) {
     if (!snap) return
-    const chip = insertRefChip(snap)
+    insertRefChip(snap)
     closeQuotePop()
-    inputEl.focus()
-    caretAfter(chip)
-  }
-  // 折叠光标到 node 之后（与 mention.js insertMention 落光标同一手法）
-  function caretAfter(node) {
-    if (!node || !node.parentNode) return
-    const sel = window.getSelection()
-    if (!sel) return
-    const r = document.createRange()
-    r.setStartAfter(node)
-    r.collapse(true)
-    sel.removeAllRanges()
-    sel.addRange(r)
+    composerFocus()
   }
   // 动作行 = 内置（「使用 AI 编辑」）+ 当前项目申报行**合流**（2026-09-28）。外部只能**追加**——
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
@@ -12100,7 +12234,7 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
     initWork()
     route()
     if (GATEWAY) initGateway()
-    else { inputEl.contentEditable = 'false'; inputEl.dataset.ph = '只读查看 · 无法发送' } // 只读查看器：输入不可编辑
+    else { composerSetEditable(false); composerPlaceholder('只读查看 · 无法发送') } // 只读查看器：输入不可编辑
     if (HOT_RELOAD) {
       // 开发审阅热重载：server.mjs HOT_RELOAD=1 时，public/ 文件变化经 SSE 通知 → 自动刷新
       const hr = new EventSource('/gateway/hotreload')

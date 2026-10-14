@@ -1,7 +1,9 @@
-// .canvas 文件（JSON Canvas 1.0，Obsidian 同格式）的图形预览：wkEdLangExt 对 .canvas 扩展名注入
+// .canvas 文件（JSON Canvas 1.0，Obsidian 同格式）的图形预览+编辑：wkEdLangExt 对 .canvas 扩展名注入
 // wkCvExt —— 默认把整篇文档替换为 SVG 画布（群组/边/节点 + 点阵网格 + 平移/缩放），画布顶栏「编辑源码」
-// 切回 JSON（带高亮、可正常自动保存）；源码态文档首行挂「图形预览」钮切回画布。渲染零依赖（SVG 自绘，
-// 无外网 CDN）；canvas 自定色用内联 rgba（Safari 对 SVG 内 color-mix 支持不稳），项目令牌色走 class。
+// 切回 JSON（带高亮、可正常自动保存）；源码态文档首行挂「图形预览」钮切回画布。图形编辑（2026-10-14
+// 待办#2 补缺）：节点/组拖动改坐标、双击改文字，写入=原样改写源 JSON（保留未识别字段）dispatch 回
+// 编辑器文档走既有自动保存链。渲染零依赖（SVG 自绘，无外网 CDN）；canvas 自定色用内联 rgba（Safari
+// 对 SVG 内 color-mix 支持不稳），项目令牌色走 class。
 /* @module sidebar/work/work-canvas.js */
 
   // ---------- JSON Canvas 解析 ----------
@@ -86,12 +88,19 @@
     if (side === 'bottom') return [n.x + n.w / 2, n.y + n.h]
     return null
   }
-  // 连线几何：端点锚（缺省按两节点相对方位取最近侧）+ 三次贝塞尔控制点 + t=0.5 中点（放 label）。
+  // 连线几何：端点锚（缺省按两节点中心连线的主轴取最近侧——水平位移为主取左/右，竖直为主取上/
+  // 下；旧实现恒按水平取侧，上下堆叠的节点连线会从侧腰横着出去再拐弯，方向观感即「不对」）
+  // + 三次贝塞尔控制点 + t=0.5 中点（放 label）。fromSide/toSide 显式声明时仍按声明取锚（spec 语义）。
+  function wkCvDefaultAnchor(n, tx, ty) {
+    const cx = n.x + n.w / 2, cy = n.y + n.h / 2
+    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) return tx < cx ? [n.x, cy] : [n.x + n.w, cy]
+    return ty < cy ? [cx, n.y] : [cx, n.y + n.h]
+  }
   function wkCvEdgeGeom(e) {
     let a = wkCvAnchor(e.from, e.fs)
-    if (!a) a = e.to.x + e.to.w / 2 < e.from.x ? [e.from.x, e.from.y + e.from.h / 2] : [e.from.x + e.from.w, e.from.y + e.from.h / 2]
+    if (!a) a = wkCvDefaultAnchor(e.from, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
     let b = wkCvAnchor(e.to, e.ts)
-    if (!b) b = e.to.x > e.from.x + e.from.w / 2 ? [e.to.x, e.to.y + e.to.h / 2] : [e.to.x + e.to.w, e.to.y + e.to.h / 2]
+    if (!b) b = wkCvDefaultAnchor(e.to, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
     const dx = b[0] - a[0], dy = b[1] - a[1]
     const horiz = Math.abs(dx) >= Math.abs(dy)
     const d = horiz
@@ -108,6 +117,105 @@
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
     for (const k in attrs) el.setAttribute(k, attrs[k])
     return el
+  }
+
+  // ---------- 图形编辑（节点/组拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回
+  // 编辑器文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
+  // dispatch 触发 widget 重建不丢视口。拖动过程只做视觉位移，pointerup 才一次性写文档（一次手势 =
+  // 一次编辑 = 一条撤销步）。连线端点随拖动的跟随要等重建（重建后按新坐标重画），拖动中不实时跟。 ----------
+  function wkCvWriteDoc(view, j) {
+    try {
+      const text = JSON.stringify(j, null, 2) + '\n'
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+    } catch { /* 编辑器已销毁（切文件竞速）：丢弃本次手势 */ }
+  }
+  function wkCvRawNode(raw, id) {
+    return (Array.isArray(raw && raw.nodes) ? raw.nodes : []).find((x) => x && x.id === id) || null
+  }
+  function wkCvBindEdit(view, root, data, raw, gElById) {
+    for (const n of data.nodes) {
+      const gEl = gElById.get(n.id)
+      if (!gEl) continue
+      gEl.classList.add(n.type === 'group' ? 'wk-cv-drag-grp' : 'wk-cv-drag-node')
+      // 拖动（左键/单指）：拖组 = 组框 + 组内节点（中心落在组框内）一起平移，对齐 Obsidian 语义。
+      gEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return
+        e.stopPropagation() // 不进 pan
+        const moved = [n]
+        if (n.type === 'group') {
+          for (const m of data.nodes) {
+            if (m === n || m.type === 'group') continue
+            const cx = m.x + m.w / 2, cy = m.y + m.h / 2
+            if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
+          }
+        }
+        const sx = e.clientX, sy = e.clientY
+        let dx = 0, dy = 0
+        root.classList.add('wk-cv-dragging')
+        try { gEl.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
+        const move = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          dx = (ev.clientX - sx) / wkCvCam.k
+          dy = (ev.clientY - sy) / wkCvCam.k
+          for (const m of moved) {
+            const el = gElById.get(m.id)
+            if (el) el.setAttribute('transform', `translate(${dx},${dy})`)
+          }
+        }
+        const finish = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          gEl.removeEventListener('pointermove', move)
+          gEl.removeEventListener('pointerup', finish)
+          gEl.removeEventListener('pointercancel', cancel)
+          root.classList.remove('wk-cv-dragging')
+          if (!dx && !dy) return
+          for (const m of moved) {
+            const r = wkCvRawNode(raw, m.id)
+            if (!r) continue
+            r.x = Math.round((Number(r.x) || 0) + dx)
+            r.y = Math.round((Number(r.y) || 0) + dy)
+            m.x += dx
+            m.y += dy
+            const el = gElById.get(m.id)
+            if (el) el.removeAttribute('transform')
+          }
+          wkCvWriteDoc(view, raw)
+        }
+        const cancel = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          gEl.removeEventListener('pointermove', move)
+          gEl.removeEventListener('pointerup', finish)
+          gEl.removeEventListener('pointercancel', cancel)
+          root.classList.remove('wk-cv-dragging')
+          for (const m of moved) {
+            const el = gElById.get(m.id)
+            if (el) el.removeAttribute('transform')
+          }
+        }
+        gEl.addEventListener('pointermove', move)
+        gEl.addEventListener('pointerup', finish)
+        gEl.addEventListener('pointercancel', cancel)
+      })
+      // 双击改文字：节点改 text/file/url（按源里已有的字段写回，不新增键）；组改 label。
+      gEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation()
+        const r = wkCvRawNode(raw, n.id)
+        if (!r) return
+        if (n.type === 'group') {
+          const v = window.prompt('组名称', n.label || '')
+          if (v === null) return
+          r.label = v
+          n.label = v
+        } else {
+          const key = typeof r.text === 'string' ? 'text' : typeof r.file === 'string' ? 'file' : typeof r.url === 'string' ? 'url' : 'text'
+          const v = window.prompt('节点文字', n.text || '')
+          if (v === null) return
+          r[key] = v
+          n.text = v
+        }
+        wkCvWriteDoc(view, raw)
+      })
+    }
   }
 
   // ---------- 画布 widget（decoField 的 block replace 宿主；跨行 replace 只允许走 StateField） ----------
@@ -198,22 +306,30 @@
           edgesG.appendChild(t)
         }
       }
-      // 节点：群组先画（z 序垫底），其余按数组序
+      // 节点：群组先画（z 序垫底），其余按数组序。图形编辑（2026-10-14 待办#2 补缺）：节点/组可拖动
+      // 改坐标、双击改文字，落点 = 原样改写源 JSON（保留未识别字段）并 dispatch 回编辑器文档
+      // （走既有自动保存链落盘）。raw = JSON.parse 原文（渲染用 normalized 副本，写入用 raw 保字段）；
+      // 能走到此处 = wkCvParse 已验证 JSON 合法（坏 JSON 在 err 分支早退），此处解析不设防。
+      const raw = JSON.parse(this.text)
       const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
       const XHTML = 'http://www.w3.org/1999/xhtml'
+      const gElById = new Map()
       for (const n of ordered) {
         const gEl = wkCvEl('g', { class: 'wk-cv-node' + (n.type === 'group' ? ' wk-cv-group' : '') })
-        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 8, class: 'wk-cv-box' })
+        gElById.set(n.id, gEl)
+        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: n.type === 'group' ? 10 : 8, class: 'wk-cv-box' })
         if (n.color) {
-          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.1 : 0.16)
+          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.08 : 0.16)
           rect.style.stroke = wkCvRgba(n.color, 0.65)
         }
         if (n.type === 'group') rect.setAttribute('stroke-dasharray', '5 4')
         gEl.appendChild(rect)
         if (n.type === 'group') {
           if (n.label) {
-            const t = wkCvEl('text', { x: n.x + 10, y: n.y + 18, class: 'wk-cv-glabel' })
+            // 组名按 Obsidian 惯例放框外顶上（旧实现塞框内第一行，与节点正文争空间 =「组的 UI 不好」）
+            const t = wkCvEl('text', { x: n.x + 2, y: n.y - 8, class: 'wk-cv-glabel' })
             t.textContent = n.label
+            if (n.color) t.style.fill = wkCvRgba(n.color, 0.95)
             gEl.appendChild(t)
           }
         } else {
@@ -226,6 +342,7 @@
         }
         nodesG.appendChild(gEl)
       }
+      if (raw) wkCvBindEdit(view, root, data, raw, gElById)
       // 相机：未 fit 过（新文件）→ 包围盒适配；否则保留上次的平移缩放
       if (!wkCvCam.fit) {
         const sc = view.dom.querySelector('.cm-scroller')

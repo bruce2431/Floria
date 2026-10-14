@@ -38,10 +38,16 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  let wkTab = 'files'      // 'files' | 'chat'
+  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图，2026-10-14 待办 9）
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
+  // 工作区 tab 状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
+  // 重型目录、每层 ≤50）。path 相对工作区根，'' = 根。entries null = 未加载。纯运行时，不持久化。
+  let wkWsPath = ''
+  let wkWsEntries = null
+  let wkWsLoading = false
+  let wkWsErr = ''
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
   let edSeq = 0            // 编辑区读取序号：快速连点文件时丢弃迟到的旧响应
 

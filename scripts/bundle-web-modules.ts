@@ -119,6 +119,7 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'engine/auth.js', part: 3 },
   { file: 'inputbar/images.js', part: 1 },
   { file: 'inputbar/send.js', part: 1 },
+  { file: 'inputbar/md-preview.js', part: 1 },
   // 键盘适配（engine/viewport.js）须在启动序列之前（initViewport 调用时模块顶层 let 已初始化）。
   { file: 'engine/viewport.js', part: 1 },
   { file: 'engine/gateway.js', part: 4 },

@@ -16,15 +16,14 @@ import { renderList, renderProject } from './mgr.js'
   // ---------- 侧栏 ----------
   // 开合唯一入口。opt.pin 只在打开时有意义：钉住 = 鼠标移出侧栏不自动收（汉堡/抽屉把手点击），
   // 不钉 = 预览式（左缘悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
-  // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
-  // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
+  // 钉住态挂 state.panelPinned（跨模块真源）。pin 可由 menu-btn/panel-collapse/scrim 任一处翻转。
   function setPanel(open, opt) {
     applyPanelOpen(open, !!(opt && opt.pin)) // 状态落地唯一核（engine/panel.js）：钉住态 + 可见态 + #sidebar.open + 调宽复位
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
     if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
-    syncPaneRows() // work 视图浮层的「侧边栏」行随钉住态刷新（悬停唤出不改 pin ⇒ 行状态不动）
+    // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链删除）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
   // 侧栏折叠时宽度 0，本事件不会触发。行浮窗挂在 #sidebar 内（见 openRowMenu），指针移到浮窗上
@@ -399,12 +398,16 @@ import { renderList, renderProject } from './mgr.js'
   // 表单壳（标题/占位/初值/校验/错误回显），提交语义由调用方以 onSubmit 注入——会话重命名走
   // POST /gateway/session/rename（网关 append custom-title，已停止会话同样生效），文件重命名走
   // POST /gateway/file/rename（work.js 注册），两者共用同一对话框实例，不各建一套弹窗。
-  let renameTarget = null // { heading, placeholder, okText, onSubmit }
+  let renameTarget = null // { heading, placeholder, okText, onSubmit, exts?, defaultExt? }
   const renameModal = $('rename-modal')
   const renameInput = $('rename-input')
   const renameErr = $('rename-error')
   const renameTitle = renameModal.querySelector('.title')
   const renameOk = $('rename-ok')
+  // 新建文件格式行（2026-10-14 待办#1）：opt.exts 提供扩展名清单才显示；确认时未自带扩展名的名字
+  // 拼入选中扩展名（自带 .xx 的名字尊重用户原样，不再追加）。onSubmit 收 (name, ext)。
+  const renameExtRow = $('rename-ext-row')
+  const renameExtSel = $('rename-ext')
   function openRenameDialog(opt) {
     renameTarget = opt
     renameTitle.textContent = opt.heading || '重命名'
@@ -412,6 +415,13 @@ import { renderList, renderProject } from './mgr.js'
     renameOk.textContent = opt.okText || '重命名'
     renameInput.value = opt.value || ''
     renameErr.hidden = true
+    if (Array.isArray(opt.exts) && opt.exts.length) {
+      renameExtSel.innerHTML = opt.exts.map((e) => `<option value="${esc(e)}"${e === opt.defaultExt ? ' selected' : ''}>${esc(e || '（无扩展名）')}</option>`).join('')
+      renameExtRow.hidden = false
+    } else {
+      renameExtSel.innerHTML = ''
+      renameExtRow.hidden = true
+    }
     renameModal.hidden = false
     renameInput.focus()
     renameInput.select()
@@ -422,14 +432,19 @@ import { renderList, renderProject } from './mgr.js'
   }
   async function confirmRename() {
     if (!renameTarget) return
-    const value = renameInput.value.trim()
+    let value = renameInput.value.trim()
     if (!value) {
       renameErr.textContent = '名称不能为空'
       renameErr.hidden = false
       return
     }
+    let ext = ''
+    if (!renameExtRow.hidden) {
+      ext = renameExtSel.value
+      if (ext && !/\.[A-Za-z0-9]+$/.test(value)) value += ext
+    }
     try {
-      await renameTarget.onSubmit(value)
+      await renameTarget.onSubmit(value, ext)
       closeRenameDialog()
     } catch (e) {
       renameErr.textContent = e.message || String(e)

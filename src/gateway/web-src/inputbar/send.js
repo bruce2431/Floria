@@ -132,6 +132,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
     setBtnMode(turnLive && !hasContent ? 'stop' : 'send')
     const on = turnLive || (GATEWAY && gws && gws.readyState === 1 && hasContent)
     sendBtn.classList.toggle('enabled', on)
+    mdPreviewRefresh() // md 实时预览（待办 17）：输入变化全汇到 syncGwSend 这一口，开着就跟着重渲
   }
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型

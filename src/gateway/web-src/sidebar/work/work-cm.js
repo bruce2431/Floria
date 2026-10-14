@@ -67,8 +67,9 @@
       doc: '',
       extensions: [
         CM.history(),
-        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap]),
+        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap]),
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
+        CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
         CM.editorTheme,
         wkEdThemeSpec(CM),
@@ -184,6 +185,109 @@
   function wkEdSetLang(path) {
     if (!wkEdView) return
     wkEdView.dispatch({ effects: wkEdLangComp.reconfigure(wkEdLangExt(path)) })
+  }
+
+  // ---------- 补全（2026-10-14：Pj18 转派待办 6，VSCode 式自动补全）----------
+  // 一个 override 源三分支：①路径补全（md 链接/引用、任何文件里 ]( / [[ / @ / 引号 / 圆括号 之后或
+  // 词含 / 时）——数据 = GET /gateway/fs（与 @ 浮窗同源，path = <label>/<目录>），逐目录缓存、写盘成功
+  // 即整体失效（新文件要能被补出）；②md 语法片段（触发词 h1/h2/bold/link/table/… → snippet）；③
+  // 代码/纯文本的文档内词补全（≥3 字母 token）。补全 UI（弹层/键位）由 vendor 的 autocompletion +
+  // completionKeymap 提供，样式见 styles.css「.cm-tooltip-autocomplete」段。
+  let wkEdPathCache = new Map()
+  let wkEdPathCacheProj = '' // 缓存按项目隔离（切项目即整表作废）
+  function wkEdInvalidatePathCache() {
+    wkEdPathCache = new Map()
+  }
+  async function wkEdListDir(dir) {
+    const proj = state.workProj
+    if (!proj) return []
+    if (wkEdPathCacheProj !== proj) { wkEdPathCacheProj = proj; wkEdPathCache = new Map() }
+    const key = dir || ''
+    if (wkEdPathCache.has(key)) return wkEdPathCache.get(key)
+    try {
+      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(proj + (dir ? '/' + dir : ''))))
+      const data = await res.json()
+      const entries = res.ok && Array.isArray(data.entries)
+        ? data.entries.map((e2) => ({ name: String(e2.name), dir: e2.type === 'dir' }))
+        : []
+      wkEdPathCache.set(key, entries)
+      return entries
+    } catch (e) {
+      return [] // 失败不缓存：下次再拉（目录可能又可用了）
+    }
+  }
+  // md 语法片段表：触发词 → snippet 模板（$0/$1 为光标/占位跳点，与 VSCode 同语法）。
+  const WK_ED_MD_SNIPPETS = [
+    { label: 'h1', detail: '一级标题', apply: '# $0' },
+    { label: 'h2', detail: '二级标题', apply: '## $0' },
+    { label: 'h3', detail: '三级标题', apply: '### $0' },
+    { label: 'bold', detail: '粗体', apply: '**$0**' },
+    { label: 'italic', detail: '斜体', apply: '*$0*' },
+    { label: 'code', detail: '行内代码', apply: '`$0`' },
+    { label: 'link', detail: '链接', apply: '[$1]($0)' },
+    { label: 'img', detail: '图片', apply: '![$1]($0)' },
+    { label: 'task', detail: '任务列表', apply: '- [ ] $0' },
+    { label: 'quote', detail: '引用块', apply: '> $0' },
+    { label: 'hr', detail: '分隔线', apply: '---' },
+    { label: 'fence', detail: '代码围栏', apply: '```\n$0\n```' },
+    { label: 'table', detail: '表格', apply: '| 列1 | 列2 |\n| --- | --- |\n| $0 |  |' },
+  ]
+  function wkEdCompletionSource(ctx) {
+    const CM = wkEdCM
+    if (!CM || !wkEdFile || !wkEdMeta || !wkEdMeta.editable) return null
+    const line = ctx.state.doc.lineAt(ctx.pos)
+    const before = line.text.slice(0, ctx.pos - line.from)
+    // ① 路径补全：显式触发符（[[ / ]( / @ / 引号 / 圆括号）后，或词本身含 /
+    const pm = /(?:\[\[|\]\(|@|["'(])((?:[\w.\-]+\/)*[\w.\-]*)$/.exec(before)
+    const wm = ctx.matchBefore(/[\w.\-/]+/)
+    if (pm || (wm && wm.text.includes('/'))) {
+      const frag = (pm ? pm[1] : wm.text).replace(/\\/g, '/')
+      const slash = frag.lastIndexOf('/')
+      const dir = slash >= 0 ? frag.slice(0, slash) : ''
+      const name = slash >= 0 ? frag.slice(slash + 1) : frag
+      const from = ctx.pos - name.length
+      const ql = name.toLowerCase()
+      return wkEdListDir(dir).then((entries) => ({
+        from,
+        options: entries
+          .filter((e2) => !ql || e2.name.toLowerCase().includes(ql))
+          .slice(0, 30)
+          .map((e2) => ({ label: e2.name, type: e2.dir ? 'directory' : 'file', apply: e2.name + (e2.dir ? '/' : '') })),
+        validFor: /^[\w.\-/]*$/,
+      }))
+    }
+    const extM = /\.([a-z0-9]+)$/i.exec(wkEdFile)
+    const ext = extM ? extM[1].toLowerCase() : ''
+    const isMd = /^(md|markdown)$/.test(ext)
+    // ② md 语法片段：行首（可带少量块前缀字符）后跟字母触发词
+    if (isMd) {
+      const sm = /^[ \t]*(?:[-*+>]|\d+\.|#{1,6})?[ \t]*([A-Za-z]{1,8})$/.exec(before)
+      if (sm) {
+        const ql = sm[1].toLowerCase()
+        const hits = WK_ED_MD_SNIPPETS.filter((s) => s.label.startsWith(ql))
+        if (hits.length) {
+          return {
+            from: ctx.pos - sm[1].length,
+            options: hits.map((s) => ({ label: s.label, detail: s.detail, type: 'keyword', apply: CM.snippet(s.apply) })),
+            validFor: /^[A-Za-z]*$/,
+          }
+        }
+      }
+      return null
+    }
+    // ③ 文档内词补全（代码 / 纯文本）：≥3 字母 token，排除正在输入的词本身
+    const wm2 = ctx.matchBefore(/[A-Za-z_$][\w$]*/)
+    if (!wm2 || wm2.text.length < 2) return null
+    const seen = new Set()
+    const cur = wm2.text
+    const text = ctx.state.doc.toString()
+    const re = /[A-Za-z_$][\w$]{2,}/g
+    let m
+    while ((m = re.exec(text)) && seen.size < 500) {
+      if (m[0] !== cur && !seen.has(m[0])) seen.add(m[0])
+    }
+    const options = [...seen].slice(0, 200).map((w) => ({ label: w, type: 'text' }))
+    return { from: wm2.from, options, validFor: /^[\w$]*$/ }
   }
 
   // 本项目主题：用项目 CSS 变量（--text/--bg/--mono），日夜切换自动随动（不重建）。

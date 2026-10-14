@@ -39,18 +39,20 @@
     return !!state.panelPinned
   }
 
-  // 视图浮层行状态落地（唯一处）：本模块 applyPanes 与 recent.js setPanel（钉住态可被汉堡/收起钮/
-  // 遮罩任一处翻转）两处调用。
-  function syncPaneRows() {
-    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
-  }
+  // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链随之删除——侧栏开关回归汉堡/收起钮直管）
 
   // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
   // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
   // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
   function applySidebarPin() {
     if (isMobile()) return
-    setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
+    if (state.panelPinned) return setPanel(true, { pin: true })
+    // 待办#4（2026-10-14）：模式切换（chat⇄work）/ work 下切项目都走本函数落地侧栏开合；若此刻
+    // 鼠标正悬在侧栏区域内（用户刚在侧栏里点了模式钮/项目行），不因槽里的开关值收起——以
+    // :hover 几何判定为准保持展开（悬停预览态，不置 pin），移出仍由 recent.js 的 #sidebar
+    // mouseleave 收。判定用 matches(':hover') 而非事件标志：零状态、无漂移，切换瞬间即准。
+    if ($('sidebar').matches(':hover')) return setPanel(true)
+    setPanel(false)
   }
 
   // 下沉区当前显示的内容（唯一判定）：助手靠栏时按 wkMainTab（要看文件且确有文件才给 file，
@@ -71,7 +73,14 @@
     const s = findSession(key)
     return (s && s.title) || '未命名会话'
   }
-  function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 并入守卫（2026-10-14 待办 14）：开放集不变量 = 只含当前工作项目的会话（或 new 哨兵）。
+  // route.js 在 renderSession 的 enforceWorkScope 弹回**之前**就调 syncWorkTabs 并入外项目 hash，
+  // 不守此口则外项目/全局会话胶囊先入集并被持久化（弹回也残留，顶栏串入他项目会话）。
+  // workScopeOk 查无此会话（列表未拉/刷新窗口）不判——「未知」≠「别的项目」，与 enforceWorkScope 同判据。
+  function wkEnsureTab(key) {
+    if (key !== WK_NEW_TAB && !workScopeOk(key)) return
+    if (!state.wkChats.includes(key)) state.wkChats.push(key)
+  }
   // 打开的**文件** tab 开放集（与聊天胶囊同构，2026-10-12）：真源 state.wkFiles（项目内相对路径），
   // 激活项 = 单值 state.workFile。并入唯一口在此（applyPanes 按当前 workFile 兜底 ⇒ 刷新恢复的
   // workFile 也有一枚 pill）；移除/切换在 work-editor.js closeWkFile（要 flush 编辑器，故不在此）。
@@ -109,6 +118,12 @@
       const i = state.wkChats.indexOf(WK_NEW_TAB)
       if (i >= 0) state.wkChats.splice(i, 1)
     }
+    // 自愈清剿（2026-10-14 待办 14）：历史污染的外项目条目（旧版无并入守卫时入集并被持久化）
+    // 在已知归属时一律移除，开放集回归「仅当前工作项目」不变量；查无此会话（未知）不判。
+    for (let i = state.wkChats.length - 1; i >= 0; i--) {
+      const k = state.wkChats[i]
+      if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
+    }
     wkEnsureTab(key)
     wkPrevActiveKey = key
     renderTopbar()
@@ -129,7 +144,9 @@
         state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      // 占位新对话 tab 只在**聊天 tab 正被显示**时并入（2026-10-14 待办 16）：文件 tab 在场时并入会
+      // 把「打开文件顶掉占位」的摘除立即加回来。不变量 = 占位「新对话」胶囊存在 ⇔ 新对话正被显示。
+      if (state.wkAssist && wkShownTab() === 'chat') wkEnsureTab(wkActiveKey())
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')
@@ -138,7 +155,6 @@
     } else {
       chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
-    syncPaneRows()
     applyWorkCols()
     renderTopbar()
     applyPvTab()

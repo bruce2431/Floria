@@ -52,11 +52,15 @@
       if (state.workFile === p || state.workFile.startsWith(p + '/')) state.workFile = ''
       for (const k of [...wkOpen]) if (k === p || k.startsWith(p + '/')) wkOpen.delete(k)
       saveWork()
-      await loadProjectTree(state.workProj)
-      renderEditor()
+      // 增量更新（2026-10-14 待办 12）：后端已确认成功，先就地从内存树摘掉该节点重渲（不闪整树、
+      // 不置加载态），再后台静默对账一次（HTML 比对，内容一致零写 DOM）。不走非静默 loadProjectTree
+      // ——那会把 wkTree 清成「加载中…」整树重建，即用户报的「强制刷新」。
+      wkTreeRemove(p)
       renderWorkBody()
+      renderEditor()
       applyPanes() // 删掉当前打开的文件 → 文件 tab 退场、下沉格切回聊天/空
       toast('已移入 ' + data.trash)
+      loadProjectTree(state.workProj, true)
     } catch (e) {
       toast('删除失败：' + (e.message || e))
     }
@@ -71,7 +75,7 @@
         el.dataset.wkfile
           ? [
               { a: 'rename', icon: I.dshEdit, label: '重命名' },
-              { a: 'download', label: '下载' },
+              { a: 'download', icon: I.dshDownload, label: '下载' },
               { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
             ]
           : el.dataset.wkdir

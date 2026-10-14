@@ -2239,6 +2239,11 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   font-size: 14px; line-height: 22px; color: var(--ink);
 }
 #rename-modal .rename-input:focus { border-color: var(--ink-3); }
+/* 新建文件格式行（2026-10-14 待办#1）：格式标签 + 扩展名下拉，仅 exts 传入时显示 */
+#rename-modal .rename-ext-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+#rename-modal .rename-ext-row[hidden] { display: none; }
+#rename-modal .rename-ext-label { flex: none; font-size: 12px; color: var(--ink-3); }
+#rename-modal .rename-ext-row .rename-input { height: 38px; border-radius: 19px; }
 #rename-modal .rename-error {
   margin-top: 8px; font-size: 12px; line-height: 18px; color: #ec1313;
 }
@@ -2380,18 +2385,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wkn-row { display: block; width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
 .wkn-row:hover { background: var(--hover); }
 
-/* 视图开关浮层（2026-10-10）：DOM 随 #app 直下（不再挂 .panel-actions——侧栏折叠时会连浮层一并裁掉），
-   left/top 由 work-mount.js 的 positionWkViewPop 按「当前在场的触发器」（#wk-view / 汉堡 #menu-btn）现写，
-   故此处不再写死 right/top。基类 .popup 已给 position:absolute（含块 = #app, position:relative）。 */
-#wk-view-pop { width: 186px; padding: 8px; }
-.wkv-title { font-size: 12px; color: var(--text-3); padding: 2px 6px 6px; }
-.wkv-row { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--text); text-align: left; }
-.wkv-row:hover { background: var(--hover); }
-.wkv-sw { flex: none; width: 30px; height: 17px; border-radius: 999px; background: var(--border); position: relative; transition: background 0.15s; }
-.wkv-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: var(--knob); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); transition: transform 0.15s; }
-.wkv-row.on .wkv-sw { background: var(--blue); }
-.wkv-row.on .wkv-sw::after { transform: translateX(13px); }
-
 .wk-body { flex: 1; overflow-y: auto; padding: 2px 8px 12px; }
 /* 空态/加载态文案用 --text-2：--text-3(#c4c4c9) 在白底浮层上肉眼等同空白，
    2026-09-25「下拉纯空白」实报的次因——失败必须看得见 */
@@ -2410,6 +2403,8 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-fic svg { width: 15px; height: 15px; display: block; }
 .wk-row.dir .wk-name { font-weight: 600; }
 .wk-row.dir svg { color: var(--text-2); }
+/* 拖拽移动（2026-10-14 待办 10）落点高亮：目录行被悬停可落 / 树空白（#wk-body 本体）＝项目根可落 */
+.wk-row.wk-dnd, #wk-body.wk-dnd { outline: 1.5px dashed var(--accent, var(--text-2)); outline-offset: -1.5px; border-radius: 7px; background: var(--hover); }
 /* 长按扶起（触屏唤出文件行操作浮窗）：与 .sess-item.lift 同一份外观，宽度不动（文件树是缩进层级，
    拉宽会盖住右侧栏位）——.lift 只负责脱出 #wk-body 的 overflow 裁剪并浮到浮窗之下。 */
 .wk-row.lift {
@@ -2459,6 +2454,13 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #chat-area.work > .wk-topbar {
   margin: 2px 2px 0;
 }
+/* 键盘在场（2026-10-14 待办#8 根修，iPad work 编辑「文本在屏外滑不到」）：app 刚性板上移 --kb 后
+   app 顶部有 --kb-total 高的条带落到屏外（键盘节口径）。chat 消息流由 #chat-scroll margin-top
+   让位；work 下沉区此前后不消费 ⇒ 编辑器盒（grid row2）顶部延伸进屏外带，光标上方的文本永远在
+   屏幕外且 .cm-scroller 内部滚动够不着。修法同口径：顶栏格加高 --kb-total，把内容格（row2,
+   minmax(0,1fr)）整体压回可视窗内——编辑器盒恒可见，光标行由 .cm-scroller 内部滚动自然可达。
+   手机 ≤720 单列 flex 同样吃这条（顶栏 margin 撑高、编辑器 flex 收缩），一式两用。 */
+body.kb-open #chat-area.work > .wk-topbar { margin-top: calc(var(--kb-total, 0px) + 2px); }
 /* 上半区渐隐板（2026-10-09，镜像 #composer-mask）：贴在**内容格顶部**（标签页 tab 条正下方），
    使卡内内容滚到顶栏下沿时自然淡出。底栏板贴卡底、本板贴卡顶——方向镜像。
    高度定 18px：前 9px 实心盖住卡顶 padding，其下 9px 为渐隐区。
@@ -2836,8 +2838,48 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-cv-arrow { fill: var(--text-3); }
 .wk-cv-edge { stroke: var(--text-3); stroke-width: 1.5; }
 .wk-cv-elabel { font-size: 11px; fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.wk-cv-glabel { font-size: 12px; font-weight: 600; fill: var(--text-2); }
+.wk-cv-glabel { font-size: 12px; font-weight: 600; fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
 .wk-cv-box { fill: transparent; stroke: var(--border); }
+/* 图形编辑（2026-10-14 待办#2）：节点/组可拖动（grab），拖动中 grabbing；文本框禁原生选择防与拖动抢手势 */
+.wk-cv-drag-node, .wk-cv-drag-grp { cursor: grab; }
+.wk-cv-drag-node .wk-cv-text, .wk-cv-drag-grp .wk-cv-text { user-select: none; -webkit-user-select: none; }
+.wk-cv-dragging, .wk-cv-dragging .wk-cv-drag-node, .wk-cv-dragging .wk-cv-drag-grp { cursor: grabbing; }
+/* PDF 预览（2026-10-14 待办#15）：编辑区内嵌浏览器自带 viewer，撑满编辑区 */
+.wk-ed-pdf { width: 100%; height: 100%; min-height: 320px; display: flex; }
+.wk-ed-pdf iframe { flex: 1; width: 100%; height: 100%; border: 0; border-radius: 10px; background: var(--bg); }
 .wk-cv-text { color: var(--text); font-size: 12px; line-height: 1.5; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .wk-cv-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 12.5px; color: var(--text-3); text-align: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; }
 .wk-cv-bad { color: var(--danger-fg); }
+
+/* ===== md 就地渲染（2026-10-14 待办 17，用户改判不弹独立预览卡）：#input-md 顶替 #input 显示渲染态 =====
+   盒几何/内距与 #input 完全同族（换层时输入栏不跳动）；内容复用消息流渲染器（core/markdown.js mdHtml）
+   ⇒ 外层套 .blocks 即吃同一套 .msg .blocks 样式，.msg .blocks 未覆盖的块级间距按 .tr-body 口径补齐。
+   单真值 = #input 原文；#input-md 纯派生视图（聚焦即弃）。交互 = 失焦显渲染 / 聚焦回编辑。 */
+#input-md {
+  box-sizing: border-box;
+  padding: 4px 12px 0 16px;
+  font: inherit; line-height: inherit; color: var(--ink); text-align: left;
+  word-break: break-word; overflow-wrap: anywhere;
+  min-height: 52px; max-height: 336px; overflow-y: auto;
+  cursor: text;
+}
+#input-md[hidden] { display: none; }
+#input-wrap.docked #input-md { min-height: 28px; }
+#input-md h1, #input-md h2, #input-md h3 { margin: 0.6em 0 0.3em; }
+#input-md p, #input-md ul, #input-md ol, #input-md blockquote, #input-md pre { margin: 0.4em 0; }
+#input-md ul, #input-md ol { padding-left: 1.4em; }
+#input-md blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text-2); }
+
+/* ===== work 编辑卡补全弹层（2026-10-14 Pj18 转派待办 6）：@codemirror/autocomplete 默认浅色 tooltip
+   换成项目变量（日夜随动）；.cm-editor 作用域只管编辑卡，不碰消息流/底栏。 ===== */
+.wk-ed-cm .cm-tooltip.cm-tooltip-autocomplete {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm), 0 8px 24px 0 rgba(0, 0, 0, 0.08);
+  font-family: inherit;
+}
+.wk-ed-cm .cm-tooltip-autocomplete ul li { padding: 2px 8px; font-size: 12.5px; }
+.wk-ed-cm .cm-tooltip-autocomplete ul li[aria-selected] { background: var(--hover-ink, var(--hover)); color: var(--text); }
+.wk-ed-cm .cm-completionLabel { color: var(--text); }
+.wk-ed-cm .cm-completionDetail { color: var(--text-3); font-style: normal; }

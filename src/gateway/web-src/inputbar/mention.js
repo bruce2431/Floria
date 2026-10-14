@@ -29,7 +29,13 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   const MENTION_UP_ICON = I.dshUp
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
-  const pick = { path: '', entries: null, loading: false, err: '', seq: 0 }
+  // searchOff：搜索/浏览模式开关（2026-10-14 待办 20）——false 且查询非空 = 全局搜索模式；
+  // 下钻/返回目录后翻 true（回到层内浏览），浮窗重开（refreshPick）复位 false。
+  const pick = { path: '', entries: null, loading: false, err: '', seq: 0, searchOff: false, q: '' }
+  // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层并发），层间 await。
+  // 上限：目录 ≤250 / 条目 ≤2000 / 深度 ≤4——够覆盖散件与项目浅层，防全库深扫拖垮浮窗。
+  // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
+  const pickAll = { items: null, busy: false, seq: 0 }
 
   // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
   // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
@@ -46,6 +52,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const seen = {}
     const kept = items.filter((it) => {
       if (it.kind === 'pathup') return true
+      if (it.glob) return true // 全局搜索命中（待办 20）：就是要看的重点结果，不受每组 3 行截断
       const g = groupOf(it)
       seen[g] = (seen[g] || 0) + 1
       return seen[g] <= GROUP_MAX
@@ -70,9 +77,55 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return i < 0 ? '' : p.slice(0, i)
   }
   function pickLabel() {
+    // 搜索模式（2026-10-14 待办 20）：文件组标题提示结果口径（层内浏览则照旧标当前层）
+    if (pick.q && !pick.searchOff) return pickAll.items ? '工作区全局搜索' : '全局搜索…'
     if (pick.loading) return '加载中…'
     if (pick.err) return '加载失败'
     return pick.path || '工作区根'
+  }
+  // 构建全工作区递归清单（幂等；构建期间 busy 挡重入，seq 丢弃被 refreshPick 作废的旧轮）。
+  // 完成不自行重渲——由调用方的 after 回调负责（浮窗还开着才重渲）。
+  async function ensurePickAll() {
+    if (pickAll.items || pickAll.busy) return
+    pickAll.busy = true
+    const seq = ++pickAll.seq
+    const out = []
+    let layer = [{ p: '', d: 0 }]
+    const seen = new Set()
+    try {
+      while (layer.length && seen.size < 250 && out.length < 2000) {
+        const next = []
+        await Promise.all(
+          layer.map(async ({ p, d }) => {
+            try {
+              const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
+              const data = await r.json()
+              if (!r.ok || !data || !Array.isArray(data.entries)) return
+              for (const e of data.entries) {
+                const cp = p ? `${p}/${e.name}` : e.name
+                out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp })
+                if (e.type === 'dir' && d < 4 && !seen.has(cp) && seen.size < 250) {
+                  seen.add(cp)
+                  next.push({ p: cp, d: d + 1 })
+                }
+              }
+            } catch { /* 单层失败跳过，不拖垮整轮 */ }
+          }),
+        )
+        if (seq !== pickAll.seq) return
+        layer = next
+      }
+    } finally {
+      if (seq === pickAll.seq) {
+        pickAll.items = out
+        pickAll.busy = false
+      }
+    }
+  }
+  // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
+  // 建清单，完成后浮窗仍开着才重渲。
+  function pickSearchKick(re) {
+    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy) ensurePickAll().then(re).catch(() => {})
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -95,12 +148,25 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     }
     return seq === pick.seq
   }
-  // 当前层的可选条目（q 在当前层内过滤名称）：上级目录行 + 目录 + 文件。
+  // 当前层的可选条目 / 全局搜索结果（2026-10-14 待办 20）。
+  // q 为空或已下钻（searchOff）= 原层内浏览：上级目录行 + 当前层按 q 过滤。
+  // q 非空且未下钻 = 全局搜索：跨工作区递归清单（pickAll）按名称过滤，glob 标记免组截断，
+  // 上限 30 行防溢屏。清单未就绪时文件组暂空（其余组照常），pickSearchKick 建完重渲补上。
   // 「上级目录」只取决于「当前是不是工作区根」，与**这一层的内容**无关——故加载中/加载失败时它照样在，
   // 否则某一层拉不到（目录已删/端点失败）就退不回去，整个文件组成死层。条目本身不塞假行。
   function pickItems(q) {
     const ql = (q || '').trim().toLowerCase()
+    pick.q = ql
     const items = []
+    if (ql && !pick.searchOff) {
+      if (!pickAll.items) return items
+      for (const e of pickAll.items) {
+        if (!e.name.toLowerCase().includes(ql)) continue
+        items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true })
+        if (items.length >= 30) break
+      }
+      return items
+    }
     if (pick.path) items.push({ kind: 'pathup', name: '上级目录', path: pickParent() })
     if (pick.loading || !pick.entries) return items
     for (const e of pick.entries) {
@@ -110,8 +176,10 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     }
     return items
   }
-  // 目录项进入下一层 / 上级目录返回（两个浮窗的选择入口共用同一处判定）
+  // 目录项进入下一层 / 上级目录返回（两个浮窗的选择入口共用同一处判定）。下钻 = 用户已明确
+  // 「要看这个位置」→ 翻回层内浏览模式（此后 q 只做层内过滤，不再全局搜）。
   function pickEnter(it) {
+    pick.searchOff = true
     return loadPickPath(it.path)
   }
   function mentionChipIcon(kind, ptype) {
@@ -263,6 +331,9 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   function refreshPick(after) {
     pick.entries = null // 立刻清旧层：否则换项目后先闪一帧上一个项目的条目（在途请求由 loadPickPath 的 seq 作废）
     pick.err = ''
+    pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
+    pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.seq++
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
@@ -287,6 +358,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const pop = $('mention-pop')
     if (!pop || !mention.open) return
     const items = mentionItems(mention.q)
+    const searching = pick.q && !pick.searchOff && !pickAll.items
+    pickSearchKick(() => { if (mention.open) renderMentionPop() }) // 搜索清单未就绪 → 建完补渲（待办 20）
+    if (!items.length && searching) {
+      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果
+      pop.innerHTML = '<div class="mp-sec">文件 · 全局搜索…</div>'
+      pop.hidden = false
+      return
+    }
     if (!items.length) { closeMentionPop(); return }
     mention.items = items
     mention.sel = Math.min(mention.sel, items.length - 1)
@@ -448,10 +527,12 @@ export {
   onInputMention,
   openMentionPopAtCaret,
   pick,
+  pickAll,
   pickEnter,
   pickHome,
   pickItems,
   pickLabel,
+  pickSearchKick,
   quotePdfChipHtml,
   quoteRefChipHtml,
   quoteReplyChipHtml,

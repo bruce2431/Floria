@@ -100,7 +100,7 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
   }
   // 当前模型的官方思考等级清单（2026-09-18：凭据池 effortLevels 声明经 /gateway/models 下发；
   // 未声明返回 null → 回退固定 Off+Low/High/Max）。渲染与选择一律以此为准，不写死档位。
-  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' }
+  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max', ultra: 'Ultra' }
   function modelEffortLevels() {
     const id = MODEL_CUR.model
     if (!id || !MODELS || !Array.isArray(MODELS.items)) return null
@@ -255,7 +255,16 @@ import { MGR, MODELS, MODELS_LOADING, MODELS_ERR, loadModelsData, modelProviderO
       if (MODEL_CUR.model === id) { closeModelPop(); return }
       const it = ((MODELS && MODELS.items) || []).find(x => x && (x.v === id || x.k === id))
       // 2026-08-29 直接切模型自动切供应商：MODEL_CUR.provider 同步真实归属（网关侧按会话绑定供应商）
+      const prevEff = MODEL_CUR.effortLevel
       MODEL_CUR = { ...MODEL_CUR, model: id, provider: (it && it.provider) || MODEL_CUR.provider }
+      // 切模型校验档位（2026-10-14 待办#7 补缺）：新模型有官方档位声明且当前档不在其中（例：从
+      // DeepSeek 切 GLM 时残留 off，GLM 声明无 off）→ 清回「默认」，避免座显/菜单展示无效档；
+      // 有会话时随切换下发改档（'off' 语义 = 网关 delete settings.effortLevel），与 effort 面板同链。
+      const lv = modelEffortLevels()
+      if (lv && prevEff != null && !lv.includes(prevEff)) {
+        MODEL_CUR.effortLevel = undefined
+        void apiSetModel({ effortLevel: 'off' }) // 与 effort 面板同链同形：'off' = 网关清档
+      }
       modelUserPicked = true // 2026-08-24：本次会话内主动切换，防止 /gateway/session 旧上报回滚
       saveModelCur() // 2026-08-24：持久化，刷新后恢复
       renderModelSeat()

@@ -57,6 +57,7 @@
     wkEdConflict = false
     wkEdPendingDoc = null
     wkEdCmtMarks = []
+    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
@@ -91,17 +92,49 @@
     wkEdState()
   }
 
+  let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
     wkEdConflict = false
+    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (IMG_EXT.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: true, editable: false }
       wkEdText = ''
       wkEdMtime = null
       renderEdBody()
+      return
+    }
+    // PDF（2026-10-14 待办#15）：纯前端预览——GET /gateway/file 读原始字节 blob 化，<iframe> 交给
+    // 浏览器自带 viewer（零外链、零后端改动）。网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
+    // 渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态。
+    if (/\.pdf$/i.test(p)) {
+      wkEdFile = p
+      wkEdMeta = { isImg: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
+      try {
+        const res = await fetch(fileUrl(p))
+        if (seq !== edSeq) return
+        if (!res.ok) {
+          body.innerHTML =
+            '<div class="wk-ed-empty">' +
+            esc(res.status === 413 ? 'PDF 超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
+            '</div>'
+          return
+        }
+        const blob = await res.blob()
+        if (seq !== edSeq) return
+        const url = URL.createObjectURL(blob)
+        wkEdPdfUrl = url
+        body.innerHTML = `<div class="wk-ed-pdf"><iframe src="${esc(url)}" title="${esc(p)}"></iframe></div>`
+      } catch (e) {
+        if (seq !== edSeq) return
+        body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
+      }
       return
     }
     body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -194,6 +227,7 @@
         const data = await res.json().catch(() => ({}))
         if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
         if (typeof data.mtime === 'number') wkEdMtime = data.mtime
+        wkEdInvalidatePathCache() // 写盘成功 → 路径补全目录缓存失效（新文件/新目录要能补出来）
         wkEdDirty = wkEdDocText() !== wkEdText // 保存期间又改了 → 留脏，下面续排程
       }
     } catch (e) {
@@ -234,6 +268,12 @@
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
+    // 新对话占位被顶掉（2026-10-14 待办 16，对齐 syncWorkTabs「开会话顶掉占位」的定案）：在新对话
+    // 占位态打开文件 = 占位让位，顶栏不留悬空「新对话」胶囊；回到聊天由 applyPanes 兜底重开。
+    if (wkActiveKey() === WK_NEW_TAB) {
+      const i = state.wkChats.indexOf(WK_NEW_TAB)
+      if (i >= 0) state.wkChats.splice(i, 1)
+    }
     saveWork()
     applyPanes()
     renderWorkBody()

@@ -241,8 +241,11 @@ import { gwSend, syncGwSend } from './send.js'
     if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
-  window.addEventListener('scroll', (e) => { if (quotePop && !quotePop.contains(e.target)) closeQuotePop() }, { passive: true, capture: true })
-  window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
+  // iPad（2026-10-14 Pj13 转派）：弹软键盘会触发 resize、浮窗内输入也会带出滚动——光标在浮窗输入框里时
+  // 这两类事件都不是「锚点漂移」，不得关窗（豁免判据 = 焦点在浮窗内）；浮窗外滚动/真 resize 仍照常关。
+  const quoteFocusInside = () => !!quotePop && quotePop.contains(document.activeElement)
+  window.addEventListener('scroll', (e) => { if (quotePop && !quotePop.contains(e.target) && !quoteFocusInside()) closeQuotePop() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { if (quotePop && !quoteFocusInside()) closeQuotePop() })
 
   // ---------- 5. 项目预览桥（floria-quote-open / floria-quote-close / floria-quote-action）----------
   // 预览页（<项目>/.claude/preview 的 iframe，src = 127.0.0.1:<port> 或 /backend/<label>/）里的选区

@@ -35,24 +35,15 @@ import { renderCtxMeter } from './inputbar/ctx-meter.js'
 
 /* @module __app__ */
   // ---------- 事件绑定 ----------
-  // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
-  //  · #menu-btn 汉堡（左上角，全视口共用一枚）：点击 = 打开并钉住（钉住后鼠标移出侧栏不自动收）
-  //  · 左缘唤出（桌面，预览式打开、不钉住）：判据 = 「指针到达窗口左缘」，两种观测合一——
-  //    ①窗口内取样到 clientX ≤ EDGE_PX；②指针直接从左缘离开窗口（document mouseout：relatedTarget
-  //    为 null 且 clientX ≤ 0）。快速左移常在同一个取样间隔内直接冲出窗口，靠细条 mouseenter 会被整段
-  //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
-  const EDGE_PX = 8
-  const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
-  // 2026-10-10 用户定案：work 模式下汉堡 = 标签栏左端的「视图」入口，点击弹出 #wk-view-pop（与侧栏头部
-  // #wk-view 同一个口，见 work-mount.js toggleWkViewPop）——work 面板的开合本就由该浮层的「侧边栏」行管；
-  // chat 模式不变，仍是「打开并钉住侧栏」。面板随模式互斥显隐（#panel.work 钩子），故按 state.sbMode 分派。
+  // 侧栏开合（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除；2026-10-14 待办#19 定案：
+  // **左缘悬停唤出整条触发链移除**——work 编辑时误触屏幕边界即弹侧栏打断操作，干扰大于收益；
+  // 只保留手动口：#menu-btn 汉堡（左上角，全视口共用一枚）点击 = 打开并钉住（钉住后鼠标移出侧栏
+  // 不自动收）、#panel-collapse 收起钮、#scrim 遮罩（移动端抽屉）。收的判定在 sidebar/recent.js 的
+  // #sidebar mouseleave（仅对未钉住的展开态生效）。
+  // 2026-10-14 待办 5：汉堡两模式同语义 = 打开并钉住侧栏（work 的视图浮层已退役）；work 侧栏的
+  // 收起走侧栏头部 #wk-view（work-mount.js）。面板随模式互斥显隐（#panel.work 钩子）不受影响。
   $('menu-btn').addEventListener('click', () => {
-    if (state.sbMode === 'work') toggleWkViewPop()
-    else setPanel(true, { pin: true })
-  })
-  document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
-  document.addEventListener('mouseout', (e) => {
-    if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)
+    setPanel(true, { pin: true })
   })
   $('scrim').addEventListener('click', () => setPanel(false))
   $('panel-collapse').innerHTML = I.collapse

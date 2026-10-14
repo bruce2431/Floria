@@ -2,7 +2,7 @@
 
 import { hideGate } from './auth.js'
 import { setChar } from '../core/char.js'
-import { needToken, apiUrl, setConn } from './gateway.js'
+import { needToken, apiUrl, setConn, forceWsReconnect } from './gateway.js'
 import { hashOf, findSession, listSigOf, applyTurnEndAt, fetchMessages, withSynthetic } from './sessions.js'
 import { messagesEl, inputEl, bodyEl, state, ALL, live, connUp } from './state.js'
 import { toast } from '../core/util.js'
@@ -48,18 +48,87 @@ import { toast } from '../core/util.js'
     } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
   }
 
-  function initLive() {
+  // ——SSE 连接监督者（2026-10-14 GPT 定案第一阶段①②④）——
+  // 不变量：下行 SSE 的生命周期由监督者统一编排，与 WS 心跳链联动——WS open → 强制重建 SSE
+  //（重建后 hello → refreshSession 全量对账，重建瞬间丢的 delta 由快照覆盖）；WS close →
+  // 关 SSE 一并等 WS 重连。SSE 自身活性由双侧检测：服务端 15s 命名 heartbeat（localGateway
+  // startSseHeartbeat），客户端 watchdog 45s 无任何数据 → 重建 SSE（容忍丢 2 次心跳）；连续
+  // 3 次重建失败判「网关不可达」→ 触发 WS 重连链（onclose → 4s → onopen → noteWsOpen 重建 SSE）。
+  // generation（esGen）防旧连接晚到事件污染新状态：每次重建/关闭 +1，旧代回调整帧丢弃。
+  let esGen = 0
+  let lastSseDataAt = 0 // 任何下行数据（含 heartbeat）到达时刻 = watchdog 基点（不分会话/类型，监督者只管链路活性）
+  let sseFailStreak = 0
+  let watchdogTimer = null
+  const SSE_WATCHDOG_MS = 45_000 // 45s 无任何数据（15s 心跳 ×3 窗口）
+  const SSE_RECONNECT_DELAY_MS = 3000
+
+  function closeEs() {
+    if (live.es) { try { live.es.close() } catch { /* 已断忽略 */ } live.es = null }
+  }
+
+  function rebuildEs() {
     if (!('EventSource' in window)) return
     if (needToken()) return // token 门锁定态：不建 SSE（避免 401 重连刷屏，hideGate 解锁后再建）
-    if (live.es) return // 2026-09-04 防重建：hideGate 每次 WS 重连都会跑，重复 new 泄漏旧 SSE 连接+事件双发
-    live.es = new EventSource(apiUrl('/gateway/events'))
-    live.lastSseAt = Date.now() // SSE 链活性时刻：建连即起算（tick 半开探测基点）
-    live.es.onmessage = (e) => {
-      live.lastSseAt = Date.now() // 任何事件到达=链活（parse 失败同样是活性证明，先记再解析）
-      let ev
-      try { ev = JSON.parse(e.data) } catch { return }
-      if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
-      else if (ev.type === 'activity') {
+    closeEs()
+    esGen++
+    const gen = esGen
+    lastSseDataAt = Date.now()
+    const es = new EventSource(apiUrl('/gateway/events'))
+    live.es = es
+    es.onmessage = (e) => {
+      if (gen !== esGen) return // 旧代连接的晚到事件：整帧丢弃
+      sseFailStreak = 0
+      lastSseDataAt = Date.now()
+      handleSseMessage(e)
+    }
+    // heartbeat 是命名事件（event: heartbeat），EventSource 走 addEventListener，不进 onmessage
+    es.addEventListener('heartbeat', () => {
+      if (gen !== esGen) return
+      sseFailStreak = 0
+      lastSseDataAt = Date.now()
+    })
+    es.onerror = () => {
+      if (gen !== esGen) return
+      closeEs()
+      sseFailStreak++
+      if (sseFailStreak >= 3) { sseFailStreak = 0; forceWsReconnect() }
+      setTimeout(() => { if (gen === esGen) rebuildEs() }, SSE_RECONNECT_DELAY_MS)
+    }
+  }
+
+  // watchdog（GPT 定案④）：查「长时间没收到任何数据」——TCP 半开（无 FIN/RST）时 onerror 不
+  // 触发，唯一客户端侧观测手段是数据断流。与服务端 heartbeat 的写入错误/背压检测不可互替。
+  function startSseWatchdog() {
+    if (watchdogTimer) return
+    watchdogTimer = setInterval(() => {
+      if (!live.es) return // 重建窗/已移交 WS 重连链，不重复计数
+      if (Date.now() - lastSseDataAt <= SSE_WATCHDOG_MS) return
+      lastSseDataAt = Date.now()
+      sseFailStreak++
+      if (sseFailStreak >= 3) { sseFailStreak = 0; forceWsReconnect(); return }
+      rebuildEs()
+    }, 5000)
+    watchdogTimer.unref?.()
+  }
+
+  // 监督者联动口（gateway.js WS onopen/onclose 调用）
+  function noteWsOpen() { sseFailStreak = 0; rebuildEs() } // WS 重连成功 = SSE 复活信号：强制换新连接（hello 全量对账）
+  function noteWsClosed() { closeEs(); esGen++ } // WS 断开：SSE 一并关，待 WS 重链后统一重建
+
+  // 启动入口（app.js 启动序列 + hideGate 解锁后调用）。已在监督态（live.es 在场 = watchdog 已启）不重复；
+  // 否则建连 + 启 watchdog。此后 SSE 重建/联动一律走监督者（noteWsOpen/noteWsClosed/rebuildEs）。
+  function initLive() {
+    if (!('EventSource' in window)) return
+    if (live.es) return // 防重建（hideGate 每次 WS 重连都会跑）：重复 new 泄漏旧 SSE 连接+事件双发
+    rebuildEs()
+    startSseWatchdog()
+  }
+
+  function handleSseMessage(e) {
+    let ev
+    try { ev = JSON.parse(e.data) } catch { return }
+    if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
+    else if (ev.type === 'activity') {
         // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）。
         // 2026-09-07 断连感知：state=null（CLI /clients 断开 → 网关 detach 群发）= 会话进程
         // 断开 → 该会话状态点立即熄（不等 600ms 防抖重拉），当前打开的会话立即收口运行态
@@ -244,12 +313,6 @@ import { toast } from '../core/util.js'
         if (ev.hash === state.currentHash) refreshSession()
         refreshList()
       }
-    }
-    live.es.onerror = () => {
-      live.es.close()
-      live.es = null
-      setTimeout(initLive, 3000)
-    }
   }
 
   function refreshList() {
@@ -656,6 +719,8 @@ import { toast } from '../core/util.js'
   function stopLiveFoldTimer() {
     if (liveFoldTimer) { clearInterval(liveFoldTimer); liveFoldTimer = null }
   }
+  // （2026-10-14 收口：90s 静默探测 probeCurStall/lastCurSseAt/#claim-fold 探测分支已随 SSE
+  // 根治第一阶段删除——SSE 活性判定下沉到连接监督者 watchdog + 服务端 heartbeat，见文件头。）
   function bindLiveFoldTimer(messages) {
     stopLiveFoldTimer()
     const fold = messagesEl.querySelector('details.done-fold.done-live[data-m]') // 权威折叠（data-m）；乐观主张折叠在暂态区无 data-m，不参与
@@ -676,18 +741,7 @@ import { toast } from '../core/util.js'
     const sum = fold.querySelector('summary')
     const tick = () => {
       if (!fold.isConnected) { stopLiveFoldTimer(); return }
-      // SSE 半开探测（2026-09-10 真空期二轮根治）：TCP 半开（改网/睡眠唤醒/网络抖动）不触发
-      // es.onerror（无 FIN/RST），delta 全丢且无重连——唯一表现=任何 SSE 事件停达而计时行照跳
-      //（776169a6 实证：CLI 跑 4 个 Bash，网关 deltaSeq=29/投影 103 条完整，web 冻结旁白帧
-      // 1m18s）。done-live 在场=处理中段，引擎有增量即 4s 一发 beat，纯工具期亦有输出流；
-      // 90s 无任何 SSE 事件=链死亡（覆盖引擎真静默上界），主动全量对账自愈——fetch 走新 TCP，
-      // 既是探测也是恢复，幂等无状态污染。重置基点防每秒重入。es.onerror 明确断开形态已有
-      // close+3s 重连+hello 对账覆盖，本探测只补半开盲区。
-      const nowMs = Date.now()
-      if (live.lastSseAt && nowMs - live.lastSseAt > 90000) {
-        live.lastSseAt = nowMs
-        refreshSession(true)
-      }
+      // SSE 活性监督已下沉到连接监督者（watchdog/heartbeat，见文件头）；此处只剩计时与状态对账。
       const sec = Math.round((Date.now() - t1) / 1000)
       // 僵死/断连对账（每秒 tick 无残留状态，信号恢复即自动消失）：
       // ① beat = 引擎最后产出增量的时刻（turn-beat SSE）。落后 ≥150s（beat 缺席则从本折叠
@@ -808,6 +862,8 @@ export {
   bindLiveFoldTimer,
   initLive,
   liveFoldTimer,
+  noteWsClosed,
+  noteWsOpen,
   refreshList,
   refreshSession,
   renderSessionBody,

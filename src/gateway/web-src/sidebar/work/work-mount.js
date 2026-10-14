@@ -1,33 +1,9 @@
 // 事件绑定（mountWork）与启动一次（initWork）。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 /* @module sidebar/work/work-mount.js */
-  // ---------- 视图浮层（唯一开合口，2026-10-10）----------
-  // 触发器两处、互斥在场：侧栏展开 = 头部 #wk-view；侧栏折叠 = 标签栏左端的汉堡 #menu-btn
-  // （#sidebar.open 的兄弟选择器把汉堡藏起，故任一时刻恰一个可见）。浮层 DOM 挂在 #app 直下
-  // （见 index.html 注释），故侧栏折叠也不被裁。锚点按「谁在场」现取，不记住触发器。
-  function wkViewAnchor() {
-    return state.panelOpen ? $('wk-view') : $('menu-btn')
-  }
-  // 把浮层贴到当前触发器下方：侧栏开 → 锚在头部右侧，右对齐；侧栏折叠 → 锚在左端，左对齐。
-  // 横向夹回 #app 内（左右各 6px），避免窄屏溢出。
-  function positionWkViewPop() {
-    const pop = $('wk-view-pop')
-    const host = $('app').getBoundingClientRect()
-    const a = wkViewAnchor().getBoundingClientRect()
-    const w = pop.offsetWidth
-    let left = state.panelOpen ? a.right - host.left - w : a.left - host.left
-    left = Math.max(6, Math.min(left, host.width - w - 6))
-    pop.style.left = left + 'px'
-    pop.style.top = a.bottom - host.top + 4 + 'px'
-  }
-  function toggleWkViewPop() {
-    const pop = $('wk-view-pop')
-    const willShow = pop.hidden
-    hideWkPops()
-    if (!willShow) return
-    applyPanes() // 行状态（#wk-view-pop 常驻 DOM，靠 applyPanes 的 syncPaneRows 对齐 paneOn）
-    pop.hidden = false
-    positionWkViewPop() // 先落显（量 offsetWidth 需已可见）再定位
-  }
+  // ---------- 侧栏开关（2026-10-14 待办 5，取代 2026-10-10 的视图浮层）----------
+  // 触发器两处、互斥在场：侧栏展开 = 头部 #wk-view（收起钮）；侧栏折叠 = 标签栏左端的汉堡 #menu-btn
+  // （#sidebar.open 的兄弟选择器把汉堡藏起，故任一时刻恰一个可见）。两钮都只直管侧栏常开/常收
+  // （与 chat 模式同一语义），不再经 #wk-view-pop 浮层——浮层仅剩「侧边栏」一行，无存在必要。
 
   // ---------- 事件 ----------
   function mountWork() {
@@ -166,22 +142,15 @@
       const b = e.target.closest('[data-wkproj]')
       if (b) selectProject(b.dataset.wkproj)
     })
+    // 侧栏收起钮：与 chat 的 #panel-collapse 同语义（只管把侧栏收起；再开走折叠态的汉堡）
     $('wk-view').addEventListener('click', (e) => {
       e.stopPropagation()
-      toggleWkViewPop()
-    })
-    $('wk-view-pop').addEventListener('click', (e) => {
-      e.stopPropagation()
-      const b = e.target.closest('[data-wkpane]')
-      if (!b) return
-      setPane(b.dataset.wkpane, !b.classList.contains('on'))
-      // 切「侧边栏」会翻 panelOpen ⇒ 触发器在 #wk-view ↔ 汉堡 间易主（#sidebar 宽 0.28s 过渡中量锚也不准），
-      // 原地留着会悬在旧锚位 → 收起浮层（开关本身已是反馈，再点对面的触发器即在当前锚点重开）。
-      if (b.dataset.wkpane === 'sidebar') $('wk-view-pop').hidden = true
+      setPane('sidebar', false)
     })
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
+      if (wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
       if (wkTab !== 'files') {
         newWorkChat()
         return
@@ -200,13 +169,22 @@
     })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
-        wkTab = b.dataset.wktab === 'chat' ? 'chat' : 'files'
+        wkTab = b.dataset.wktab
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
+        // 工作区 tab（2026-10-14 待办 9）：首切未加载过才拉；失败/加载中不重复打
+        if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
       }),
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
     $('wk-body').addEventListener('click', (e) => {
+      const wu = e.target.closest('[data-wsup]')
+      if (wu) { loadWsDir(wkWsPath ? wkWsPath.slice(0, wkWsPath.lastIndexOf('/')) : ''); return }
+      const wd = e.target.closest('[data-wsdir]')
+      if (wd) { loadWsDir(wd.dataset.wsdir); return }
+      const wf = e.target.closest('[data-wsfile]')
+      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析
+      if (wf) { window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wf.dataset.wsfile)), '_blank'); return }
       const d = e.target.closest('[data-wkdir]')
       if (d) {
         const p = d.dataset.wkdir
@@ -235,6 +213,53 @@
         return
       }
     })
+    // 文件树拖拽移动（2026-10-14 待办 10，仿 Obsidian）：行 draggable（wkTreeHtml），投放目标 =
+    // 目录行（含收起态）与树空白（= 项目根，仅文件 tab）。wkDragPath 记拖动起点，dragover 按
+    // 「非自身 / 非其子目录 / 父目录不同」判可落并亮行；落点落定走 wkTreeMove（work-files.js）。
+    let wkDragPath = ''
+    let wkDndEl = null
+    const body = $('wk-body')
+    const dropDir = (e) => {
+      const row = e.target.closest ? e.target.closest('[data-wkdir]') : null
+      return row ? row.dataset.wkdir : wkTab === 'files' ? '' : null
+    }
+    const canDrop = (from, dir) =>
+      from !== dir && !dir.startsWith(from + '/') && from.split('/').slice(0, -1).join('/') !== dir
+    const dndMark = (el) => {
+      if (wkDndEl === el) return
+      if (wkDndEl) wkDndEl.classList.remove('wk-dnd')
+      wkDndEl = el
+      if (el) el.classList.add('wk-dnd')
+    }
+    body.addEventListener('dragstart', (e) => {
+      const row = e.target.closest ? e.target.closest('[data-wkfile],[data-wkdir]') : null
+      if (!row) return
+      wkDragPath = row.dataset.wkfile || row.dataset.wkdir
+      e.dataTransfer.setData('text/plain', wkDragPath)
+      e.dataTransfer.effectAllowed = 'move'
+    })
+    body.addEventListener('dragover', (e) => {
+      if (!wkDragPath || wkTab !== 'files') return
+      const dir = dropDir(e)
+      if (dir == null || !canDrop(wkDragPath, dir)) { dndMark(null); return }
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      dndMark(e.target.closest('[data-wkdir]') || body)
+    })
+    body.addEventListener('dragleave', (e) => {
+      if (!body.contains(e.relatedTarget)) dndMark(null)
+    })
+    body.addEventListener('drop', (e) => {
+      const from = wkDragPath
+      wkDragPath = ''
+      dndMark(null)
+      if (!from || wkTab !== 'files') return
+      const dir = dropDir(e)
+      if (dir == null || !canDrop(from, dir)) return
+      e.preventDefault()
+      wkTreeMove(from, dir)
+    })
+    body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
@@ -247,9 +272,6 @@
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#wk-proj-pop') && !e.target.closest('#wk-proj-seat')) $('wk-proj-pop').hidden = true
-      // 两个视图浮层触发器都排除：#wk-view（侧栏展开）与 #menu-btn（侧栏折叠），否则汉堡的点击
-      // 冒泡到这里会把刚弹出的浮层立刻关掉。
-      if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view') && !e.target.closest('#menu-btn')) $('wk-view-pop').hidden = true
       if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔

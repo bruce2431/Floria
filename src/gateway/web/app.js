@@ -58,6 +58,7 @@
     dshSkill: '<svg viewBox="0 0 17 17" fill="none" stroke-width="1"><path d="M4.57788 5.77124H10.7029" stroke="currentColor"/><path d="M4.57788 8.89819H7.91879" stroke="currentColor"/><path d="M12.1404 1.19446C12.9442 1.19446 13.6404 1.81999 13.6404 2.64465V8.89856H12.6404V2.64465C12.6404 2.42015 12.4411 2.19446 12.1404 2.19446H3.14038C2.83968 2.19446 2.64038 2.42015 2.64038 2.64465V13.0929C2.64082 13.3172 2.84001 13.5421 3.14038 13.5421H8.88159V14.5421H3.14038C2.33675 14.5421 1.6408 13.9172 1.64038 13.0929V2.64465C1.64038 1.81999 2.33651 1.19446 3.14038 1.19446H12.1404Z" fill="currentColor"/><path d="M12.0051 15.1056C12.0051 13.6395 10.8166 12.451 9.35059 12.451C10.8166 12.451 12.0051 11.2626 12.0051 9.79651C12.0051 11.2626 13.1936 12.451 14.6597 12.451C13.1936 12.451 12.0051 13.6395 12.0051 15.1056Z" stroke="currentColor"/></svg>', // IconSkillOutlineRegular（技能：文档 + 星）
     dshPlugin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M7.84457 5.06199C11.6605 4.93876 14.7962 6.14848 14.8484 7.76397C14.8875 8.97461 13.1838 10.0696 10.7215 10.5942"/><path d="M5.12742 8.07731C5.00419 4.26138 6.21391 1.12568 7.8294 1.07351C9.04004 1.03441 10.135 2.73808 10.6596 5.20037"/><path d="M8.02457 10.6802C4.20865 10.8034 1.07294 9.5937 1.02077 7.97821C0.981678 6.76758 2.68535 5.67262 5.14763 5.14798"/><path d="M10.7476 7.89535C10.8708 11.7113 9.66109 14.847 8.0456 14.8991C6.83496 14.9382 5.74 13.2346 5.21536 10.7723"/></svg>', // IconPluginPinwheelOutlineRegular（插件：风车）
     dshUp: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 10L8.70711 6.70711C8.31658 6.31658 7.68342 6.31658 7.29289 6.70711L4 10"/></svg>', // IconChevronUpOutlineRegular（上级目录）
+    dshDownload: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 2.5V9.5"/><path d="M4.75 6.25 8 9.5l3.25-3.25"/><path d="M2.5 10.75v1.75a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1.75"/></svg>', // 下载（2026-10-14 待办 3：文件行菜单「下载」项；dsh 同族 1px 描线自绘）
     dshPaperclip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12.75 4.5V9.5C12.75 10.7598 12.2496 11.968 11.3588 12.8588C10.468 13.7496 9.25978 14.25 8 14.25C6.74022 14.25 5.53204 13.7496 4.64124 12.8588C3.75045 11.968 3.25 10.7598 3.25 9.5V5C3.25 4.13805 3.59241 3.3114 4.2019 2.7019C4.8114 2.09241 5.63805 1.75 6.5 1.75C7.36195 1.75 8.1886 2.09241 8.7981 2.7019C9.40759 3.3114 9.75 4.13805 9.75 5V9.5C9.75 9.96413 9.56563 10.4092 9.23744 10.7374C8.90925 11.0656 8.46413 11.25 8 11.25C7.53587 11.25 7.09075 11.0656 6.76256 10.7374C6.43437 10.4092 6.25 9.96413 6.25 9.5V5.5"/></svg>', // IconPaperclipOutlineRegular（上传文件）
     // ---- 命令菜单逐命令字形（2026-09-29）--------------------------------------------------------
     // 抄处：dsh `packages/client/ui-commands/src/client/presentation.ts` 的 HOST_FACES——dsh 给**每个**
@@ -1285,18 +1286,87 @@ function setSessionCwd(v) { sessionCwd = v }
     } catch { /* 离线等瞬时失败忽略，下次 hello 再对 */ }
   }
 
-  function initLive() {
+  // ——SSE 连接监督者（2026-10-14 GPT 定案第一阶段①②④）——
+  // 不变量：下行 SSE 的生命周期由监督者统一编排，与 WS 心跳链联动——WS open → 强制重建 SSE
+  //（重建后 hello → refreshSession 全量对账，重建瞬间丢的 delta 由快照覆盖）；WS close →
+  // 关 SSE 一并等 WS 重连。SSE 自身活性由双侧检测：服务端 15s 命名 heartbeat（localGateway
+  // startSseHeartbeat），客户端 watchdog 45s 无任何数据 → 重建 SSE（容忍丢 2 次心跳）；连续
+  // 3 次重建失败判「网关不可达」→ 触发 WS 重连链（onclose → 4s → onopen → noteWsOpen 重建 SSE）。
+  // generation（esGen）防旧连接晚到事件污染新状态：每次重建/关闭 +1，旧代回调整帧丢弃。
+  let esGen = 0
+  let lastSseDataAt = 0 // 任何下行数据（含 heartbeat）到达时刻 = watchdog 基点（不分会话/类型，监督者只管链路活性）
+  let sseFailStreak = 0
+  let watchdogTimer = null
+  const SSE_WATCHDOG_MS = 45_000 // 45s 无任何数据（15s 心跳 ×3 窗口）
+  const SSE_RECONNECT_DELAY_MS = 3000
+
+  function closeEs() {
+    if (live.es) { try { live.es.close() } catch { /* 已断忽略 */ } live.es = null }
+  }
+
+  function rebuildEs() {
     if (!('EventSource' in window)) return
     if (needToken()) return // token 门锁定态：不建 SSE（避免 401 重连刷屏，hideGate 解锁后再建）
-    if (live.es) return // 2026-09-04 防重建：hideGate 每次 WS 重连都会跑，重复 new 泄漏旧 SSE 连接+事件双发
-    live.es = new EventSource(apiUrl('/gateway/events'))
-    live.lastSseAt = Date.now() // SSE 链活性时刻：建连即起算（tick 半开探测基点）
-    live.es.onmessage = (e) => {
-      live.lastSseAt = Date.now() // 任何事件到达=链活（parse 失败同样是活性证明，先记再解析）
-      let ev
-      try { ev = JSON.parse(e.data) } catch { return }
-      if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
-      else if (ev.type === 'activity') {
+    closeEs()
+    esGen++
+    const gen = esGen
+    lastSseDataAt = Date.now()
+    const es = new EventSource(apiUrl('/gateway/events'))
+    live.es = es
+    es.onmessage = (e) => {
+      if (gen !== esGen) return // 旧代连接的晚到事件：整帧丢弃
+      sseFailStreak = 0
+      lastSseDataAt = Date.now()
+      handleSseMessage(e)
+    }
+    // heartbeat 是命名事件（event: heartbeat），EventSource 走 addEventListener，不进 onmessage
+    es.addEventListener('heartbeat', () => {
+      if (gen !== esGen) return
+      sseFailStreak = 0
+      lastSseDataAt = Date.now()
+    })
+    es.onerror = () => {
+      if (gen !== esGen) return
+      closeEs()
+      sseFailStreak++
+      if (sseFailStreak >= 3) { sseFailStreak = 0; forceWsReconnect() }
+      setTimeout(() => { if (gen === esGen) rebuildEs() }, SSE_RECONNECT_DELAY_MS)
+    }
+  }
+
+  // watchdog（GPT 定案④）：查「长时间没收到任何数据」——TCP 半开（无 FIN/RST）时 onerror 不
+  // 触发，唯一客户端侧观测手段是数据断流。与服务端 heartbeat 的写入错误/背压检测不可互替。
+  function startSseWatchdog() {
+    if (watchdogTimer) return
+    watchdogTimer = setInterval(() => {
+      if (!live.es) return // 重建窗/已移交 WS 重连链，不重复计数
+      if (Date.now() - lastSseDataAt <= SSE_WATCHDOG_MS) return
+      lastSseDataAt = Date.now()
+      sseFailStreak++
+      if (sseFailStreak >= 3) { sseFailStreak = 0; forceWsReconnect(); return }
+      rebuildEs()
+    }, 5000)
+    watchdogTimer.unref?.()
+  }
+
+  // 监督者联动口（gateway.js WS onopen/onclose 调用）
+  function noteWsOpen() { sseFailStreak = 0; rebuildEs() } // WS 重连成功 = SSE 复活信号：强制换新连接（hello 全量对账）
+  function noteWsClosed() { closeEs(); esGen++ } // WS 断开：SSE 一并关，待 WS 重链后统一重建
+
+  // 启动入口（app.js 启动序列 + hideGate 解锁后调用）。已在监督态（live.es 在场 = watchdog 已启）不重复；
+  // 否则建连 + 启 watchdog。此后 SSE 重建/联动一律走监督者（noteWsOpen/noteWsClosed/rebuildEs）。
+  function initLive() {
+    if (!('EventSource' in window)) return
+    if (live.es) return // 防重建（hideGate 每次 WS 重连都会跑）：重复 new 泄漏旧 SSE 连接+事件双发
+    rebuildEs()
+    startSseWatchdog()
+  }
+
+  function handleSseMessage(e) {
+    let ev
+    try { ev = JSON.parse(e.data) } catch { return }
+    if (ev.type === 'hello') { refreshList(); refreshSession(); checkAssetFresh() }
+    else if (ev.type === 'activity') {
         // 状态点翻转即时刷新（网关 /gateway/activity 群发，2026-08-29）。
         // 2026-09-07 断连感知：state=null（CLI /clients 断开 → 网关 detach 群发）= 会话进程
         // 断开 → 该会话状态点立即熄（不等 600ms 防抖重拉），当前打开的会话立即收口运行态
@@ -1481,12 +1551,6 @@ function setSessionCwd(v) { sessionCwd = v }
         if (ev.hash === state.currentHash) refreshSession()
         refreshList()
       }
-    }
-    live.es.onerror = () => {
-      live.es.close()
-      live.es = null
-      setTimeout(initLive, 3000)
-    }
   }
 
   function refreshList() {
@@ -1893,6 +1957,8 @@ function setSessionCwd(v) { sessionCwd = v }
   function stopLiveFoldTimer() {
     if (liveFoldTimer) { clearInterval(liveFoldTimer); liveFoldTimer = null }
   }
+  // （2026-10-14 收口：90s 静默探测 probeCurStall/lastCurSseAt/#claim-fold 探测分支已随 SSE
+  // 根治第一阶段删除——SSE 活性判定下沉到连接监督者 watchdog + 服务端 heartbeat，见文件头。）
   function bindLiveFoldTimer(messages) {
     stopLiveFoldTimer()
     const fold = messagesEl.querySelector('details.done-fold.done-live[data-m]') // 权威折叠（data-m）；乐观主张折叠在暂态区无 data-m，不参与
@@ -1913,18 +1979,7 @@ function setSessionCwd(v) { sessionCwd = v }
     const sum = fold.querySelector('summary')
     const tick = () => {
       if (!fold.isConnected) { stopLiveFoldTimer(); return }
-      // SSE 半开探测（2026-09-10 真空期二轮根治）：TCP 半开（改网/睡眠唤醒/网络抖动）不触发
-      // es.onerror（无 FIN/RST），delta 全丢且无重连——唯一表现=任何 SSE 事件停达而计时行照跳
-      //（776169a6 实证：CLI 跑 4 个 Bash，网关 deltaSeq=29/投影 103 条完整，web 冻结旁白帧
-      // 1m18s）。done-live 在场=处理中段，引擎有增量即 4s 一发 beat，纯工具期亦有输出流；
-      // 90s 无任何 SSE 事件=链死亡（覆盖引擎真静默上界），主动全量对账自愈——fetch 走新 TCP，
-      // 既是探测也是恢复，幂等无状态污染。重置基点防每秒重入。es.onerror 明确断开形态已有
-      // close+3s 重连+hello 对账覆盖，本探测只补半开盲区。
-      const nowMs = Date.now()
-      if (live.lastSseAt && nowMs - live.lastSseAt > 90000) {
-        live.lastSseAt = nowMs
-        refreshSession(true)
-      }
+      // SSE 活性监督已下沉到连接监督者（watchdog/heartbeat，见文件头）；此处只剩计时与状态对账。
       const sec = Math.round((Date.now() - t1) / 1000)
       // 僵死/断连对账（每秒 tick 无残留状态，信号恢复即自动消失）：
       // ① beat = 引擎最后产出增量的时刻（turn-beat SSE）。落后 ≥150s（beat 缺席则从本折叠
@@ -3433,15 +3488,14 @@ function setLastNavHash(v) { lastNavHash = v }
   // ---------- 侧栏 ----------
   // 开合唯一入口。opt.pin 只在打开时有意义：钉住 = 鼠标移出侧栏不自动收（汉堡/抽屉把手点击），
   // 不钉 = 预览式（左缘悬停唤出）。收起一律清钉住态，避免上一轮的钉住 residual 影响下次悬停。
-  // 钉住态挂 state.panelPinned（跨模块真源，「侧边栏」开关读它——悬停唤出不算打开），每次落地后
-  // 同步视图浮层的行状态：pin 可由 menu-btn/panel-collapse/scrim/浮层开关任一处翻转，收口在这里。
+  // 钉住态挂 state.panelPinned（跨模块真源）。pin 可由 menu-btn/panel-collapse/scrim 任一处翻转。
   function setPanel(open, opt) {
     applyPanelOpen(open, !!(opt && opt.pin)) // 状态落地唯一核（engine/panel.js）：钉住态 + 可见态 + #sidebar.open + 调宽复位
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
     if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
-    syncPaneRows() // work 视图浮层的「侧边栏」行随钉住态刷新（悬停唤出不改 pin ⇒ 行状态不动）
+    // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链删除）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
   // 侧栏折叠时宽度 0，本事件不会触发。行浮窗挂在 #sidebar 内（见 openRowMenu），指针移到浮窗上
@@ -3816,12 +3870,16 @@ function setLastNavHash(v) { lastNavHash = v }
   // 表单壳（标题/占位/初值/校验/错误回显），提交语义由调用方以 onSubmit 注入——会话重命名走
   // POST /gateway/session/rename（网关 append custom-title，已停止会话同样生效），文件重命名走
   // POST /gateway/file/rename（work.js 注册），两者共用同一对话框实例，不各建一套弹窗。
-  let renameTarget = null // { heading, placeholder, okText, onSubmit }
+  let renameTarget = null // { heading, placeholder, okText, onSubmit, exts?, defaultExt? }
   const renameModal = $('rename-modal')
   const renameInput = $('rename-input')
   const renameErr = $('rename-error')
   const renameTitle = renameModal.querySelector('.title')
   const renameOk = $('rename-ok')
+  // 新建文件格式行（2026-10-14 待办#1）：opt.exts 提供扩展名清单才显示；确认时未自带扩展名的名字
+  // 拼入选中扩展名（自带 .xx 的名字尊重用户原样，不再追加）。onSubmit 收 (name, ext)。
+  const renameExtRow = $('rename-ext-row')
+  const renameExtSel = $('rename-ext')
   function openRenameDialog(opt) {
     renameTarget = opt
     renameTitle.textContent = opt.heading || '重命名'
@@ -3829,6 +3887,13 @@ function setLastNavHash(v) { lastNavHash = v }
     renameOk.textContent = opt.okText || '重命名'
     renameInput.value = opt.value || ''
     renameErr.hidden = true
+    if (Array.isArray(opt.exts) && opt.exts.length) {
+      renameExtSel.innerHTML = opt.exts.map((e) => `<option value="${esc(e)}"${e === opt.defaultExt ? ' selected' : ''}>${esc(e || '（无扩展名）')}</option>`).join('')
+      renameExtRow.hidden = false
+    } else {
+      renameExtSel.innerHTML = ''
+      renameExtRow.hidden = true
+    }
     renameModal.hidden = false
     renameInput.focus()
     renameInput.select()
@@ -3839,14 +3904,19 @@ function setLastNavHash(v) { lastNavHash = v }
   }
   async function confirmRename() {
     if (!renameTarget) return
-    const value = renameInput.value.trim()
+    let value = renameInput.value.trim()
     if (!value) {
       renameErr.textContent = '名称不能为空'
       renameErr.hidden = false
       return
     }
+    let ext = ''
+    if (!renameExtRow.hidden) {
+      ext = renameExtSel.value
+      if (ext && !/\.[A-Za-z0-9]+$/.test(value)) value += ext
+    }
     try {
-      await renameTarget.onSubmit(value)
+      await renameTarget.onSubmit(value, ext)
       closeRenameDialog()
     } catch (e) {
       renameErr.textContent = e.message || String(e)
@@ -4972,10 +5042,16 @@ function setFirstSendHash(v) { firstSendHash = v }
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  let wkTab = 'files'      // 'files' | 'chat'
+  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图，2026-10-14 待办 9）
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
+  // 工作区 tab 状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
+  // 重型目录、每层 ≤50）。path 相对工作区根，'' = 根。entries null = 未加载。纯运行时，不持久化。
+  let wkWsPath = ''
+  let wkWsEntries = null
+  let wkWsLoading = false
+  let wkWsErr = ''
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
   let edSeq = 0            // 编辑区读取序号：快速连点文件时丢弃迟到的旧响应
 
@@ -5072,18 +5148,20 @@ function setFirstSendHash(v) { firstSendHash = v }
     return !!state.panelPinned
   }
 
-  // 视图浮层行状态落地（唯一处）：本模块 applyPanes 与 recent.js setPanel（钉住态可被汉堡/收起钮/
-  // 遮罩任一处翻转）两处调用。
-  function syncPaneRows() {
-    document.querySelectorAll('.wkv-row').forEach((b) => b.classList.toggle('on', paneOn(b.dataset.wkpane)))
-  }
+  // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链随之删除——侧栏开关回归汉堡/收起钮直管）
 
   // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
   // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
   // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
   function applySidebarPin() {
     if (isMobile()) return
-    setPanel(!!state.panelPinned, { pin: !!state.panelPinned })
+    if (state.panelPinned) return setPanel(true, { pin: true })
+    // 待办#4（2026-10-14）：模式切换（chat⇄work）/ work 下切项目都走本函数落地侧栏开合；若此刻
+    // 鼠标正悬在侧栏区域内（用户刚在侧栏里点了模式钮/项目行），不因槽里的开关值收起——以
+    // :hover 几何判定为准保持展开（悬停预览态，不置 pin），移出仍由 recent.js 的 #sidebar
+    // mouseleave 收。判定用 matches(':hover') 而非事件标志：零状态、无漂移，切换瞬间即准。
+    if ($('sidebar').matches(':hover')) return setPanel(true)
+    setPanel(false)
   }
 
   // 下沉区当前显示的内容（唯一判定）：助手靠栏时按 wkMainTab（要看文件且确有文件才给 file，
@@ -5104,7 +5182,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     const s = findSession(key)
     return (s && s.title) || '未命名会话'
   }
-  function wkEnsureTab(key) { if (!state.wkChats.includes(key)) state.wkChats.push(key) }
+  // 并入守卫（2026-10-14 待办 14）：开放集不变量 = 只含当前工作项目的会话（或 new 哨兵）。
+  // route.js 在 renderSession 的 enforceWorkScope 弹回**之前**就调 syncWorkTabs 并入外项目 hash，
+  // 不守此口则外项目/全局会话胶囊先入集并被持久化（弹回也残留，顶栏串入他项目会话）。
+  // workScopeOk 查无此会话（列表未拉/刷新窗口）不判——「未知」≠「别的项目」，与 enforceWorkScope 同判据。
+  function wkEnsureTab(key) {
+    if (key !== WK_NEW_TAB && !workScopeOk(key)) return
+    if (!state.wkChats.includes(key)) state.wkChats.push(key)
+  }
   // 打开的**文件** tab 开放集（与聊天胶囊同构，2026-10-12）：真源 state.wkFiles（项目内相对路径），
   // 激活项 = 单值 state.workFile。并入唯一口在此（applyPanes 按当前 workFile 兜底 ⇒ 刷新恢复的
   // workFile 也有一枚 pill）；移除/切换在 work-editor.js closeWkFile（要 flush 编辑器，故不在此）。
@@ -5142,6 +5227,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       const i = state.wkChats.indexOf(WK_NEW_TAB)
       if (i >= 0) state.wkChats.splice(i, 1)
     }
+    // 自愈清剿（2026-10-14 待办 14）：历史污染的外项目条目（旧版无并入守卫时入集并被持久化）
+    // 在已知归属时一律移除，开放集回归「仅当前工作项目」不变量；查无此会话（未知）不判。
+    for (let i = state.wkChats.length - 1; i >= 0; i--) {
+      const k = state.wkChats[i]
+      if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
+    }
     wkEnsureTab(key)
     wkPrevActiveKey = key
     renderTopbar()
@@ -5162,7 +5253,9 @@ function setFirstSendHash(v) { firstSendHash = v }
         state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      if (state.wkAssist) wkEnsureTab(wkActiveKey()) // 聊天栏在场 ⇒ 当前路由对应的 tab 必在开放集
+      // 占位新对话 tab 只在**聊天 tab 正被显示**时并入（2026-10-14 待办 16）：文件 tab 在场时并入会
+      // 把「打开文件顶掉占位」的摘除立即加回来。不变量 = 占位「新对话」胶囊存在 ⇔ 新对话正被显示。
+      if (state.wkAssist && wkShownTab() === 'chat') wkEnsureTab(wkActiveKey())
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')
@@ -5171,7 +5264,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     } else {
       chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
-    syncPaneRows()
     applyWorkCols()
     renderTopbar()
     applyPvTab()
@@ -5548,7 +5640,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function hideWkPops() {
-    for (const id of ['wk-proj-pop', 'wk-view-pop', 'wk-new-pop']) {
+    for (const id of ['wk-proj-pop', 'wk-new-pop']) {
       const el = $(id)
       if (el) el.hidden = true
     }
@@ -5630,7 +5722,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const isChat = wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
-    if (pop && isChat) pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
+    if (pop && wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -5648,6 +5740,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function wkBodyHtml() {
+    if (wkTab === 'ws') return wkWsHtml()
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
@@ -5674,14 +5767,14 @@ function setFirstSendHash(v) { firstSendHash = v }
       const pad = `padding-left:${8 + depth * 13}px`
       if (n.type === 'dir') {
         const open = wkOpen.has(p)
-        h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
         h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
         if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
-        h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
       }
@@ -5689,7 +5782,102 @@ function setFirstSendHash(v) { firstSendHash = v }
     return h
   }
 
+  // ---------- 工作区 tab（2026-10-14 待办 9：工作区全局根散落文件的可见性）----------
+  // 数据源 = GET /gateway/fs（与 @ 提及的目录浏览同一条链：单层列举、跳过隐藏项与 .git/node_modules
+  // 等重型目录、目录在前、每层 ≤50）。方案 = 侧栏第三枚 tab「工作区」，不逐文件夹挂：根层只列
+  // **非项目**条目（项目目录藏掉——各项目有自己的侧栏入口，重复即噪音），下钻进普通目录后全量展示。
+  // 文件行可打开（2026-10-14 待办 9 二期）：后端 /gateway/file 已扩展 label 缺省 = 按工作区根解析
+  // （顶层隐藏段拒读），点文件行即新窗口打开原文。
+  function wkWsHtml() {
+    if (wkWsLoading) return '<div class="wk-empty">加载中…</div>'
+    if (wkWsErr) return `<div class="wk-empty">${esc(wkWsErr)}</div>`
+    if (!wkWsEntries) return '<div class="wk-empty"></div>'
+    const projs = new Set(wkProjGroups().map((g) => g.label))
+    const entries = wkWsPath ? wkWsEntries : wkWsEntries.filter((e) => !(e.type === 'dir' && projs.has(e.name)))
+    let h = ''
+    if (wkWsPath) {
+      h += `<button class="wk-row dir" data-wsup="1" style="padding-left:8px" title="返回上一层">`
+      h += `<span class="wk-chev"></span><span class="wk-fic">${I.dshUp}</span><span class="wk-name">上级目录</span></button>`
+    } else {
+      h += `<div class="wk-row dir ws-root" style="padding-left:8px"><span class="wk-chev"></span><span class="wk-fic">${I.folder}</span><span class="wk-name">工作区根</span></div>`
+    }
+    if (!entries.length && !wkWsPath) h += '<div class="wk-empty">工作区根没有散落的非项目文件</div>'
+    for (const e of entries) {
+      const p = wkWsPath ? `${wkWsPath}/${e.name}` : e.name
+      const pad = `padding-left:8px`
+      if (e.type === 'dir') {
+        h += `<button class="wk-row dir" data-wsdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<span class="wk-chev">${I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
+        h += `<span class="wk-name">${esc(e.name)}</span></button>`
+      } else {
+        h += `<button class="wk-row file" data-wsfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
+        h += `<span class="wk-name">${esc(e.name)}</span></button>`
+      }
+    }
+    return h
+  }
+  async function loadWsDir(path) {
+    if (needToken()) return
+    wkWsLoading = true
+    wkWsErr = ''
+    wkWsEntries = null
+    renderWorkBody()
+    try {
+      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || '加载失败')
+      wkWsPath = String(path || '')
+      wkWsEntries = Array.isArray(data.entries) ? data.entries : []
+    } catch (e) {
+      wkWsErr = e.message || String(e)
+    }
+    wkWsLoading = false
+    renderWorkBody()
+  }
+
   // ---------- 数据 ----------
+  // 就地从内存树摘掉一个条目（2026-10-14 待办 12 删除增量更新的渲染源）：按路径段逐层下钻，
+  // 末段命中即 splice。wkTree 为 null（树未加载）时静默不动——增量无源可改，交给随后的静默对账。
+  function wkTreeRemove(p) {
+    if (!wkTree) return
+    const parts = p.split('/')
+    const walk = (nodes, i) => {
+      if (!Array.isArray(nodes)) return
+      const idx = nodes.findIndex((n) => n.name === parts[i])
+      if (idx < 0) return
+      if (i === parts.length - 1) nodes.splice(idx, 1)
+      else walk(nodes[idx] && nodes[idx].children, i + 1)
+    }
+    walk(wkTree, 0)
+  }
+  // 拖拽移动（2026-10-14 待办 10）：POST /gateway/file/move 成功后，前端把内存里的路径引用一并改指
+  // 新址——打开中的文件（workFile）、文件 tab 开放集（wkFiles）、目录展开集（wkOpen）凡落在被移动
+  // 子树下的都重写。树本身不手工搬节点：wkTreeRemove 摘旧 + 静默对账 loadProjectTree 补新（与删除
+  // 同一条渲染链，不另起第二套搬移逻辑）。
+  async function wkTreeMove(from, dir) {
+    if (needToken()) return
+    const res = await fetch(apiUrl('/gateway/file/move'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: state.workProj, path: from, dir }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.error) { toast(data.error || `移动失败（${res.status}）`); return }
+    const to = dir ? `${dir}/${from.split('/').pop()}` : from.split('/').pop()
+    const remap = (p) => (p === from ? to : p.startsWith(from + '/') ? to + p.slice(from.length) : p)
+    if (state.workFile) state.workFile = remap(state.workFile)
+    state.wkFiles = (state.wkFiles || []).map(remap)
+    for (const k of [...wkOpen]) {
+      const np = remap(k)
+      if (np !== k) { wkOpen.delete(k); wkOpen.add(np) }
+    }
+    wkTreeRemove(from)
+    renderEditor()
+    applyPanes() // workFile/wkFiles 变更随一次布局落地（内含 saveWork 收口）
+    loadProjectTree(state.workProj, true) // 静默对账：新位置入树（失败保旧树）
+    toast('已移动到 ' + (dir || '项目根'))
+  }
   // silent = 自动对账调用：不置加载态、失败保留旧树（瞬时网络错误不该把已展开的树清成错误页）
   async function loadProjectTree(label, silent) {
     if (!label || needToken()) return
@@ -5875,8 +6063,9 @@ function setFirstSendHash(v) { firstSendHash = v }
       doc: '',
       extensions: [
         CM.history(),
-        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap]),
+        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap]),
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
+        CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
         CM.editorTheme,
         wkEdThemeSpec(CM),
@@ -5992,6 +6181,109 @@ function setFirstSendHash(v) { firstSendHash = v }
   function wkEdSetLang(path) {
     if (!wkEdView) return
     wkEdView.dispatch({ effects: wkEdLangComp.reconfigure(wkEdLangExt(path)) })
+  }
+
+  // ---------- 补全（2026-10-14：Pj18 转派待办 6，VSCode 式自动补全）----------
+  // 一个 override 源三分支：①路径补全（md 链接/引用、任何文件里 ]( / [[ / @ / 引号 / 圆括号 之后或
+  // 词含 / 时）——数据 = GET /gateway/fs（与 @ 浮窗同源，path = <label>/<目录>），逐目录缓存、写盘成功
+  // 即整体失效（新文件要能被补出）；②md 语法片段（触发词 h1/h2/bold/link/table/… → snippet）；③
+  // 代码/纯文本的文档内词补全（≥3 字母 token）。补全 UI（弹层/键位）由 vendor 的 autocompletion +
+  // completionKeymap 提供，样式见 styles.css「.cm-tooltip-autocomplete」段。
+  let wkEdPathCache = new Map()
+  let wkEdPathCacheProj = '' // 缓存按项目隔离（切项目即整表作废）
+  function wkEdInvalidatePathCache() {
+    wkEdPathCache = new Map()
+  }
+  async function wkEdListDir(dir) {
+    const proj = state.workProj
+    if (!proj) return []
+    if (wkEdPathCacheProj !== proj) { wkEdPathCacheProj = proj; wkEdPathCache = new Map() }
+    const key = dir || ''
+    if (wkEdPathCache.has(key)) return wkEdPathCache.get(key)
+    try {
+      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(proj + (dir ? '/' + dir : ''))))
+      const data = await res.json()
+      const entries = res.ok && Array.isArray(data.entries)
+        ? data.entries.map((e2) => ({ name: String(e2.name), dir: e2.type === 'dir' }))
+        : []
+      wkEdPathCache.set(key, entries)
+      return entries
+    } catch (e) {
+      return [] // 失败不缓存：下次再拉（目录可能又可用了）
+    }
+  }
+  // md 语法片段表：触发词 → snippet 模板（$0/$1 为光标/占位跳点，与 VSCode 同语法）。
+  const WK_ED_MD_SNIPPETS = [
+    { label: 'h1', detail: '一级标题', apply: '# $0' },
+    { label: 'h2', detail: '二级标题', apply: '## $0' },
+    { label: 'h3', detail: '三级标题', apply: '### $0' },
+    { label: 'bold', detail: '粗体', apply: '**$0**' },
+    { label: 'italic', detail: '斜体', apply: '*$0*' },
+    { label: 'code', detail: '行内代码', apply: '`$0`' },
+    { label: 'link', detail: '链接', apply: '[$1]($0)' },
+    { label: 'img', detail: '图片', apply: '![$1]($0)' },
+    { label: 'task', detail: '任务列表', apply: '- [ ] $0' },
+    { label: 'quote', detail: '引用块', apply: '> $0' },
+    { label: 'hr', detail: '分隔线', apply: '---' },
+    { label: 'fence', detail: '代码围栏', apply: '```\n$0\n```' },
+    { label: 'table', detail: '表格', apply: '| 列1 | 列2 |\n| --- | --- |\n| $0 |  |' },
+  ]
+  function wkEdCompletionSource(ctx) {
+    const CM = wkEdCM
+    if (!CM || !wkEdFile || !wkEdMeta || !wkEdMeta.editable) return null
+    const line = ctx.state.doc.lineAt(ctx.pos)
+    const before = line.text.slice(0, ctx.pos - line.from)
+    // ① 路径补全：显式触发符（[[ / ]( / @ / 引号 / 圆括号）后，或词本身含 /
+    const pm = /(?:\[\[|\]\(|@|["'(])((?:[\w.\-]+\/)*[\w.\-]*)$/.exec(before)
+    const wm = ctx.matchBefore(/[\w.\-/]+/)
+    if (pm || (wm && wm.text.includes('/'))) {
+      const frag = (pm ? pm[1] : wm.text).replace(/\\/g, '/')
+      const slash = frag.lastIndexOf('/')
+      const dir = slash >= 0 ? frag.slice(0, slash) : ''
+      const name = slash >= 0 ? frag.slice(slash + 1) : frag
+      const from = ctx.pos - name.length
+      const ql = name.toLowerCase()
+      return wkEdListDir(dir).then((entries) => ({
+        from,
+        options: entries
+          .filter((e2) => !ql || e2.name.toLowerCase().includes(ql))
+          .slice(0, 30)
+          .map((e2) => ({ label: e2.name, type: e2.dir ? 'directory' : 'file', apply: e2.name + (e2.dir ? '/' : '') })),
+        validFor: /^[\w.\-/]*$/,
+      }))
+    }
+    const extM = /\.([a-z0-9]+)$/i.exec(wkEdFile)
+    const ext = extM ? extM[1].toLowerCase() : ''
+    const isMd = /^(md|markdown)$/.test(ext)
+    // ② md 语法片段：行首（可带少量块前缀字符）后跟字母触发词
+    if (isMd) {
+      const sm = /^[ \t]*(?:[-*+>]|\d+\.|#{1,6})?[ \t]*([A-Za-z]{1,8})$/.exec(before)
+      if (sm) {
+        const ql = sm[1].toLowerCase()
+        const hits = WK_ED_MD_SNIPPETS.filter((s) => s.label.startsWith(ql))
+        if (hits.length) {
+          return {
+            from: ctx.pos - sm[1].length,
+            options: hits.map((s) => ({ label: s.label, detail: s.detail, type: 'keyword', apply: CM.snippet(s.apply) })),
+            validFor: /^[A-Za-z]*$/,
+          }
+        }
+      }
+      return null
+    }
+    // ③ 文档内词补全（代码 / 纯文本）：≥3 字母 token，排除正在输入的词本身
+    const wm2 = ctx.matchBefore(/[A-Za-z_$][\w$]*/)
+    if (!wm2 || wm2.text.length < 2) return null
+    const seen = new Set()
+    const cur = wm2.text
+    const text = ctx.state.doc.toString()
+    const re = /[A-Za-z_$][\w$]{2,}/g
+    let m
+    while ((m = re.exec(text)) && seen.size < 500) {
+      if (m[0] !== cur && !seen.has(m[0])) seen.add(m[0])
+    }
+    const options = [...seen].slice(0, 200).map((w) => ({ label: w, type: 'text' }))
+    return { from: wm2.from, options, validFor: /^[\w$]*$/ }
   }
 
   // 本项目主题：用项目 CSS 变量（--text/--bg/--mono），日夜切换自动随动（不重建）。
@@ -6163,12 +6455,19 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (side === 'bottom') return [n.x + n.w / 2, n.y + n.h]
     return null
   }
-  // 连线几何：端点锚（缺省按两节点相对方位取最近侧）+ 三次贝塞尔控制点 + t=0.5 中点（放 label）。
+  // 连线几何：端点锚（缺省按两节点中心连线的主轴取最近侧——水平位移为主取左/右，竖直为主取上/
+  // 下；旧实现恒按水平取侧，上下堆叠的节点连线会从侧腰横着出去再拐弯，方向观感即「不对」）
+  // + 三次贝塞尔控制点 + t=0.5 中点（放 label）。fromSide/toSide 显式声明时仍按声明取锚（spec 语义）。
+  function wkCvDefaultAnchor(n, tx, ty) {
+    const cx = n.x + n.w / 2, cy = n.y + n.h / 2
+    if (Math.abs(tx - cx) >= Math.abs(ty - cy)) return tx < cx ? [n.x, cy] : [n.x + n.w, cy]
+    return ty < cy ? [cx, n.y] : [cx, n.y + n.h]
+  }
   function wkCvEdgeGeom(e) {
     let a = wkCvAnchor(e.from, e.fs)
-    if (!a) a = e.to.x + e.to.w / 2 < e.from.x ? [e.from.x, e.from.y + e.from.h / 2] : [e.from.x + e.from.w, e.from.y + e.from.h / 2]
+    if (!a) a = wkCvDefaultAnchor(e.from, e.to.x + e.to.w / 2, e.to.y + e.to.h / 2)
     let b = wkCvAnchor(e.to, e.ts)
-    if (!b) b = e.to.x > e.from.x + e.from.w / 2 ? [e.to.x, e.to.y + e.to.h / 2] : [e.to.x + e.to.w, e.to.y + e.to.h / 2]
+    if (!b) b = wkCvDefaultAnchor(e.to, e.from.x + e.from.w / 2, e.from.y + e.from.h / 2)
     const dx = b[0] - a[0], dy = b[1] - a[1]
     const horiz = Math.abs(dx) >= Math.abs(dy)
     const d = horiz
@@ -6185,6 +6484,105 @@ function setFirstSendHash(v) { firstSendHash = v }
     const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
     for (const k in attrs) el.setAttribute(k, attrs[k])
     return el
+  }
+
+  // ---------- 图形编辑（节点/组拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回
+  // 编辑器文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
+  // dispatch 触发 widget 重建不丢视口。拖动过程只做视觉位移，pointerup 才一次性写文档（一次手势 =
+  // 一次编辑 = 一条撤销步）。连线端点随拖动的跟随要等重建（重建后按新坐标重画），拖动中不实时跟。 ----------
+  function wkCvWriteDoc(view, j) {
+    try {
+      const text = JSON.stringify(j, null, 2) + '\n'
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+    } catch { /* 编辑器已销毁（切文件竞速）：丢弃本次手势 */ }
+  }
+  function wkCvRawNode(raw, id) {
+    return (Array.isArray(raw && raw.nodes) ? raw.nodes : []).find((x) => x && x.id === id) || null
+  }
+  function wkCvBindEdit(view, root, data, raw, gElById) {
+    for (const n of data.nodes) {
+      const gEl = gElById.get(n.id)
+      if (!gEl) continue
+      gEl.classList.add(n.type === 'group' ? 'wk-cv-drag-grp' : 'wk-cv-drag-node')
+      // 拖动（左键/单指）：拖组 = 组框 + 组内节点（中心落在组框内）一起平移，对齐 Obsidian 语义。
+      gEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return
+        e.stopPropagation() // 不进 pan
+        const moved = [n]
+        if (n.type === 'group') {
+          for (const m of data.nodes) {
+            if (m === n || m.type === 'group') continue
+            const cx = m.x + m.w / 2, cy = m.y + m.h / 2
+            if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
+          }
+        }
+        const sx = e.clientX, sy = e.clientY
+        let dx = 0, dy = 0
+        root.classList.add('wk-cv-dragging')
+        try { gEl.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
+        const move = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          dx = (ev.clientX - sx) / wkCvCam.k
+          dy = (ev.clientY - sy) / wkCvCam.k
+          for (const m of moved) {
+            const el = gElById.get(m.id)
+            if (el) el.setAttribute('transform', `translate(${dx},${dy})`)
+          }
+        }
+        const finish = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          gEl.removeEventListener('pointermove', move)
+          gEl.removeEventListener('pointerup', finish)
+          gEl.removeEventListener('pointercancel', cancel)
+          root.classList.remove('wk-cv-dragging')
+          if (!dx && !dy) return
+          for (const m of moved) {
+            const r = wkCvRawNode(raw, m.id)
+            if (!r) continue
+            r.x = Math.round((Number(r.x) || 0) + dx)
+            r.y = Math.round((Number(r.y) || 0) + dy)
+            m.x += dx
+            m.y += dy
+            const el = gElById.get(m.id)
+            if (el) el.removeAttribute('transform')
+          }
+          wkCvWriteDoc(view, raw)
+        }
+        const cancel = (ev) => {
+          if (ev.pointerId !== e.pointerId) return
+          gEl.removeEventListener('pointermove', move)
+          gEl.removeEventListener('pointerup', finish)
+          gEl.removeEventListener('pointercancel', cancel)
+          root.classList.remove('wk-cv-dragging')
+          for (const m of moved) {
+            const el = gElById.get(m.id)
+            if (el) el.removeAttribute('transform')
+          }
+        }
+        gEl.addEventListener('pointermove', move)
+        gEl.addEventListener('pointerup', finish)
+        gEl.addEventListener('pointercancel', cancel)
+      })
+      // 双击改文字：节点改 text/file/url（按源里已有的字段写回，不新增键）；组改 label。
+      gEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation()
+        const r = wkCvRawNode(raw, n.id)
+        if (!r) return
+        if (n.type === 'group') {
+          const v = window.prompt('组名称', n.label || '')
+          if (v === null) return
+          r.label = v
+          n.label = v
+        } else {
+          const key = typeof r.text === 'string' ? 'text' : typeof r.file === 'string' ? 'file' : typeof r.url === 'string' ? 'url' : 'text'
+          const v = window.prompt('节点文字', n.text || '')
+          if (v === null) return
+          r[key] = v
+          n.text = v
+        }
+        wkCvWriteDoc(view, raw)
+      })
+    }
   }
 
   // ---------- 画布 widget（decoField 的 block replace 宿主；跨行 replace 只允许走 StateField） ----------
@@ -6275,22 +6673,30 @@ function setFirstSendHash(v) { firstSendHash = v }
           edgesG.appendChild(t)
         }
       }
-      // 节点：群组先画（z 序垫底），其余按数组序
+      // 节点：群组先画（z 序垫底），其余按数组序。图形编辑（2026-10-14 待办#2 补缺）：节点/组可拖动
+      // 改坐标、双击改文字，落点 = 原样改写源 JSON（保留未识别字段）并 dispatch 回编辑器文档
+      // （走既有自动保存链落盘）。raw = JSON.parse 原文（渲染用 normalized 副本，写入用 raw 保字段）；
+      // 能走到此处 = wkCvParse 已验证 JSON 合法（坏 JSON 在 err 分支早退），此处解析不设防。
+      const raw = JSON.parse(this.text)
       const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
       const XHTML = 'http://www.w3.org/1999/xhtml'
+      const gElById = new Map()
       for (const n of ordered) {
         const gEl = wkCvEl('g', { class: 'wk-cv-node' + (n.type === 'group' ? ' wk-cv-group' : '') })
-        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 8, class: 'wk-cv-box' })
+        gElById.set(n.id, gEl)
+        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: n.type === 'group' ? 10 : 8, class: 'wk-cv-box' })
         if (n.color) {
-          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.1 : 0.16)
+          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.08 : 0.16)
           rect.style.stroke = wkCvRgba(n.color, 0.65)
         }
         if (n.type === 'group') rect.setAttribute('stroke-dasharray', '5 4')
         gEl.appendChild(rect)
         if (n.type === 'group') {
           if (n.label) {
-            const t = wkCvEl('text', { x: n.x + 10, y: n.y + 18, class: 'wk-cv-glabel' })
+            // 组名按 Obsidian 惯例放框外顶上（旧实现塞框内第一行，与节点正文争空间 =「组的 UI 不好」）
+            const t = wkCvEl('text', { x: n.x + 2, y: n.y - 8, class: 'wk-cv-glabel' })
             t.textContent = n.label
+            if (n.color) t.style.fill = wkCvRgba(n.color, 0.95)
             gEl.appendChild(t)
           }
         } else {
@@ -6303,6 +6709,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         }
         nodesG.appendChild(gEl)
       }
+      if (raw) wkCvBindEdit(view, root, data, raw, gElById)
       // 相机：未 fit 过（新文件）→ 包围盒适配；否则保留上次的平移缩放
       if (!wkCvCam.fit) {
         const sc = view.dom.querySelector('.cm-scroller')
@@ -6480,6 +6887,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEdConflict = false
     wkEdPendingDoc = null
     wkEdCmtMarks = []
+    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
@@ -6514,17 +6922,49 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEdState()
   }
 
+  let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
     wkEdConflict = false
+    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (IMG_EXT.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: true, editable: false }
       wkEdText = ''
       wkEdMtime = null
       renderEdBody()
+      return
+    }
+    // PDF（2026-10-14 待办#15）：纯前端预览——GET /gateway/file 读原始字节 blob 化，<iframe> 交给
+    // 浏览器自带 viewer（零外链、零后端改动）。网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
+    // 渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态。
+    if (/\.pdf$/i.test(p)) {
+      wkEdFile = p
+      wkEdMeta = { isImg: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
+      try {
+        const res = await fetch(fileUrl(p))
+        if (seq !== edSeq) return
+        if (!res.ok) {
+          body.innerHTML =
+            '<div class="wk-ed-empty">' +
+            esc(res.status === 413 ? 'PDF 超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
+            '</div>'
+          return
+        }
+        const blob = await res.blob()
+        if (seq !== edSeq) return
+        const url = URL.createObjectURL(blob)
+        wkEdPdfUrl = url
+        body.innerHTML = `<div class="wk-ed-pdf"><iframe src="${esc(url)}" title="${esc(p)}"></iframe></div>`
+      } catch (e) {
+        if (seq !== edSeq) return
+        body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
+      }
       return
     }
     body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -6617,6 +7057,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         const data = await res.json().catch(() => ({}))
         if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
         if (typeof data.mtime === 'number') wkEdMtime = data.mtime
+        wkEdInvalidatePathCache() // 写盘成功 → 路径补全目录缓存失效（新文件/新目录要能补出来）
         wkEdDirty = wkEdDocText() !== wkEdText // 保存期间又改了 → 留脏，下面续排程
       }
     } catch (e) {
@@ -6657,6 +7098,12 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
+    // 新对话占位被顶掉（2026-10-14 待办 16，对齐 syncWorkTabs「开会话顶掉占位」的定案）：在新对话
+    // 占位态打开文件 = 占位让位，顶栏不留悬空「新对话」胶囊；回到聊天由 applyPanes 兜底重开。
+    if (wkActiveKey() === WK_NEW_TAB) {
+      const i = state.wkChats.indexOf(WK_NEW_TAB)
+      if (i >= 0) state.wkChats.splice(i, 1)
+    }
     saveWork()
     applyPanes()
     renderWorkBody()
@@ -6738,11 +7185,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       if (state.workFile === p || state.workFile.startsWith(p + '/')) state.workFile = ''
       for (const k of [...wkOpen]) if (k === p || k.startsWith(p + '/')) wkOpen.delete(k)
       saveWork()
-      await loadProjectTree(state.workProj)
-      renderEditor()
+      // 增量更新（2026-10-14 待办 12）：后端已确认成功，先就地从内存树摘掉该节点重渲（不闪整树、
+      // 不置加载态），再后台静默对账一次（HTML 比对，内容一致零写 DOM）。不走非静默 loadProjectTree
+      // ——那会把 wkTree 清成「加载中…」整树重建，即用户报的「强制刷新」。
+      wkTreeRemove(p)
       renderWorkBody()
+      renderEditor()
       applyPanes() // 删掉当前打开的文件 → 文件 tab 退场、下沉格切回聊天/空
       toast('已移入 ' + data.trash)
+      loadProjectTree(state.workProj, true)
     } catch (e) {
       toast('删除失败：' + (e.message || e))
     }
@@ -6757,7 +7208,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         el.dataset.wkfile
           ? [
               { a: 'rename', icon: I.dshEdit, label: '重命名' },
-              { a: 'download', label: '下载' },
+              { a: 'download', icon: I.dshDownload, label: '下载' },
               { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
             ]
           : el.dataset.wkdir
@@ -6802,6 +7253,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 创建文件（isDir=false）/ 文件夹（true）：复用 openRenameDialog 一件两用弹窗（与重命名同模式：
   // onSubmit 抛错 = 错误留在弹窗内、不关窗，可改名重试）。成功后展开落点目录、刷新树；新建文件
   // 直接 openWorkFile（进编辑器 + 顶栏 pill + cardBus 广播，与侧栏点击同一唯一口）。
+  // 新建文件常用格式清单（2026-10-14 待办#1）：名称未自带扩展名时拼入所选格式；自带 .xx 尊重原样。
+  const WK_NEW_EXTS = ['.md', '.txt', '.json', '.canvas', '.ts', '.js', '.py', '.html', '.css', '.yaml', '']
   function wkNewCreate(isDir) {
     if (!state.workProj) return toast('先在上方选择一个项目')
     const dir = wkNewContextDir()
@@ -6810,6 +7263,8 @@ function setFirstSendHash(v) { firstSendHash = v }
       placeholder: '输入名称',
       okText: '创建',
       value: '',
+      exts: isDir ? undefined : WK_NEW_EXTS,
+      defaultExt: '.md',
       onSubmit: async (name) => {
         const res = await fetch(apiUrl('/gateway/file/create'), {
           method: 'POST',
@@ -6912,34 +7367,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       toast('下载失败：' + (e.message || e))
     }
   }
-  // ---------- 视图浮层（唯一开合口，2026-10-10）----------
-  // 触发器两处、互斥在场：侧栏展开 = 头部 #wk-view；侧栏折叠 = 标签栏左端的汉堡 #menu-btn
-  // （#sidebar.open 的兄弟选择器把汉堡藏起，故任一时刻恰一个可见）。浮层 DOM 挂在 #app 直下
-  // （见 index.html 注释），故侧栏折叠也不被裁。锚点按「谁在场」现取，不记住触发器。
-  function wkViewAnchor() {
-    return state.panelOpen ? $('wk-view') : $('menu-btn')
-  }
-  // 把浮层贴到当前触发器下方：侧栏开 → 锚在头部右侧，右对齐；侧栏折叠 → 锚在左端，左对齐。
-  // 横向夹回 #app 内（左右各 6px），避免窄屏溢出。
-  function positionWkViewPop() {
-    const pop = $('wk-view-pop')
-    const host = $('app').getBoundingClientRect()
-    const a = wkViewAnchor().getBoundingClientRect()
-    const w = pop.offsetWidth
-    let left = state.panelOpen ? a.right - host.left - w : a.left - host.left
-    left = Math.max(6, Math.min(left, host.width - w - 6))
-    pop.style.left = left + 'px'
-    pop.style.top = a.bottom - host.top + 4 + 'px'
-  }
-  function toggleWkViewPop() {
-    const pop = $('wk-view-pop')
-    const willShow = pop.hidden
-    hideWkPops()
-    if (!willShow) return
-    applyPanes() // 行状态（#wk-view-pop 常驻 DOM，靠 applyPanes 的 syncPaneRows 对齐 paneOn）
-    pop.hidden = false
-    positionWkViewPop() // 先落显（量 offsetWidth 需已可见）再定位
-  }
+  // ---------- 侧栏开关（2026-10-14 待办 5，取代 2026-10-10 的视图浮层）----------
+  // 触发器两处、互斥在场：侧栏展开 = 头部 #wk-view（收起钮）；侧栏折叠 = 标签栏左端的汉堡 #menu-btn
+  // （#sidebar.open 的兄弟选择器把汉堡藏起，故任一时刻恰一个可见）。两钮都只直管侧栏常开/常收
+  // （与 chat 模式同一语义），不再经 #wk-view-pop 浮层——浮层仅剩「侧边栏」一行，无存在必要。
 
   // ---------- 事件 ----------
   function mountWork() {
@@ -7078,22 +7509,15 @@ function setFirstSendHash(v) { firstSendHash = v }
       const b = e.target.closest('[data-wkproj]')
       if (b) selectProject(b.dataset.wkproj)
     })
+    // 侧栏收起钮：与 chat 的 #panel-collapse 同语义（只管把侧栏收起；再开走折叠态的汉堡）
     $('wk-view').addEventListener('click', (e) => {
       e.stopPropagation()
-      toggleWkViewPop()
-    })
-    $('wk-view-pop').addEventListener('click', (e) => {
-      e.stopPropagation()
-      const b = e.target.closest('[data-wkpane]')
-      if (!b) return
-      setPane(b.dataset.wkpane, !b.classList.contains('on'))
-      // 切「侧边栏」会翻 panelOpen ⇒ 触发器在 #wk-view ↔ 汉堡 间易主（#sidebar 宽 0.28s 过渡中量锚也不准），
-      // 原地留着会悬在旧锚位 → 收起浮层（开关本身已是反馈，再点对面的触发器即在当前锚点重开）。
-      if (b.dataset.wkpane === 'sidebar') $('wk-view-pop').hidden = true
+      setPane('sidebar', false)
     })
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
+      if (wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
       if (wkTab !== 'files') {
         newWorkChat()
         return
@@ -7112,13 +7536,22 @@ function setFirstSendHash(v) { firstSendHash = v }
     })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
-        wkTab = b.dataset.wktab === 'chat' ? 'chat' : 'files'
+        wkTab = b.dataset.wktab
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
+        // 工作区 tab（2026-10-14 待办 9）：首切未加载过才拉；失败/加载中不重复打
+        if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
       }),
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
     $('wk-body').addEventListener('click', (e) => {
+      const wu = e.target.closest('[data-wsup]')
+      if (wu) { loadWsDir(wkWsPath ? wkWsPath.slice(0, wkWsPath.lastIndexOf('/')) : ''); return }
+      const wd = e.target.closest('[data-wsdir]')
+      if (wd) { loadWsDir(wd.dataset.wsdir); return }
+      const wf = e.target.closest('[data-wsfile]')
+      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析
+      if (wf) { window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wf.dataset.wsfile)), '_blank'); return }
       const d = e.target.closest('[data-wkdir]')
       if (d) {
         const p = d.dataset.wkdir
@@ -7147,6 +7580,53 @@ function setFirstSendHash(v) { firstSendHash = v }
         return
       }
     })
+    // 文件树拖拽移动（2026-10-14 待办 10，仿 Obsidian）：行 draggable（wkTreeHtml），投放目标 =
+    // 目录行（含收起态）与树空白（= 项目根，仅文件 tab）。wkDragPath 记拖动起点，dragover 按
+    // 「非自身 / 非其子目录 / 父目录不同」判可落并亮行；落点落定走 wkTreeMove（work-files.js）。
+    let wkDragPath = ''
+    let wkDndEl = null
+    const body = $('wk-body')
+    const dropDir = (e) => {
+      const row = e.target.closest ? e.target.closest('[data-wkdir]') : null
+      return row ? row.dataset.wkdir : wkTab === 'files' ? '' : null
+    }
+    const canDrop = (from, dir) =>
+      from !== dir && !dir.startsWith(from + '/') && from.split('/').slice(0, -1).join('/') !== dir
+    const dndMark = (el) => {
+      if (wkDndEl === el) return
+      if (wkDndEl) wkDndEl.classList.remove('wk-dnd')
+      wkDndEl = el
+      if (el) el.classList.add('wk-dnd')
+    }
+    body.addEventListener('dragstart', (e) => {
+      const row = e.target.closest ? e.target.closest('[data-wkfile],[data-wkdir]') : null
+      if (!row) return
+      wkDragPath = row.dataset.wkfile || row.dataset.wkdir
+      e.dataTransfer.setData('text/plain', wkDragPath)
+      e.dataTransfer.effectAllowed = 'move'
+    })
+    body.addEventListener('dragover', (e) => {
+      if (!wkDragPath || wkTab !== 'files') return
+      const dir = dropDir(e)
+      if (dir == null || !canDrop(wkDragPath, dir)) { dndMark(null); return }
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      dndMark(e.target.closest('[data-wkdir]') || body)
+    })
+    body.addEventListener('dragleave', (e) => {
+      if (!body.contains(e.relatedTarget)) dndMark(null)
+    })
+    body.addEventListener('drop', (e) => {
+      const from = wkDragPath
+      wkDragPath = ''
+      dndMark(null)
+      if (!from || wkTab !== 'files') return
+      const dir = dropDir(e)
+      if (dir == null || !canDrop(from, dir)) return
+      e.preventDefault()
+      wkTreeMove(from, dir)
+    })
+    body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
@@ -7159,9 +7639,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#wk-proj-pop') && !e.target.closest('#wk-proj-seat')) $('wk-proj-pop').hidden = true
-      // 两个视图浮层触发器都排除：#wk-view（侧栏展开）与 #menu-btn（侧栏折叠），否则汉堡的点击
-      // 冒泡到这里会把刚弹出的浮层立刻关掉。
-      if (!e.target.closest('#wk-view-pop') && !e.target.closest('#wk-view') && !e.target.closest('#menu-btn')) $('wk-view-pop').hidden = true
       if (!e.target.closest('#wk-new-pop') && !e.target.closest('#wk-new')) $('wk-new-pop').hidden = true
     })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
@@ -7478,24 +7955,15 @@ function setFirstSendHash(v) { firstSendHash = v }
   window.addEventListener('scroll', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() }, { passive: true, capture: true })
 
   // ---------- 事件绑定 ----------
-  // 侧栏唤出（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除）：
-  //  · #menu-btn 汉堡（左上角，全视口共用一枚）：点击 = 打开并钉住（钉住后鼠标移出侧栏不自动收）
-  //  · 左缘唤出（桌面，预览式打开、不钉住）：判据 = 「指针到达窗口左缘」，两种观测合一——
-  //    ①窗口内取样到 clientX ≤ EDGE_PX；②指针直接从左缘离开窗口（document mouseout：relatedTarget
-  //    为 null 且 clientX ≤ 0）。快速左移常在同一个取样间隔内直接冲出窗口，靠细条 mouseenter 会被整段
-  //    跳过（用户实测「向左后再向右一点点才唤出」）。收的判定在 sidebar/recent.js 的 #sidebar mouseleave
-  const EDGE_PX = 8
-  const edgeArmed = () => !state.panelOpen && !isMobile() && !document.body.classList.contains('token-gate')
-  // 2026-10-10 用户定案：work 模式下汉堡 = 标签栏左端的「视图」入口，点击弹出 #wk-view-pop（与侧栏头部
-  // #wk-view 同一个口，见 work-mount.js toggleWkViewPop）——work 面板的开合本就由该浮层的「侧边栏」行管；
-  // chat 模式不变，仍是「打开并钉住侧栏」。面板随模式互斥显隐（#panel.work 钩子），故按 state.sbMode 分派。
+  // 侧栏开合（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除；2026-10-14 待办#19 定案：
+  // **左缘悬停唤出整条触发链移除**——work 编辑时误触屏幕边界即弹侧栏打断操作，干扰大于收益；
+  // 只保留手动口：#menu-btn 汉堡（左上角，全视口共用一枚）点击 = 打开并钉住（钉住后鼠标移出侧栏
+  // 不自动收）、#panel-collapse 收起钮、#scrim 遮罩（移动端抽屉）。收的判定在 sidebar/recent.js 的
+  // #sidebar mouseleave（仅对未钉住的展开态生效）。
+  // 2026-10-14 待办 5：汉堡两模式同语义 = 打开并钉住侧栏（work 的视图浮层已退役）；work 侧栏的
+  // 收起走侧栏头部 #wk-view（work-mount.js）。面板随模式互斥显隐（#panel.work 钩子）不受影响。
   $('menu-btn').addEventListener('click', () => {
-    if (state.sbMode === 'work') toggleWkViewPop()
-    else setPanel(true, { pin: true })
-  })
-  document.addEventListener('mousemove', (e) => { if (e.clientX <= EDGE_PX && edgeArmed()) setPanel(true) })
-  document.addEventListener('mouseout', (e) => {
-    if (!e.relatedTarget && e.clientX <= 0 && edgeArmed()) setPanel(true)
+    setPanel(true, { pin: true })
   })
   $('scrim').addEventListener('click', () => setPanel(false))
   $('panel-collapse').innerHTML = I.collapse
@@ -8091,7 +8559,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   const MENTION_UP_ICON = I.dshUp
   let mention = { open: false, sentinel: null, q: '', items: [], sel: 0 }
   // entries: null=未加载；[]=空目录；[TreeNode…]=已加载。seq 丢弃迟到的旧响应（快速连点目录）。
-  const pick = { path: '', entries: null, loading: false, err: '', seq: 0 }
+  // searchOff：搜索/浏览模式开关（2026-10-14 待办 20）——false 且查询非空 = 全局搜索模式；
+  // 下钻/返回目录后翻 true（回到层内浏览），浮窗重开（refreshPick）复位 false。
+  const pick = { path: '', entries: null, loading: false, err: '', seq: 0, searchOff: false, q: '' }
+  // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层并发），层间 await。
+  // 上限：目录 ≤250 / 条目 ≤2000 / 深度 ≤4——够覆盖散件与项目浅层，防全库深扫拖垮浮窗。
+  // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
+  const pickAll = { items: null, busy: false, seq: 0 }
 
   // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
   // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
@@ -8108,6 +8582,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const seen = {}
     const kept = items.filter((it) => {
       if (it.kind === 'pathup') return true
+      if (it.glob) return true // 全局搜索命中（待办 20）：就是要看的重点结果，不受每组 3 行截断
       const g = groupOf(it)
       seen[g] = (seen[g] || 0) + 1
       return seen[g] <= GROUP_MAX
@@ -8132,9 +8607,55 @@ function setFirstSendHash(v) { firstSendHash = v }
     return i < 0 ? '' : p.slice(0, i)
   }
   function pickLabel() {
+    // 搜索模式（2026-10-14 待办 20）：文件组标题提示结果口径（层内浏览则照旧标当前层）
+    if (pick.q && !pick.searchOff) return pickAll.items ? '工作区全局搜索' : '全局搜索…'
     if (pick.loading) return '加载中…'
     if (pick.err) return '加载失败'
     return pick.path || '工作区根'
+  }
+  // 构建全工作区递归清单（幂等；构建期间 busy 挡重入，seq 丢弃被 refreshPick 作废的旧轮）。
+  // 完成不自行重渲——由调用方的 after 回调负责（浮窗还开着才重渲）。
+  async function ensurePickAll() {
+    if (pickAll.items || pickAll.busy) return
+    pickAll.busy = true
+    const seq = ++pickAll.seq
+    const out = []
+    let layer = [{ p: '', d: 0 }]
+    const seen = new Set()
+    try {
+      while (layer.length && seen.size < 250 && out.length < 2000) {
+        const next = []
+        await Promise.all(
+          layer.map(async ({ p, d }) => {
+            try {
+              const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
+              const data = await r.json()
+              if (!r.ok || !data || !Array.isArray(data.entries)) return
+              for (const e of data.entries) {
+                const cp = p ? `${p}/${e.name}` : e.name
+                out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp })
+                if (e.type === 'dir' && d < 4 && !seen.has(cp) && seen.size < 250) {
+                  seen.add(cp)
+                  next.push({ p: cp, d: d + 1 })
+                }
+              }
+            } catch { /* 单层失败跳过，不拖垮整轮 */ }
+          }),
+        )
+        if (seq !== pickAll.seq) return
+        layer = next
+      }
+    } finally {
+      if (seq === pickAll.seq) {
+        pickAll.items = out
+        pickAll.busy = false
+      }
+    }
+  }
+  // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
+  // 建清单，完成后浮窗仍开着才重渲。
+  function pickSearchKick(re) {
+    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy) ensurePickAll().then(re).catch(() => {})
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -8157,12 +8678,25 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     return seq === pick.seq
   }
-  // 当前层的可选条目（q 在当前层内过滤名称）：上级目录行 + 目录 + 文件。
+  // 当前层的可选条目 / 全局搜索结果（2026-10-14 待办 20）。
+  // q 为空或已下钻（searchOff）= 原层内浏览：上级目录行 + 当前层按 q 过滤。
+  // q 非空且未下钻 = 全局搜索：跨工作区递归清单（pickAll）按名称过滤，glob 标记免组截断，
+  // 上限 30 行防溢屏。清单未就绪时文件组暂空（其余组照常），pickSearchKick 建完重渲补上。
   // 「上级目录」只取决于「当前是不是工作区根」，与**这一层的内容**无关——故加载中/加载失败时它照样在，
   // 否则某一层拉不到（目录已删/端点失败）就退不回去，整个文件组成死层。条目本身不塞假行。
   function pickItems(q) {
     const ql = (q || '').trim().toLowerCase()
+    pick.q = ql
     const items = []
+    if (ql && !pick.searchOff) {
+      if (!pickAll.items) return items
+      for (const e of pickAll.items) {
+        if (!e.name.toLowerCase().includes(ql)) continue
+        items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true })
+        if (items.length >= 30) break
+      }
+      return items
+    }
     if (pick.path) items.push({ kind: 'pathup', name: '上级目录', path: pickParent() })
     if (pick.loading || !pick.entries) return items
     for (const e of pick.entries) {
@@ -8172,8 +8706,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
     return items
   }
-  // 目录项进入下一层 / 上级目录返回（两个浮窗的选择入口共用同一处判定）
+  // 目录项进入下一层 / 上级目录返回（两个浮窗的选择入口共用同一处判定）。下钻 = 用户已明确
+  // 「要看这个位置」→ 翻回层内浏览模式（此后 q 只做层内过滤，不再全局搜）。
   function pickEnter(it) {
+    pick.searchOff = true
     return loadPickPath(it.path)
   }
   function mentionChipIcon(kind, ptype) {
@@ -8325,6 +8861,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   function refreshPick(after) {
     pick.entries = null // 立刻清旧层：否则换项目后先闪一帧上一个项目的条目（在途请求由 loadPickPath 的 seq 作废）
     pick.err = ''
+    pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
+    pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.seq++
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
@@ -8349,6 +8888,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     const pop = $('mention-pop')
     if (!pop || !mention.open) return
     const items = mentionItems(mention.q)
+    const searching = pick.q && !pick.searchOff && !pickAll.items
+    pickSearchKick(() => { if (mention.open) renderMentionPop() }) // 搜索清单未就绪 → 建完补渲（待办 20）
+    if (!items.length && searching) {
+      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果
+      pop.innerHTML = '<div class="mp-sec">文件 · 全局搜索…</div>'
+      pop.hidden = false
+      return
+    }
     if (!items.length) { closeMentionPop(); return }
     mention.items = items
     mention.sel = Math.min(mention.sel, items.length - 1)
@@ -8692,7 +9239,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
     items.push(...pickItems(cmd.search))
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
-    return arrangeItems(items)
+    const arranged = arrangeItems(items)
+    pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
+    return arranged
   }
   function toggleCmdPop() {
     if (cmd.open) { closeCmdPop(); return }
@@ -8734,7 +9283,10 @@ function setFirstSendHash(v) { firstSendHash = v }
         html += `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
       }
       let lastGrp = ''
-      html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
+      // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
+      if (!cmd.items.length && cmd.search.trim() && !pick.searchOff && !pickAll.items) {
+        html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
+      } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
         const grp = g === '文件' ? '文件 · ' + pickLabel() : g
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
@@ -8886,7 +9438,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
   // 当前模型的官方思考等级清单（2026-09-18：凭据池 effortLevels 声明经 /gateway/models 下发；
   // 未声明返回 null → 回退固定 Off+Low/High/Max）。渲染与选择一律以此为准，不写死档位。
-  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' }
+  const EFFORT_LABELS = { off: 'Off', low: 'Low', medium: 'Medium', high: 'High', max: 'Max', ultra: 'Ultra' }
   function modelEffortLevels() {
     const id = MODEL_CUR.model
     if (!id || !MODELS || !Array.isArray(MODELS.items)) return null
@@ -9041,7 +9593,16 @@ function setFirstSendHash(v) { firstSendHash = v }
       if (MODEL_CUR.model === id) { closeModelPop(); return }
       const it = ((MODELS && MODELS.items) || []).find(x => x && (x.v === id || x.k === id))
       // 2026-08-29 直接切模型自动切供应商：MODEL_CUR.provider 同步真实归属（网关侧按会话绑定供应商）
+      const prevEff = MODEL_CUR.effortLevel
       MODEL_CUR = { ...MODEL_CUR, model: id, provider: (it && it.provider) || MODEL_CUR.provider }
+      // 切模型校验档位（2026-10-14 待办#7 补缺）：新模型有官方档位声明且当前档不在其中（例：从
+      // DeepSeek 切 GLM 时残留 off，GLM 声明无 off）→ 清回「默认」，避免座显/菜单展示无效档；
+      // 有会话时随切换下发改档（'off' 语义 = 网关 delete settings.effortLevel），与 effort 面板同链。
+      const lv = modelEffortLevels()
+      if (lv && prevEff != null && !lv.includes(prevEff)) {
+        MODEL_CUR.effortLevel = undefined
+        void apiSetModel({ effortLevel: 'off' }) // 与 effort 面板同链同形：'off' = 网关清档
+      }
       modelUserPicked = true // 2026-08-24：本次会话内主动切换，防止 /gateway/session 旧上报回滚
       saveModelCur() // 2026-08-24：持久化，刷新后恢复
       renderModelSeat()
@@ -10218,12 +10779,14 @@ function setApprovalPending(v) { approvalPending = v }
       gateVerified = true
       if (gateAwait) gatePlayTransition() // 门流程：播过渡视频（白板拉伸成输入栏/角色转正趴栏），ended 后 hideGate
       else hideGate() // URL 带 token 直连（无门）：验证通过直接解锁
+      noteWsOpen() // SSE 监督者联动（2026-10-14 GPT 定案②）：WS 恢复即强制重建 SSE（半开下行唯一复活信号，重建后 hello 全量对账）
       gwSendPort.syncGwSend()
       cardBus.reportCaps() // 卡片能力表：连上/重连即补报（网关侧随连接断开已摘表，重连必须重报）
       gwApproval.sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
     }
     gws.onclose = () => {
       setConn(false, '未连接')
+      noteWsClosed() // SSE 监督者联动：WS 断 → 关 SSE（上行已死，下行单独维持无意义），随 WS 重链统一重建
       // 2026-08-18 修复：token 未验证成功即断开（URL token 过期——网关重启/换新 token、或门内输入错误）
       // 一律回 token 门重输，避免静默卡在空态、后续数据请求带着无效 token 全 401。
       if (!gateVerified) {
@@ -10665,6 +11228,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     setBtnMode(turnLive && !hasContent ? 'stop' : 'send')
     const on = turnLive || (GATEWAY && gws && gws.readyState === 1 && hasContent)
     sendBtn.classList.toggle('enabled', on)
+    mdPreviewRefresh() // md 实时预览（待办 17）：输入变化全汇到 syncGwSend 这一口，开着就跟着重渲
   }
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型
@@ -10683,6 +11247,60 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   }
   function relUploadPath(abs) {
     return sessionCwd ? relPath(sessionCwd, abs) : abs
+  }
+
+  // 换层禁用窗口：@ 浮窗 / 命令菜单 / 模型·项目下拉 / 审批接管在场时，插入链（sentinel/选区 DOM 操作）
+  // 依赖 #input 的选区与可见性——display:none 会毁掉选区，此时保持编辑态不换层（守护的不变量 =
+  // 「弹层插入链运行期输入区 DOM 不得被替换」；弹层关闭后随下次输入/blur 自然恢复换层判定）。
+  function mdSwapBlocked() {
+    const tk = $('composer-takeover')
+    if (tk && !tk.hidden) return true
+    if (mention && mention.open) return true
+    for (const id of ['mention-pop', 'cmd-pop', 'model-pop', 'proj-pop']) {
+      const el = $(id)
+      if (el && !el.hidden) return true
+    }
+    return false
+  }
+
+  function mdPreviewRefresh() {
+    const raw = $('input')
+    const view = $('input-md')
+    if (!raw || !view) return
+    const focused = document.activeElement === raw
+    // 编辑态或无内容：渲染视图弃掉（单真值原则——不保留第二份文本），原文归位
+    if (focused || !serializeInput().trim() || mdSwapBlocked()) {
+      view.hidden = true
+      view.innerHTML = ''
+      raw.hidden = false
+      return
+    }
+    view.innerHTML = `<div class="blocks">${mdHtml(serializeInput())}</div>`
+    view.hidden = false
+    raw.hidden = true
+  }
+
+  // 点击渲染态 = 要继续编辑：焦点交回 #input（focus 事件走 mdPreviewRefresh 换回编辑态）。
+  // 光标落点：contenteditable 被 hidden 过，选区丢失 → 归到文末（就近续写，回执已声明）。
+  const mdView = $('input-md')
+  if (mdView) {
+    mdView.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      inputEl.focus()
+      const sel = window.getSelection()
+      if (sel) {
+        const r = document.createRange()
+        r.selectNodeContents(inputEl)
+        r.collapse(false)
+        sel.removeAllRanges()
+        sel.addRange(r)
+      }
+    })
+  }
+  const mdRaw = $('input')
+  if (mdRaw) {
+    mdRaw.addEventListener('blur', mdPreviewRefresh)
+    mdRaw.addEventListener('focus', mdPreviewRefresh)
   }
 
 
@@ -11097,8 +11715,11 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
     if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
-  window.addEventListener('scroll', (e) => { if (quotePop && !quotePop.contains(e.target)) closeQuotePop() }, { passive: true, capture: true })
-  window.addEventListener('resize', () => { if (quotePop) closeQuotePop() })
+  // iPad（2026-10-14 Pj13 转派）：弹软键盘会触发 resize、浮窗内输入也会带出滚动——光标在浮窗输入框里时
+  // 这两类事件都不是「锚点漂移」，不得关窗（豁免判据 = 焦点在浮窗内）；浮窗外滚动/真 resize 仍照常关。
+  const quoteFocusInside = () => !!quotePop && quotePop.contains(document.activeElement)
+  window.addEventListener('scroll', (e) => { if (quotePop && !quotePop.contains(e.target) && !quoteFocusInside()) closeQuotePop() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { if (quotePop && !quoteFocusInside()) closeQuotePop() })
 
   // ---------- 5. 项目预览桥（floria-quote-open / floria-quote-close / floria-quote-action）----------
   // 预览页（<项目>/.claude/preview 的 iframe，src = 127.0.0.1:<port> 或 /backend/<label>/）里的选区

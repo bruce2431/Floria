@@ -10,7 +10,7 @@
   }
 
   function hideWkPops() {
-    for (const id of ['wk-proj-pop', 'wk-view-pop', 'wk-new-pop']) {
+    for (const id of ['wk-proj-pop', 'wk-new-pop']) {
       const el = $(id)
       if (el) el.hidden = true
     }
@@ -92,7 +92,7 @@
     const isChat = wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
-    if (pop && isChat) pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
+    if (pop && wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -110,6 +110,7 @@
   }
 
   function wkBodyHtml() {
+    if (wkTab === 'ws') return wkWsHtml()
     if (wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
@@ -136,14 +137,14 @@
       const pad = `padding-left:${8 + depth * 13}px`
       if (n.type === 'dir') {
         const open = wkOpen.has(p)
-        h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
         h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
         if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
-        h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
       }
@@ -151,7 +152,102 @@
     return h
   }
 
+  // ---------- 工作区 tab（2026-10-14 待办 9：工作区全局根散落文件的可见性）----------
+  // 数据源 = GET /gateway/fs（与 @ 提及的目录浏览同一条链：单层列举、跳过隐藏项与 .git/node_modules
+  // 等重型目录、目录在前、每层 ≤50）。方案 = 侧栏第三枚 tab「工作区」，不逐文件夹挂：根层只列
+  // **非项目**条目（项目目录藏掉——各项目有自己的侧栏入口，重复即噪音），下钻进普通目录后全量展示。
+  // 文件行可打开（2026-10-14 待办 9 二期）：后端 /gateway/file 已扩展 label 缺省 = 按工作区根解析
+  // （顶层隐藏段拒读），点文件行即新窗口打开原文。
+  function wkWsHtml() {
+    if (wkWsLoading) return '<div class="wk-empty">加载中…</div>'
+    if (wkWsErr) return `<div class="wk-empty">${esc(wkWsErr)}</div>`
+    if (!wkWsEntries) return '<div class="wk-empty"></div>'
+    const projs = new Set(wkProjGroups().map((g) => g.label))
+    const entries = wkWsPath ? wkWsEntries : wkWsEntries.filter((e) => !(e.type === 'dir' && projs.has(e.name)))
+    let h = ''
+    if (wkWsPath) {
+      h += `<button class="wk-row dir" data-wsup="1" style="padding-left:8px" title="返回上一层">`
+      h += `<span class="wk-chev"></span><span class="wk-fic">${I.dshUp}</span><span class="wk-name">上级目录</span></button>`
+    } else {
+      h += `<div class="wk-row dir ws-root" style="padding-left:8px"><span class="wk-chev"></span><span class="wk-fic">${I.folder}</span><span class="wk-name">工作区根</span></div>`
+    }
+    if (!entries.length && !wkWsPath) h += '<div class="wk-empty">工作区根没有散落的非项目文件</div>'
+    for (const e of entries) {
+      const p = wkWsPath ? `${wkWsPath}/${e.name}` : e.name
+      const pad = `padding-left:8px`
+      if (e.type === 'dir') {
+        h += `<button class="wk-row dir" data-wsdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<span class="wk-chev">${I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
+        h += `<span class="wk-name">${esc(e.name)}</span></button>`
+      } else {
+        h += `<button class="wk-row file" data-wsfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
+        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
+        h += `<span class="wk-name">${esc(e.name)}</span></button>`
+      }
+    }
+    return h
+  }
+  async function loadWsDir(path) {
+    if (needToken()) return
+    wkWsLoading = true
+    wkWsErr = ''
+    wkWsEntries = null
+    renderWorkBody()
+    try {
+      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || '加载失败')
+      wkWsPath = String(path || '')
+      wkWsEntries = Array.isArray(data.entries) ? data.entries : []
+    } catch (e) {
+      wkWsErr = e.message || String(e)
+    }
+    wkWsLoading = false
+    renderWorkBody()
+  }
+
   // ---------- 数据 ----------
+  // 就地从内存树摘掉一个条目（2026-10-14 待办 12 删除增量更新的渲染源）：按路径段逐层下钻，
+  // 末段命中即 splice。wkTree 为 null（树未加载）时静默不动——增量无源可改，交给随后的静默对账。
+  function wkTreeRemove(p) {
+    if (!wkTree) return
+    const parts = p.split('/')
+    const walk = (nodes, i) => {
+      if (!Array.isArray(nodes)) return
+      const idx = nodes.findIndex((n) => n.name === parts[i])
+      if (idx < 0) return
+      if (i === parts.length - 1) nodes.splice(idx, 1)
+      else walk(nodes[idx] && nodes[idx].children, i + 1)
+    }
+    walk(wkTree, 0)
+  }
+  // 拖拽移动（2026-10-14 待办 10）：POST /gateway/file/move 成功后，前端把内存里的路径引用一并改指
+  // 新址——打开中的文件（workFile）、文件 tab 开放集（wkFiles）、目录展开集（wkOpen）凡落在被移动
+  // 子树下的都重写。树本身不手工搬节点：wkTreeRemove 摘旧 + 静默对账 loadProjectTree 补新（与删除
+  // 同一条渲染链，不另起第二套搬移逻辑）。
+  async function wkTreeMove(from, dir) {
+    if (needToken()) return
+    const res = await fetch(apiUrl('/gateway/file/move'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: state.workProj, path: from, dir }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.error) { toast(data.error || `移动失败（${res.status}）`); return }
+    const to = dir ? `${dir}/${from.split('/').pop()}` : from.split('/').pop()
+    const remap = (p) => (p === from ? to : p.startsWith(from + '/') ? to + p.slice(from.length) : p)
+    if (state.workFile) state.workFile = remap(state.workFile)
+    state.wkFiles = (state.wkFiles || []).map(remap)
+    for (const k of [...wkOpen]) {
+      const np = remap(k)
+      if (np !== k) { wkOpen.delete(k); wkOpen.add(np) }
+    }
+    wkTreeRemove(from)
+    renderEditor()
+    applyPanes() // workFile/wkFiles 变更随一次布局落地（内含 saveWork 收口）
+    loadProjectTree(state.workProj, true) // 静默对账：新位置入树（失败保旧树）
+    toast('已移动到 ' + (dir || '项目根'))
+  }
   // silent = 自动对账调用：不置加载态、失败保留旧树（瞬时网络错误不该把已展开的树清成错误页）
   async function loadProjectTree(label, silent) {
     if (!label || needToken()) return

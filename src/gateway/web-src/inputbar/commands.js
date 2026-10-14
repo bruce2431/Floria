@@ -6,7 +6,7 @@ import { findSession, hashOf } from '../engine/sessions.js'
 import { inputEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isTouch, newSessionProject } from '../core/util.js'
 import { pendingImages, renderImgPills } from './images.js'
-import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pickItems, pickLabel, refreshPick, serializeInput } from './mention.js'
+import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pick, pickAll, pickItems, pickLabel, pickSearchKick, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
@@ -150,7 +150,9 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
     items.push(...pickItems(cmd.search))
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
-    return arrangeItems(items)
+    const arranged = arrangeItems(items)
+    pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
+    return arranged
   }
   function toggleCmdPop() {
     if (cmd.open) { closeCmdPop(); return }
@@ -192,7 +194,10 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
         html += `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
       }
       let lastGrp = ''
-      html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
+      // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
+      if (!cmd.items.length && cmd.search.trim() && !pick.searchOff && !pickAll.items) {
+        html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
+      } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
         const grp = g === '文件' ? '文件 · ' + pickLabel() : g
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''

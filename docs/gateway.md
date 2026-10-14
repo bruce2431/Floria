@@ -289,7 +289,7 @@ web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
 
-## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`、`/gateway/file/create`、`/gateway/file/upload`）
+## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`、`/gateway/file/create`、`/gateway/file/upload`、`/gateway/file/move`）
 
 work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两端点只解析 `label` 找项目根，语义与防护全在导出纯函数里——端点即「纯函数结果码 → HTTP 码」的直译，写法与 `/gateway/fs` 复用 `resolveWithinRoot` 同源。
 
@@ -305,6 +305,8 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 **`POST /gateway/file/upload`**（2026-10-13，work「+」菜单上传）body `{label, dir, name, contentBase64}` → `uploadProjectFile(projRoot, dir, name, buf)`。前端多选逐个发；同名自动加 `-1`/`-2` 序号避让（**不覆盖**）；名含路径段按 basename 化解（不可能逃出落点）；落点逃逸 → **403**；单件上限 **20 MB** → 413。成功 `{ok, path, size}`（`EntryOpResult` 新增可选 `size`）。
 
+**`POST /gateway/file/move`**（2026-10-14，work 文件树拖拽移动）body `{label, path, dir}` → `moveProjectEntry(projRoot, path, dir)`。`dir` = 目标目录（项目根相对，空串 = 项目根，**不自建多级**，不存在或非目录 → **404**）；basename 随源不变（移动不改名，改名走 rename）；移入自身或其子目录 → **400**；目标同名已存在 → **409**；源越界/空 `path` → **403**，不存在 → **404**；已在目标处 → 200 幂等 no-op。成功 `{ok, name, path}`（新项目内相对路径，正斜杠）。
+
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（直接 import 四件真实现：重命名 13 例 + 删除 12 例 + 写内容 10 例〔越界/空 rel 403、不存在与目录 404、基线不符 409 且不覆盖、基线正确写入、无基线强制覆盖〕+ 端点转译/ETag/`SKIP_TREE_DIRS` 文本断言，43 项；临时树建在 `os.tmpdir()`，跑完自清；评论读写 10 例见 §17）；`probes/probe-file-create.ts`（create/upload：26 例——创建文件/目录、落点 ''=项目根、409 不覆盖、落点逃逸 403、落点目录不存在 404、保留名清洗、空名 400、上传落盘/序号避让/递归建目录/逃逸 403/basename 化解）。
 
 ## 17. 项目评论批注端点（`/gateway/comments`，2026-10-06）
@@ -316,7 +318,7 @@ work 右栏评论 tab + 选区「添加评论」的存取侧（[web-ui.md](web-u
 - 与文件树写端点同构：只解析 `label` 找项目根，语义/防护在导出纯函数里，端点即「纯函数结果码 → HTTP 码」直译；受 `/gateway/*` token/cookie 校验保护。
 - **探针锚点**：`probes/probe-file-tree-ops.ts`（评论段 10 例：空读、写+计数、落 `.claude/comments.json`、回读、整份替换、非数组 400、非对象元素过滤、坏 JSON / 顶层非对象 → 空、两端点存在且转译结果码；临时树 `os.tmpdir()` 自清）。
 
-**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款；**MIME 分类 = 静态表优先、未登记扩展名落 `sniffBinary()` 内容嗅探**——前 8 KB 无 NUL 判文本 → `text/plain; charset=utf-8`，见 [web-ui.md](web-ui.md) §43）**现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按相对路径读盘，`.claude/images/` 仅是普通路径。**`label` 不做 scope 筛选**：项目会话 `label`=项目名（解析到项目根），全局根会话 `label`=`全局根 · 散装对话`（解析到工作区根）——两者标签空间不重叠（项目 label 是目录名、不含 `·`），故全局会话同样能取图。单图受 `GET /gateway/file` 的 4 MB 上限约束。
+**读端点复用（无新路由）**：`GET /gateway/file?label=&path=`（原始字节 + 路径穿越防护 + 4 MB 上限 + MIME 头 + `ETag`/`Last-Modified`，work 编辑区同款；**MIME 分类 = 静态表优先、未登记扩展名落 `sniffBinary()` 内容嗅探**——前 8 KB 无 NUL 判文本 → `text/plain; charset=utf-8`，见 [web-ui.md](web-ui.md) §43）**现亦作 AI 生成图取图口——前端按 markdown 图片语法 `![](代号.png)` 里的代号拼 `.claude/images/<代号>` 提请（[web-ui.md](web-ui.md) §50）。图片字节不进消息流/转录，`/gateway/file` 只按相对路径读盘，`.claude/images/` 仅是普通路径。**`label` 不做 scope 筛选**：项目会话 `label`=项目名（解析到项目根），全局根会话 `label`=`全局根 · 散装对话`（解析到工作区根）——两者标签空间不重叠（项目 label 是目录名、不含 `·`），故全局会话同样能取图。**label 缺省 = 按工作区根解析**（2026-10-14，work 侧栏「工作区」tab 打开散装文件）：根直读仅限 label 缺省，且拒顶层隐藏段（首段以 `.` 开头 → **403**，防摸 `.claude/gateway/token` 等凭据）；查无此 label（非空且未命中）仍 → **404**。其余穿越防护与 4 MB 上限同一口径。单图受 `GET /gateway/file` 的 4 MB 上限约束。
 
 ## 18. 卡片公开 API 端点（`/gateway/cards`、`/gateway/card-call`，2026-10-11）
 

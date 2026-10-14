@@ -7,6 +7,10 @@ import {
 } from '@codemirror/state'
 import { EditorView, Decoration, keymap, WidgetType, ViewPlugin } from '@codemirror/view'
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands'
+import {
+  autocompletion, closeCompletion, startCompletion, completionKeymap,
+  CompletionContext, snippet, completeFromList, ifIn,
+} from '@codemirror/autocomplete'
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -32,6 +36,8 @@ window.CMLiveMarkdown = {
   EditorView, Decoration, keymap, WidgetType, ViewPlugin,
   // @codemirror/commands
   history, defaultKeymap, historyKeymap, indentWithTab,
+  // @codemirror/autocomplete（2026-10-14：work 编辑卡 VSCode 式补全，Pj18 待办 6 转派）
+  autocompletion, closeCompletion, startCompletion, completionKeymap, CompletionContext, snippet, completeFromList, ifIn,
   // @codemirror/language
   StreamLanguage, syntaxHighlighting, HighlightStyle, syntaxTree,
   // @lezer/highlight

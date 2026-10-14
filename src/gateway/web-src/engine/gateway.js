@@ -4,6 +4,7 @@ import { deviceHint, showGate, gatePlayTransition, hideGate } from './auth.js'
 import { inputEl, setConnUp, state } from './state.js'
 import { toast } from '../core/util.js'
 import { cardBus } from './card-bus.js'
+import { noteWsOpen, noteWsClosed } from './live.js' // SSE 连接监督者联动口（循环引用可用：ESM 函数声明提升，调用都在运行期回调内）
 /* @module engine/gateway.js */
   // ---------- 网关模式（SubPj2 私有化网关）----------
   // 检测 /gateway/health 返回 mode==='gateway' 即启用：composer 可发、WS 双向、工具审批。
@@ -224,12 +225,14 @@ import { cardBus } from './card-bus.js'
       gateVerified = true
       if (gateAwait) gatePlayTransition() // 门流程：播过渡视频（白板拉伸成输入栏/角色转正趴栏），ended 后 hideGate
       else hideGate() // URL 带 token 直连（无门）：验证通过直接解锁
+      noteWsOpen() // SSE 监督者联动（2026-10-14 GPT 定案②）：WS 恢复即强制重建 SSE（半开下行唯一复活信号，重建后 hello 全量对账）
       gwSendPort.syncGwSend()
       cardBus.reportCaps() // 卡片能力表：连上/重连即补报（网关侧随连接断开已摘表，重连必须重报）
       gwApproval.sendSubscribe() // 2026-08-30 pending 重放：连上/重连即订阅当前会话（补切会话时 WS 尚未就绪的场景）
     }
     gws.onclose = () => {
       setConn(false, '未连接')
+      noteWsClosed() // SSE 监督者联动：WS 断 → 关 SSE（上行已死，下行单独维持无意义），随 WS 重链统一重建
       // 2026-08-18 修复：token 未验证成功即断开（URL token 过期——网关重启/换新 token、或门内输入错误）
       // 一律回 token 门重输，避免静默卡在空态、后续数据请求带着无效 token 全 401。
       if (!gateVerified) {
@@ -323,6 +326,12 @@ import { cardBus } from './card-bus.js'
 // —— 跨模块写入口（切割脚本生成）——
 export function setGateAwait(v) { gateAwait = v }
 export function setGateVerified(v) { gateVerified = v }
+// SSE 监督者回唤（live.js watchdog 连续失败时调用）：主动断 WS → onclose 走既有 4s 重连链 →
+// onopen → noteWsOpen 重建 SSE。gws 为空（尚未连过/REVIEW）无可断，SSE 自身重试链已覆盖。
+export function forceWsReconnect() {
+  clearTimeout(reconnectTimer)
+  if (gws) { try { gws.close() } catch { /* 已断忽略 */ } }
+}
 // 分层治理 4D（2026-10-10）：feature 端口注入（app 启动序列调用一次，须早于 initGateway）。
 export function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMention = p.mention }
 

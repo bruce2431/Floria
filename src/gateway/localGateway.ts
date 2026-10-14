@@ -97,7 +97,10 @@ const cliClients = new Map<string, WebSocket>()
 // 10s 内有注册痕迹 = 活进程在重连 → 复用不 spawn。痕迹不清理（仅时间戳，内存开销可忽略）。
 const cliRegisterAt = new Map<string, number>()
 const CLI_RECENT_REGISTER_MS = 10_000
-const sseClients = new Set<{ res: import('node:http').ServerResponse }>()
+// stuckSince（2026-10-14 SSE 半开根治，GPT 定案第一阶段⑤）：res.write() 返回 false（内核缓冲
+// 满 = 背压）或写异常时记下起点；心跳循环里超 30s 未恢复 drain 即 destroy 摘除。
+// res.write() 成功 ≠ 浏览器收到——写异常/背压是服务端唯一能观测到的死亡信号。
+const sseClients = new Set<{ res: import('node:http').ServerResponse; stuckSince?: number }>()
 let ssePrimed = false
 const sseSizes = new Map<string, { size: number; mtime: number }>()
 // O4：SSE 事件驱动 —— 用 fs.watch 监听各项目会话目录，替代 2s 轮询。sseWatches 持所有 watcher
@@ -1093,6 +1096,30 @@ export function renameProjectEntry(projRoot: string, rel: string, rawName: strin
   renameSync(abs, to)
   const parent = dirname(from)
   return { ok: true, name, path: parent === '.' ? name : `${parent}/${name}` }
+}
+
+/**
+ * 项目内条目移动（拖拽放入文件夹，2026-10-14 待办 10）：把 rel 整体搬到 dir 目录下（dir='' = 项目根），
+ * basename 不变。防护与 renameProjectEntry 同口径：resolveWithinRoot 越界拒绝（path 与 dir 两侧都查）、
+ * 目标已存在 → 409（不覆盖、不自动序号）；另拒移入自身或自身子目录（dir === rel 或在其下）→ 400。
+ * 抽成纯函数供探针直测（与 probe-file-tree-ops 同段约定）。
+ */
+export function moveProjectEntry(projRoot: string, rel: string, rawDir: string): EntryOpResult {
+  const abs = resolveWithinRoot(projRoot, rel)
+  if (!abs || abs === projRoot) return { ok: false, code: 403, error: 'forbidden' }
+  if (!existsSync(abs)) return { ok: false, code: 404, error: 'not found' }
+  const dir = String(rawDir || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (dir === rel || dir.startsWith(rel + '/')) return { ok: false, code: 400, error: '不能移入自身或其子目录' }
+  const dirAbs = dir ? resolveWithinRoot(projRoot, dir) : projRoot
+  if (!dirAbs) return { ok: false, code: 403, error: 'forbidden' }
+  if (!existsSync(dirAbs) || !statSync(dirAbs).isDirectory()) return { ok: false, code: 404, error: '目标目录不存在' }
+  const name = basename(abs)
+  const to = join(dirAbs, name)
+  const newPath = dir ? `${dir}/${name}` : name
+  if (to === abs) return { ok: true, name, path: newPath }
+  if (existsSync(to)) return { ok: false, code: 409, error: '同名条目已存在' }
+  renameSync(abs, to)
+  return { ok: true, name, path: newPath }
 }
 
 /**
@@ -2691,12 +2718,22 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   if (req.method === 'GET' && url.pathname === '/gateway/file') {
     const fLabel = url.searchParams.get('label') || ''
     const fPath = url.searchParams.get('path') || ''
+    // label 缺省 = 读工作区根散装文件（2026-10-14 待办 9：work 侧栏「工作区」tab 点开全局文件）。
+    // 根直读仅限 label 缺省；另拒顶层隐藏段（.claude/.trash 等，防摸 token/凭据），其余走同一条防越界与 4MB 口径。
+    let fDir: string
     const fProj = findProjects(root).find((g) => g.label === fLabel)
-    if (!fProj) {
+    if (fProj) {
+      fDir = resolve(fProj.dir, '..', '..') // 项目根（fProj.dir = <root>/<label>/.claude/projects）
+    } else if (!fLabel) {
+      if ((fPath.split(/[\\/]/)[0] || '').startsWith('.')) {
+        sendJson(res, 403, { error: 'forbidden' })
+        return
+      }
+      fDir = root
+    } else {
       sendJson(res, 404, { error: 'project not found' })
       return
     }
-    const fDir = resolve(fProj.dir, '..', '..') // 项目根（fProj.dir = <root>/<label>/.claude/projects）
     const fAbs = resolve(fDir, fPath)
     if (fAbs !== fDir && !fAbs.startsWith(fDir + sep)) {
       sendJson(res, 403, { error: 'forbidden' })
@@ -2744,6 +2781,31 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       )
       if (!rOut.ok) sendJson(res, rOut.code, { error: rOut.error })
       else sendJson(res, 200, rOut)
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 项目内文件 / 目录移动（拖拽放入文件夹，2026-10-14 待办 10）：POST /gateway/file/move
+  // {label, path, dir} → basename 不变、整体搬到 dir（'' = 项目根）。语义与防护全在 moveProjectEntry
+  // （纯函数）；此处只管解析 label。受上方 /gateway/* token 校验保护。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/move') {
+    try {
+      const mp = await readReportBody(req)
+      const mProj = findProjects(root).find(
+        (g) => g.scope === 'project' && g.label === (typeof mp.label === 'string' ? mp.label : ''),
+      )
+      if (!mProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      const mOut = moveProjectEntry(
+        resolve(mProj.dir, '..', '..'),
+        typeof mp.path === 'string' ? mp.path : '',
+        typeof mp.dir === 'string' ? mp.dir : '',
+      )
+      if (!mOut.ok) sendJson(res, mOut.code, { error: mOut.error })
+      else sendJson(res, 200, mOut)
     } catch (e) {
       sendError(res, e)
     }
@@ -3276,6 +3338,15 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     const client = { res }
     sseClients.add(client)
     scheduleIdleShutdown()
+    // TCP keepalive（2026-10-14 GPT 定案）：只辅助回收半开 TCP（内核层探测死对端），
+    // 不作实时性保证——实时性由应用层命名 heartbeat（startSseHeartbeat）+ 客户端 watchdog 承担。
+    res.socket?.setKeepAlive(true, 15_000)
+    // 背压恢复即清 stuckSince；error = 写失败，立即摘除名册（close 会随后触发同一清理路径，幂等）。
+    res.on('drain', () => { client.stuckSince = undefined })
+    res.on('error', () => {
+      sseClients.delete(client)
+      scheduleIdleShutdown()
+    })
     res.write(`data: ${JSON.stringify({ type: 'hello', time: Date.now() })}\n\n`)
     req.on('close', () => {
       sseClients.delete(client)
@@ -4514,6 +4585,57 @@ function stopSocketHeartbeat(): void {
   heartbeatTimer = null
 }
 
+// ——SSE 应用层命名 heartbeat（2026-10-14 GPT 定案第一阶段③⑤）——
+// 旧形态：SSE 只写 hello 无任何活性机制，网关对半开死对端恒写成功 → 永不摘除 sseClients，
+// 前端 onerror 永不触发 → 冻结到 F5。根治 = 服务端 15s 写命名心跳（`event: heartbeat` +
+// data JSON——`: ping` 注释浏览器拿不到，无效），兼作服务端背压探测：write 返回 false 记
+// stuckSince，超 SSE_BACKPRESSURE_DESTROY_MS 未恢复 drain 即 destroy 摘除；写异常/close/error
+// 从名册移除。客户端侧 45s watchdog（web-src live.js）看「长时间没收到任何数据」自行重建。
+// 两侧不可互替：服务端查写入错误/背压，客户端查下行断流。
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000
+const SSE_BACKPRESSURE_DESTROY_MS = 30_000
+let sseHeartbeatTimer: ReturnType<typeof setInterval> | null = null
+function startSseHeartbeat(): void {
+  if (sseHeartbeatTimer) return
+  sseHeartbeatTimer = setInterval(() => {
+    const frame = `event: heartbeat\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`
+    for (const c of [...sseClients]) {
+      if (c.res.destroyed || c.res.writableEnded) {
+        sseClients.delete(c)
+        continue
+      }
+      // 背压长期不恢复 → 销毁连接：客户端 onerror → 3s 重连 → hello 全量对账（靠监督者，不靠时序侥幸）。
+      if (c.stuckSince !== undefined && Date.now() - c.stuckSince > SSE_BACKPRESSURE_DESTROY_MS) {
+        console.log('[gateway] SSE 背压超时，销毁连接交由客户端重连')
+        sseClients.delete(c)
+        try {
+          c.res.destroy()
+        } catch {
+          /* 已断忽略 */
+        }
+        scheduleIdleShutdown()
+        continue
+      }
+      try {
+        if (!c.res.write(frame)) {
+          if (c.stuckSince === undefined) c.stuckSince = Date.now()
+        } else {
+          c.stuckSince = undefined
+        }
+      } catch {
+        sseClients.delete(c)
+        scheduleIdleShutdown()
+      }
+    }
+  }, SSE_HEARTBEAT_INTERVAL_MS)
+  sseHeartbeatTimer.unref?.()
+}
+function stopSseHeartbeat(): void {
+  if (!sseHeartbeatTimer) return
+  clearInterval(sseHeartbeatTimer)
+  sseHeartbeatTimer = null
+}
+
 // 2026-08-31 取证强化：网关日志逐行加 [MM-DD HH:MM:SS] 时间戳。落盘是 fd 重定向（server.ts
 // spawnGatewayProcess stdio 直传 fd），无法在落盘侧加前缀 → 输出侧劫持 console。startLocalGateway
 // 仅 --gateway 独立进程调用（cli.tsx fast-path），不影响 CLI 进程自身输出。2026-08-30 新会话
@@ -4584,6 +4706,7 @@ export function startLocalGateway(opts?: { host?: string; port?: number; token?:
   })
   wss = new WebSocketServer({ noServer: true })
   startSocketHeartbeat() // ① 心跳：/ws 与 /clients 的僵尸连接回收（stopLocalGateway 统一停）
+  startSseHeartbeat() // ② SSE 命名心跳：活性探测 + 背压回收（stopLocalGateway 统一停）
   wss.on('connection', (ws, req) => {
     sockets.add(ws)
     wsDevice.set(ws, deviceHintOf(req)) // 卡片能力表的设备标签（仅展示/人工分辨用）
@@ -5065,6 +5188,7 @@ export function stopLocalGateway(): boolean {
     reclaimTimer = null
   }
   stopSocketHeartbeat() // ① 心跳定时器随网关关停（下一步即 close 全部 WS，无需再探测）
+  stopSseHeartbeat() // ② SSE 心跳定时器随网关关停
   for (const c of sockets) {
     try {
       c.close()

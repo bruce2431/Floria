@@ -74,7 +74,7 @@ import { state } from './ui-state.js'
     const num = (k) => (s && typeof s[k] === 'number' && s[k] > 0 ? s[k] : def[k])
     const bool = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
     const arr = (k) => (s && Array.isArray(s[k]) ? s[k].filter((x) => typeof x === 'string' && x) : def[k].slice())
-    state.wkTab = str('wkTab', ['files', 'chat', 'ws'])
+    state.wkTab = str('wkTab', ['files', 'chat'])
     state.wkMainTab = str('wkMainTab', ['chat', 'file'])
     state.wkAssist = bool('wkAssist')
     state.wkAssistMode = str('wkAssistMode', ['side', 'float', 'slim'])

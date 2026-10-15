@@ -15,16 +15,17 @@ import { WORK_SLOT_DEF } from './work-state.js'
 /* @module sidebar/work-context.js */
 
   // 「当前 work 面在哪儿」的唯一只读源。kind 区分两种语境：
-  //   'project'   = 某个具体工作项目（含它的会话/文件/预览）
-  //   'workspace' = 工作区根散件视图（wkTab==='ws'）或无项目选中
+  //   'project'   = 某个具体工作项目（含它的会话/文件/预览）——**工作区根「全局根 · 散装对话」也是
+  //                 一个 project 语境**（待办 #7 收尾：与项目同构，不再是第三态）
+  //   'workspace' = 未选中任何项目
   function getWorkContext() {
     const projectKey = state.workProj || ''
     return {
-      kind: projectKey && state.wkTab !== 'ws' ? 'project' : 'workspace',
+      kind: projectKey ? 'project' : 'workspace',
       projectKey,
       projectLabel: projectKey, // 槽键 = 项目 label（/gateway/sessions 的 groups label）
       mode: state.sbMode, // 'chat' | 'work'
-      selectedTab: state.wkTab, // 'files' | 'chat' | 'ws'
+      selectedTab: state.wkTab, // 'files' | 'chat'
     }
   }
 

@@ -25,7 +25,7 @@
     // 预览态 ⇄ 工具态由顶栏「工具栏」胶囊切（工具态时胶囊变「关闭」，点回预览态）。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
     wkMainTab: 'chat', wkPrevW: 420, wkPvTab: '',
-    // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件）。2026-10-15 由
+    // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表）。2026-10-15 由
     // sidebar/work.js 的模块局部变量提升到 state 并**随项目入槽**（此前不持久化 ⇒ 重启恒回「文件」，
     // 这既是待办 #5 的一半，也让「切项目恢复上次侧栏页」成为可能）。
     wkTab: 'files',

@@ -43,8 +43,11 @@
       body.innerHTML = '<div class="wk-ed-empty">未选择项目</div>'
       return
     }
-    // 返回载入 Promise（新文件才读盘）：调用方要等「文档真进编辑器」才能定位行（如卡片 src-open 跳行）
-    if (wkEdFile !== state.workFile) return readFile(state.workFile)
+    // 返回载入 Promise（新文件/新项目才读盘）：调用方要等「文档真进编辑器」才能定位行（如卡片 src-open 跳行）。
+    // 缓存键 = (workProj, workFile) 两维——只比路径会在「两项目存在同名相对路径」（如都开 README.md）时
+    // 判为同一文件：切项目后不重读，编辑区留着上个项目的内容（PDF 分支表现为旧 iframe 换「不支持预览」，
+    // 文本分支更会被后续自动保存写进新项目同名文件 = 跨项目串台/污染）。项目维度不可省。
+    if (wkEdFile !== state.workFile || wkEdProj !== state.workProj) return readFile(state.workFile)
     renderEdBody()
   }
 
@@ -57,6 +60,7 @@
     wkEdConflict = false
     wkEdPendingDoc = null
     wkEdCmtMarks = []
+    wkEdProj = ''
     if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
@@ -93,10 +97,14 @@
   }
 
   let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
+  let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
+    // 立刻认下新 (proj,path)：并发重渲（切项目那一刻）不得拿旧 wkEdFile 命中缓存渲染上个项目的内容
+    wkEdProj = state.workProj
+    wkEdFile = ''
     wkEdConflict = false
     if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (IMG_EXT.test(p)) {

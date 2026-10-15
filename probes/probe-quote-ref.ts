@@ -21,7 +21,7 @@
  *    .preview-frame 的 contentWindow**（按 e.source 反查帧，不取第一个）；坐标 = 帧内视口 + 帧偏移；
  *  - cache-bust 同值：sw.js 的 CACHE 版本与 index.html 的 ?v= 必须一致（只 bump 一处 = 老资源常驻）。
  */
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { resolve } from 'path'
 
 const ROOT = resolve(import.meta.dir, '..')
@@ -65,8 +65,9 @@ if (!existsSync(QUOTE)) {
   else bad('quoteSendNow 未走 gwSend()（自建发送链？）')
   if (!/gws\s*\.\s*send\(/.test(q)) ok('quote.js 不自建 ws 发送（gws.send 零命中）')
   else bad('quote.js 直接 gws.send —— 绕开了 gwSend 唯一发送口')
-  if (/chip\.className = 'mention ref'/.test(q)) ok('引用 chip 复用 .mention 类（× / 退格删除链自动生效）')
-  else bad('引用 chip 未复用 .mention 类')
+  // CM6 接管（2026-10-14 #17）：输入栏胶囊 = 引用令牌（refToken）进 doc 的原子装饰视图，不再是 DOM chip。
+  if (/composerAppendRef\(refToken\(\{/.test(q)) ok('引用胶囊 = refToken 进 doc + CM6 原子装饰（.mention ref 类由装饰渲染）')
+  else bad('引用胶囊未走 composerAppendRef(refToken(...)) —— CM6 接管后形态不对')
   if (!q.includes('wkEdText')) ok('quote.js 不再依赖编辑区原文缓存（行号唯一来源 = DOM）')
   else bad('quote.js 仍读 wkEdText —— 原文缓存已退役（应改走 data-l 行锚）')
   // 唤出手势（2026-09-28 用户定案）：松开鼠标那一刻；右键保留浏览器原生菜单
@@ -77,7 +78,7 @@ if (!existsSync(QUOTE)) {
   if (/quoteSkipNextUp/.test(q)) ok('「点浮窗外关窗」的 mouseup 被消费（不会关掉又立刻重开）')
   else bad('缺 quoteSkipNextUp 守卫 —— 关窗后紧随的 mouseup 会把浮窗重开')
   // 「使用 AI 编辑」后光标必须落在胶囊之后（用户定案 2026-09-28：接着打字是给这条引用的说明）
-  if (/function caretAfter\(/.test(q) && /const chip = insertRefChip\(snap\)[\s\S]{0,120}caretAfter\(chip\)/.test(q)) ok('「使用 AI 编辑」后光标折叠到新胶囊之后（caretAfter）')
+  if (/function quoteStash\(snap\)[\s\S]{0,200}composerFocus\(\)/.test(q) && /composerAppendRef\(refToken/.test(q)) ok('「使用 AI 编辑」后光标落胶囊之后（composerAppendRef 落块尾 + composerFocus）')
   else bad('quoteStash 未把光标落到胶囊后 —— 打字会插在胶囊前面')
 }
 
@@ -98,7 +99,9 @@ if (entry >= 0) {
 }
 
 // ---- 3. 令牌正则：从源码抽真身来测（不在探针里复刻）----
-const mention = read(resolve(SRC, 'inputbar/mention.js'))
+// 令牌正则/chip 已下移 core/mention-syntax.js（cbcad75 分层治理，core←feature 断环）；mention.js 只余
+// 浮窗/回显/stripQuoteBodies/refToken 并 re-export 令牌。两件拼接后仍是「整族源码」，reOf/fnSlice 照旧命中。
+const mention = read(resolve(SRC, 'core/mention-syntax.js')) + '\n' + read(resolve(SRC, 'inputbar/mention.js'))
 const reOf = (name: string) => {
   const m = mention.match(new RegExp(`const ${name} = (\\/.*\\/[a-z]*)\\n`))
   if (!m) return null
@@ -139,8 +142,10 @@ if (QRE && MRE) {
 }
 
 // ---- 4. 序列化分支 + 回显成对 ----
-if (/k === 'ref'\s*\)\s*\{\s*out \+= refToken/.test(mention)) ok('serializeInput 有 ref 分支（走 refToken）')
-else bad('serializeInput 缺 ref 分支（引用 chip 会按插件令牌序列化）')
+// CM6 接管（2026-10-14）：序列化 = doc 原文（serializeInput 退化为 composerDocText()，令牌块自承载
+// 原文语义，不再有 k==='ref' 的拼接分支）。
+if (/function serializeInput\(\)\s*\{\s*return composerDocText\(\)/.test(mention)) ok('serializeInput = composerDocText()（doc 单真源，令牌块自承载）')
+else bad('serializeInput 未退化到 composerDocText（引用序列化形态不对）')
 if (/rkind !== 'file'/.test(mention) && /\[@引用回复:\$\{/.test(mention)) ok('refToken：回复引用出原文 + 锚点令牌')
 else bad('refToken 的回复引用分支缺失/形态变了')
 if (mention.includes('quoted') === false && /\[@引用:\$\{p\}/.test(mention)) ok('refToken：文件引用只出位置令牌（不含原文）')
@@ -150,6 +155,13 @@ else bad('renderUserText 未接 QUOTE_REF_RE')
 if (/\.replace\(QUOTE_REPLY_RE/.test(mention)) ok('renderUserText 接 QUOTE_REPLY_RE（乐观态回显）')
 else bad('renderUserText 未接 QUOTE_REPLY_RE')
 const md = read(resolve(SRC, 'core/markdown.js'))
+// 公式文法唯一真源（core/math-spec.js，2026-10-15 待办 11）：markdown.js 的 extractMath 消费 MATH_SRC_*，
+// §9 跑真身 mdHtml 时必须同源注入（否则 extractMath 未定义、整件抛）。
+const specSrc2 = read(resolve(SRC, 'core/math-spec.js'))
+const specCut = specSrc2.search(/^export \{/m)
+const specBody = (specCut >= 0 ? specSrc2.slice(0, specCut) : specSrc2).split('\n').filter((l) => !/^\s*import\s/.test(l)).join('\n')
+const mathSpec = new Function(`${specBody}\nreturn { MATH_SRC_BLOCK_DOLLAR, MATH_SRC_BLOCK_BRACKET, MATH_SRC_INLINE_PAREN, MATH_SRC_INLINE_DOLLAR, mathInlineOk }`)() as Record<string, unknown>
+if (!mathSpec.MATH_SRC_BLOCK_DOLLAR || typeof mathSpec.mathInlineOk !== 'function') { console.error('❌ 未能装载 core/math-spec.js 真源'); process.exit(1) }
 if (/\.replace\(QUOTE_REF_RE/.test(md)) ok('mdInline 接 QUOTE_REF_RE（落盘态回显）')
 else bad('mdInline 未接 QUOTE_REF_RE')
 if (/\.replace\(QUOTE_REPLY_RE/.test(md)) ok('mdInline 接 QUOTE_REPLY_RE（落盘态回显）')
@@ -206,11 +218,11 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
     if (pOut === '[@引用PDF:Pj13/paper.pdf#p7]') ok('stripQuoteBodies：PDF 原文块压回单一锚点令牌')
     else bad(`stripQuoteBodies PDF 块形态变了：${JSON.stringify(pOut)}`)
     // 三个渲染入口都要过这一刀（漏一个 = 该路径仍把原文摆进气泡）
-    const messages = read(resolve(SRC, 'chat/messages.js'))
+    const messages = read(resolve(SRC, 'chat/messages/msg-actions.js'))
     const approval = read(resolve(SRC, 'inputbar/approval.js'))
     if (/export \{[^}]*stripQuoteBodies,/.test(mention)) ok('mention.js 导出 stripQuoteBodies')
     else bad('mention.js 未导出 stripQuoteBodies')
-    if (/import \{[^}]*stripQuoteBodies[^}]*\} from '\.\.\/inputbar\/mention\.js'/.test(messages) && /stripQuoteBodies\(txt\)/.test(messages)) ok('messages.js 落盘气泡渲染前剥原文块')
+    if (/import \{[^}]*stripQuoteBodies[^}]*\} from '[^']*inputbar\/mention\.js'/.test(messages) && /stripQuoteBodies\(txt\)/.test(messages)) ok('messages.js 落盘气泡渲染前剥原文块')
     else bad('messages.js 未剥原文块 —— 原文仍会出现在气泡里')
     if ((approval.match(/stripQuoteBodies\(/g) || []).length >= 2) ok('approval.js 乐观气泡 + 排队项两处都剥')
     else bad('approval.js 漏剥（乐观气泡或排队项）')
@@ -271,13 +283,14 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
 
 // ---- 4e. 项目申报的浮窗动作（2026-09-28）：纯数据表 + 与内置行合流 ----
 {
-  const registry = read(resolve(SRC, 'views/registry.js'))
-  const extCard = read(resolve(SRC, 'views/cards/ext/ext-card.js'))
-  const preview = read(resolve(SRC, 'views/cards/preview/preview-card.js'))
-  if (/function normQuoteActions\(/.test(extCard) && /function registerQuoteActions\(/.test(registry) && /function quoteActions\(/.test(registry)) ok('动作表：ext-card.normQuoteActions + registry.registerQuoteActions/quoteActions 齐')
+  // 浮窗动作表宿主已迁 views/registry.js → engine/ext-runtime.js（视图卡分层治理，views/ 仅余 cards/）
+  const registry = read(resolve(SRC, 'engine/ext-runtime.js'))
+  const extDecl = read(resolve(SRC, 'engine/ext-decl.js'))   // 申报规范化：normQuoteActions（ext-card → engine/ext-decl 分层治理）
+  const preview = read(resolve(SRC, 'feature/preview-frame.js'))  // syncExtCards 宿主（views/cards/preview → feature/preview-frame）
+  if (/function normQuoteActions\(/.test(extDecl) && /function registerQuoteActions\(/.test(registry) && /function quoteActions\(/.test(registry)) ok('动作表：ext-decl.normQuoteActions + ext-runtime.registerQuoteActions/quoteActions 齐')
   else bad('动作表缺失（normQuoteActions / registerQuoteActions / quoteActions）')
-  if (/export \{[^}]*normQuoteActions,/.test(extCard) || /normQuoteActions,/.test(extCard)) ok('ext-card.js 导出 normQuoteActions')
-  else bad('ext-card.js 未导出 normQuoteActions')
+  if (/export \{[^}]*normQuoteActions,/.test(extDecl) || /normQuoteActions,/.test(extDecl)) ok('ext-decl.js 导出 normQuoteActions')
+  else bad('ext-decl.js 未导出 normQuoteActions')
   if (/export \{[^}]*registerQuoteActions[\s\S]*?quoteActions/.test(registry) || (/registerQuoteActions/.test(registry.split('export {')[1] || '') && /quoteActions/.test(registry.split('export {')[1] || ''))) ok('registry.js 导出 registerQuoteActions / quoteActions')
   else bad('registry.js 未导出动作表接口')
   // 一次请求取两份申报：syncExtCards 同一 then 里落两张表，且清理点一致
@@ -286,7 +299,7 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
   if (/clearExtCards\(\)[\s\S]{0,80}clearQuoteActions\(\)/.test(preview)) ok('EXT 卡与动作表同点清理（生命周期一致）')
   else bad('动作表未与 EXT 卡同点清理（会残留上个项目动作）')
   // 动作 = 纯数据：normQuoteActions 不得带 path / host
-  const nq = fnSlice(extCard, 'normQuoteActions')
+  const nq = fnSlice(extDecl, 'normQuoteActions')
   if (nq && !/\bpath\b/.test(nq) && !/\bhost\b/.test(nq) && /\/\^\[a-zA-Z0-9_-\]\{1,32\}\$\//.test(nq)) ok('normQuoteActions：纯数据（无 path/host），id 白名单 + 去重')
   else bad('normQuoteActions 形态变了（应纯数据、id 白名单）')
   // quote.js 合流：内置行恒在 + 申报行追加 + 同 id 内置优先
@@ -355,7 +368,9 @@ const stripBody = (QRBODY && QPBODY && stripBodySrc ? new Function('QUOTE_REPLY_
 // 选中一旦跨在格式符边界上 indexOf 必然 -1 ⇒ 行号丢失。
 // 2026-10-07：编辑区统一为 CodeMirror 6（md 走 Live Preview、其余按扩展名高亮），行号不再来自渲染期
 // data-l 行锚或纯文本字符偏移，而由编辑器文档经 posAtDOM 反查（work.js wkEdQuoteLines）。
-const work = read(resolve(SRC, 'sidebar/work.js'))
+// work 家族（2026-10-13 God Module 拆分）：work.js + sidebar/work/*.js 拼接读取（wkEdQuoteLines 已下移 work/work-cm.js）
+const WORK_DIR2 = resolve(SRC, 'sidebar/work')
+const work = [read(resolve(SRC, 'sidebar/work.js')), ...readdirSync(WORK_DIR2).filter((f) => f.endsWith('.js')).map((f) => read(resolve(WORK_DIR2, f)))].join('\n')
 if (/function wkEdQuoteLines\(range\)/.test(work) && /posAtDOM\(/.test(work) && /lineAt\(/.test(work)) ok('work.js：选区行号 = CodeMirror posAtDOM → 源行号（wkEdQuoteLines）')
 else bad('work.js 缺 wkEdQuoteLines —— 选区 → 行号链断开')
 if (!/mdHtml\([^)]*data-l/.test(work)) ok('work.js 不再经 mdHtml 落行锚（编辑区已改 CodeMirror）')
@@ -382,9 +397,9 @@ for (const sel of ['.quote-pop', '.qp-row', '.qp-bar', '.qp-send', '.mention.ref
 // 触屏自绘选中栏样式已随引擎撤除（2026-10-02）
 if (!/\.quote-bar|\.qb-item|\.qh-knob/.test(css)) ok('触屏选中栏/柄样式已清（.quote-bar/.qb-item/.qh-knob 无残留）')
 else bad('styles.css 仍留触屏选中栏/柄样式 —— 自绘引擎已撤但样式残留')
-// 浅色是定案（用户点名「对应换成浅色」）：此块不跟主题变量
-if (/\.quote-pop \{[\s\S]*?background: #fff;/.test(css)) ok('.quote-pop 浅色硬编码（不跟 --bg/--text 主题变量）')
-else bad('.quote-pop 仍跟随主题变量 —— 与「换成浅色」定案不符')
+// 2026-10-06 撤销「浅色硬编码」定案：浮窗随夜晚模式令牌化（背景/文字用 --bg/--ink 主题变量）。
+if (/\.quote-pop \{[\s\S]*?background: var\(--bg\);/.test(css)) ok('.quote-pop 随主题令牌化（--bg/--ink，兼容黑夜反转）')
+else bad('.quote-pop 未跟随主题变量 —— 与令牌化定案不符')
 if (css.includes('.qp-tab')) bad('styles.css 仍留 .qp-tab —— tab 条已被竖排菜单取代')
 else ok('旧 tab 条样式已删（无遗留）')
 // 聚焦指示载体 = 整行描边，不用浏览器默认 focus ring（全局 2px outline + 6px 圆角与输入行不齐）
@@ -437,15 +452,25 @@ if (existsSync(APP)) {
   try {
     const body = md.replace(/^import .*$/gm, '').replace(/^export \{[\s\S]*?^\}$/m, '')
     // eslint-disable-next-line no-new-func
-    const fn = new Function('esc', 'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE', 'QUOTE_PDF_RE', 'mentionChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'quotePdfChipHtml', `${body}\nreturn mdHtml`)
-    const render = fn(escStub, never, never, never, never, QREPLY || never, QPDF || never, (k: string, v: string) => v, (p: string) => p, replyChip || ((p: string) => p), pdfChip || ((p: string) => p)) as (s: string, a?: string) => string
+    const fn = new Function(
+      'esc', 'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE', 'QUOTE_PDF_RE',
+      'mentionChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'quotePdfChipHtml',
+      'MATH_SRC_BLOCK_DOLLAR', 'MATH_SRC_BLOCK_BRACKET', 'MATH_SRC_INLINE_PAREN', 'MATH_SRC_INLINE_DOLLAR', 'mathInlineOk',
+      `${body}\nreturn mdHtml`,
+    )
+    const render = fn(
+      escStub, never, never, never, never, QREPLY || never, QPDF || never, (k: string, v: string) => v, (p: string) => p, replyChip || ((p: string) => p), pdfChip || ((p: string) => p),
+      mathSpec.MATH_SRC_BLOCK_DOLLAR, mathSpec.MATH_SRC_BLOCK_BRACKET, mathSpec.MATH_SRC_INLINE_PAREN, mathSpec.MATH_SRC_INLINE_DOLLAR, mathSpec.mathInlineOk,
+    ) as (s: string, a?: string) => string
     const src = '# 标题\n\n**加粗**：正文\n第二行\n\n- 项一\n- 项二\n\n```\ncode1\ncode2\n```\n'
     html = render(src)
     if (!/data-l/.test(html)) ok('mdHtml 输出零行锚（行锚子系统已随 CodeMirror 改造移除）')
     else bad('mdHtml 仍落 data-l —— 旧行锚子系统未清')
-    const frags = ['<h1>标题</h1>', '<strong>加粗</strong>', '<li>项一</li>', '<div class="code-block">', '<pre><code>code1']
+    // data-md（2026-10-09 复制链）在块级元素上挂原文，故片段断言只看可见 HTML（剔除 data-md 属性）
+    const vis = html.replace(/ data-md="[^"]*"/g, '')
+    const frags = ['<h1>标题</h1>', '<strong>加粗</strong>', '<li>项一</li>', '<div class="code-block', '<pre><code>code1']
     let okAll = true
-    for (const f of frags) if (!html.includes(f)) { okAll = false; bad(`mdHtml 未渲染 ${f}`) }
+    for (const f of frags) if (!vis.includes(f)) { okAll = false; bad(`mdHtml 未渲染 ${f}`) }
     if (okAll) ok('mdHtml 结构渲染完好（标题/加粗/列表/代码块）')
     // 回复引用全链：真身 refToken 出「锚点 + 原文块」→ stripQuoteReplyBody 剥块 → 渲染成胶囊。
     // 气泡里既不得有原文，也不得裸露令牌（用户实报「为什么文本信息也在气泡里」）。
@@ -458,7 +483,9 @@ if (existsSync(APP)) {
     else bad(`块外正文被吞：${JSON.stringify(h2)}`)
     if (h2.includes('mention-chip m-ref') && h2.includes('引用自「引用文本功能」· 第 12 条回复')) ok('回复引用锚点渲染成胶囊（与文件引用同族）')
     else bad(`回复引用未渲染成胶囊：${JSON.stringify(h2)}`)
-    if (!h2.includes('[@引用回复:')) ok('令牌已被消费（不裸露在气泡里）')
+    // 令牌裸露只看可见 HTML：data-md（复制用原文）合法保留了令牌源码，不算裸露
+    const h2vis = h2.replace(/ data-md="[^"]*"/g, '')
+    if (!h2vis.includes('[@引用回复:')) ok('令牌已被消费（可见文本不裸露，data-md 保留源码供复制）')
     else bad('令牌裸露在消息里（渲染入口漏接？）')
     // PDF 引用全链：真身 refToken 出「路径#页码 + 原文块」→ stripQuoteBodies 剥块 → 渲染成胶囊
     const pdfStripped = stripBody ? stripBody('[@引用PDF:Pj13/paper.pdf#p7]\n第七页原文\n[/引用PDF]') : ''
@@ -467,7 +494,8 @@ if (existsSync(APP)) {
     else bad(`PDF 原文仍出现在气泡里：${JSON.stringify(h3)}`)
     if (h3.includes('mention-chip m-ref') && h3.includes('引用自 paper.pdf · 第 7 页')) ok('PDF 引用令牌渲染成胶囊（与文件/回复引用同族）')
     else bad(`PDF 引用未渲染成胶囊：${JSON.stringify(h3)}`)
-    if (!h3.includes('[@引用PDF:')) ok('PDF 令牌已被消费（不裸露在气泡里）')
+    const h3vis = h3.replace(/ data-md="[^"]*"/g, '')
+    if (!h3vis.includes('[@引用PDF:')) ok('PDF 令牌已被消费（可见文本不裸露，data-md 保留源码供复制）')
     else bad('PDF 令牌裸露在消息里（渲染入口漏接？）')
   } catch (e) {
     bad(`mdHtml 真身调用失败：${(e as Error).message}`)

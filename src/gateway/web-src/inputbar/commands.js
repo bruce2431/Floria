@@ -5,7 +5,7 @@ import { relTime } from '../core/markdown.js'
 import { findSession, hashOf } from '../engine/sessions.js'
 import { inputEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isTouch, newSessionProject } from '../core/util.js'
-import { pendingImages, renderImgPills } from './images.js'
+import { pendingImages } from './images.js'
 import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pick, pickAll, pickItems, pickLabel, pickSearchKick, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
@@ -224,7 +224,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
     cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
       pendingImages.splice(+x.dataset.i, 1)
-      renderImgPills()
+      syncGwSend()
       renderCmdPop()
     }))
     cmdPop.querySelector('.retry')?.addEventListener('click', () => { cmd.error = null; cmd.status = 'ready'; renderCmdPop() })

@@ -38,20 +38,13 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat' | 'ws'）；2026-10-15 从本文件的模块局部变量提升到
+  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat'）；2026-10-15 从本文件的模块局部变量提升到
   // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
   // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下
   // 整块 #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
-  // 工作区视图状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
-  // 重型目录、每层 ≤50）。path 相对工作区根，'' = 根。entries null = 未加载。纯运行时，不持久化。
-  let wkWsPath = ''
-  let wkWsEntries = null
-  let wkWsLoading = false
-  let wkWsErr = ''
-  let wkWsSeq = 0          // 工作区层加载序号：快速连点目录时丢弃迟到的旧响应（同 loadPickPath 口径）
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
   let edSeq = 0            // 编辑区读取序号：快速连点文件时丢弃迟到的旧响应
 
@@ -61,14 +54,16 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
     saveWork()
   }
 
-  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目/全局会话时，
+  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目的会话时，
   // 回该项目的「新对话」空态（新会话的目标项目由 engine/state.js newSessionProject 收口，seat 只读）。
+  // 判据 = **label 唯一命中**（不再硬判 scope==='project'）：工作区根「全局根 · 散装对话」也是一个
+  // 工作项目，其会话的 projectLabel 就是该 label，与项目 label 空间不重叠（待办 #7 收尾，2026-10-15）。
   // 调用点 = 进入 work 模式 / 切换工作项目 / 路由渲染会话前（chat/route.js renderSession）。
   // 会话尚未落地（findSession 查无 = 列表未拉或刷新中）时不判——「未知」不等于「别的项目」。
   function workScopeOk(hash) {
     if (state.sbMode !== 'work' || !state.workProj || !hash) return true
     const s = findSession(hash)
-    return !s || (s.projectScope === 'project' && s.projectLabel === state.workProj)
+    return !s || s.projectLabel === state.workProj
   }
   function enforceWorkScope() {
     if (!workScopeOk(state.currentHash)) navigate('#/')

@@ -222,7 +222,7 @@
     // 预览态 ⇄ 工具态由顶栏「工具栏」胶囊切（工具态时胶囊变「关闭」，点回预览态）。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
     wkMainTab: 'chat', wkPrevW: 420, wkPvTab: '',
-    // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件）。2026-10-15 由
+    // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表）。2026-10-15 由
     // sidebar/work.js 的模块局部变量提升到 state 并**随项目入槽**（此前不持久化 ⇒ 重启恒回「文件」，
     // 这既是待办 #5 的一半，也让「切项目恢复上次侧栏页」成为可能）。
     wkTab: 'files',
@@ -344,7 +344,7 @@
     const num = (k) => (s && typeof s[k] === 'number' && s[k] > 0 ? s[k] : def[k])
     const bool = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
     const arr = (k) => (s && Array.isArray(s[k]) ? s[k].filter((x) => typeof x === 'string' && x) : def[k].slice())
-    state.wkTab = str('wkTab', ['files', 'chat', 'ws'])
+    state.wkTab = str('wkTab', ['files', 'chat'])
     state.wkMainTab = str('wkMainTab', ['chat', 'file'])
     state.wkAssist = bool('wkAssist')
     state.wkAssistMode = str('wkAssistMode', ['side', 'float', 'slim'])
@@ -510,6 +510,17 @@ function setConnUp(v) { connUp = v }
     return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
   }
 
+  // 源串（不带 flag）：消费方各自 new RegExp(src, 'g') —— 共享同一个 RegExp 对象会踩 lastIndex 状态。
+  const MATH_SRC_BLOCK_DOLLAR = '\\$\\$([\\s\\S]+?)\\$\\$'   // $$…$$（可跨行）
+  const MATH_SRC_BLOCK_BRACKET = '\\\\\\[([\\s\\S]+?)\\\\\\]' // \[…\]（可跨行）
+  const MATH_SRC_INLINE_PAREN = '\\\\\\(([\\s\\S]+?)\\\\\\)'  // \(…\)（行内）
+  const MATH_SRC_INLINE_DOLLAR = '\\$([^$\\n]+?)\\$'          // $…$（单行）
+  // 行内 $…$ 假阳性防护：首尾不留空白、不紧跟数字（避免 "$5 and $10" 这类货币被误吃）。
+  // 与 core/markdown.js 2026-10-06 定案同判据（提取到本层后行为不变）。
+  const mathInlineOk = (body) => !/^\s/.test(body) && !/\s$/.test(body) && !/^\d/.test(body)
+  // 抽取顺序契约：块级先于行内（否则 $$ 被 $ 抢占）。消费方按此序依次 replace。
+  const MATH_EXTRACT_ORDER = ['blockDollar', 'blockBracket', 'inlineParen', 'inlineDollar']
+
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
   const MD_MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Courier New', monospace"
   const MD_LINK_OK = (u) => /^(https?:)?\/\//.test(u) || /^[a-z0-9][a-z0-9./_-]*$/i.test(u)
@@ -547,12 +558,12 @@ function setConnUp(v) { connUp = v }
       const ph = `\u0002${mathStore.length - 1}\u0002`
       return block ? `\n${ph}\n` : ph
     }
-    // 块级先于行内（否则 $$ 会被 $ 抢占）
-    s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, body) => put(body, true) ?? m)
-    s = s.replace(/\\\[([\s\S]+?)\\\]/g, (m, body) => put(body, true) ?? m)
-    s = s.replace(/\\\(([\s\S]+?)\\\)/g, (m, body) => put(body, false) ?? m)
+    // 文法与判据来自 core/math-spec.js（三条链唯一真源）；块级先于行内（否则 $$ 会被 $ 抢占）
+    s = s.replace(new RegExp(MATH_SRC_BLOCK_DOLLAR, 'g'), (m, body) => put(body, true) ?? m)
+    s = s.replace(new RegExp(MATH_SRC_BLOCK_BRACKET, 'g'), (m, body) => put(body, true) ?? m)
+    s = s.replace(new RegExp(MATH_SRC_INLINE_PAREN, 'g'), (m, body) => put(body, false) ?? m)
     // 行内 $…$：单行内、非空、首尾不留空白、不紧跟数字（避免误吃 $5 之类货币）
-    s = s.replace(/\$([^$\n]+?)\$/g, (m, body) => (/^\s|\s$/.test(body) || /^\d/.test(body) ? m : (put(body, false) ?? m)))
+    s = s.replace(new RegExp(MATH_SRC_INLINE_DOLLAR, 'g'), (m, body) => (mathInlineOk(body) ? (put(body, false) ?? m) : m))
     return s.replace(/\u0003(\d+)\u0003/g, (_, i) => masked[+i])
   }
   function restoreMath(s) {
@@ -707,6 +718,12 @@ function setConnUp(v) { connUp = v }
     const closeList = () => { if (list) { html += `</${list}>`; list = null } }
     const isSep = (r) => { const x = r.replace(/\|/g, '').replace(/[\s:-]/g, ''); return x === '' && r.includes('-') }
     const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
+    // 任务列表复选框（2026-10-15 待办 10）：`- [ ] ` / `- [x] ` / `- [X] `（-/*/+ bullet 与有序列表同支持）
+    // 行解析阶段转**真实** <input type="checkbox">（禁 CSS 伪元素模拟）。data-task-line = 1-based 源行号
+    // （可编辑面据此还原源码，见 editor-markdown.toggleTask）；disabled = 渲染面只读（消息是渲染产物，
+    // 勾选语义只在编辑面发生，此处不改消息内容）。data-md 仍挂 li 整行原文（含 `[ ]`）→ 复制口径不变。
+    const TASK_RE = /^\[([ xX])\]\s+(.*)$/
+    const taskBox = (n, mark) => `<input type="checkbox" class="md-task-checkbox" data-task-line="${n}"${mark !== ' ' ? ' checked' : ''} disabled>`
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
@@ -730,13 +747,17 @@ function setConnUp(v) { connUp = v }
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        const body = t.replace(/^[-*+]\s+/, '')
+        const tk = TASK_RE.exec(body)
+        html += `<li${mdAttr(t)}>${tk ? taskBox(i + 1, tk[1]) : ''}${mdInline(tk ? tk[2] : body)}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        const body = t.replace(/^\d+[.)]\s+/, '')
+        const tk = TASK_RE.exec(body)
+        html += `<li${mdAttr(t)}>${tk ? taskBox(i + 1, tk[1]) : ''}${mdInline(tk ? tk[2] : body)}</li>`
         continue
       }
       if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${mdAttr(t)}>`; continue }
@@ -5193,7 +5214,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 一个键一件事，槽与 live 字段一一对应，不再有两套命名（旧 wkPanes 的 workspace/sidebar 已并入
   // wkPreview/panelPinned，由 loadWork 的迁移一次性折叠）。
   const WORK_SLOT_DEF = {
-    wkTab: 'files',        // 侧栏体：'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件
+    wkTab: 'files',        // 侧栏体：'files' 文件树 / 'chat' 会话列表
     wkMainTab: 'chat',     // 下沉区：'chat' 助手 / 'file' 编辑区
     wkAssist: true,        // 聊天 tab 是否在场
     wkAssistMode: 'side',  // 助手形态：'side' 靠栏 / 'float' 悬浮卡 / 'slim' 收敛输入栏
@@ -5212,16 +5233,17 @@ function setFirstSendHash(v) { firstSendHash = v }
 
 
   // 「当前 work 面在哪儿」的唯一只读源。kind 区分两种语境：
-  //   'project'   = 某个具体工作项目（含它的会话/文件/预览）
-  //   'workspace' = 工作区根散件视图（wkTab==='ws'）或无项目选中
+  //   'project'   = 某个具体工作项目（含它的会话/文件/预览）——**工作区根「全局根 · 散装对话」也是
+  //                 一个 project 语境**（待办 #7 收尾：与项目同构，不再是第三态）
+  //   'workspace' = 未选中任何项目
   function getWorkContext() {
     const projectKey = state.workProj || ''
     return {
-      kind: projectKey && state.wkTab !== 'ws' ? 'project' : 'workspace',
+      kind: projectKey ? 'project' : 'workspace',
       projectKey,
       projectLabel: projectKey, // 槽键 = 项目 label（/gateway/sessions 的 groups label）
       mode: state.sbMode, // 'chat' | 'work'
-      selectedTab: state.wkTab, // 'files' | 'chat' | 'ws'
+      selectedTab: state.wkTab, // 'files' | 'chat'
     }
   }
 
@@ -5286,6 +5308,364 @@ function setFirstSendHash(v) { firstSendHash = v }
     }
   }
 
+
+const edCMG = typeof window !== 'undefined' ? window.CMLiveMarkdown : null
+
+function edCmg() {
+  if (!edCMG) throw new Error('CodeMirror 未加载（window.CMLiveMarkdown 缺失）')
+  return edCMG
+}
+
+
+
+  // 选区包裹（待办 15）：有选区 = before+选区文本+after；无选区 = 插入成对符号、光标居中。
+  // 多光标按 range 各自处理；after 缺省 = before（对称括弧族 `*` `**` `` ` `` 等）。
+  function wrapSelectionCM(view, before, after) {
+    if (!view || view.state.readOnly) return
+    const tail = after === undefined ? before : after
+    const EditorSelection = edCmg().EditorSelection
+    const tr = view.state.changeByRange((range) => {
+      const body = range.empty ? '' : view.state.sliceDoc(range.from, range.to)
+      const ins = before + body + tail
+      const anchor = range.empty ? range.from + before.length : range.from
+      const head = range.empty ? anchor : range.from + before.length + body.length
+      return { changes: { from: range.from, to: range.to, insert: ins }, range: EditorSelection.range(anchor, head) }
+    })
+    view.dispatch(tr, { scrollIntoView: true })
+  }
+
+  // 任务勾选（待办 10 可编辑面）：把第 line 行（1-based）行首列表标记后的 `[ ]` / `[x]` 改写为
+  // checked 形态；该行无任务标记则不动（返回 false）。
+  function toggleTaskLineCM(view, line, checked) {
+    if (!view || view.state.readOnly) return false
+    const doc = view.state.doc
+    if (line < 1 || line > doc.lines) return false
+    const l = doc.line(line)
+    const m = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\]/.exec(l.text)
+    if (!m) return false
+    view.dispatch({ changes: { from: l.from + m[1].length + 1, to: l.from + m[1].length + 2, insert: checked ? 'x' : ' ' } })
+    return true
+  }
+
+  // 光标处插入文本（附件 md 引用落点）：前接空格分隔（行首/前文空白则不补），光标落插入尾。
+  function insertAtCursorCM(view, text) {
+    if (!view || view.state.readOnly) return
+    const r = view.state.selection.main
+    const before = view.state.sliceDoc(Math.max(0, r.from - 1), r.from)
+    const pad = r.from === 0 || /\s|\n/.test(before) ? '' : ' '
+    const ins = pad + text + ' '
+    view.dispatch({ changes: { from: r.from, to: r.to, insert: ins }, selection: { anchor: r.from + ins.length }, scrollIntoView: true })
+  }
+
+  // 包裹快捷键（Mod-b 粗体 / Mod-i 斜体 / Mod-e 行内代码）：两宿主 keymap 共用一张表（待办 15
+  // 「所有 Markdown 按钮经 editor-command 调度」的键位侧——同一命令层，无第二套包裹实现）。
+  function wrapKeymap() {
+    return [
+      { key: 'Mod-b', run: (v) => { wrapSelectionCM(v, '**'); return true } },
+      { key: 'Mod-i', run: (v) => { wrapSelectionCM(v, '*'); return true } },
+      { key: 'Mod-e', run: (v) => { wrapSelectionCM(v, '`'); return true } },
+    ]
+  }
+
+
+
+  // 注册表：id → facade。同一 id 重复注册 = 后者覆盖（编辑面重建场景）。
+  const ED_EDITORS = new Map()
+  // 活跃编辑器 id：宿主在 focus 时上报（editorApi.setActive），命令调度落这里。
+  let edActiveId = ''
+
+  function editorApiRegister(facade) {
+    if (!facade || !facade.id) throw new Error('editorApi.register: facade.id 必填')
+    ED_EDITORS.set(facade.id, facade)
+    if (!edActiveId) edActiveId = facade.id
+    return facade
+  }
+  function editorApiUnregister(id) {
+    ED_EDITORS.delete(id)
+    if (edActiveId === id) edActiveId = ''
+  }
+  function editorApiSetActive(id) {
+    if (ED_EDITORS.has(id)) edActiveId = id
+  }
+  function editorApiGet(id) {
+    return id ? ED_EDITORS.get(id) || null : (edActiveId ? ED_EDITORS.get(edActiveId) || null : null)
+  }
+  // 命令调度（方案「所有 Markdown 按钮经 editor-command 调度」唯一入口）：
+  //   editorCommand('wrap', {before, after}) / ('insert', {text}) / ('toggleTask', {line, checked}) / ('focus')
+  // target 缺省 = 活跃编辑器；返回是否命中注册面（调用方据此给 toast）。
+  function editorCommand(name, payload, target) {
+    const ed = editorApiGet(target)
+    if (!ed) return false
+    if (name === 'wrap') { wrapSelectionCM(ed.view, String(payload.before || ''), payload.after === undefined ? undefined : String(payload.after)); return true }
+    if (name === 'insert') { insertAtCursorCM(ed.view, String(payload.text || '')); return true }
+    if (name === 'toggleTask') { return toggleTaskLineCM(ed.view, payload.line, !!payload.checked) }
+    if (name === 'focus') { ed.focus(); return true }
+    throw new Error('editorCommand: 未知命令 ' + name)
+  }
+
+  // facade 构造（宿主持 EditorView 后包一层公开面；不替代宿主既有专属链）。
+  function makeEditorFacade({ id, view, onDispose }) {
+    const facade = {
+      id,
+      view, // 宿主既有专属插件的过渡持有口：新能力禁直取，走本 facade / editorCommand
+      getValue() { return view.state.doc.toString() },
+      setValue(text) {
+        const cur = view.state.doc.toString()
+        if (cur === String(text == null ? '' : text)) return
+        view.dispatch({ changes: { from: 0, to: cur.length, insert: String(text == null ? '' : text) } })
+      },
+      focus() { view.focus() },
+      blur() { view.contentDOM.blur() },
+      wrapSelection(before, after) { wrapSelectionCM(view, before, after) },
+      insertText(text) { insertAtCursorCM(view, text) },
+      toggleTask(line, checked) { return toggleTaskLineCM(view, line, checked) },
+      copyMarkdownSelection() { return view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to) },
+      destroy() {
+        editorApiUnregister(id)
+        view.destroy()
+        if (onDispose) onDispose()
+      },
+    }
+    return editorApiRegister(facade)
+  }
+
+
+
+  // 统一渲染入口。opts 为能力声明面（当前唯一真源 mdHtml 恒开公式/提及/代码块；allowHtml 恒 false
+  // = mdHtml 白名单安全口径，不提供开关——HTML 直注宿主 DOM 只经任务F的 sandbox 插件链）。
+  // opts 现阶段仅作消费面自描述（surface），不改变渲染行为；后续能力裁剪在此收口。
+  function renderMarkdown(source, opts) {
+    return mdHtml(source)
+  }
+
+  // 任务勾选（源码层，纯函数）：把第 line 行（1-based）列表标记后的 `[ ]`/`[x]` 改写为 checked 形态，
+  // 返回新源码；该行无任务标记返回 null（调用方不动源码）。渲染面只读复选框（disabled）的可编辑
+  // 对应件——CM6 编辑面走 editor-transactions.toggleTaskLineCM（同一行语义，两处正则同族）。
+  function toggleTask(source, line, checked) {
+    const lines = String(source == null ? '' : source).split('\n')
+    const i = line - 1
+    if (i < 0 || i >= lines.length) return null
+    const m = /^(\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](.*)$/.exec(lines[i])
+    if (!m) return null
+    lines[i] = m[1] + '[' + (checked ? 'x' : ' ') + ']' + m[3]
+    return lines.join('\n')
+  }
+
+
+  // ---------- 判类（按扩展名，方案 isImageAttachment / isDocumentAttachment） ----------
+  const ATT_IMG_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i
+  function isImageAttachment(name) { return ATT_IMG_RE.test(String(name || '')) }
+  function isDocumentAttachment(name) { return !isImageAttachment(name) }
+
+  // ---------- 上传（与 + 浮窗「上传文件」同一端点/落点/认证链） ----------
+  // POST /gateway/upload（原始字节直传）→ 网关落盘 <会话根>/uploads/；sid=当前会话、无会话时
+  // project=newSessionProject()（与 gwSend 首送建会话归属同源，保证上传落点=消息会话落点）。
+  async function uploadAttachment(file) {
+    const tgt = newSessionProject()
+    const ctx = state.currentHash
+      ? '&sid=' + encodeURIComponent(state.currentHash)
+      : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
+    try {
+      const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(file.name || 'file') + ctx), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) { toast('上传失败：' + (d.error || r.status)); return null }
+      return { name: d.name || file.name || '文件', abs: String(d.abs || d.path || ''), size: d.size || 0 }
+    } catch {
+      toast('上传失败：网络错误')
+      return null
+    }
+  }
+
+  // ---------- md 引用插入（经 editor-command 调度，禁直改 doc） ----------
+  // 引用路径恒 uploads/<落盘名>（同会话上传+发送 = 会话 cwd 相对路径，send.js relUploadPath 同口径；
+  // 跨会话补发由用户改文本——旧胶囊链的 [文件:占位] 仍随 pendingFiles 在发送侧自动相对化，不受影响）。
+  function insertAttachmentMarkdown(target, att) {
+    if (!att) return false
+    const md = isImageAttachment(att.name)
+      ? `![${att.name}](uploads/${encodeURIComponent(att.name)})`
+      : `[${att.name}](uploads/${encodeURIComponent(att.name)})`
+    return editorCommand('insert', { text: md }, target)
+  }
+
+  // ---------- 取图 URL 解析（复用 GET /gateway/file?label=&path=） ----------
+  // label 取法与 chat/messages.js AI 图 resolver 同口径：work 模式 = workProj；会话态 = 会话自带
+  // projectLabel（全局根会话=「全局根 · 散装对话」，网关按 label 解析到工作区根）。解析不出 → null
+  // （不兜底：widget 不挂，原样显源码）。
+  function attachmentUrl(relPath) {
+    const label = state.sbMode === 'work' && state.workProj
+      ? state.workProj
+      : (findSession(live.curUuid) || {}).projectLabel || ''
+    if (!label) return null
+    return `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent(relPath)}`
+  }
+
+  // ---------- 行内图片 widget（vendor 无 image 渲染的补缺件，2026-10-15） ----------
+  // syntaxTree 扫 Image 节点（`![alt](url)`）：url 为 uploads/ 引用且能解析出取图 URL → 原子 replace
+  // 成 <img>；光标/拖选落在区间内 = 显源码（与 vendor live preview 显隐口径一致）。非 uploads 引用
+  // （AI 生成图代号等）不接管，仍走各自链路。
+  const edImgWidgetBase = class extends edCmg().WidgetType {
+    constructor(url, alt) { super(); this.url = url; this.alt = alt }
+    eq(o) { return o.url === this.url && o.alt === this.alt }
+    ignoreEvent() { return true }
+    toDOM() {
+      const wrap = document.createElement('span')
+      wrap.className = 'cm-att-img'
+      const img = document.createElement('img')
+      img.src = this.url
+      img.alt = this.alt
+      img.loading = 'lazy'
+      wrap.appendChild(img)
+      return wrap
+    }
+  }
+  const edAttImgPlugin = edCmg().ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view) }
+    update(u) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view) }
+    build(view) {
+      const CM = edCmg()
+      const deco = []
+      const isDrag = view.state.field(CM.mouseSelectingField, false)
+      let active = null
+      if (!isDrag) {
+        for (const r of view.state.selection.ranges) {
+          if (!r.empty) { active = { from: r.from, to: r.to }; break }
+        }
+      }
+      CM.syntaxTree(view.state).iterate({
+        enter: (node) => {
+          if (node.name !== 'Image') return
+          const text = view.state.sliceDoc(node.from, node.to)
+          const m = /^!\[([^\]]*)\]\((uploads\/[^)\s]+)\)$/.exec(text)
+          if (!m) return
+          let url = null
+          try { url = attachmentUrl(decodeURIComponent(m[2])) } catch { return } // 引用路径非法 → 不接管
+          if (!url) return
+          if (active && node.from < active.to && node.to > active.from) return // 选区内 = 显源码
+          deco.push(CM.Decoration.replace({ widget: new edImgWidgetBase(url, m[1]) }).range(node.from, node.to))
+        },
+      })
+      return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+  }, { decorations: (v) => v.decorations })
+
+
+
+  // copyRenderedSelection({selection, container}) → md 源码或 null：
+  //  1. selection 给定且非折叠 → selectionMd（整块覆盖用 data-md 原文；块内碎片返回 null）
+  //  2. container 给定（如某条消息 .body）→ messageMd（全块按序拼接，复制按钮链路）
+  //  3. 都未命中 → null（调用方回落 sel.toString() 纯文本）
+  function copyRenderedSelection({ selection, container } = {}) {
+    if (selection && !selection.isCollapsed) {
+      const s = selectionMd(selection)
+      if (s) return s
+    }
+    if (container) return messageMd(container) || null
+    return null
+  }
+
+
+  // 代码区间（不参与公式识别）：行内代码与围栏代码。vendor 的 ```math 围栏也在此被跳过 → 交 vendor 处理。
+  const CM_MATH_SKIP_NODES = new Set(['InlineCode', 'FencedCode', 'CodeBlock'])
+  // 选区相交判据（撤装饰显源码）——**闭区间**，与 vendor live-markdown 的 `cn(state,from,to)`
+  // （`a.from<=to && a.to>=from`，即 `**` 行内标记的去/显判据）逐字同款：光标落在公式边界上
+  // （紧邻 `$` 前 / 后）也算命中 ⇒ 退化显源码。开区间（严格 `<`/`>`）会漏掉边界态——此即 2026-10-15
+  // 实报「`$…$` 光标临近不退化为源码，而 `**` 正常」的根因。拖选中（mouseSelectingField）期间按
+  // 「无选区」处理，避免拖拽沿途闪烁。
+  function cmMathSelectionHit(state, CM, from, to) {
+    if (state.field(CM.mouseSelectingField, false)) return false
+    for (const r of state.selection.ranges) {
+      if (r.from <= to && r.to >= from) return true
+    }
+    return false
+  }
+  // 一次全量收集：块级（$$…$$ / \[…\]）先于行内（\(…\) / $…$），已被块级认领的区间不再被行内重认。
+  function cmMathScan(state, CM) {
+    const doc = state.doc
+    const text = doc.toString()
+    const skip = []
+    CM.syntaxTree(state).iterate({
+      enter: (node) => {
+        if (!CM_MATH_SKIP_NODES.has(node.name)) return
+        skip.push([node.from, node.to])
+      },
+    })
+    const inSkip = (a, b) => skip.some(([s, e]) => a < e && b > s)
+    const claimed = []
+    const isClaimed = (a, b) => claimed.some(([s, e]) => a < e && b > s)
+    const out = []
+    const push = (m, body, cls) => {
+      const from = m.index
+      const to = from + m[0].length
+      if (inSkip(from, to) || isClaimed(from, to)) return
+      claimed.push([from, to])
+      out.push({ from, to, src: body, cls })
+    }
+    // 块级：$$…$$ / \[…\]
+    for (const src of [MATH_SRC_BLOCK_DOLLAR, MATH_SRC_BLOCK_BRACKET]) {
+      const re = new RegExp(src, 'g')
+      let m
+      while ((m = re.exec(text))) push(m, m[1], 'block')
+    }
+    // 行内：\(…\) / $…$
+    for (const src of [MATH_SRC_INLINE_PAREN, MATH_SRC_INLINE_DOLLAR]) {
+      const re = new RegExp(src, 'g')
+      let m
+      while ((m = re.exec(text))) {
+        if (src === MATH_SRC_INLINE_DOLLAR && !mathInlineOk(m[1])) continue
+        push(m, m[1], 'inline')
+      }
+    }
+    return out
+  }
+  // 块级公式落成 block widget 需行对齐：整行只含该公式（首行前缀 / 末行后缀皆空白）→ 吃掉整行；
+  // 否则按行内 widget 渲染（displayMode 数学仍按 KaTeX 显示模式排版，不吞同行文字）。
+  function cmMathRange(state, item) {
+    if (item.cls !== 'block') return { from: item.from, to: item.to, block: false }
+    const d = state.doc
+    const l0 = d.lineAt(item.from)
+    const l1 = d.lineAt(item.to)
+    const pre = d.sliceString(l0.from, item.from)
+    const post = d.sliceString(item.to, l1.to)
+    if (!pre.trim() && !post.trim()) return { from: l0.from, to: l1.to, block: true }
+    return { from: item.from, to: item.to, block: false }
+  }
+  // 扩展工厂（两宿主各传自己的 CM 全局；同一实现，禁各写一套）。
+  function cmMathExt(CM) {
+    const C = CM || edCmg()
+    const renderMath = (src, display) => (typeof C.renderMath === 'function' ? C.renderMath(src, display) : '')
+    class CM_MathWidget extends C.WidgetType {
+      constructor(src, block, display) { super(); this.src = src; this.block = block; this.display = display }
+      eq(o) { return o.src === this.src && o.block === this.block && o.display === this.display }
+      ignoreEvent() { return false }
+      toDOM() {
+        const el = document.createElement(this.block ? 'div' : 'span')
+        el.className = this.block ? 'cm-math-block cm-mspec-math' : 'cm-math-inline cm-mspec-math'
+        // KaTeX 输出自身安全（trust 默认 false + 内部转义），与消息流 mdHtml 同口径直接进 DOM。
+        el.innerHTML = renderMath(this.src, this.display)
+        return el
+      }
+    }
+    const build = (view) => {
+      const deco = []
+      for (const item of cmMathScan(view.state, C)) {
+        const r = cmMathRange(view.state, item)
+        if (cmMathSelectionHit(view.state, C, r.from, r.to)) continue // 选区内 = 显源码
+        deco.push(C.Decoration.replace({ widget: new CM_MathWidget(item.src, r.block, item.cls === 'block'), block: r.block }).range(r.from, r.to))
+      }
+      return C.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+    return C.ViewPlugin.fromClass(class {
+      constructor(view) { this.decorations = build(view) }
+      update(u) {
+        if (u.docChanged || u.viewportChanged || u.selectionSet || u.reconfigured) this.decorations = build(u.view)
+      }
+    }, { decorations: (v) => v.decorations })
+  }
+
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
   // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
@@ -5308,20 +5688,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat' | 'ws'）；2026-10-15 从本文件的模块局部变量提升到
+  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat'）；2026-10-15 从本文件的模块局部变量提升到
   // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
   // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下
   // 整块 #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
-  // 工作区视图状态（待办 9）：数据源 = GET /gateway/fs（与 @ 提及目录浏览同源；单层、跳过隐藏项与
-  // 重型目录、每层 ≤50）。path 相对工作区根，'' = 根。entries null = 未加载。纯运行时，不持久化。
-  let wkWsPath = ''
-  let wkWsEntries = null
-  let wkWsLoading = false
-  let wkWsErr = ''
-  let wkWsSeq = 0          // 工作区层加载序号：快速连点目录时丢弃迟到的旧响应（同 loadPickPath 口径）
   const wkOpen = new Set() // 已展开目录（项目内相对路径）
   let edSeq = 0            // 编辑区读取序号：快速连点文件时丢弃迟到的旧响应
 
@@ -5331,14 +5704,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     saveWork()
   }
 
-  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目/全局会话时，
+  // work 模式不变量（唯一判定点）：助手栏只显示工作项目的会话——当前打开的是别的项目的会话时，
   // 回该项目的「新对话」空态（新会话的目标项目由 engine/state.js newSessionProject 收口，seat 只读）。
+  // 判据 = **label 唯一命中**（不再硬判 scope==='project'）：工作区根「全局根 · 散装对话」也是一个
+  // 工作项目，其会话的 projectLabel 就是该 label，与项目 label 空间不重叠（待办 #7 收尾，2026-10-15）。
   // 调用点 = 进入 work 模式 / 切换工作项目 / 路由渲染会话前（chat/route.js renderSession）。
   // 会话尚未落地（findSession 查无 = 列表未拉或刷新中）时不判——「未知」不等于「别的项目」。
   function workScopeOk(hash) {
     if (state.sbMode !== 'work' || !state.workProj || !hash) return true
     const s = findSession(hash)
-    return !s || (s.projectScope === 'project' && s.projectLabel === state.workProj)
+    return !s || s.projectLabel === state.workProj
   }
   function enforceWorkScope() {
     if (!workScopeOk(state.currentHash)) navigate('#/')
@@ -5955,8 +6330,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 原取名 `projList` 与 inputbar/commands.js 的同名函数撞车（后者在后 ⇒ 覆盖本函数），
   // 本函数返回 group 对象数组、后者返回 label 字符串数组 ⇒ 下拉渲染出 7 行空按钮。
   // 由 `probes/probe-web-module-scope.ts` 看住这条不变量。
+  // 项目列表 = findProjects 的全部组：scope==='project' 的各项目 + scope==='global' 的工作区根
+  // （label「全局根 · 散装对话」）。工作区根 = 一个特殊项目，与项目同构走同一条文件树/会话链
+  // （待办 #7 收尾，2026-10-15）——两 scope 的 label 空间不重叠，故按唯一 label 命中即够。
   function wkProjGroups() {
-    return (state.projects || []).filter((g) => g && g.scope === 'project' && g.label)
+    return (state.projects || []).filter((g) => g && g.label && (g.scope === 'project' || g.scope === 'global'))
   }
 
   // 项目名 + 底部卡 + 下拉内容 = 同一份 state.projects 的同一次渲染（2026-09-25 修）。
@@ -5965,11 +6343,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = state.wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
+    if (lab) lab.textContent = state.workProj || '选择项目'
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${state.wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -5980,21 +6358,18 @@ function setFirstSendHash(v) { firstSendHash = v }
     const box = $('wk-proj-pop')
     if (!box) return
     const ps = wkProjGroups()
-    // 「工作区」行与项目并列（2026-10-14 待办 9 返修）：全局根散件的浏览入口，不是第三枚 tab。
-    const rows = ps.length
+    // 工作区根（「全局根 · 散装对话」）与项目并列同一份 wkProjGroups（待办 #7 收尾）：不再另设
+    // 「工作区」行/第三态——它就是列表里的一行，选中即 selectProject(真 label)，走同一条项目链。
+    box.innerHTML = ps.length
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj && state.wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
-    box.innerHTML =
-      rows +
-      `<button class="wkp-row${state.wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
-      `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
@@ -6027,12 +6402,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function wkBodyHtml() {
-    if (state.wkTab === 'ws') return wkWsHtml()
     if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const list = state.workProj
-        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj).sort(sessCmp)
+        ? ALL.filter((s) => s.projectLabel === state.workProj).sort(sessCmp)
         : []
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
@@ -6067,77 +6441,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
     }
     return h
-  }
-
-  // ---------- 工作区 tab（2026-10-14 待办 9：工作区全局根散落文件的可见性）----------
-  // 数据源 = GET /gateway/fs（与 @ 提及的目录浏览同一条链：单层列举、跳过隐藏项与 .git/node_modules
-  // 等重型目录、目录在前、每层 ≤50）。方案 = 侧栏第三枚 tab「工作区」，不逐文件夹挂：根层只列
-  // **非项目**条目（项目目录藏掉——各项目有自己的侧栏入口，重复即噪音），下钻进普通目录后全量展示。
-  // 文件行可打开（2026-10-14 待办 9 二期）：后端 /gateway/file 已扩展 label 缺省 = 按工作区根解析
-  // （顶层隐藏段拒读），点文件行即新窗口打开原文。
-  function wkWsHtml() {
-    if (wkWsLoading) return '<div class="wk-empty">加载中…</div>'
-    if (wkWsErr) return `<div class="wk-empty">${esc(wkWsErr)}</div>`
-    if (!wkWsEntries) return '<div class="wk-empty"></div>'
-    const projs = new Set(wkProjGroups().map((g) => g.label))
-    const entries = wkWsPath ? wkWsEntries : wkWsEntries.filter((e) => !(e.type === 'dir' && projs.has(e.name)))
-    let h = ''
-    if (wkWsPath) {
-      h += `<button class="wk-row dir" data-wsup="1" style="padding-left:8px" title="返回上一层">`
-      h += `<span class="wk-chev"></span><span class="wk-fic">${I.dshUp}</span><span class="wk-name">上级目录</span></button>`
-    } else {
-      h += `<div class="wk-row dir ws-root" style="padding-left:8px"><span class="wk-chev"></span><span class="wk-fic">${I.folder}</span><span class="wk-name">工作区根</span></div>`
-    }
-    if (!entries.length && !wkWsPath) h += '<div class="wk-empty">工作区根没有散落的非项目文件</div>'
-    for (const e of entries) {
-      const p = wkWsPath ? `${wkWsPath}/${e.name}` : e.name
-      const pad = `padding-left:8px`
-      if (e.type === 'dir') {
-        h += `<button class="wk-row dir" data-wsdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chev">${I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
-        h += `<span class="wk-name">${esc(e.name)}</span></button>`
-      } else {
-        h += `<button class="wk-row file" data-wsfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
-        h += `<span class="wk-name">${esc(e.name)}</span></button>`
-      }
-    }
-    return h
-  }
-  async function loadWsDir(path, silent) {
-    const seq = ++wkWsSeq
-    if (!silent) {
-      wkWsLoading = true
-      wkWsErr = ''
-      wkWsEntries = null
-      renderWorkBody()
-    }
-    try {
-      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
-      const data = await res.json()
-      if (seq !== wkWsSeq) return false
-      if (!res.ok || data.error) throw new Error(data.error || '加载失败')
-      wkWsPath = String(path || '')
-      wkWsEntries = Array.isArray(data.entries) ? data.entries : []
-    } catch (e) {
-      if (seq !== wkWsSeq) return false
-      if (silent) return false // 对账轮失败静默保留旧层（同 loadProjectTree silent 口径）
-      wkWsErr = e.message || String(e)
-    }
-    wkWsLoading = false
-    renderWorkBody()
-    return seq === wkWsSeq
-  }
-  // 工作区视图入口（2026-10-14 待办 9 返修）：项目下拉里的「工作区」行——与项目并列呈现，
-  // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
-  function enterWsView() {
-    hideWkPops()
-    state.wkTab = 'ws'
-    if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
-    renderWorkChrome()
-    renderWorkBody()
-    // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
-    // registry.js（state.preview / state.mgr），与 work 侧栏的 state.wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------
@@ -6208,11 +6511,6 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
-    if (state.wkTab === 'ws') {
-      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；state.wkTab 的 on 类只在 tab 点击 handler 里切换）
-      state.wkTab = 'files'
-      document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
-    }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
     // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
@@ -6252,8 +6550,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (state.wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
-    else if (state.workProj) await loadProjectTree(state.workProj, silent)
+    if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
   }
@@ -6297,7 +6594,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
-    if (state.wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
@@ -6375,7 +6671,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       doc: '',
       extensions: [
         CM.history(),
-        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap]),
+        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap, ...wrapKeymap()]),
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
         CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
@@ -6386,6 +6682,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       ],
     })
     wkEdView = new CM.EditorView({ state: st, parent: wkEdHost })
+    // editor 组公开面注册（2026-10-15 任务D）：work 编辑区进 editorCommand 统一调度（包裹/勾选/插入），
+    // 聚焦时上报活跃面。既有专属链（评论装饰/补全/保存/热换语言）原样不动，仍走本模块自有符号。
+    makeEditorFacade({ id: 'work', view: wkEdView })
+    wkEdView.contentDOM.addEventListener('focus', () => editorApiSetActive('work'))
     if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
     try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
     return wkEdView
@@ -6446,6 +6746,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         CM.markdownStylePlugin,
         CM.mathPlugin,
         CM.blockMathField,
+        cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
         CM.tableField,
         CM.linkPlugin(),
         ...CM.codeBlockField(),
@@ -7198,8 +7499,11 @@ function setFirstSendHash(v) { firstSendHash = v }
       body.innerHTML = '<div class="wk-ed-empty">未选择项目</div>'
       return
     }
-    // 返回载入 Promise（新文件才读盘）：调用方要等「文档真进编辑器」才能定位行（如卡片 src-open 跳行）
-    if (wkEdFile !== state.workFile) return readFile(state.workFile)
+    // 返回载入 Promise（新文件/新项目才读盘）：调用方要等「文档真进编辑器」才能定位行（如卡片 src-open 跳行）。
+    // 缓存键 = (workProj, workFile) 两维——只比路径会在「两项目存在同名相对路径」（如都开 README.md）时
+    // 判为同一文件：切项目后不重读，编辑区留着上个项目的内容（PDF 分支表现为旧 iframe 换「不支持预览」，
+    // 文本分支更会被后续自动保存写进新项目同名文件 = 跨项目串台/污染）。项目维度不可省。
+    if (wkEdFile !== state.workFile || wkEdProj !== state.workProj) return readFile(state.workFile)
     renderEdBody()
   }
 
@@ -7212,6 +7516,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEdConflict = false
     wkEdPendingDoc = null
     wkEdCmtMarks = []
+    wkEdProj = ''
     if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
@@ -7248,10 +7553,14 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
+  let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
     const seq = ++edSeq
+    // 立刻认下新 (proj,path)：并发重渲（切项目那一刻）不得拿旧 wkEdFile 命中缓存渲染上个项目的内容
+    wkEdProj = state.workProj
+    wkEdFile = ''
     wkEdConflict = false
     if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
     if (IMG_EXT.test(p)) {
@@ -7833,9 +8142,8 @@ function setFirstSendHash(v) { firstSendHash = v }
       e.stopPropagation()
       const b = e.target.closest('[data-wkproj]')
       if (!b) return
-      // 「工作区」行 = 与项目并列的全局散件浏览入口（2026-10-14 待办 9 返修），不走 selectProject
-      if (b.dataset.wkproj === '__ws__') enterWsView()
-      else selectProject(b.dataset.wkproj)
+      // 每行都是 findProjects 的一个真 label（含工作区根「全局根 · 散装对话」）——统一走 selectProject
+      selectProject(b.dataset.wkproj)
     })
     // 侧栏收起钮：与 chat 的 #panel-collapse 同语义（只管把侧栏收起；再开走折叠态的汉堡）
     $('wk-view').addEventListener('click', (e) => {
@@ -7845,7 +8153,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
-      if (state.wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
       if (state.wkTab !== 'files') {
         newWorkChat()
         return
@@ -7871,32 +8178,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
     $('wk-body').addEventListener('click', (e) => {
-      const wu = e.target.closest('[data-wsup]')
-      if (wu) { loadWsDir(wkWsPath ? wkWsPath.slice(0, wkWsPath.lastIndexOf('/')) : ''); return }
-      const wd = e.target.closest('[data-wsdir]')
-      if (wd) { loadWsDir(wd.dataset.wsdir); return }
-      const wf = e.target.closest('[data-wsfile]')
-      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析。
-      // PDF（2026-10-14 待办#15 返修）不走直开：网关 MIME 表无 .pdf → 二进制嗅探落
-      // application/octet-stream → window.open 即触发下载。根修在前端入口：fetch 原始字节、
-      // blob 强制 application/pdf 类型后开 blob URL —— 浏览器自带 viewer 直显不下载（后端内容
-      // 分类与「展示策略」解耦，不为展示扩 MIME 表）。
-      if (wf) {
-        const wsp = wf.dataset.wsfile
-        if (/\.pdf$/i.test(wsp)) {
-          fetch(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)))
-            .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() })
-            .then((b) => {
-              const url = URL.createObjectURL(new Blob([b], { type: 'application/pdf' }))
-              window.open(url, '_blank')
-              setTimeout(() => URL.revokeObjectURL(url), 120000) // viewer 载入后即无需持有，2 分钟兜底回收
-            })
-            .catch((er) => toast('PDF 打开失败：' + (er.message || er)))
-          return
-        }
-        window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)), '_blank')
-        return
-      }
       const d = e.target.closest('[data-wkdir]')
       if (d) {
         const p = d.dataset.wkdir
@@ -8495,13 +8776,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('file-upload').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
-  $('img-pills').addEventListener('click', (e) => {
-    const x = e.target.closest('.img-x')
-    if (!x) return
-    if (x.dataset.f != null) pendingFiles.splice(+x.dataset.f, 1) // 文件胶囊
-    else pendingImages.splice(+x.dataset.i, 1)
-    renderImgPills()
-  })
+  // 附件胶囊行（#img-pills）已随 2026-10-15 待办 13 退役：附件 = 原文 md 引用（editor-attachments），
+  // 无独立胶囊 UI，监听随之移除。pendingImages/pendingFiles 只剩发送链内部态（+ 浮窗缩略图仍可移除）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
@@ -8534,12 +8810,13 @@ function setFirstSendHash(v) { firstSendHash = v }
   })
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
   // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
-  // 2026-10-09 扩展：消息区选区先经 selectionMd 还原**原始 md 源码**（core/markdown.js，整块覆盖用 data-md 原文；
-  // 块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
+  // 2026-10-09 扩展：消息区选区先还原**原始 md 源码**；2026-10-15 任务D 收口为
+  // editor/editor-clipboard.copyRenderedSelection 门面（公式块还原 `$…$`/`$$…$$` 源码，整块覆盖用 data-md
+  // 原文，块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
   document.addEventListener('copy', (e) => {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
-    const text = selectionMd(sel) || sel.toString()
+    const text = copyRenderedSelection({ selection: sel }) || sel.toString()
     if (!text) return
     e.clipboardData.setData('text/plain', text)
     e.preventDefault()
@@ -9401,8 +9678,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   function cmOnPaste(event, view) {
     if (gateAwait) return false
     const cd = event.clipboardData
-    const files = Array.from((cd && cd.files) || []).filter((f) => /^image\//.test(f.type))
-    if (files.length) { event.preventDefault(); addImageFiles(files); return true }
+    const all = Array.from((cd && cd.files) || [])
+    const imgs = all.filter((f) => /^image\//.test(f.type))
+    // 非图片文件粘贴也进附件链（2026-10-15 待办 13：上传落盘 → 原文插 md 引用，与 + 浮窗「上传文件」同链）
+    const docs = all.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) { event.preventDefault(); addImageFiles(imgs); return true }
+    if (docs.length) { event.preventDefault(); addUploadFiles(docs); return true }
     // 纯文本粘贴：CM 天然只收文本（无 text/html 富格式问题），走原生事务保 undo 栈
     if (!cd || !cd.getData('text/plain')) return false
     return false // 文本粘贴交 CM 默认（等价旧 execCommand insertText 的纯文本语义）
@@ -9428,7 +9709,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       doc: '',
       extensions: [
         cmCM.history(),
-        cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap]),
+        cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap, ...wrapKeymap()]),
         cmCM.EditorView.lineWrapping,
         cmEditComp.of([cmCM.EditorView.editable.of(true), cmCM.EditorState.readOnly.of(false)]),
         cmPhComp.of(cmCM.placeholder(cmPhText)),
@@ -9440,17 +9721,23 @@ function setFirstSendHash(v) { firstSendHash = v }
         cmCM.markdownStylePlugin,
         cmCM.mathPlugin,
         cmCM.blockMathField,
+        cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
         cmCM.tableField,
         cmCM.linkPlugin(),
         ...cmCM.codeBlockField(),
         cmChipPlugin,
         cmAtomic,
+        edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
         cmCM.editorTheme,
         cmThemeSpec(),
         cmCM.EditorView.updateListener.of(cmOnUpdate),
       ],
     })
     cmView = new cmCM.EditorView({ state: st, parent: $('cm-host') })
+    // editor 组公开面注册（2026-10-15 任务D）：底栏编辑面进 editorCommand 统一调度（包裹/插入/勾选），
+    // 聚焦时上报活跃面（work 编辑区同款；活跃面 = 最后聚焦者）。既有 chip/令牌/补全链原样不动。
+    makeEditorFacade({ id: 'composer', view: cmView })
+    cmView.contentDOM.addEventListener('focus', () => editorApiSetActive('composer'))
     // 键/粘贴走 contentDOM **捕获阶段**直挂（不 domEventHandlers）：本 vendor 实测 keymap.of(defaultKeymap)
     // 的 Enter 绑定先于 domEventHandlers 吞键（探针 2026-10-14，np=false 且键程分支未触）——捕获监听先于
     // CM 自身气泡链，true = preventDefault+stopPropagation 阻断 keymap 默认行为。
@@ -9816,7 +10103,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
     cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
       pendingImages.splice(+x.dataset.i, 1)
-      renderImgPills()
+      syncGwSend()
       renderCmdPop()
     }))
     cmdPop.querySelector('.retry')?.addEventListener('click', () => { cmd.error = null; cmd.status = 'ready'; renderCmdPop() })
@@ -11505,37 +11792,19 @@ function setApprovalPending(v) { approvalPending = v }
   // 白板内 token 表单：回车提交（无发送按钮）—— 设备配对版已移除输入框，此绑定随 #g-token-input 删除
 
 function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
-  // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
-  // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
-  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl(预览)}。发送时文本拼
-  // [Image #N] 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents
-  // → handlePromptSubmit 占位匹配才发送（与本地粘贴图片完全同路径，不落盘、执行时才 resize）。
+  // ---------- 视觉上行内部态（无底栏 UI；发送链 [Image #N] 契约不变，2026-08-28 起同口径） ----------
+  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl}。发送时文本拼 [Image #N] 占位 +
+  // images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
   let pendingImages = []
   function clearPendingImages() {
     pendingImages = []
-    renderImgPills()
+    syncGwSend()
   }
-  // pendingFiles: {name, abs, size}（落盘文件）。渲染与图片同胶囊行（#img-pills），发送时
-  // 文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行（CLI 端即普通文本，模型按路径 Read）。
+  // pendingFiles: {name, abs, size}（落盘文件）。发送时文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行
+  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](uploads/x)` 链接是同一次上传的引用表达。
   let pendingFiles = []
   function clearPendingFiles() {
     pendingFiles = []
-    renderImgPills()
-  }
-  function renderImgPills() {
-    const box = $('img-pills')
-    if (!box) return
-    if (!pendingImages.length && !pendingFiles.length) {
-      box.hidden = true
-      box.innerHTML = ''
-    } else {
-      box.hidden = false
-      box.innerHTML = pendingImages
-        .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
-        .join('') + pendingFiles
-        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
-        .join('')
-    }
     syncGwSend()
   }
   // 编码：≤1.5MB 且 png/jpg/webp 直传原 base64（截图文字不重压）；否则 canvas 重编码 jpeg
@@ -11569,41 +11838,32 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       r.readAsDataURL(file)
     })
   }
+  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列 + 原文件上传落盘 → 原文插 `![名](uploads/x)`
+  // md 引用（CM 行内直渲）。落盘失败时视觉上行仍有效（无 md 引用，发送链 [Image #N] 照旧上行）。
   async function addImageFiles(files) {
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
       if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
-      try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败') }
+      try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败'); continue }
+      const att = await uploadAttachment(f)
+      if (att) insertAttachmentMarkdown('composer', att)
     }
-    renderImgPills()
+    syncGwSend()
   }
-  // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
-  // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
-  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=newSessionProject()
-  //（项目「+」初始化界面 / work 模式的工作项目）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
-  // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
+  // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
+  // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
+  // 已开）；首页尚无会话时 project=newSessionProject()——与 gwSend 首送建会话的归属参数同源，
+  // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
   async function addUploadFiles(files) {
-    const tgt = newSessionProject()
-    const ctx = state.currentHash
-      ? '&sid=' + encodeURIComponent(state.currentHash)
-      : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
-      try {
-        const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(f.name || 'file') + ctx), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: f,
-        })
-        const d = await r.json().catch(() => ({}))
-        if (!r.ok || !d.ok) { toast('上传失败：' + (d.error || r.status)); continue }
-        pendingFiles.push({ name: d.name || f.name || '文件', abs: String(d.abs || d.path || ''), size: d.size || 0 })
-        toast('已上传 ' + d.name)
-      } catch {
-        toast('上传失败：网络错误')
-      }
+      const att = await uploadAttachment(f)
+      if (!att) continue
+      pendingFiles.push(att)
+      toast('已上传 ' + att.name)
+      insertAttachmentMarkdown('composer', att)
     }
-    renderImgPills()
+    syncGwSend()
   }
 
   async function gwSend() {

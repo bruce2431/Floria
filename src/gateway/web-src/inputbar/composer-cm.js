@@ -4,6 +4,11 @@
 // .mention 族 = 输入栏现行为，三点确认 ①）。接缝签名与语义冻结：serializeInput = doc.toString()、
 // setInputText = 全文替换——消费链（send/mention/quote/commands/ctx-meter/live）只认这两口。
 // 旧 #input contenteditable 与 #input-md 渲染层（md-preview.js 整模块）退役。
+import { makeEditorFacade, editorApiSetActive } from '../editor/editor-api.js'
+import { wrapKeymap } from '../editor/editor-transactions.js'
+import { edAttImgPlugin } from '../editor/editor-attachments.js'
+import { cmMathExt } from '../editor/cm-math.js'
+import { addImageFiles, addUploadFiles } from './images.js'
 /* @module inputbar/composer-cm.js */
   // vendor 全局（index.html 先于 app.js 载入，eval 期取值安全；work-cm.js 同款别名）
   const CMG = window.CMLiveMarkdown
@@ -182,8 +187,12 @@
   function cmOnPaste(event, view) {
     if (gateAwait) return false
     const cd = event.clipboardData
-    const files = Array.from((cd && cd.files) || []).filter((f) => /^image\//.test(f.type))
-    if (files.length) { event.preventDefault(); addImageFiles(files); return true }
+    const all = Array.from((cd && cd.files) || [])
+    const imgs = all.filter((f) => /^image\//.test(f.type))
+    // 非图片文件粘贴也进附件链（2026-10-15 待办 13：上传落盘 → 原文插 md 引用，与 + 浮窗「上传文件」同链）
+    const docs = all.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) { event.preventDefault(); addImageFiles(imgs); return true }
+    if (docs.length) { event.preventDefault(); addUploadFiles(docs); return true }
     // 纯文本粘贴：CM 天然只收文本（无 text/html 富格式问题），走原生事务保 undo 栈
     if (!cd || !cd.getData('text/plain')) return false
     return false // 文本粘贴交 CM 默认（等价旧 execCommand insertText 的纯文本语义）
@@ -209,7 +218,7 @@
       doc: '',
       extensions: [
         cmCM.history(),
-        cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap]),
+        cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap, ...wrapKeymap()]),
         cmCM.EditorView.lineWrapping,
         cmEditComp.of([cmCM.EditorView.editable.of(true), cmCM.EditorState.readOnly.of(false)]),
         cmPhComp.of(cmCM.placeholder(cmPhText)),
@@ -221,17 +230,23 @@
         cmCM.markdownStylePlugin,
         cmCM.mathPlugin,
         cmCM.blockMathField,
+        cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
         cmCM.tableField,
         cmCM.linkPlugin(),
         ...cmCM.codeBlockField(),
         cmChipPlugin,
         cmAtomic,
+        edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
         cmCM.editorTheme,
         cmThemeSpec(),
         cmCM.EditorView.updateListener.of(cmOnUpdate),
       ],
     })
     cmView = new cmCM.EditorView({ state: st, parent: $('cm-host') })
+    // editor 组公开面注册（2026-10-15 任务D）：底栏编辑面进 editorCommand 统一调度（包裹/插入/勾选），
+    // 聚焦时上报活跃面（work 编辑区同款；活跃面 = 最后聚焦者）。既有 chip/令牌/补全链原样不动。
+    makeEditorFacade({ id: 'composer', view: cmView })
+    cmView.contentDOM.addEventListener('focus', () => editorApiSetActive('composer'))
     // 键/粘贴走 contentDOM **捕获阶段**直挂（不 domEventHandlers）：本 vendor 实测 keymap.of(defaultKeymap)
     // 的 Enter 绑定先于 domEventHandlers 吞键（探针 2026-10-14，np=false 且键程分支未触）——捕获监听先于
     // CM 自身气泡链，true = preventDefault+stopPropagation 阻断 keymap 默认行为。

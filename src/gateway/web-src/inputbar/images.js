@@ -1,42 +1,26 @@
-// 图片附件（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
-
-import { state } from '../engine/state.js'
-import { toast, esc, newSessionProject } from '../core/util.js'
-import { I } from '../core/icons.js'
-import { apiUrl } from '../engine/gateway.js'
+// 附件链（2026-10-15 待办 13 改造；原 2026-09-10 图片/文件胶囊链退役）。
+// 上传（粘贴/拖拽/+ 浮窗）→ 落盘（POST /gateway/upload）→ **原文插 md 引用**：图片 `![名](uploads/x.png)`
+// 行内直渲（editor-attachments.edAttImgPlugin）、文件 `[名](uploads/x)` 文件名链接——底栏不再有胶囊行，
+// 「胶囊 + 正文引用」两套真相收口为一套（正文引用即唯一表达）。
+// 发送链不变量原样保留：pendingImages/pendingFiles 仍是发送链内部态（send.js 消费：[Image #N] 占位 +
+// images base64 视觉上行 / [文件:占位] 相对化上行），只是不再有底栏 UI 表达。
+import { toast } from '../core/util.js'
 import { syncGwSend } from './send.js'
+import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-attachments.js'
 /* @module inputbar/images.js */
-  // ---------- 图片附件（2026-08-28）：走 CLI 粘贴同链路；2026-09-09 上传入口=+ 浮窗「上传」组常驻行，
-  // vision 入口门控退役（粘贴/拖拽/发送链本无门控，入口级限制与其它入口不一致）----------
-  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl(预览)}。发送时文本拼
-  // [Image #N] 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents
-  // → handlePromptSubmit 占位匹配才发送（与本地粘贴图片完全同路径，不落盘、执行时才 resize）。
+  // ---------- 视觉上行内部态（无底栏 UI；发送链 [Image #N] 契约不变，2026-08-28 起同口径） ----------
+  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl}。发送时文本拼 [Image #N] 占位 +
+  // images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
   let pendingImages = []
   function clearPendingImages() {
     pendingImages = []
-    renderImgPills()
+    syncGwSend()
   }
-  // pendingFiles: {name, abs, size}（落盘文件）。渲染与图片同胶囊行（#img-pills），发送时
-  // 文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行（CLI 端即普通文本，模型按路径 Read）。
+  // pendingFiles: {name, abs, size}（落盘文件）。发送时文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行
+  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](uploads/x)` 链接是同一次上传的引用表达。
   let pendingFiles = []
   function clearPendingFiles() {
     pendingFiles = []
-    renderImgPills()
-  }
-  function renderImgPills() {
-    const box = $('img-pills')
-    if (!box) return
-    if (!pendingImages.length && !pendingFiles.length) {
-      box.hidden = true
-      box.innerHTML = ''
-    } else {
-      box.hidden = false
-      box.innerHTML = pendingImages
-        .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${p.filename}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
-        .join('') + pendingFiles
-        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
-        .join('')
-    }
     syncGwSend()
   }
   // 编码：≤1.5MB 且 png/jpg/webp 直传原 base64（截图文字不重压）；否则 canvas 重编码 jpeg
@@ -70,41 +54,32 @@ import { syncGwSend } from './send.js'
       r.readAsDataURL(file)
     })
   }
+  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列 + 原文件上传落盘 → 原文插 `![名](uploads/x)`
+  // md 引用（CM 行内直渲）。落盘失败时视觉上行仍有效（无 md 引用，发送链 [Image #N] 照旧上行）。
   async function addImageFiles(files) {
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
       if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
-      try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败') }
+      try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败'); continue }
+      const att = await uploadAttachment(f)
+      if (att) insertAttachmentMarkdown('composer', att)
     }
-    renderImgPills()
+    syncGwSend()
   }
-  // ---------- 文件上传（2026-09-12）：+ 浮窗「上传文件」行 → POST /gateway/upload（原始字节直传，
-  // token/cookie 认证同链）→ 网关落盘 <会话根>/uploads/ → 文件胶囊进附件行。落盘跟随会话
-  // （2026-09-12 四轮用户定案）：sid=当前会话（存量/已开）；首页尚无会话时 project=newSessionProject()
-  //（项目「+」初始化界面 / work 模式的工作项目）——与 gwSend 首送建会话的归属参数同源，保证「上传落点=消息会话落点」；
-  // 两者皆无（纯首页）网关落全局根。与图片附件（base64 内联不落盘）是两条独立链路，互不复用。
+  // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
+  // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
+  // 已开）；首页尚无会话时 project=newSessionProject()——与 gwSend 首送建会话的归属参数同源，
+  // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
   async function addUploadFiles(files) {
-    const tgt = newSessionProject()
-    const ctx = state.currentHash
-      ? '&sid=' + encodeURIComponent(state.currentHash)
-      : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
-      try {
-        const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(f.name || 'file') + ctx), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: f,
-        })
-        const d = await r.json().catch(() => ({}))
-        if (!r.ok || !d.ok) { toast('上传失败：' + (d.error || r.status)); continue }
-        pendingFiles.push({ name: d.name || f.name || '文件', abs: String(d.abs || d.path || ''), size: d.size || 0 })
-        toast('已上传 ' + d.name)
-      } catch {
-        toast('上传失败：网络错误')
-      }
+      const att = await uploadAttachment(f)
+      if (!att) continue
+      pendingFiles.push(att)
+      toast('已上传 ' + att.name)
+      insertAttachmentMarkdown('composer', att)
     }
-    renderImgPills()
+    syncGwSend()
   }
 
 export {
@@ -115,5 +90,4 @@ export {
   encodeImg,
   pendingImages,
   pendingFiles,
-  renderImgPills,
 }

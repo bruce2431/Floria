@@ -105,8 +105,11 @@ ok('D1 未选项目不落槽（无 workProj 时 stash 空转）', (() => { const
 // ---------- E. 语境唯一源 + 顶栏投影 ----------
 const ctxA = api.getWorkContext()
 ok('E1 getWorkContext：项目语境（kind/projectKey/mode/tab）', ctxA.kind === 'project' && ctxA.projectKey === 'PJ-A' && ctxA.mode === 'work' && ctxA.selectedTab === 'chat')
+// E1（2026-10-15 待办 7 收尾）：撤 `wkTab==='ws'` 第三态——kind 只看 projectKey 在场（工作区根「全局根·
+// 散装对话」有 label ⇒ project 语境），wkTab 取值不再影响 kind。旧断言「wkTab=ws → kind=workspace」已失效。
 state.wkTab = 'ws'
-ok('E1 工作区根散件视图（wkTab=ws）→ kind=workspace', api.getWorkContext().kind === 'workspace')
+ok('E1 撤第三态：有 projectKey 时 wkTab 不影响 kind（仍 project）', api.getWorkContext().kind === 'project')
+ok('E1 无 projectKey（未选项目）→ kind=workspace', (() => { const p = state.workProj; state.workProj = ''; const k = api.getWorkContext().kind; state.workProj = p; return k === 'workspace' })())
 state.wkTab = 'chat'
 state.wkChats = ['#a1', '#live-only']
 const proj = api.getWorkSurfaceProjection(ctxA)

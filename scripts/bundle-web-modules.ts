@@ -30,6 +30,9 @@ const PIECES: { file: string; part: number }[] = [
   // @ 提及/引用令牌纯符号层（2026-10-10 自 inputbar/mention.js 下移）：core/markdown.js 渲染内联 chip 只依赖
   // 此层（断开 core→feature 成环）；只依赖 core/icons.js，须排在其后、core/markdown.js 之前。
   { file: 'core/mention-syntax.js', part: 1 },
+  // 数学公式文法唯一真源（core/math-spec.js，2026-10-15 待办 11）：消息流 extractMath 与 CM6 插件
+  // （editor/cm-math.js）共用同一套分隔符正则与行内判据，禁任一条链自带第二套。须先于两者。
+  { file: 'core/math-spec.js', part: 1 },
   { file: 'core/markdown.js', part: 1 },
   { file: 'core/util.js', part: 2 },
   // 卡片公开 API 总线（engine/card-bus.js，唯一顶层名 cardBus）：只依赖 engine/state.js + core/util.js，
@@ -80,6 +83,19 @@ const PIECES: { file: string; part: number }[] = [
   // reconcileWorkSurface()。顶层仅函数声明（共享 IIFE 内提升），须排在 work-state.js 之后（其 import 面用到
   // WORK_SLOT_DEF）。调用方 = work-files.js 的 selectProject、work-mount.js 的 initWork。
   { file: 'sidebar/work-context.js', part: 1 },
+  // 编辑器模块组（2026-10-15 待办返修轮任务D，自 archive/wip-20261015 移植）：cm-global（vendor 取值口）
+  // → transactions（CM6 事务：包裹/勾选/插入）→ api（facade 注册表 + editorCommand 唯一调度口）
+  // → markdown（renderMarkdown 门面）→ attachments（上传落盘 + 原文 md 引用 + 行内图片 widget）
+  // → clipboard（渲染面复制还原 md 源码门面）。顶层只有函数声明与 const 表（edImgWidgetBase 依赖
+  // window.CMLiveMarkdown，vendor 先于 app.js 载入）；宿主（composer-cm / work-cm）在本组之后调用导出。
+  { file: 'editor/cm-global.js', part: 1 },
+  { file: 'editor/editor-transactions.js', part: 1 },
+  { file: 'editor/editor-api.js', part: 1 },
+  { file: 'editor/editor-markdown.js', part: 1 },
+  { file: 'editor/editor-attachments.js', part: 1 },
+  { file: 'editor/editor-clipboard.js', part: 1 },
+  // CM6 数学插件（2026-10-15 待办 11）：文法取自 core/math-spec.js，两编辑器共用本件（cmMathExt）。
+  { file: 'editor/cm-math.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。

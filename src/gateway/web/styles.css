@@ -316,6 +316,14 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* AI 生成图（2026-10-03）：模型输出 ![](文件名.png) 渲染在回复正文 .blocks 内（不在 .msg-imgs），
    故单列样式；上限 480px 超出收缩，复用 .msg-img 类接入既有 lightbox 委托（点图看大图）。 */
 .msg .blocks .md-img { display: block; max-width: min(100%, 480px); height: auto; border-radius: 10px; margin: 6px 0; cursor: zoom-in; }
+/* 任务列表真实复选框（2026-10-15 待办 10）：core/markdown.js 行解析产出
+   <input type="checkbox" class="md-task-checkbox" data-task-line disabled>——只读展示（勾选态由源码决定，
+   渲染面不改消息内容；可编辑面走 CM6，见 editor-transactions.toggleTaskLineCM）。禁 CSS 伪元素模拟。 */
+.md-task-checkbox { appearance: auto; width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: var(--blue); cursor: default; }
+/* CM6 行内附件图片 widget（2026-10-15 待办 13 / editor-attachments.edAttImgPlugin）：`![](uploads/x)`
+   原子替换为 <img>；光标/拖选落在区间内 = 还原源码（widget 不挂），故此处只管可见态几何。 */
+.cm-att-img { display: inline-block; line-height: 0; margin: 0 2px; vertical-align: middle; }
+.cm-att-img img { max-width: min(100%, 320px); max-height: 160px; border-radius: 8px; display: block; }
 /* 用户消息文件卡片（2026-09-12 文件上传定案：像图片一样有 UI）——.msg-files 在 .body/.msg-imgs
    之后，气泡外下方右对齐；点击复制落盘路径（title=完整路径悬停可看） */
 .msg .msg-files { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 5px; }
@@ -868,19 +876,23 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 .msg .body .code-block.wrap pre, .done-think .code-block.wrap pre, .tr-body .code-block.wrap pre, .appr-md .code-block.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg .body .code-block:not(.wrap) pre, .done-think .code-block:not(.wrap) pre, .tr-body .code-block:not(.wrap) pre, .appr-md .code-block:not(.wrap) pre { white-space: pre; }
 .msg .body .code-block code, .done-think .code-block code, .tr-body .code-block code, .appr-md .code-block code { background: transparent; padding: 0; font-size: inherit; font-family: inherit; }
-/* hljs 令牌 → --hl-*（仅代码块内的 span，全局一份即可；同一套色贯穿 work 编辑区与会话代码块） */
-.code-block code .hljs-comment, .code-block code .hljs-quote, .code-block code .hljs-meta { color: var(--hl-com); font-style: italic; }
-.code-block code .hljs-keyword, .code-block code .hljs-selector-tag, .code-block code .hljs-literal, .code-block code .hljs-doctag, .code-block code .hljs-name, .code-block code .hljs-meta .hljs-keyword { color: var(--hl-kw); }
-.code-block code .hljs-string, .code-block code .hljs-regexp, .code-block code .hljs-addition, .code-block code .hljs-attribute, .code-block code .hljs-meta .hljs-string { color: var(--hl-str); }
-.code-block code .hljs-number, .code-block code .hljs-symbol, .code-block code .hljs-bullet, .code-block code .hljs-variable, .code-block code .hljs-template-variable, .code-block code .hljs-selector-attr, .code-block code .hljs-selector-pseudo { color: var(--hl-num); }
-.code-block code .hljs-title, .code-block code .hljs-section, .code-block code .hljs-title.class_, .code-block code .hljs-title.function_ { color: var(--hl-fn); }
-.code-block code .hljs-type, .code-block code .hljs-class, .code-block code .hljs-built_in, .code-block code .hljs-builtin-name { color: var(--hl-type); }
-.code-block code .hljs-attr, .code-block code .hljs-property, .code-block code .hljs-params, .code-block code .hljs-selector-class, .code-block code .hljs-selector-id { color: var(--hl-attr); }
-.code-block code .hljs-operator, .code-block code .hljs-punctuation { color: var(--hl-op); }
-.code-block code .hljs-deletion { color: var(--danger-fg); }
-.code-block code .hljs-link { color: var(--hl-link); text-decoration: underline; }
-.code-block code .hljs-emphasis { font-style: italic; }
-.code-block code .hljs-strong { font-weight: 600; }
+/* hljs 令牌 → --hl-*（全局一份；同一套色贯穿三处代码高亮：会话代码块 / work 编辑区代码块 / 底栏 CM6）。
+   作用域键 = :is(.code-block code, #work-editor, #cm-host)：前者的 hljs span 由 core/markdown.js 调
+   vendored highlightCode 产出；后两者由 CodeMirror live-markdown 自带高亮产出（该库硬编码浅色，暗色
+   主题下对比差——2026-10-15 组4 备忘，故必须一并映射到 --hl-*）。:is() 内含 id ⇒ 特指度高于 CM 注入的
+   styleModule 规则，稳赢且不需要 !important。 */
+:is(.code-block code, #work-editor, #cm-host) .hljs-comment, :is(.code-block code, #work-editor, #cm-host) .hljs-quote, :is(.code-block code, #work-editor, #cm-host) .hljs-meta { color: var(--hl-com); font-style: italic; }
+:is(.code-block code, #work-editor, #cm-host) .hljs-keyword, :is(.code-block code, #work-editor, #cm-host) .hljs-selector-tag, :is(.code-block code, #work-editor, #cm-host) .hljs-literal, :is(.code-block code, #work-editor, #cm-host) .hljs-doctag, :is(.code-block code, #work-editor, #cm-host) .hljs-name, :is(.code-block code, #work-editor, #cm-host) .hljs-meta .hljs-keyword { color: var(--hl-kw); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-string, :is(.code-block code, #work-editor, #cm-host) .hljs-regexp, :is(.code-block code, #work-editor, #cm-host) .hljs-addition, :is(.code-block code, #work-editor, #cm-host) .hljs-attribute, :is(.code-block code, #work-editor, #cm-host) .hljs-meta .hljs-string { color: var(--hl-str); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-number, :is(.code-block code, #work-editor, #cm-host) .hljs-symbol, :is(.code-block code, #work-editor, #cm-host) .hljs-bullet, :is(.code-block code, #work-editor, #cm-host) .hljs-variable, :is(.code-block code, #work-editor, #cm-host) .hljs-template-variable, :is(.code-block code, #work-editor, #cm-host) .hljs-selector-attr, :is(.code-block code, #work-editor, #cm-host) .hljs-selector-pseudo { color: var(--hl-num); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-title, :is(.code-block code, #work-editor, #cm-host) .hljs-section, :is(.code-block code, #work-editor, #cm-host) .hljs-title.class_, :is(.code-block code, #work-editor, #cm-host) .hljs-title.function_ { color: var(--hl-fn); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-type, :is(.code-block code, #work-editor, #cm-host) .hljs-class, :is(.code-block code, #work-editor, #cm-host) .hljs-built_in, :is(.code-block code, #work-editor, #cm-host) .hljs-builtin-name { color: var(--hl-type); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-attr, :is(.code-block code, #work-editor, #cm-host) .hljs-property, :is(.code-block code, #work-editor, #cm-host) .hljs-params, :is(.code-block code, #work-editor, #cm-host) .hljs-selector-class, :is(.code-block code, #work-editor, #cm-host) .hljs-selector-id { color: var(--hl-attr); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-operator, :is(.code-block code, #work-editor, #cm-host) .hljs-punctuation { color: var(--hl-op); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-deletion { color: var(--danger-fg); }
+:is(.code-block code, #work-editor, #cm-host) .hljs-link { color: var(--hl-link); text-decoration: underline; }
+:is(.code-block code, #work-editor, #cm-host) .hljs-emphasis { font-style: italic; }
+:is(.code-block code, #work-editor, #cm-host) .hljs-strong { font-weight: 600; }
 /* 2026-09-12：嵌入式图表（```chart 双段围栏）——web 渲染 %%html 段进 sandbox iframe（opaque origin，
    高度由 iframe 内 BOOT postMessage 上报、messages.js 按 e.source 设高；上限 60vh 超出内部滚动），
    「源码」按钮切原文（.as-src）。%%ascii 段仅供 CLI，web 弃用。普通 ```html 围栏不受影响 */
@@ -1031,7 +1043,28 @@ body.kb-open #input-wrap { transition: none; }
    到底栏内部文本。选择器覆盖 CM6 内部（.cm-content/.cm-line/.cm-placeholder）——id+class 特指度
    高于 CM 注入的 styleModule 规则，稳赢。 */
 #input-bar, #input-bar #cm-host, #input-bar .cm-content, #input-bar .cm-line, #input-bar .cm-placeholder { text-align: left; }
+/* 底栏几何 = 组件自带契约（2026-10-15 真机 DOM 实测根因）：vendor 主题（vendor/codemirror/
+   live-markdown.js 内 `.cm-content{padding:"16px 0"}` + `.cm-line{padding:"0 16px"}`）**压过**
+   composer-cm.js 的 cmThemeSpec（那里声明的是 padding 4/12/0/16）⇒ .cm-content 计算值 =
+   `0px 0px 16px 0px`（顶 0 由 docked 覆写，右 0 / 底 16 / 左 0 全是 vendor 的），底栏因此凭空多出
+   16px 下垫。这就是「占位行到控件行之间一条空带」的真源——不是 gap，也不是 min-height。
+   根治 = 与 1045 行 text-align 同款做法：在组件边界（#input-bar）声明几何，id+class 特指度
+   (1,1,0) 胜过 vendor 主题生成的选择器 (0,2,0)，且不碰 vendor 文件本身（vendor 是只读件）。
+   仅抹下垫（恢复 cmThemeSpec 声明的底部 0）：水平 16px 内缩由 vendor 的 .cm-line padding 提供，
+   净内缩与 cmThemeSpec 一致，不动。 */
+#input-bar .cm-content { padding-bottom: 0; }
 #input-wrap.docked #cm-host .cm-content { min-height: 24px; }
+/* 会话态（.docked）几何 —— 2026-10-15 真机量图定案：按参考图（暗色会话底栏）等比。
+   参考量值：栏 768×110 CSS —— 顶垫 19.5 / 文本 16 / 文本下留白 31 / 控件行 32 / 下垫 11.5。
+   本栏等宽（780）⇒ 同高 110。分项 = 边框 2 + 顶垫 14 + 内容 28（CM 顶垫 0 + 24 行盒）+ gap 24 + .row 42。
+   ①顶垫 14：字上方视觉 = 1 边框 + 14 + 半行距 4.5 ≈ 19.5，对齐参考；
+   ②gap 24：字下沿到控件行 = 半行距 4.5 + 24 = 28.5，对齐参考的 31（controls 行高本栏 42 vs 参考 32，差在控件本体，不动）。
+   **回正记录**：2026-10-15 前两轮把这两值误收到 4/6（整栏 98→82，比参考矮 28px）——已按量图回正；
+   「文本行与控件行之间一条空带」的真源是 vendor 下垫泄漏（见上 1046 行），不由本组两值承担，别再用收 gap/顶垫去治它。
+   **空态 hero 的几何由 1019 行基础规则承担**（hero 无 .docked，不受本组规则影响）。
+   行数增长行为不变（.cm-content min-height 24px 在单行下被 28px 行盒压过，改它无效果，故不动）。 */
+#input-wrap.docked #input-bar { padding-top: 14px; gap: 24px; }
+#input-wrap.docked #cm-host .cm-content { padding-top: 0; }
 /* 引用块正文行（回复/PDF 引用的锚点令牌与收尾令牌之间的可见文本行）：blockquote 同族观感 */
 #cm-host .cm-quote-body { color: var(--text-2); border-left: 2px solid var(--border); padding-left: 6px; margin-left: 10px; }
 /* 底部工具行（dsh .row）：textarea 与工具行 gap 12px；左 .tools / 右 .trailing。
@@ -2518,9 +2551,15 @@ body.kb-open #chat-area.work.wk-show-file > .wk-topbar { margin-top: calc(var(--
 #sidebar:not(.open) ~ #chat-area.work #menu-btn:hover { background: var(--hover); }
 .wk-tb-tabs { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .wk-tb-tabs::-webkit-scrollbar { display: none; }
-.wk-tb-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font-size: 13px; max-width: 220px; flex: none; }
+.wk-tb-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; min-width: 96px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font-size: 13px; max-width: 220px; flex: none; }
 .wk-tb-pill:hover { background: var(--hover); color: var(--text-2); }
 .wk-tb-pill.on { background: var(--chat-bg); border-color: var(--border); color: var(--text); }
+/* 顶栏工具栏胶囊 #wk-tb-tool（待办18）：全部胶囊里唯一带色的一枚——半透明蓝底 = 「这是开关」。
+   取色只走 --blue 令牌（无硬编码色），日夜随动；文字/图标色仍归上面的 .wk-tb-pill 族，只换底与描边，
+   故除本胶囊外无其它像素变化。作用域 = 本 id（聊天/文件 pill 无色底照旧）；在场态（.on）加深一档。 */
+#wk-tb-tool { background: color-mix(in srgb, var(--blue) 12%, transparent); border-color: color-mix(in srgb, var(--blue) 28%, transparent); }
+#wk-tb-tool:hover { background: color-mix(in srgb, var(--blue) 20%, transparent); }
+#wk-tb-tool.on { background: color-mix(in srgb, var(--blue) 26%, transparent); border-color: color-mix(in srgb, var(--blue) 52%, transparent); }
 .wk-tb-ico { display: flex; flex: none; }
 .wk-tb-ico svg { width: 14px; height: 14px; display: block; }
 .wk-tb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2740,6 +2779,34 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 #work-editor .cm-link-preview { background: var(--float-bg); border-color: var(--border); }
 #work-editor .cm-math-preview-panel { border: 1px solid var(--border); }
 #work-editor .cm-math-source { color: var(--text); }
+/* ---------- vendor 令牌桥（2026-10-15，待办4 根治：底栏 #cm-host 的实时预览暗色）----------
+   库主题的颜色一律写成 `hsl(var(--muted, 220 14% 96%))` 这种 shadcn 命名，本项目一个都不定义 ⇒
+   **浅色回落值在暗色下全数生效**。work 编辑区靠上面那一段逐类覆写挡住了，底栏（#cm-host，2026-10-14
+   CM6 接管）没有 ⇒ 实报「底栏实时预览白底白字 / 数学源码近黑不可读 / 行内代码浅灰底」。
+   此处按项目令牌给出库要的**HSL 三元组**（hsl() 只吃三元组，不收十六进制），日夜一层覆盖 ⇒ 两个
+   CM6 宿主一次随动，新增宿主不必再抄一套逐类覆写。
+   注：库读的 `--border` 与本项目同名十六进制令牌相撞（本项目处是 `1px solid var(--border)` 的色值），
+   定义成三元组会打断全站边框 ⇒ 此桥不含它，读 --border 的几个库类改由下面 #cm-host 逐类覆写。 */
+:root {
+  --foreground: 240 3% 11%;       /* = --text #1c1c1e（正文 / 标题 / 加粗 / 公式源码）*/
+  --muted: 240 4% 95%;            /* = --border-soft #f2f2f3（行内代码底 / 表头 / 代码块底）*/
+  --muted-foreground: 240 2% 57%; /* = --text-2 #8e8e93（格式化标记 / 行号 / 图片信息）*/
+  --primary: 230 99% 65%;         /* = --blue #4d6bfe（链接 / wikilink / 光标）*/
+  --background: 0 0% 100%;        /* = --bg #ffffff（表格 toggle / 链接悬浮卡 / 复制钮）*/
+}
+html[data-theme="dark"] {
+  --foreground: 0 0% 91%;         /* = --text #e8e8e8 */
+  --muted: 0 0% 12%;              /* = --border-soft #1f1f1f */
+  --muted-foreground: 0 0% 60%;   /* = --text-2 #9a9a9a */
+  --background: 0 0% 9%;          /* = --bg #161616 */
+}
+/* 底栏 #cm-host 读 --border 的库类（取项目令牌，与 #work-editor 同源取值，不引新色）*/
+#cm-host .cm-math-preview-panel { border-color: var(--border); }
+#cm-host .cm-table-widget th, #cm-host .cm-table-widget td,
+#cm-host .cm-table-editor th, #cm-host .cm-table-editor td { border-color: var(--border); }
+#cm-host .cm-table-toggle { border-color: var(--border); }
+#cm-host .cm-link-preview { border-color: var(--border); }
+#cm-host .cm-codeblock-copy { border: 1px solid var(--border); }
 .wk-ed-img { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 16px; }
 .wk-ed-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .wk-ed-empty { padding: 24px 20px; font-size: 13px; color: var(--text-3); text-align: center; }

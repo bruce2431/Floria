@@ -310,11 +310,12 @@ function sessionProjectRootOf(sessionId: string): { projectLabel?: string } | nu
 // web 会话启动 cwd（2026-08-24 用户定案：笔=全局根，项目=项目目录内）：
 //  CLI 的 getProjectRoot() = 进程启动时的 cwd（state.ts getInitialState projectRoot: resolvedCwd），
 //  会话 jsonl 自然落 <cwd>/.claude/projects/——所以只需把 cwd 指对，落盘位置即正确，无需额外落盘逻辑。
-//  - project 指定（findProjects 命中的项目组，防任意路径）→ 该项目根目录
+//  - project 指定（findProjects 命中的项目组，防任意路径）→ 该项目根目录；label 唯一命中，故
+//    「全局根 · 散装对话」同样命中（= 工作区根 = getPortableRoot()，与未指定同一落点，非兜底）
 //  - 未指定（笔/首页消息发送）→ 全局根（便携根 getPortableRoot() = @WrokSpace 散装对话区）
 function webSessionProjectRoot(project: string | undefined): string {
   if (project && project.trim()) {
-    const g = findProjects(getPortableRoot()).find((x) => x.scope === 'project' && x.label === project)
+    const g = findProjects(getPortableRoot()).find((x) => x.label === project)
     if (g) return resolve(g.dir, '..', '..') // dir = <项目根>/.claude/projects → 上两级 = 项目根
   }
   return getPortableRoot()
@@ -992,6 +993,7 @@ const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
   '.canvas': 'application/json; charset=utf-8',
+  '.pdf': 'application/pdf',
   '.md': 'text/plain; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.jpeg': 'image/jpeg',
@@ -2529,7 +2531,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 默认预览页数据：/gateway/project?label=<项目> → 文件树 + README + 会话元信息（GitHub 仓库风格默认界面）
+  // 默认预览页数据：/gateway/project?label=<项目|工作区根> → 文件树 + README + 会话元信息（GitHub 仓库风格默认界面）
+  // 2026-10-15 待办7：工作区根 = 一个特殊「项目」（统一复用本路由，不留第三态）——label 不再硬判 scope==='project'，
+  // findProjects 已含 scope==='global'（label「全局根 · 散装对话」），按唯一 label 命中即服务。pDir 仍用同一条
+  // 公式 resolve(dir,'..','..')：项目 = <root>/<label>/.claude/projects → <root>/<label>；工作区根 =
+  // <root>/.claude/projects → <root>（即工作区根），无需分支。
   // 2026-08-19 Web 容器：/gateway/backend?label=<项目> → 懒加载 spawn 该项目 preview.json 声明的后端进程，
   // 返回 {url}：本机 iframe 直连；远程宿主由前端改走同源代理 /backend/<label>/（受上方 /gateway/* token 校验保护；后端仅监听 127.0.0.1，访问面可控）。
   if (req.method === 'GET' && url.pathname === '/gateway/backend') {
@@ -2567,19 +2573,19 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   if (req.method === 'GET' && url.pathname === '/gateway/project') {
     const pLabel = url.searchParams.get('label') || ''
-    const pProj = findProjects(root).find((g) => g.scope === 'project' && g.label === pLabel)
+    const pProj = findProjects(root).find((g) => g.label === pLabel)
     if (!pProj) {
       sendJson(res, 404, { error: 'project not found' })
       return
     }
     try {
-      const pDir = resolve(pProj.dir, '..', '..') // pProj.dir = <root>/<label>/.claude/projects，上两级才是项目根（resolve '..' 只到 .claude）
+      const pDir = resolve(pProj.dir, '..', '..') // pProj.dir = <root>/<label>/.claude/projects（工作区根 = <root>/.claude/projects）→ 上两级即项目根/工作区根
       const budget = { n: 2000 }
       const files = walkProjectTree(pDir, 0, budget) ?? []
       const readme = findProjectReadme(pDir)
       const list = await listSessions(root)
       const pSessions = (list.sessions as Array<Record<string, unknown>>)
-        .filter((s) => s.projectScope === 'project' && s.projectLabel === pLabel)
+        .filter((s) => s.projectScope === pProj.scope && s.projectLabel === pLabel)
         .map((s) => ({
           hash: String(s.file).replace(/\.jsonl$/, ''),
           id: s.id,
@@ -2590,7 +2596,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         .slice(0, 100)
       sendJson(res, 200, {
         label: pLabel,
-        scope: 'project',
+        scope: pProj.scope,
         hasPreview: pProj.hasPreview,
         description: deriveProjectDescription(readme, pLabel),
         files,
@@ -2764,12 +2770,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // 项目内文件 / 目录重命名：POST /gateway/file/rename {label, path, name} → 同目录改名（2026-09-27）
   // 语义与防护全在 renameProjectEntry（纯函数，探针 probe-file-tree-ops 直测）；此处只管解析 label。
   // 穿越防护口径同 GET /gateway/file（resolveWithinRoot）。受上方 /gateway/* token 校验保护。
+  // label 唯一命中（含工作区根「全局根 · 散装对话」）——工作区根 = 一等公民项目，写链同口径放行。
   if (req.method === 'POST' && url.pathname === '/gateway/file/rename') {
     try {
       const rp = await readReportBody(req)
-      const rProj = findProjects(root).find(
-        (g) => g.scope === 'project' && g.label === (typeof rp.label === 'string' ? rp.label : ''),
-      )
+      const rProj = findProjects(root).find((g) => g.label === (typeof rp.label === 'string' ? rp.label : ''))
       if (!rProj) {
         sendJson(res, 404, { error: 'project not found' })
         return
@@ -2788,13 +2793,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   // 项目内文件 / 目录移动（拖拽放入文件夹，2026-10-14 待办 10）：POST /gateway/file/move
   // {label, path, dir} → basename 不变、整体搬到 dir（'' = 项目根）。语义与防护全在 moveProjectEntry
-  // （纯函数）；此处只管解析 label。受上方 /gateway/* token 校验保护。
+  // （纯函数）；此处只管解析 label（label 唯一命中，含工作区根）。受上方 /gateway/* token 校验保护。
   if (req.method === 'POST' && url.pathname === '/gateway/file/move') {
     try {
       const mp = await readReportBody(req)
-      const mProj = findProjects(root).find(
-        (g) => g.scope === 'project' && g.label === (typeof mp.label === 'string' ? mp.label : ''),
-      )
+      const mProj = findProjects(root).find((g) => g.label === (typeof mp.label === 'string' ? mp.label : ''))
       if (!mProj) {
         sendJson(res, 404, { error: 'project not found' })
         return
@@ -2812,7 +2815,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 项目内已存在文件写内容：POST /gateway/file/write {label, path, content, baseMtime?}（2026-10-05 work 编辑区）
-  // 语义与防护全在 writeProjectFile（纯函数，探针 probe-file-tree-ops 直测）；此处只管解析 label 与 body 上限。
+  // 语义与防护全在 writeProjectFile（纯函数，探针 probe-file-tree-ops 直测）；此处只管解析 label（label
+  // 唯一命中，含工作区根）与 body 上限。
   // body 用 4 MB 上限（readReportBody 的 1 MB 容不下源码文件），超限 → 413。受上方 /gateway/* token 校验保护。
   if (req.method === 'POST' && url.pathname === '/gateway/file/write') {
     try {
@@ -2831,9 +2835,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         return
       }
       const wp = wBody as Record<string, unknown>
-      const wProj = findProjects(root).find(
-        (g) => g.scope === 'project' && g.label === (typeof wp.label === 'string' ? wp.label : ''),
-      )
+      const wProj = findProjects(root).find((g) => g.label === (typeof wp.label === 'string' ? wp.label : ''))
       if (!wProj) {
         sendJson(res, 404, { error: 'project not found' })
         return
@@ -2888,12 +2890,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   // 项目内文件 / 目录删除：POST /gateway/file/delete {label, path} → 移入项目根 .trash/（2026-09-27）
   // 「删除」= 移动（工作区规范：禁止 rm），语义与冲突命名全在 trashProjectEntry（纯函数，同上探针直测）。
+  // label 唯一命中（含工作区根）；<项目根>/.trash/ 对工作区根即 <root>/.trash/。
   if (req.method === 'POST' && url.pathname === '/gateway/file/delete') {
     try {
       const dp = await readReportBody(req)
-      const dProj = findProjects(root).find(
-        (g) => g.scope === 'project' && g.label === (typeof dp.label === 'string' ? dp.label : ''),
-      )
+      const dProj = findProjects(root).find((g) => g.label === (typeof dp.label === 'string' ? dp.label : ''))
       if (!dProj) {
         sendJson(res, 404, { error: 'project not found' })
         return
@@ -2908,13 +2909,12 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   // 项目内新建文件 / 目录：POST /gateway/file/create {label, path, name, dir}（2026-10-13 work 侧栏
   // 「创建文件 / 文件夹」）。语义与防护全在 createProjectEntry（纯函数，探针 probe-file-create 直测）；
-  // 此处只管解析 label。path = 落点目录（'' = 项目根）。受上方 /gateway/* token 校验保护。
+  // 此处只管解析 label（label 唯一命中，含工作区根）。path = 落点目录（'' = 项目根）。
+  // 受上方 /gateway/* token 校验保护。
   if (req.method === 'POST' && url.pathname === '/gateway/file/create') {
     try {
       const cp = await readReportBody(req)
-      const cProj = findProjects(root).find(
-        (g) => g.scope === 'project' && g.label === (typeof cp.label === 'string' ? cp.label : ''),
-      )
+      const cProj = findProjects(root).find((g) => g.label === (typeof cp.label === 'string' ? cp.label : ''))
       if (!cProj) {
         sendJson(res, 404, { error: 'project not found' })
         return
@@ -2936,11 +2936,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // （2026-10-13 work 侧栏「上传文件 / 文件夹」）。语义与防护全在 uploadProjectFile（纯函数，
   // probe-file-create 直测）：同名 -1/-2 序号避让（对齐 /gateway/upload 先例）、落点目录 recursive
   // 创建（承载「上传文件夹」的子目录结构）、越界 403、单文件上限 20 MB（对齐 /gateway/upload）。
-  // 受上方 /gateway/* token 校验保护。
+  // label 唯一命中（含工作区根）。受上方 /gateway/* token 校验保护。
   if (req.method === 'POST' && url.pathname === '/gateway/file/upload') {
     try {
       const upLabel = url.searchParams.get('label') || ''
-      const uProj = findProjects(root).find((g) => g.scope === 'project' && g.label === upLabel)
+      const uProj = findProjects(root).find((g) => g.label === upLabel)
       if (!uProj) {
         sendJson(res, 404, { error: 'project not found' })
         return

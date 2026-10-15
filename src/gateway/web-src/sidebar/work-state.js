@@ -8,7 +8,7 @@
   // 一个键一件事，槽与 live 字段一一对应，不再有两套命名（旧 wkPanes 的 workspace/sidebar 已并入
   // wkPreview/panelPinned，由 loadWork 的迁移一次性折叠）。
   const WORK_SLOT_DEF = {
-    wkTab: 'files',        // 侧栏体：'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件
+    wkTab: 'files',        // 侧栏体：'files' 文件树 / 'chat' 会话列表
     wkMainTab: 'chat',     // 下沉区：'chat' 助手 / 'file' 编辑区
     wkAssist: true,        // 聊天 tab 是否在场
     wkAssistMode: 'side',  // 助手形态：'side' 靠栏 / 'float' 悬浮卡 / 'slim' 收敛输入栏

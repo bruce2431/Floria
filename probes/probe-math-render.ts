@@ -14,19 +14,32 @@
 
 const here = import.meta.dir
 const mkSrc = await Bun.file(`${here}/../src/gateway/web-src/core/markdown.js`).text()
+const specSrc = await Bun.file(`${here}/../src/gateway/web-src/core/math-spec.js`).text()
 const katexPath = `${here}/../src/gateway/web/vendor/katex/katex.min.js`
 
 // katex UMD → CJS
 const katex = require(katexPath)
 
 // 剥头注释 + import 行 + 尾部 export 块；其余照原样执行
-const raw = mkSrc.replace(/\r\n/g, '\n')
-const exportAt = raw.search(/^export \{/m)
-const noExport = exportAt >= 0 ? raw.slice(0, exportAt) : raw
-const body = noExport
-  .split('\n')
-  .filter((l) => !/^\s*import\s/.test(l))
-  .join('\n')
+const strip = (src: string) => {
+  const raw = src.replace(/\r\n/g, '\n')
+  const exportAt = raw.search(/^export \{/m)
+  const noExport = exportAt >= 0 ? raw.slice(0, exportAt) : raw
+  return noExport
+    .split('\n')
+    .filter((l) => !/^\s*import\s/.test(l))
+    .join('\n')
+}
+const body = strip(mkSrc)
+
+// 数学文法唯一真源 core/math-spec.js：与 markdown.js 同源求值，取回常量/判据注入（禁在此另写一套）
+const spec = new Function(`${strip(specSrc)}\nreturn { MATH_SRC_BLOCK_DOLLAR, MATH_SRC_BLOCK_BRACKET, MATH_SRC_INLINE_PAREN, MATH_SRC_INLINE_DOLLAR, mathInlineOk }`)() as {
+  MATH_SRC_BLOCK_DOLLAR: string
+  MATH_SRC_BLOCK_BRACKET: string
+  MATH_SRC_INLINE_PAREN: string
+  MATH_SRC_INLINE_DOLLAR: string
+  mathInlineOk: (body: string) => boolean
+}
 
 function build(windowObj: Record<string, unknown>) {
   const esc = (s: unknown) =>
@@ -36,15 +49,24 @@ function build(windowObj: Record<string, unknown>) {
   const factory = new Function(
     'esc',
     'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_PDF_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE',
-    'mentionChipHtml', 'quotePdfChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'window',
+    'mentionChipHtml', 'quotePdfChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml',
+    'MATH_SRC_BLOCK_DOLLAR', 'MATH_SRC_BLOCK_BRACKET', 'MATH_SRC_INLINE_PAREN', 'MATH_SRC_INLINE_DOLLAR', 'mathInlineOk',
+    'window',
     `${body}\nreturn { mdHtml, mdInline }`,
   )
   const chip = () => ''
-  return factory(esc, never, never, never, never, never, never, chip, chip, chip, chip, windowObj) as {
+  return factory(
+    esc, never, never, never, never, never, never, chip, chip, chip, chip,
+    spec.MATH_SRC_BLOCK_DOLLAR, spec.MATH_SRC_BLOCK_BRACKET, spec.MATH_SRC_INLINE_PAREN, spec.MATH_SRC_INLINE_DOLLAR, spec.mathInlineOk,
+    windowObj,
+  ) as {
     mdHtml: (s: string, la?: string) => string
     mdInline: (s: string) => string
   }
 }
+
+// data-md 属性里合法保存源码（复制契约），断言「定界符已消解」须剔除该属性后再看可见文本
+const visible = (h: string) => h.replace(/ data-md="[^"]*"/g, '')
 
 let pass = 0
 let fail = 0
@@ -56,11 +78,12 @@ const ok = (cond: boolean, msg: string) => {
 // ---------- 有 katex ----------
 const { mdHtml, mdInline } = build({ katex })
 
-const sample = String.raw`$$\mathrm{MHA}=[\mathrm{head}_1;\dots;\mathrm{head}_h]W_O,\qquad \mathrm{head}_i=\mathrm{Attn}(XW_Q^{(i)},XW_K^{(i)},XW_V^{(i)})$$`
+const sample = String.raw`$$\mathrm{MHA}=[\mathrm{head}_1;\dots,\mathrm{head}_h]W_O,\qquad \mathrm{head}_i=\mathrm{Attn}(XW_Q^{(i)},XW_K^{(i)},XW_V^{(i)})$$`
 const h1 = mdHtml(sample)
 ok(h1.includes('math-block'), '$$…$$ → <div class="math-block">')
 ok(h1.includes('class="katex"'), '$$…$$ 渲染出 KaTeX HTML')
-ok(!h1.includes('$$'), '$$…$$ 定界符已消解')
+ok(!visible(h1).includes('$$'), '$$…$$ 可见文本里定界符已消解')
+ok(h1.includes('data-md="$$') , '$$…$$ data-md 保留源码（复制契约 #16）')
 
 const h2 = mdHtml('注意力为 $\\mathrm{softmax}(QK^\\top/\\sqrt{d_k})V$ 形式。')
 ok(h2.includes('class="katex"'), '行内 $…$ 渲染出 KaTeX')

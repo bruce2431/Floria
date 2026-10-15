@@ -817,3 +817,134 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **探针锚点**：`probes/probe-web-cards-api.ts`（43 断言：总线单顶层名 / 信封与保留前缀字面量 / **动词两层与 `card:*` 分流、`setSlotHost` 注入与 `card:open` 按 label 寻址、close/delete 在场校验与 inline 报错** / 广播信道与 ready 补发 / ack 配对键 / 帧挂点 / 文件打开广播 / 前端网关接线 / 网关帧型与路由状态码真值表 / 工具与 feature 门控 / cache-bust 版本一致）、`probes/probe-web-card-boundary.ts`（8 断言，`engine/card-bus.js` 入卡片小底座白名单）、`probes/probe-web-module-scope.ts`（5 断言，cardBus 单顶层名无撞名）。
 
 
+
+## 66. 图形化解释口径：chart / mermaid / canvas / HTML 四选一判据（2026-10-15，组3-B）
+
+> 编号说明：本节写于 main（落笔时末节 §61）。§62–§65（markdown 块插件 / 底栏 @ 工具 / editor 模块组 / Composer 门面）在归档线 `archive/wip-20261015`，合入后编号连续——**故本节不占 §62、不重编既有编号**。
+>
+> **可用性（2026-10-15 组5 收口核对）**：本节是**口径判据**，不是现状描述——main 当前**没有** mermaid / ```html 围栏渲染（`grep -rn mermaid src/gateway/web-src` 零命中、`web/vendor/` 无 mermaid）。文中「§62 插件渲为 SVG / 允许且默认渲染」的**实现只在归档线**（`core/markdown/plugins.js`、`diagram-plugin.js`）。是否合入归档线由用户裁定；在合入前，模型侧提示词落点（全局根 CLAUDE.md）**不应**按本节宣称已可用。
+
+**背景**：Pj2「202610131215-有机随想」会话要求画 html 机理图，模型却给 ASCII 字符画；同期模型输出的 ```mermaid 因 web 渲染器不认识而显源码。**本节把「什么时候用什么」定判据**，与 §62（markdown 块插件）配套——四类图形全部走既有底座（`mdHtml` 单口 + sandbox iframe + `__chartH` 高度 + `data-md` 复制），**禁新增渲染器**。
+
+**① 什么时候用 ```chart（数据图表）**：有**数据集**、要画坐标轴/图例/趋势（柱/折/散点/热力）。**双段围栏契约固定**（§22）：`%%html` 段（可视化 HTML）+ `%%ascii` 段（等价文字表达）——web 渲 html、CLI 显 ascii。数据图表的模板与品味走 `lieflat-charts` skill。
+
+**② 什么时候用 ```mermaid（关系/流程/结构）**：**流程、时序、状态、类、实体关系、判定树**——凡是「谁连谁、先做什么」的结构化表达。模型直接写 mermaid 语法即可（语法确定、成本最低、渲染零依赖本地库），web 侧 §62 插件渲为 SVG。**这是「画个流程图」的默认选择。**
+
+**③ 什么时候用 `.canvas`（可编辑画布）**：图形要**持久化成文件、多轮迭代编辑、手工拖拽摆放**（思维导图、笔记图、项目结构图）。`.canvas` 是 JSON Canvas 文件，走 work 编辑区画布（`sidebar/work/work-canvas.js`）——**消息内不渲染 .canvas**，它属于文件编辑域。
+
+**④ 什么时候由模型生成 HTML**：**自由布局/动画/风格化的解释图**——机理图、对比卡、带版式的讲解页、需要精确摆放或动效的示意图。写成 ```html 围栏即可在消息内沙箱渲染（§62 插件），**不需要落文件、不需要用户打开新窗口**；只有用户明确要「交付一个文件」时才落 `.claude/preview/`（预览链）或项目文件。
+
+**⑤ 普通 ```html 代码块是否允许自动变可视图形**：**允许，且默认渲染**（web 侧 §62 起）。防误判靠两点：`chart` 之外的语言一律走插件链前先判 `closed`（流式未闭合恒回退代码块，不闪）；渲染块一律带「源码」按钮（`.chart-src`）一键回原码；CLI 侧不受影响（`Markdown.tsx` 只过滤 chart 围栏，```html 在 CLI 仍显代码）。**讨论 HTML 代码本身（教学/代码审查）时**，模型应改用行内代码或说明让用户点「源码」——渲染器不做启发式猜测。
+
+**⑥ 硬约束**：
+- **禁 ASCII 字符画**作为图形解释的默认输出（Pj2 事故）；仅当用户**明确要求** ASCII 时才给。
+- 优先级：**mermaid（结构）> HTML（自由/动画）> chart（数据）> .canvas（持久可编辑）> ASCII（仅点名）**；数据类不走 mermaid、结构类不走 chart。
+- 四类共用同一安全链：`sandbox="allow-scripts"` opaque origin、无 `allow-same-origin`、禁访问 parent/文件系统/兄弟卡状态；复制一律得原始围栏源码（`data-md` 口径）。
+- **模型侧提示词落点**：全局根 `@WrokSpace/CLAUDE.md` 的 chart 契约段 + §62（文本待用户确认后落；本节为其权威判据来源）。
+
+**探针锚点**：§62 的 `probes/probe-code-block.ts`（mermaid/html 插件渲染与流式回退）；本节为口径判据，无独立探针——图形输出正确性由用户实测审阅。
+
+
+## 67. 源码—渲染—复制协议：一份能力只落一处（2026-10-15，组2：待办 10/11/13/15/16）
+
+> 编号说明：本节写于 main（落笔时末节 §61，§66 为组3-B）。**§62–§65 预留给归档线 `archive/wip-20261015` 的 markdown 块插件 / 底栏 @ 工具 / editor 模块组 / Composer 门面**，故本节取 §67 不占号、不重编既有编号。
+
+**总则不变量**：**同一份能力只允许一处真源**——渲染面（消息流 / work 编辑区 / 底栏）与编辑面（CM6）共享同一份文法与判据，复制面（`data-md`）与渲染面同源。任何「某条链自带第二套正则 / 第二份真相」都是回归。
+
+### 67.1 数学文法唯一真源 `core/math-spec.js`（#11 三链统一）
+
+三条渲染链**共用** `src/gateway/web-src/core/math-spec.js`，禁各自写正则：
+
+| 链 | 消费点 | 入口 |
+|---|---|---|
+| 消息流 | `core/markdown.js` `extractMath` | 遮罩代码 → 抽公式 → `esc` → `mdInline` 末尾 `restoreMath` |
+| work md 编辑区 | `editor/cm-math.js` ViewPlugin（`cmMathExt`） | 挂 `sidebar/work/work-cm.js` |
+| 底栏 composer | 同一 `cmMathExt` | 挂 `inputbar/composer-cm.js` |
+
+- **覆盖形态**：`$…$` 行内 / `$$…$$` 块级 / `\(…\)` 行内 / `\[…\]` 块级，四形态三链一致。
+- **抽取顺序契约**：`MATH_EXTRACT_ORDER = [blockDollar, blockBracket, inlineParen, inlineDollar]`——块级先于行内（否则 `$$` 被 `$` 抢占）。消费方各自 `new RegExp(src, 'g')`（共享 RegExp 对象会踩 `lastIndex`）。
+- **行内合法性判据** `mathInlineOk(body)`：首尾不留空白、不紧跟数字 ⇒ `成本 $5 and $10` 不被误吃。
+- **流式未闭合容忍**：抽取按对匹配，未闭合的 `$$`/`$` 原样留作可见文本（不吞、不闪）；CM 侧代码区间（InlineCode / FencedCode）跳过公式扫描。
+- **光标邻近退化 = 闭区间**：CM 侧撤装饰显源码的判据 `cmMathSelectionHit` 与 vendor live-markdown 的 `cn(state,from,to)`（`**` 行内标记同款）**逐字一致**——`r.from <= to && r.to >= from`（闭区间）。光标落在公式**边界**上（紧邻 `$` 前 / 后）即命中退化；开区间（严格 `<`/`>`）会漏掉边界态（2026-10-15 实报根因）。块级 `$$…$$` 独占整行时 `cmMathRange` 扩到整行、判据同款 ⇒ 光标在该行任意处即显源码；拖选中（`mouseSelectingField`）期间按「无选区」处理防闪烁。
+
+### 67.2 任务列表真复选框（#10）
+
+`core/markdown.js` 行解析：`- [ ] / - [x] / - [X] item`（有序表同支持）⇒ 产**真** `<input type="checkbox" class="md-task-checkbox" data-task-line="N" [checked] disabled>`，**禁 CSS 伪元素模拟**。
+
+- `[ ]` 未勾选、`[x]`/`[X]` 均 `checked`；`disabled` = 只读展示（**渲染面不改消息内容**）。
+- `data-md` 仍挂**整行原文**（`- [ ] 待办甲`）⇒ 复制得原文，渲染出的勾选框不改变复制口径。
+- 可编辑面（用户改勾选态）走 CM6：`editor/editor-transactions.js` `toggleTaskLineCM(view, line, checked)`，经 `editor-api` facade 的 `toggleTask(line, checked)` 调度。
+
+### 67.3 附件 = 正文原文引用（#13）
+
+**禁「底栏胶囊 + 正文引用」两套真相**——附件一律以 Markdown 原文引用落进编辑器 doc：图片 `![](uploads/x.png)`、文件 `[文件名](uploads/x.pdf)`。
+
+- 上传后**只往编辑器 doc 插一条引用**（`editor/editor-attachments.js` `uploadAttachment` / `insertAttachmentMarkdown`）；不再有底栏 `#img-pills` 胶囊行（元素已从 `index.html` 移除，`inputbar/images.js` 不再导出 `renderImgPills`）。
+- **渲染同源**：图片引用行内直渲（`edAttImgPlugin`，`![](uploads/x)` 原子替换为 `<img class="cm-att-img">`）；消息流侧同口径经 `mdHtml` 渲 `<img class="msg-img md-img">`。历史消息 / 乐观气泡 / 队列 / work 编辑区四处一致。
+- 可点击区域 = 光标/拖选落在引用区间内即还原源码（widget 不挂），故可编辑。
+
+### 67.4 选中文本包裹 = CM6 事务命令（#15）
+
+一个通用 CM 层命令 `editor/editor-transactions.js` `wrapSelectionCM(view, before, after)`——`changeByRange` 事务（**禁直接改 DOM / `execCommand` / `contenteditable`**）。
+
+- 有选区：左右加括号（`*text*` / `**text**` / `` ` `` 等）；多选区（多 range）独立处理。
+- 空选区：插入成对符号、光标居中。
+- **两宿主共用**：work 编辑区与底栏 composer 同一份 `wrapKeymap()`（Mod-b `**` / Mod-i `*` / Mod-e `` ` ``），经 `editor/editor-api.js` 的 `ED_EDITORS` 注册表 + `editorCommand(name, payload, target)` 统一调度（`makeEditorFacade({id:'composer'|'work'})`）。
+
+### 67.5 已渲染 Markdown 的复制口径（#16）
+
+复制一律经 `editor/editor-clipboard.js` `copyRenderedSelection({selection, container})` → `core/markdown.js` 的 `data-md` 链（`selectionMd` → `messageMd`），底栏 `inputbar/ctx-meter.js` 的**全局复制拦截器**为唯一入口。
+
+- **块级**（`p`/`li`/代码块/数学块）：优先取 `data-md`（原文），无则回落可见文本。
+- **整块数学公式被选中** → 得 `$…$`（行内）/ `$$…$$`（块级）源码，而非 KaTeX 渲染出的字符。
+- **仅选中公式内部字符**（选区完全落在 `.katex`/`.math-block` 内、不覆盖整个 `data-md` 块）：**得该公式的 Markdown 源码**（整式复制，等价于选中整块）——因为 KaTeX 的渲染产物对「公式」无独立 `data-md` 锚，其可见字符不是合法源码；复制公式**任意子串**均回退为整式源码，防「复制出乱码字符」。判据由 `isCoveredByRange` / `intersectFragment` / `contentEdges` 决定：选区与 `data-md` 块**相交即整块取源**，不比字符粒度。
+- **跨块部分选中**：按块拼接（`joinMdBlocks`），顶层 `data-md`（`topDataMd`）优先于逐节点文本。
+
+**探针锚点**：`probes/probe-md-protocol.ts`（45 断言，锁本节全部五条：真 `<input>` 任务框 + `data-md` 原文、math-spec 单源与三链挂载、无 `execCommand|contenteditable`、`ED_EDITORS`/`editorCommand`/`makeEditorFacade`、附件原文引用与 `#img-pills` 退役、`copyRenderedSelection`→`selectionMd`）、`probes/probe-math-render.ts`（KaTeX 四形态 + 代码遮罩 + 货币假阳性 + 无 katex 兜底 + `data-md` 复制契约）、`probes/probe-md-image.ts`（`mdHtml` 入口 `/gateway/file` 解析）、`probes/probe-user-bubble-parity.ts`（乐观/落盘气泡同构）、`probes/probe-quote-ref.ts`（引用/提及链路）。
+
+
+## 68. work 槽状态模型（胶囊集 / 路由意图分家）与两处收口缺陷根修（2026-10-15，组1 与组3-A/组4）
+
+### 68.1 顶栏胶囊集只在用户主动新建时增长（待办 5/8/9）
+
+**不变量**：`state.wkChats` 的**「新对话」胶囊（`WK_NEW_TAB`）只由用户主动新建入集**；路由弹回空态（`#/`）**不得**被自动并入。
+
+- 旧链把两种意图混成一条：`selectProject() → switchWorkProject() → enforceWorkScope() → navigate('#/') → route() → syncWorkTabs()`，其中 `wkActiveKey() = currentHash || WK_NEW_TAB`（`sidebar/work/work-layout.js:72`）把空路由读成 `'new'` ⇒ 每切一次项目多一枚胶囊并被 `saveWork()` 持久化。
+- **槽专属键 `activeChat`**（`sidebar/work-state.js:21`，读口 `sidebar/work-context.js:75`）：由 `stashWorkSlot()` 在离开该项目时从 `currentHash` 记入；`switchWorkProject(label)` 返回它，`selectProject()` **显式 `navigate`**（有则回该会话、无则空态首页）；`enforceWorkScope()` 不再在切项目链上强制跳首页。项目顶栏 tab 不再串进工作区根（隔离来自「每 ctx 一槽」，非特判）。
+- `wkCloseTab()` 保底分支**撤除** `wkEnsureTab('new')`；`switchWorkProject` 重置 `wkPrevActiveKey = null`（防旧项目 prev 误摘新槽里合法的 new 胶囊）。
+
+### 68.2 work 编辑区缓存键 = (项目, 文件) 二维（待办 2 附带根修）
+
+`sidebar/work/work-editor.js`：`wkEdFile` 路径一维键**不足**——两项目存在同名相对路径（各自 `README.md`）时切项目被判为「同一文件」不重读，编辑区残留 A 项目内容，后续自动保存把 **A 项目内容写进 B 项目同名文件**（跨项目污染；PDF 侧表现为旧 iframe 残留）。
+
+- 修：新增 `wkEdProj`（:100），`wkEdReset`（:63）清空、`readFile` 开头 `wkEdFile=''` + 记 proj（:106），`renderEditor` 判据改为 `wkEdFile !== state.workFile || wkEdProj !== state.workProj`（:50）。**不变量：编辑区内容必属当前 (workProj, workFile)**（键由一维补成二维，状态源不增）。
+
+### 68.3 CM6 宿主暗色令牌桥 + 工具栏胶囊底色（待办 4/18）
+
+- **vendor 令牌桥**（`web/styles.css`）：`vendor/codemirror/live-markdown.js` 的主题按 shadcn 命名读 `--foreground`/`--muted`/`--muted-foreground`/`--primary`/`--background`，本项目一个都不定义 ⇒ 浅色回落值在暗色下全数生效（底栏 CM6 接管后无逐类覆写）。桥按项目令牌给出 **HSL 三元组**（`hsl()` 只吃三元组），`:root` 与 `html[data-theme="dark"]` 各一遍 ⇒ **两 CM6 宿主（`#work-editor`/`#cm-host`）一次随动**。例外：`--border` 与项目同名令牌相撞（桥不含），读它的 5 个库类逐类覆写。
+- **工具栏胶囊**（`#wk-tb-tool`，待办 18）：底与描边走 `color-mix(in srgb, var(--blue) N%, transparent)`（零硬编码色值），`.on` 显式接管加深；作用域锁 id ⇒ 顶栏聊天/文件 pill 像素不变。**#4/#18 均为视觉项，判据（点哪→看到什么）由用户实测裁定**。
+
+**探针锚点**：`probes/probe-work-slot.ts`（58 断言，含 J1–J4 真跑切项目）、`probes/probe-composer-align.ts`、`probes/probe-work-canvas.ts`。基线红（**本底陈旧，非本轮引入**，属独立「探针重构」任务）：`probe-work-scope.ts`（底层断言块状回填/半透明底期望已随样式演进失真）、`probe-chart.ts`（harness 未随 mention 拆件更新 `MENTION_PATH_RE`）。
+
+## 69. 工作区根 = 一等公民项目（待办 7 收尾）· 数学文法真源 · 底栏会话态高度（2026-10-15，组1/组2/组4 集成）
+
+### 69.1 工作区根与项目同构：label 唯一命中，撤销第三态（待办 7）
+
+**不变量**：`findProjects(root)` 的 label 空间**跨 scope 不重叠**——`scope==='project'` 的各项目 + `scope==='global'` 的工作区根（label「全局根 · 散装对话」）共处一张表且互不重名。因此**凡按 label 定位一律 `g.label === X` 即够**，不再硬判 `g.scope === 'project'`；工作区根 = 一个可被服务路由/写链直接命中的「特殊项目」，**不再是第三态**。
+
+- 后端 `src/gateway/localGateway.ts`（本轮获许可）：`webSessionProjectRoot`、`GET /gateway/project`、写链 `POST /gateway/file/{rename,move,write,create,delete}` 的 `find` 条件统一由 `g.scope==='project' && g.label===X` 收为 `g.label===X`。`/gateway/project` 响应 `scope` 改为回传 `pProj.scope`，会话过滤按 `s.projectScope === pProj.scope`（项目 → 'project'，工作区根 → 'global'）。
+- `.pdf` MIME 补入 `MIME` 表（`'.pdf': 'application/pdf'`）——PDF 预览不再走「未知类型」分支。
+- 前端：`state.wkTab` 收敛为 `'files' | 'chat'`（撤 `'ws'`）；`sidebar/work-context.js` `kind = projectKey ? 'project' : 'workspace'`（工作区根有 label ⇒ project 语境）；`sidebar/work/work-files.js` 项目列表放开到 `scope==='project' || scope==='global'`；`sidebar/work/work-mount.js` 撤 `__ws__` 行与 `enterWsView()`，每行统一 `selectProject(label)`；`.js` 撤 `wkWsPath/wkWsEntries/wkWsErr/loadWsDir`。
+
+### 69.2 数学文法唯一真源 + 闭区间退化（待办 11）
+
+- **真源** `core/math-spec.js`：分隔符文法源串 `MATH_SRC_BLOCK_DOLLAR`（`$$…$$` 可跨行）/`MATH_SRC_BLOCK_BRACKET`（`\[…\]`）/`MATH_SRC_INLINE_PAREN`（`\(…\)`）/`MATH_SRC_INLINE_DOLLAR`（`$…$` 单行）+ 行内合法性 `mathInlineOk`（首尾不空白、不紧跟数字）。消费方各自 `new RegExp(src,'g')`（共享实例会踩 `lastIndex`）；抽取顺序块级先于行内。`core/markdown.js` 与 `editor/cm-math.js` 三链共用，**禁任一条链另写第二套正则**（否则同条消息在消息流与编辑器渲染分叉）。
+- **闭区间退化**（`editor/cm-math.js:cmMathSelectionHit`）：光标/选区与公式区间相交即撤装饰显**源码**，判据用**闭区间** `r.from <= to && r.to >= from`（与 vendor live-markdown `cn()` 逐字同款）。开区间会漏掉「光标紧邻 `$` 边界」态，此即 2026-10-15 实报「`$…$` 光标临近不退化为源码、而 `**` 正常」的根因；拖选中（`mouseSelectingField`）期间按无选区处理防闪。
+- 与 vendor `live-markdown.js` 的边界 = **补缺不替换**：vendor 只认 ```math 围栏（`blockMathField`）与 `` `$…$` `` 行内代码内写法，标准分隔符由本件补，靠跳过 `InlineCode/FencedCode/CodeBlock` 区间划清、互不吞并。
+
+### 69.3 底栏会话态高度收紧 + 工具栏 pill 定宽（待办 4/18 视觉收口）
+
+- 会话态（`#input-wrap.docked`）底栏几何（`web/styles.css:1066`）：`#input-bar { padding-top:14px; gap:24px }` + `#cm-host .cm-content` 收 `padding-top:0`——对齐量图参考 110px（①顶垫 14：字上方 = 1 边框 + 14 + 半行距 ≈ 19.5；②gap 24：字下沿到控件行 ≈ 28.5）。**真源**：会话态「文本行与控件行之间一条空带」= vendor `live-markdown` 给 `.cm-content` 留的 16px 下垫，由 **`#input-bar .cm-content { padding-bottom:0 }`**（`styles.css:1055`）承担（抹下垫恢复 `cmThemeSpec` 底 0；水平 16px 内缩仍由 vendor `.cm-line` padding 提供）。**回正记录**：前两轮误把 `padding-top/gap` 收到 4/6（整栏 98→82，比参考矮 28px），已按量图回正为 14/24——「空带」不由这两值承担，勿再收 gap/顶垫治它。**空态 hero 几何由 `styles.css:1019` 基础规则承担**（hero 无 `.docked`，不受本组规则影响）；行数增长行为不变。
+- 顶栏 `.wk-tb-pill` 统一 `min-width:96px`（三枚 pill 等宽基线）；`#wk-tb-tool` 半透明蓝底仍走 `color-mix(var(--blue)…)` 令牌（§68.3）。
+
+**探针锚点**：`probes/probe-math-render.ts`、`probes/probe-md-protocol.ts`（真跑 `mdHtml` 求值）、`probes/probe-md-image.ts`、`probes/probe-quote-ref.ts`、`probes/probe-user-bubble-parity.ts`（组2 本轮由红转绿）。后端 label 化落点无专属探针，由真实浏览器回归项覆盖（切换项目 / 工作区根文件树 / 写链）。

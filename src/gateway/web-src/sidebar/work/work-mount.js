@@ -141,9 +141,8 @@
       e.stopPropagation()
       const b = e.target.closest('[data-wkproj]')
       if (!b) return
-      // 「工作区」行 = 与项目并列的全局散件浏览入口（2026-10-14 待办 9 返修），不走 selectProject
-      if (b.dataset.wkproj === '__ws__') enterWsView()
-      else selectProject(b.dataset.wkproj)
+      // 每行都是 findProjects 的一个真 label（含工作区根「全局根 · 散装对话」）——统一走 selectProject
+      selectProject(b.dataset.wkproj)
     })
     // 侧栏收起钮：与 chat 的 #panel-collapse 同语义（只管把侧栏收起；再开走折叠态的汉堡）
     $('wk-view').addEventListener('click', (e) => {
@@ -153,7 +152,6 @@
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
-      if (state.wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
       if (state.wkTab !== 'files') {
         newWorkChat()
         return
@@ -179,32 +177,6 @@
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
     $('wk-body').addEventListener('click', (e) => {
-      const wu = e.target.closest('[data-wsup]')
-      if (wu) { loadWsDir(wkWsPath ? wkWsPath.slice(0, wkWsPath.lastIndexOf('/')) : ''); return }
-      const wd = e.target.closest('[data-wsdir]')
-      if (wd) { loadWsDir(wd.dataset.wsdir); return }
-      const wf = e.target.closest('[data-wsfile]')
-      // 打开工作区散装文件（2026-10-14 待办 9 二期）：/gateway/file label 缺省 = 工作区根解析。
-      // PDF（2026-10-14 待办#15 返修）不走直开：网关 MIME 表无 .pdf → 二进制嗅探落
-      // application/octet-stream → window.open 即触发下载。根修在前端入口：fetch 原始字节、
-      // blob 强制 application/pdf 类型后开 blob URL —— 浏览器自带 viewer 直显不下载（后端内容
-      // 分类与「展示策略」解耦，不为展示扩 MIME 表）。
-      if (wf) {
-        const wsp = wf.dataset.wsfile
-        if (/\.pdf$/i.test(wsp)) {
-          fetch(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)))
-            .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() })
-            .then((b) => {
-              const url = URL.createObjectURL(new Blob([b], { type: 'application/pdf' }))
-              window.open(url, '_blank')
-              setTimeout(() => URL.revokeObjectURL(url), 120000) // viewer 载入后即无需持有，2 分钟兜底回收
-            })
-            .catch((er) => toast('PDF 打开失败：' + (er.message || er)))
-          return
-        }
-        window.open(apiUrl('/gateway/file?path=' + encodeURIComponent(wsp)), '_blank')
-        return
-      }
       const d = e.target.closest('[data-wkdir]')
       if (d) {
         const p = d.dataset.wkdir

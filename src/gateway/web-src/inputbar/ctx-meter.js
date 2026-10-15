@@ -5,12 +5,12 @@ import { stage, progScrollUntil, stageRelease, stageFollow, stageSync } from '..
 import { gateSubmit } from '../engine/auth.js'
 import { gateAwait, gws } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { selectionMd } from '../core/markdown.js'
+import { copyRenderedSelection } from '../editor/editor-clipboard.js'
 import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../engine/state.js'
 import { toast, isMobile } from '../core/util.js'
 import { renderSettle, btnMode } from './approval.js'
 import { cmd, msel, cmdPop, modelPop, modelSeatEl, psel, projPop, projSeatEl, closeProjPop, toggleCmdPop, closeCmdPop, closeRiskModal, cmdMove, cmdSelect, renderCmdPop } from './commands.js'
-import { pendingImages, pendingFiles, renderImgPills, addImageFiles, addUploadFiles } from './images.js'
+import { addImageFiles, addUploadFiles } from './images.js'
 import { mention, closeMentionPop, moveMentionSel, selectMention } from './mention.js'
 import { toggleModelPop, closeModelPop, modelEscape, mselMove } from './model-select.js'
 import { gwSend } from './send.js'
@@ -130,13 +130,8 @@ import { setPanel } from '../sidebar/recent.js'
     $('file-upload').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
-  $('img-pills').addEventListener('click', (e) => {
-    const x = e.target.closest('.img-x')
-    if (!x) return
-    if (x.dataset.f != null) pendingFiles.splice(+x.dataset.f, 1) // 文件胶囊
-    else pendingImages.splice(+x.dataset.i, 1)
-    renderImgPills()
-  })
+  // 附件胶囊行（#img-pills）已随 2026-10-15 待办 13 退役：附件 = 原文 md 引用（editor-attachments），
+  // 无独立胶囊 UI，监听随之移除。pendingImages/pendingFiles 只剩发送链内部态（+ 浮窗缩略图仍可移除）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
@@ -169,12 +164,13 @@ import { setPanel } from '../sidebar/recent.js'
   })
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
   // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
-  // 2026-10-09 扩展：消息区选区先经 selectionMd 还原**原始 md 源码**（core/markdown.js，整块覆盖用 data-md 原文；
-  // 块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
+  // 2026-10-09 扩展：消息区选区先还原**原始 md 源码**；2026-10-15 任务D 收口为
+  // editor/editor-clipboard.copyRenderedSelection 门面（公式块还原 `$…$`/`$$…$$` 源码，整块覆盖用 data-md
+  // 原文，块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
   document.addEventListener('copy', (e) => {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
-    const text = selectionMd(sel) || sel.toString()
+    const text = copyRenderedSelection({ selection: sel }) || sel.toString()
     if (!text) return
     e.clipboardData.setData('text/plain', text)
     e.preventDefault()

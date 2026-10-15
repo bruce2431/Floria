@@ -51,8 +51,10 @@ const linkIdx = md.indexOf('/\\[([^\\]]+)\\]\\(([^)\\s]+)\\)/')
 if (branchImg >= 0 && linkIdx >= 0 && branchImg < linkIdx) ok('图片分支排在链接替换之前（否则被拆成 ! + <a>）')
 else bad(`图片分支缺失或未排在链接替换之前（img=${branchImg} link=${linkIdx}）`)
 
-if (/esc\(String\(src\)\)/.test(md)) ok('mdHtml 入口整体 esc（引号不破出属性）')
-else bad('mdHtml 入口未整体 esc')
+// 入口链 = esc(extractMath(String(src)))：公式抽取须先于 esc（LaTeX 的 < & 原样交 KaTeX），
+// 整体 esc 仍是最后一道（引号不破出属性）。2026-10-06 抽公式前置于 esc，本断言随链更新。
+if (/esc\(extractMath\(String\(src\)\)\)/.test(md)) ok('mdHtml 入口 = esc(extractMath(...))（抽公式先于整体 esc，引号不破出属性）')
+else bad('mdHtml 入口链非 esc(extractMath(String(src)))')
 
 // mdImgResolver 模块级变量
 if (/let mdImgResolver = null/.test(md)) ok('mdImgResolver 模块级单例（默认 null）')
@@ -82,16 +84,18 @@ type Inline = (s: string) => string
 const makeInline = (resolver: ((code: string) => string | null) | null): Inline => {
   if (!inlineSrc || !MD_IMG_CODE) return (s: string) => s
   const body = inlineSrc.replace(/^const mdInline = \(s\) =>/, 'function mdInline(s)')
+  // restoreMath 是 mdInline 收尾调用的公式还原（mathStore 为空即恒等）——本探针只验图片分支，
+  // 注入恒等桩（公式链由 probe-math-render 单测，此处不做）。
   return new Function(
     'esc', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'MENTION_PATH_RE',
     'QUOTE_REF_RE', 'QUOTE_REPLY_RE', 'QUOTE_PDF_RE',
     'mentionChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml', 'quotePdfChipHtml',
-    'MD_IMG_CODE', 'mdImgResolver', 'MD_LINK_OK',
+    'MD_IMG_CODE', 'mdImgResolver', 'MD_LINK_OK', 'restoreMath',
     `${body}\nreturn mdInline`,
   )(
     esc, NEVER, NEVER, NEVER, NEVER, NEVER, NEVER,
     noopChip, noopChip, noopChip, noopChip,
-    MD_IMG_CODE, resolver, MD_LINK_OK,
+    MD_IMG_CODE, resolver, MD_LINK_OK, (s: string) => s,
   ) as Inline
 }
 
@@ -166,8 +170,10 @@ else bad('messages.js 未 import setImageSrcResolver')
 if (/setImageSrcResolver\(/.test(msg)) ok('messages.js 注册 resolver')
 else bad('messages.js 未注册 resolver')
 
-if (/projectScope === 'project'/.test(msg)) ok('resolver 只在 project scope 生效')
-else bad('resolver 未判 projectScope')
+// resolver 取图判据 = 会话自带 projectLabel（项目会话=项目名 / 全局根会话=「全局根 · 散装对话」），
+// 网关按 label 解析到对应根 ⇒ 不再有 scope 分支（旧 projectScope 断言随 label 化退役）。
+if (/projectLabel/.test(msg) && /return label \?/.test(msg)) ok('resolver 判据 = 会话 projectLabel（无 label 返 null，不按 scope 筛）')
+else bad('resolver 未按 projectLabel 取 label')
 
 if (/\/gateway\/file\?label=/.test(msg)) ok('resolver 拼 /gateway/file 取图 URL')
 else bad('resolver 未拼 /gateway/file')

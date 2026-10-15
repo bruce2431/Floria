@@ -1,6 +1,7 @@
 // Markdown 渲染 + relTime（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { esc } from './util.js'
+import { MATH_SRC_BLOCK_BRACKET, MATH_SRC_BLOCK_DOLLAR, MATH_SRC_INLINE_DOLLAR, MATH_SRC_INLINE_PAREN, mathInlineOk } from './math-spec.js'
 import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml } from './mention-syntax.js'
 /* @module core/markdown.js */
   // ---------- Markdown 渲染（安全：mdHtml 入口先整体转义，再生成白名单 HTML） ----------
@@ -40,12 +41,12 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       const ph = `\u0002${mathStore.length - 1}\u0002`
       return block ? `\n${ph}\n` : ph
     }
-    // 块级先于行内（否则 $$ 会被 $ 抢占）
-    s = s.replace(/\$\$([\s\S]+?)\$\$/g, (m, body) => put(body, true) ?? m)
-    s = s.replace(/\\\[([\s\S]+?)\\\]/g, (m, body) => put(body, true) ?? m)
-    s = s.replace(/\\\(([\s\S]+?)\\\)/g, (m, body) => put(body, false) ?? m)
+    // 文法与判据来自 core/math-spec.js（三条链唯一真源）；块级先于行内（否则 $$ 会被 $ 抢占）
+    s = s.replace(new RegExp(MATH_SRC_BLOCK_DOLLAR, 'g'), (m, body) => put(body, true) ?? m)
+    s = s.replace(new RegExp(MATH_SRC_BLOCK_BRACKET, 'g'), (m, body) => put(body, true) ?? m)
+    s = s.replace(new RegExp(MATH_SRC_INLINE_PAREN, 'g'), (m, body) => put(body, false) ?? m)
     // 行内 $…$：单行内、非空、首尾不留空白、不紧跟数字（避免误吃 $5 之类货币）
-    s = s.replace(/\$([^$\n]+?)\$/g, (m, body) => (/^\s|\s$/.test(body) || /^\d/.test(body) ? m : (put(body, false) ?? m)))
+    s = s.replace(new RegExp(MATH_SRC_INLINE_DOLLAR, 'g'), (m, body) => (mathInlineOk(body) ? (put(body, false) ?? m) : m))
     return s.replace(/\u0003(\d+)\u0003/g, (_, i) => masked[+i])
   }
   function restoreMath(s) {
@@ -200,6 +201,12 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     const closeList = () => { if (list) { html += `</${list}>`; list = null } }
     const isSep = (r) => { const x = r.replace(/\|/g, '').replace(/[\s:-]/g, ''); return x === '' && r.includes('-') }
     const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
+    // 任务列表复选框（2026-10-15 待办 10）：`- [ ] ` / `- [x] ` / `- [X] `（-/*/+ bullet 与有序列表同支持）
+    // 行解析阶段转**真实** <input type="checkbox">（禁 CSS 伪元素模拟）。data-task-line = 1-based 源行号
+    // （可编辑面据此还原源码，见 editor-markdown.toggleTask）；disabled = 渲染面只读（消息是渲染产物，
+    // 勾选语义只在编辑面发生，此处不改消息内容）。data-md 仍挂 li 整行原文（含 `[ ]`）→ 复制口径不变。
+    const TASK_RE = /^\[([ xX])\]\s+(.*)$/
+    const taskBox = (n, mark) => `<input type="checkbox" class="md-task-checkbox" data-task-line="${n}"${mark !== ' ' ? ' checked' : ''} disabled>`
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
@@ -223,13 +230,17 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (/^[-*+]\s+/.test(t)) {
         flushPara()
         if (list !== 'ul') { closeList(); list = 'ul'; html += '<ul>' }
-        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^[-*+]\s+/, ''))}</li>`
+        const body = t.replace(/^[-*+]\s+/, '')
+        const tk = TASK_RE.exec(body)
+        html += `<li${mdAttr(t)}>${tk ? taskBox(i + 1, tk[1]) : ''}${mdInline(tk ? tk[2] : body)}</li>`
         continue
       }
       if (/^\d+[.)]\s+/.test(t)) {
         flushPara()
         if (list !== 'ol') { closeList(); list = 'ol'; html += '<ol>' }
-        html += `<li${mdAttr(t)}>${mdInline(t.replace(/^\d+[.)]\s+/, ''))}</li>`
+        const body = t.replace(/^\d+[.)]\s+/, '')
+        const tk = TASK_RE.exec(body)
+        html += `<li${mdAttr(t)}>${tk ? taskBox(i + 1, tk[1]) : ''}${mdInline(tk ? tk[2] : body)}</li>`
         continue
       }
       if (/^(-{3,}|\*{3,})$/.test(t)) { flushPara(); closeList(); html += `<hr${mdAttr(t)}>`; continue }

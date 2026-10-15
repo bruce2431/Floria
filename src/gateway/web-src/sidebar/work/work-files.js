@@ -48,8 +48,11 @@
   // 原取名 `projList` 与 inputbar/commands.js 的同名函数撞车（后者在后 ⇒ 覆盖本函数），
   // 本函数返回 group 对象数组、后者返回 label 字符串数组 ⇒ 下拉渲染出 7 行空按钮。
   // 由 `probes/probe-web-module-scope.ts` 看住这条不变量。
+  // 项目列表 = findProjects 的全部组：scope==='project' 的各项目 + scope==='global' 的工作区根
+  // （label「全局根 · 散装对话」）。工作区根 = 一个特殊项目，与项目同构走同一条文件树/会话链
+  // （待办 #7 收尾，2026-10-15）——两 scope 的 label 空间不重叠，故按唯一 label 命中即够。
   function wkProjGroups() {
-    return (state.projects || []).filter((g) => g && g.scope === 'project' && g.label)
+    return (state.projects || []).filter((g) => g && g.label && (g.scope === 'project' || g.scope === 'global'))
   }
 
   // 项目名 + 底部卡 + 下拉内容 = 同一份 state.projects 的同一次渲染（2026-09-25 修）。
@@ -58,11 +61,11 @@
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = state.wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
+    if (lab) lab.textContent = state.workProj || '选择项目'
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${state.wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -73,21 +76,18 @@
     const box = $('wk-proj-pop')
     if (!box) return
     const ps = wkProjGroups()
-    // 「工作区」行与项目并列（2026-10-14 待办 9 返修）：全局根散件的浏览入口，不是第三枚 tab。
-    const rows = ps.length
+    // 工作区根（「全局根 · 散装对话」）与项目并列同一份 wkProjGroups（待办 #7 收尾）：不再另设
+    // 「工作区」行/第三态——它就是列表里的一行，选中即 selectProject(真 label)，走同一条项目链。
+    box.innerHTML = ps.length
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj && state.wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
-    box.innerHTML =
-      rows +
-      `<button class="wkp-row${state.wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
-      `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
@@ -120,12 +120,11 @@
   }
 
   function wkBodyHtml() {
-    if (state.wkTab === 'ws') return wkWsHtml()
     if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const list = state.workProj
-        ? ALL.filter((s) => s.projectScope === 'project' && s.projectLabel === state.workProj).sort(sessCmp)
+        ? ALL.filter((s) => s.projectLabel === state.workProj).sort(sessCmp)
         : []
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
@@ -160,77 +159,6 @@
       }
     }
     return h
-  }
-
-  // ---------- 工作区 tab（2026-10-14 待办 9：工作区全局根散落文件的可见性）----------
-  // 数据源 = GET /gateway/fs（与 @ 提及的目录浏览同一条链：单层列举、跳过隐藏项与 .git/node_modules
-  // 等重型目录、目录在前、每层 ≤50）。方案 = 侧栏第三枚 tab「工作区」，不逐文件夹挂：根层只列
-  // **非项目**条目（项目目录藏掉——各项目有自己的侧栏入口，重复即噪音），下钻进普通目录后全量展示。
-  // 文件行可打开（2026-10-14 待办 9 二期）：后端 /gateway/file 已扩展 label 缺省 = 按工作区根解析
-  // （顶层隐藏段拒读），点文件行即新窗口打开原文。
-  function wkWsHtml() {
-    if (wkWsLoading) return '<div class="wk-empty">加载中…</div>'
-    if (wkWsErr) return `<div class="wk-empty">${esc(wkWsErr)}</div>`
-    if (!wkWsEntries) return '<div class="wk-empty"></div>'
-    const projs = new Set(wkProjGroups().map((g) => g.label))
-    const entries = wkWsPath ? wkWsEntries : wkWsEntries.filter((e) => !(e.type === 'dir' && projs.has(e.name)))
-    let h = ''
-    if (wkWsPath) {
-      h += `<button class="wk-row dir" data-wsup="1" style="padding-left:8px" title="返回上一层">`
-      h += `<span class="wk-chev"></span><span class="wk-fic">${I.dshUp}</span><span class="wk-name">上级目录</span></button>`
-    } else {
-      h += `<div class="wk-row dir ws-root" style="padding-left:8px"><span class="wk-chev"></span><span class="wk-fic">${I.folder}</span><span class="wk-name">工作区根</span></div>`
-    }
-    if (!entries.length && !wkWsPath) h += '<div class="wk-empty">工作区根没有散落的非项目文件</div>'
-    for (const e of entries) {
-      const p = wkWsPath ? `${wkWsPath}/${e.name}` : e.name
-      const pad = `padding-left:8px`
-      if (e.type === 'dir') {
-        h += `<button class="wk-row dir" data-wsdir="${esc(p)}" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chev">${I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
-        h += `<span class="wk-name">${esc(e.name)}</span></button>`
-      } else {
-        h += `<button class="wk-row file" data-wsfile="${esc(p)}" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
-        h += `<span class="wk-name">${esc(e.name)}</span></button>`
-      }
-    }
-    return h
-  }
-  async function loadWsDir(path, silent) {
-    const seq = ++wkWsSeq
-    if (!silent) {
-      wkWsLoading = true
-      wkWsErr = ''
-      wkWsEntries = null
-      renderWorkBody()
-    }
-    try {
-      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(path || '')))
-      const data = await res.json()
-      if (seq !== wkWsSeq) return false
-      if (!res.ok || data.error) throw new Error(data.error || '加载失败')
-      wkWsPath = String(path || '')
-      wkWsEntries = Array.isArray(data.entries) ? data.entries : []
-    } catch (e) {
-      if (seq !== wkWsSeq) return false
-      if (silent) return false // 对账轮失败静默保留旧层（同 loadProjectTree silent 口径）
-      wkWsErr = e.message || String(e)
-    }
-    wkWsLoading = false
-    renderWorkBody()
-    return seq === wkWsSeq
-  }
-  // 工作区视图入口（2026-10-14 待办 9 返修）：项目下拉里的「工作区」行——与项目并列呈现，
-  // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
-  function enterWsView() {
-    hideWkPops()
-    state.wkTab = 'ws'
-    if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
-    renderWorkChrome()
-    renderWorkBody()
-    // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
-    // registry.js（state.preview / state.mgr），与 work 侧栏的 state.wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------
@@ -301,11 +229,6 @@
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
-    if (state.wkTab === 'ws') {
-      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；state.wkTab 的 on 类只在 tab 点击 handler 里切换）
-      state.wkTab = 'files'
-      document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
-    }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
     // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
     // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
@@ -345,8 +268,7 @@
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (state.wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
-    else if (state.workProj) await loadProjectTree(state.workProj, silent)
+    if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
   }
@@ -390,7 +312,6 @@
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
-    if (state.wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）

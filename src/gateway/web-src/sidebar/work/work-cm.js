@@ -1,4 +1,7 @@
 // 编辑区 CodeMirror6 引擎：建视图 / 热换语言 / 主题 / 评论行装饰 / 选区行号（惰性建单例）。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
+import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js'
+import { wrapKeymap } from '../../editor/editor-transactions.js'
+import { cmMathExt } from '../../editor/cm-math.js'
 /* @module sidebar/work/work-cm.js */
   // ---------- 编辑区（主区左栏） ----------
   // 所有可编辑文本文件（markdown 与代码/纯文本一视同仁）都是常驻 CodeMirror 6 编辑器：整篇恒可编辑，
@@ -67,7 +70,7 @@
       doc: '',
       extensions: [
         CM.history(),
-        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap]),
+        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap, ...wrapKeymap()]),
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
         CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
@@ -78,6 +81,10 @@
       ],
     })
     wkEdView = new CM.EditorView({ state: st, parent: wkEdHost })
+    // editor 组公开面注册（2026-10-15 任务D）：work 编辑区进 editorCommand 统一调度（包裹/勾选/插入），
+    // 聚焦时上报活跃面。既有专属链（评论装饰/补全/保存/热换语言）原样不动，仍走本模块自有符号。
+    makeEditorFacade({ id: 'work', view: wkEdView })
+    wkEdView.contentDOM.addEventListener('focus', () => editorApiSetActive('work'))
     if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
     try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
     return wkEdView
@@ -138,6 +145,7 @@
         CM.markdownStylePlugin,
         CM.mathPlugin,
         CM.blockMathField,
+        cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
         CM.tableField,
         CM.linkPlugin(),
         ...CM.codeBlockField(),

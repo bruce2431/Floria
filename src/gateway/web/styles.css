@@ -1023,6 +1023,14 @@ body.kb-open #input-wrap { transition: none; }
    .cm-content 顶垫 4px（主题内），52px = 4 + 48（两行 24px），docked 28px = 4 + 24（单行） */
 #cm-host { flex: 1 1 auto; min-width: 0; }
 #cm-host .cm-content { min-height: 48px; }
+/* 编辑器文本对齐 = 组件自带契约（2026-10-15「同一部件两个面貌」根因）：
+   空态下输入栏活在 #empty-hint 内（该容器 text-align:center 服务于**整体布局**对齐），而 CM6 的
+   .cm-content 未声明自身对齐 ⇒ 继承 center，新会话底栏文字居中；进已有会话后输入栏被 reparent 到
+   #session-card（无 center），浏览器默认左对齐 ⇒ 同一编辑器两副面貌。根治 = 在组件边界（#input-bar）
+   显式声明文本左对齐，与宿主布局对齐解耦：#empty-hint 的 center 保留（只管空态整体布局），不再外溢
+   到底栏内部文本。选择器覆盖 CM6 内部（.cm-content/.cm-line/.cm-placeholder）——id+class 特指度
+   高于 CM 注入的 styleModule 规则，稳赢。 */
+#input-bar, #input-bar #cm-host, #input-bar .cm-content, #input-bar .cm-line, #input-bar .cm-placeholder { text-align: left; }
 #input-wrap.docked #cm-host .cm-content { min-height: 24px; }
 /* 引用块正文行（回复/PDF 引用的锚点令牌与收尾令牌之间的可见文本行）：blockquote 同族观感 */
 #cm-host .cm-quote-body { color: var(--text-2); border-left: 2px solid var(--border); padding-left: 6px; margin-left: 10px; }

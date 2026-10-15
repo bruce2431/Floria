@@ -297,7 +297,7 @@ work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两
 
 **`POST /gateway/file/delete`** body `{label, path}` → `trashProjectEntry(projRoot, path)`。**「删除」= 移动**（工作区规范禁止 `rm`）：`renameSync` 到 `<项目根>/.trash/`，永不真删、永不覆盖——`.trash/` 下同名冲突加 `<YYYYMMDDHHMMSS>-` 前缀（同秒再撞加 `-N`）。目录删除 = 整棵子树一次搬走。响应 `{ok, trash:'.trash/<名>'}`。`.trash` 以 `.` 开头，本就不进 `/gateway/project` 文件树（`walkProjectTree` 跳过点开头条目，且在 `SKIP_TREE_DIRS` 内）。
 
-**共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` 命中 `scope==='project'` 后才动盘。
+**共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` **按 `label` 唯一命中**后才动盘（2026-10-15 待办 7 起**不再硬判 `scope==='project'`**——`scope==='global'` 的工作区根同样可按其 label 命中、作为一等项目接受写操作；`findProjects` 的 label 空间跨 scope 不重叠，按 label 定位即够。同一改动亦覆盖 `GET /gateway/project` 与 `file/{move,write,create}`。**例外**：`/gateway/comments` 与 `/gateway/backend/*` 仍按 `scope==='project'` 硬判——评论属项目不落全局根散装区，backend 需 `hasBackend` 只有项目具备）。
 
 **`POST /gateway/file/write`**（2026-10-05，work 编辑区写回侧，[web-ui.md](web-ui.md) §54）body `{label, path, content, baseMtime?}` → `writeProjectFile(projRoot, path, content, baseMtime)`。**只改已存在文件的内容，不新建/不删除**；`path` 越界与空 `path` → **403**，不存在或为目录 → **404**。**乐观并发（不静默覆盖）**：给了 `baseMtime` 即与当前 `statSync().mtimeMs` **精确比对**（非区间容差），不等 → **409 `conflict`**（磁盘已被外部改动，调用方须显式处置）；不给则强制覆盖。成功 → `{ok, path, mtime}`（新 mtime = 下次保存的基线）。body 上限 `MAX_FILE_WRITE_BYTES = 4 MB`（对齐读侧，超限 413）。**读侧配套**：`GET /gateway/file` 新增 `ETag: "<mtimeMs>"` + `Last-Modified`（ETag 用毫秒级 mtime——`Last-Modified` 只有秒级、无法表达同一秒内两次写），编辑区即以此作基线回传。
 

@@ -2161,6 +2161,12 @@ function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort
     else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
+    // 注册域随语境重算（2026-10-15 注册域隔离）：#mgr-tabs 的 EXT 段只在「当前语境 = EXT 所属项目」
+    // （chat 语境 = 预览路由 state.preview / 正在看其 ext 卡 state.mgr）时进表——离开预览后 EXT 内存表
+    // 不清（离开预览路由不清，见 ext-runtime 生命周期不变量），不重算就会把外部卡 tab 串进无关视图。
+    // 须落在 state.mgr / state.preview 定值之后（上面分支），并随后重落高亮（重渲可能重建按钮节点）。
+    renderMgrTabs()
+    syncMgrTabs()
   }
 
   // 同步管理 tab 高亮（route/renderRecent 前调用）
@@ -4371,6 +4377,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   let EXT = []
   let EXT_LABEL = ''
   const extTabs = () => EXT // registry 只读取用（合流渲染），增删恒走本件
+  // EXT 表所属项目 label（'' = 空表）。registry 据此判「当前是否该项目预览语境」——
+  // EXT 恒属当前 .preview-frame 所指项目（生命周期不变量见上），不得无条件进全局 #mgr-tabs。
+  const extLabel = () => EXT_LABEL
   const appTabs = () => APP_TABS
   function registerExtCards(label, cards, replace) {
     if (!label) return
@@ -4464,6 +4473,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
   // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
   const GLOBAL_LABEL = '全局根 · 散装对话'
+  // 工作区根 label 判定（registry 据 state.preview / state.mgr 判「当前语境 = 工作区根」用；GLOBAL_LABEL
+  // 本身留本件私有，不外泄裸字符串，避免第二处硬编码 label 漂移）。
+  const isGlobalLabel = (l) => l === GLOBAL_LABEL
   const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
   let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
   let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
@@ -4544,15 +4556,41 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
   function refreshCard(id) { cardOf(id)?.refresh?.() }
 
+  // ---------- 注册域（2026-10-15 注册域隔离返修）----------
+  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下 #chat-panel 整块 hidden，本行不可见，
+  // 故三张表的入表门控一律按 **chat 语境** 判，不得无条件合流（回归：普通 chat 串出工作区根的应用 tab；
+  // 离开预览后外部卡 tab 仍在，均可由 extTabs()/appTabs() 有残留解释）：
+  //   CARDS    = 第一方卡，恒显（当前唯一 tab:true 者 = 插件）
+  //   APP_TABS = 工作区根应用（项目/模型/神经元…）。**仅**当语境 = 工作区根时进表——预览全局根
+  //              （state.preview = 全局根 label）或正开着某张 app: 卡（点击后 state.preview 已清，
+  //              须靠 mgr id 认领，否则 tab 一点就消失）。普通 chat / 其它项目预览下都不显示。
+  //              「应用已启用」由 appTabs() 自身过滤（applyAppTabs 按 APPS_ENABLED 取集）。
+  //   EXT      = 当前预览项目申报的外部卡。**仅**当语境 = EXT 所属项目时进表——ctx = work 看工作项目、
+  //              chat 看预览路由 state.preview（work 分支此时该行不可见，保留只为语境口径完整），
+  //              或正开着该 label 的某张 ext 卡（同上的 mgr id 认领）。
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
-  // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）。
+  // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）；**语境变更**由
+  // 变更点显式调用本函数（applySbMode 的模式切换 / route 末尾 / 切项目），硬性不变量：不得由卡片注册
+  // 或应用目录同步直接触发全局重渲，一律经本函数按当前语境取集。
+  // mgrTabsHtml 缓存：算出的 HTML 无变化则零写 DOM——冗余调用（路由/5s 对账）不清掉 .on 高亮与焦点。
+  let mgrTabsHtml = ''
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = CARDS.concat(appTabs(), extTabs()).filter((v) => v.tab)
+    const onAppCard = typeof state.mgr === 'string' && state.mgr.startsWith('app:')
+    const apps = isGlobalLabel(state.preview) || onAppCard ? appTabs() : []
+    const el = extLabel()
+    const ctx = state.sbMode === 'work' ? state.workProj : state.preview
+    const onExtCard = !!el && typeof state.mgr === 'string' && state.mgr.startsWith('ext:' + el + ':')
+    const ext = el && (onExtCard || ctx === el) ? extTabs() : []
+    const html = CARDS.concat(apps, ext).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
+    if (html === mgrTabsHtml) return
+    mgrTabsHtml = html
+    box.innerHTML = html
   }
   // 启动引导：由入口（app.js 启动段）显式调用——各卡模块顶层 registerCard 已完成后再渲 tab，
   // 避免模块求值期副作用（registry 须排在卡模块之前，故不能在自身顶层调 renderMgrTabs）。
@@ -5046,6 +5084,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
   let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图；入口 = 项目下拉「工作区」行，
                            // 与项目并列，2026-10-14 待办 9 返修——不再设独立 tab）
+  // 注（2026-10-15 注册域隔离）：wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下整块
+  // #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
@@ -5131,6 +5171,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('chat-panel').hidden = on
     $('work-panel').hidden = !on
     chatArea.classList.toggle('work', on)
+    // 注册域随模式切换重算（2026-10-15）：外部卡（EXT）的语境口径含 work（看工作项目），模式一切换
+    // 就必须重取 #mgr-tabs（应用 tab 的语境判据只看 chat 侧 state.preview/state.mgr，不受模式影响）。
+    renderMgrTabs()
     applyPanes()
     enforceWorkScope() // 目标项目/只读标识随模式切换重算；开着别项目的会话时退回工作项目的新对话
     if (on) {
@@ -5858,6 +5901,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
     renderWorkChrome()
     renderWorkBody()
+    // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
+    // registry.js（state.preview / state.mgr），与 work 侧栏的 wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------

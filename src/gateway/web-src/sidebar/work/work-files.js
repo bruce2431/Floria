@@ -224,6 +224,8 @@
     if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
     renderWorkChrome()
     renderWorkBody()
+    // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
+    // registry.js（state.preview / state.mgr），与 work 侧栏的 wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------

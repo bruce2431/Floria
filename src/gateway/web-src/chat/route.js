@@ -20,7 +20,7 @@ import { renderMgr } from '../sidebar/mgr.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, syncWorkTabs, workScopeOk } from '../sidebar/work.js'
 import { clearRailExt, openProjectPreview } from '../feature/preview-frame.js'
-import { openCard } from '../engine/registry.js'
+import { openCard, renderMgrTabs } from '../engine/registry.js'
 import { hydrateExtCardId } from '../engine/ext-runtime.js'
 /* @module chat/route.js */
   // ---------- 路由 ----------
@@ -91,6 +91,12 @@ import { hydrateExtCardId } from '../engine/ext-runtime.js'
     else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
+    // 注册域随语境重算（2026-10-15 注册域隔离）：#mgr-tabs 的 EXT 段只在「当前语境 = EXT 所属项目」
+    // （chat 语境 = 预览路由 state.preview / 正在看其 ext 卡 state.mgr）时进表——离开预览后 EXT 内存表
+    // 不清（离开预览路由不清，见 ext-runtime 生命周期不变量），不重算就会把外部卡 tab 串进无关视图。
+    // 须落在 state.mgr / state.preview 定值之后（上面分支），并随后重落高亮（重渲可能重建按钮节点）。
+    renderMgrTabs()
+    syncMgrTabs()
   }
 
   // 同步管理 tab 高亮（route/renderRecent 前调用）

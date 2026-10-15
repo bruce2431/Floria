@@ -72,7 +72,16 @@ ok('I3 静态卡表 CARDS 为空表 + registerCard 契约（各卡自注册）',
   ok('I3 外部申报卡（ext-card）不含第一方卡注册（外部走 EXT 分表，壳由宿主生成）', !/registerCard\(/.test(extCardJs) && /setExtCardRenderer\(mountExtCard\)/.test(extCardJs))
 }
 ok('I3 cardOf 查三张表（CARDS → APP_TABS → EXT，后两张经 ext-runtime 只读访问口）', /const cardOf = \(id\) => CARDS\.find\(\(c\) => c\.id === id\) \|\| appTabs\(\)\.find\(\(c\) => c\.id === id\) \|\| extTabs\(\)\.find\(/.test(registryJs))
-ok('I3 renderMgrTabs 遍历 CARDS + APP_TABS + EXT', registryJs.includes('CARDS.concat(appTabs(), extTabs()).filter((v) => v.tab)'))
+// 2026-10-15 注册域隔离返修：renderMgrTabs 不再是「无条件 CARDS.concat(appTabs(), extTabs())」——
+// apps 段受「语境 = 工作区根（预览全局根 / 正开 app: 卡）」门控、ext 段受「语境 = EXT 所属项目」门控
+// （后者曾致 Chat 串 tab / 离开预览后 ext tab 残留）。逐步断言取代旧的单行 includes（细化见
+// probe-registry-scope.ts）。
+ok('I3 renderMgrTabs 合流三张表但仍受语境门控（apps 段工作区根、ext 段项目匹配）',
+  /CARDS\.concat\(apps, ext\)/.test(registryJs) &&
+  !/CARDS\.concat\(appTabs\(\), extTabs\(\)\)/.test(registryJs) &&
+  /isGlobalLabel\(state\.preview\)\s*\|\|\s*onAppCard\s*\?\s*appTabs\(\)\s*:\s*\[\]/.test(registryJs) &&
+  /ctx\s*===\s*el/.test(registryJs) &&
+  /startsWith\(\s*'ext:'\s*\+\s*el\s*\+\s*':'/.test(registryJs))
 const regBody = body(extRuntimeJs, 'function registerExtCards(')
 ok('I3 EXT 注册只写 EXT、不碰静态卡表 CARDS', regBody.includes('EXT.push({') && !regBody.includes('CARDS'))
 ok('I3 外部卡 mount 一律经注入的 extRender（宿主生成壳），无外部代码注入点', regBody.includes('mount: (body) => extRender(body, label, c)'))

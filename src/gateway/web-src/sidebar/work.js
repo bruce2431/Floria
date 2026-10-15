@@ -40,6 +40,8 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
   let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图；入口 = 项目下拉「工作区」行，
                            // 与项目并列，2026-10-14 待办 9 返修——不再设独立 tab）
+  // 注（2026-10-15 注册域隔离）：wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下整块
+  // #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''

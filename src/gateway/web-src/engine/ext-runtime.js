@@ -33,6 +33,9 @@ import { normExtCards, normQuoteActions } from './ext-decl.js'
   let EXT = []
   let EXT_LABEL = ''
   const extTabs = () => EXT // registry 只读取用（合流渲染），增删恒走本件
+  // EXT 表所属项目 label（'' = 空表）。registry 据此判「当前是否该项目预览语境」——
+  // EXT 恒属当前 .preview-frame 所指项目（生命周期不变量见上），不得无条件进全局 #mgr-tabs。
+  const extLabel = () => EXT_LABEL
   const appTabs = () => APP_TABS
   function registerExtCards(label, cards, replace) {
     if (!label) return
@@ -126,6 +129,9 @@ import { normExtCards, normQuoteActions } from './ext-decl.js'
   // 应用 tab 恒属于工作区根，不被任何预览生命周期清理。
   // GLOBAL_LABEL 须与 localGateway.ts findProjects() 的全局根 label **逐字一致**（含 · 与两侧空格）。
   const GLOBAL_LABEL = '全局根 · 散装对话'
+  // 工作区根 label 判定（registry 据 state.preview / state.mgr 判「当前语境 = 工作区根」用；GLOBAL_LABEL
+  // 本身留本件私有，不外泄裸字符串，避免第二处硬编码 label 漂移）。
+  const isGlobalLabel = (l) => l === GLOBAL_LABEL
   const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
   let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
   let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
@@ -200,10 +206,12 @@ export {
   appTabs,
   clearExtCards,
   clearQuoteActions,
+  extLabel,
   extTabs,
   hydrateExtCardId,
   hydrateExtCards,
   isAppEnabled,
+  isGlobalLabel,
   quoteActions,
   registerExtCards,
   registerQuoteActions,

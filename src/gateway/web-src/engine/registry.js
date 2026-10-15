@@ -12,9 +12,9 @@
 // 的能力（SPEC-视图卡化 §7 边界）。外部申报的取回/校验/缓存全部归 ext-runtime，本件不认识 preview.json。
 
 import { I } from '../core/icons.js'
-import { chatArea, sessionCard } from './state.js'
+import { chatArea, sessionCard, state } from './state.js'
 import { esc } from '../core/util.js'
-import { appTabs, extTabs, setTabRefresh } from './ext-runtime.js'
+import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-runtime.js'
 /* @module engine/registry.js */
 
   // ---------- 第一方卡片注册表 ----------
@@ -27,15 +27,41 @@ import { appTabs, extTabs, setTabRefresh } from './ext-runtime.js'
   // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
   function refreshCard(id) { cardOf(id)?.refresh?.() }
 
+  // ---------- 注册域（2026-10-15 注册域隔离返修）----------
+  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下 #chat-panel 整块 hidden，本行不可见，
+  // 故三张表的入表门控一律按 **chat 语境** 判，不得无条件合流（回归：普通 chat 串出工作区根的应用 tab；
+  // 离开预览后外部卡 tab 仍在，均可由 extTabs()/appTabs() 有残留解释）：
+  //   CARDS    = 第一方卡，恒显（当前唯一 tab:true 者 = 插件）
+  //   APP_TABS = 工作区根应用（项目/模型/神经元…）。**仅**当语境 = 工作区根时进表——预览全局根
+  //              （state.preview = 全局根 label）或正开着某张 app: 卡（点击后 state.preview 已清，
+  //              须靠 mgr id 认领，否则 tab 一点就消失）。普通 chat / 其它项目预览下都不显示。
+  //              「应用已启用」由 appTabs() 自身过滤（applyAppTabs 按 APPS_ENABLED 取集）。
+  //   EXT      = 当前预览项目申报的外部卡。**仅**当语境 = EXT 所属项目时进表——ctx = work 看工作项目、
+  //              chat 看预览路由 state.preview（work 分支此时该行不可见，保留只为语境口径完整），
+  //              或正开着该 label 的某张 ext 卡（同上的 mgr id 认领）。
+
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
-  // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）。
+  // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）；**语境变更**由
+  // 变更点显式调用本函数（applySbMode 的模式切换 / route 末尾 / 切项目），硬性不变量：不得由卡片注册
+  // 或应用目录同步直接触发全局重渲，一律经本函数按当前语境取集。
+  // mgrTabsHtml 缓存：算出的 HTML 无变化则零写 DOM——冗余调用（路由/5s 对账）不清掉 .on 高亮与焦点。
+  let mgrTabsHtml = ''
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    box.innerHTML = CARDS.concat(appTabs(), extTabs()).filter((v) => v.tab)
+    const onAppCard = typeof state.mgr === 'string' && state.mgr.startsWith('app:')
+    const apps = isGlobalLabel(state.preview) || onAppCard ? appTabs() : []
+    const el = extLabel()
+    const ctx = state.sbMode === 'work' ? state.workProj : state.preview
+    const onExtCard = !!el && typeof state.mgr === 'string' && state.mgr.startsWith('ext:' + el + ':')
+    const ext = el && (onExtCard || ctx === el) ? extTabs() : []
+    const html = CARDS.concat(apps, ext).filter((v) => v.tab)
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
+    if (html === mgrTabsHtml) return
+    mgrTabsHtml = html
+    box.innerHTML = html
   }
   // 启动引导：由入口（app.js 启动段）显式调用——各卡模块顶层 registerCard 已完成后再渲 tab，
   // 避免模块求值期副作用（registry 须排在卡模块之前，故不能在自身顶层调 renderMgrTabs）。

@@ -5,7 +5,7 @@ import { needToken, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { ALL, chatArea, sessionCard, state } from '../engine/state.js'
 import { esc, isMobile, toast } from '../core/util.js'
-import { loadWork, loadWorkPanes, saveWork, stashWorkPanes } from '../core/storage.js'
+import { saveWork } from '../core/storage.js'
 import { loadSessions, sessCmp, findSession } from '../engine/sessions.js'
 import { currentCardId } from '../engine/registry.js'
 import { hydrateExtCards } from '../engine/ext-runtime.js'
@@ -19,7 +19,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
   // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
-  // （侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
+  // （侧边栏）按项目分槽存 state.workSlots，切项目时由 work-context.js switchWorkProject 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
@@ -38,10 +38,10 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图；入口 = 项目下拉「工作区」行，
-                           // 与项目并列，2026-10-14 待办 9 返修——不再设独立 tab）
-  // 注（2026-10-15 注册域隔离）：wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下整块
-  // #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
+  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat' | 'ws'）；2026-10-15 从本文件的模块局部变量提升到
+  // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
+  // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下
+  // 整块 #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''

@@ -153,8 +153,8 @@
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
-      if (wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
-      if (wkTab !== 'files') {
+      if (state.wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
+      if (state.wkTab !== 'files') {
         newWorkChat()
         return
       }
@@ -172,7 +172,7 @@
     })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
-        wkTab = b.dataset.wktab
+        state.wkTab = b.dataset.wktab
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
       }),
@@ -229,7 +229,7 @@
     const body = $('wk-body')
     const dropDir = (e) => {
       const row = e.target.closest ? e.target.closest('[data-wkdir]') : null
-      return row ? row.dataset.wkdir : wkTab === 'files' ? '' : null
+      return row ? row.dataset.wkdir : state.wkTab === 'files' ? '' : null
     }
     const canDrop = (from, dir) =>
       from !== dir && !dir.startsWith(from + '/') && from.split('/').slice(0, -1).join('/') !== dir
@@ -247,7 +247,7 @@
       e.dataTransfer.effectAllowed = 'move'
     })
     body.addEventListener('dragover', (e) => {
-      if (!wkDragPath || wkTab !== 'files') return
+      if (!wkDragPath || state.wkTab !== 'files') return
       const dir = dropDir(e)
       if (dir == null || !canDrop(wkDragPath, dir)) { dndMark(null); return }
       e.preventDefault()
@@ -261,7 +261,7 @@
       const from = wkDragPath
       wkDragPath = ''
       dndMark(null)
-      if (!from || wkTab !== 'files') return
+      if (!from || state.wkTab !== 'files') return
       const dir = dropDir(e)
       if (dir == null || !canDrop(from, dir)) return
       e.preventDefault()
@@ -291,7 +291,8 @@
   // 启动一次：恢复持久化状态 → 绑定事件 → 落地（顺序不可换：绑定要先于 applySbMode 的渲染，
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
-    loadWork(WK_PANES_DEF)
+    loadWork(WORK_SLOT_DEF) // 读盘：恢复模式/当前项目/预览列宽 + 全部项目槽 → 当前槽落到 live
+    reconcileWorkSurface() // 语境归一：守护 workSlotKey === workProj（启动/路由恢复共用，幂等）
     // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
     // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
     hydrateExtCards(state.workProj)

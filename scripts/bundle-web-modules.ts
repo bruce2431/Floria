@@ -73,9 +73,13 @@ const PIECES: { file: string; part: number }[] = [
   // work 工具页注册表（右栏工具态的水平标签栏）：纯函数声明 + 顶层 const WK_TOOL_DEFS，须在 work.js
   // 之前（其 mountWork 调 registerWkTool，applyPvTab 调 wkToolDefs/wkToolDef/wkToolNormId）。
   { file: 'sidebar/work-tools.js', part: 1 },
-  // work 视图两开关缺省（WK_PANES_DEF，2026-10-10 自 engine/state.js 下移为 work 领域值）：须在 work 侧栏
-  // 各件之前（work-mount.js 的 initWork 调 loadWork(WK_PANES_DEF)、work-files.js 调 loadWorkPanes(label, 同)）。
+  // work 视图项目槽缺省（WORK_SLOT_DEF，2026-10-10 自 engine/state.js 下移为 work 领域值）：须在 work 侧栏
+  // 各件之前（work-mount.js 的 initWork 调 loadWork(WORK_SLOT_DEF)、work-context.js 的 loadWorkSlot 同用）。
   { file: 'sidebar/work-state.js', part: 1 },
+  // work 语境唯一源 + 项目槽切换（2026-10-15 待办 #5/#8/#9 根治）：getWorkContext()/switchWorkProject()/
+  // reconcileWorkSurface()。顶层仅函数声明（共享 IIFE 内提升），须排在 work-state.js 之后（其 import 面用到
+  // WORK_SLOT_DEF）。调用方 = work-files.js 的 selectProject、work-mount.js 的 initWork。
+  { file: 'sidebar/work-context.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。
@@ -235,5 +239,19 @@ const out: string[] = [...head, '(() => {', "  'use strict'", '', '  const $ = (
 for (const p of pieces) out.push(...p)
 out.push('})()')
 
-await Bun.write(OUT, out.join('\n') + '\n')
+// 产物自检（2026-10-15 事故：work-context.js 把 `/* @module */` marker 写在 import 之前，剥壳阶段
+// `while (/^import /)` 没吃到那三行 ⇒ app.js 带裸 `import {...}` ⇒ 浏览器整包解析失败、界面卡死）。
+// 两道门：①输出不得含顶层 import/export（切割壳不变量：import/export 必须写在 marker 之前 / 尾段）；
+// ②整包必须能被 JS 解析器吃下（不靠人眼）。构建即部署，产物坏 = 界面直接白。
+for (let n = 0; n < out.length; n++) {
+  if (/^\s*(import|export)\s/.test(out[n]))
+    throw new Error(`产物第 ${n + 1} 行残留顶层 import/export「${out[n].trim().slice(0, 48)}」——模块切割壳未剥离（import 必须写在 /* @module */ marker 之前，export 块在尾段）`)
+}
+const bundled = out.join('\n') + '\n'
+try {
+  new Bun.Transpiler({ loader: 'js' }).transformSync(bundled)
+} catch (e) {
+  throw new Error(`产物 JS 解析失败（app.js 会整包不执行）：${(e as Error).message}`)
+}
+await Bun.write(OUT, bundled)
 console.log(`[bundle-web] ${pieces.length} 个区间拼回 → ${OUT}（${out.length + 1} 行）`)

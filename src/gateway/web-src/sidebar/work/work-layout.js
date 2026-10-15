@@ -45,7 +45,7 @@
   // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链随之删除——侧栏开关回归汉堡/收起钮直管）
 
   // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
-  // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
+  // ——本函数只把它按项目槽里的值调一次（loadWorkSlot 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
   // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
   function applySidebarPin() {
     if (isMobile()) return

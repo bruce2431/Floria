@@ -10,7 +10,7 @@
   // 新建 / 上传的落点目录（唯一判定）：文件 tab 且有打开文件 → 其父目录（用户当前上下文）；
   // 否则项目根（''）。树浏览无独立「当前目录」态，不引入。
   function wkNewContextDir() {
-    if (wkTab !== 'files' || !state.workFile) return ''
+    if (state.wkTab !== 'files' || !state.workFile) return ''
     const i = state.workFile.lastIndexOf('/')
     return i < 0 ? '' : state.workFile.slice(0, i)
   }

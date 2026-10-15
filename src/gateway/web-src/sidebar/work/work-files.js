@@ -58,11 +58,11 @@
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
+    if (lab) lab.textContent = state.wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${state.wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -78,7 +78,7 @@
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj && wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj && state.wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
@@ -86,7 +86,7 @@
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
     box.innerHTML =
       rows +
-      `<button class="wkp-row${wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
+      `<button class="wkp-row${state.wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
       `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
@@ -94,10 +94,10 @@
   // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
     const nb = $('wk-new')
-    const isChat = wkTab === 'chat'
+    const isChat = state.wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
-    if (pop && wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
+    if (pop && state.wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -120,8 +120,8 @@
   }
 
   function wkBodyHtml() {
-    if (wkTab === 'ws') return wkWsHtml()
-    if (wkTab === 'chat') {
+    if (state.wkTab === 'ws') return wkWsHtml()
+    if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const list = state.workProj
@@ -225,12 +225,12 @@
   // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
   function enterWsView() {
     hideWkPops()
-    wkTab = 'ws'
+    state.wkTab = 'ws'
     if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
     renderWorkChrome()
     renderWorkBody()
     // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
-    // registry.js（state.preview / state.mgr），与 work 侧栏的 wkTab 无关（2026-10-15 注册域隔离）。
+    // registry.js（state.preview / state.mgr），与 work 侧栏的 state.wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------
@@ -301,20 +301,17 @@
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
-    if (wkTab === 'ws') {
-      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；wkTab 的 on 类只在 tab 点击 handler 里切换）
-      wkTab = 'files'
+    if (state.wkTab === 'ws') {
+      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；state.wkTab 的 on 类只在 tab 点击 handler 里切换）
+      state.wkTab = 'files'
       document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
     }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
-    stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
-    state.workProj = label
-    loadWorkPanes(label, WK_PANES_DEF) // 新项目：有槽恢复该项目的开关，无槽回落缺省（缺省值归 work 领域）
-    state.workFile = ''
-    state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
-    state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
-    state.wkFiles = [] // 同上：文件 pill 开放集也随项目重置（旧项目的文件路径在新项目里无意义）
-    wkOpen.clear()
+    // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
+    // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
+    // 「切回来恢复」永久做掉，是待办 #9 的根因）。
+    switchWorkProject(label)
+    wkOpen.clear() // 展开集是纯运行时视图态，不随槽持久化
     renderWorkChrome()
     saveWork()
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
@@ -344,7 +341,7 @@
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
+    if (state.wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
     else if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
@@ -389,7 +386,7 @@
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
-    if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
+    if (state.wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）

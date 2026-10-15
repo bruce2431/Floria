@@ -211,9 +211,10 @@
   const state = { mode: 'list', pt: 'projects', panelOpen: false, panelPinned: false, currentHash: '', mgr: null, preview: null, previewMounted: null, newProject: null, mgrView: { kind: 'plugins', cat: 'public', q: '' },
     // work 模式（2026-09-25）：sbMode = 侧栏模式（chat=现状 / work=Prism 式工作区）；
     // projects = /gateway/sessions 的 groups（全部项目，含无会话者，chat 侧栏不用）；
-    // workProj/workFile = 当前项目与打开的文件（项目内相对路径）；wkPreview = 预览列（最右，常驻）。
-    // wkMainTab = 下沉区当前 tab（'chat' 助手 / 'file' 编辑区），同时只显一个；
-    // wkAssist = 聊天 tab 是否在场（全局，不按项目分槽）；wkPrevW = 预览列宽 px（拖分界条调，见 work.js applyWorkCols）。
+    // workProj = 当前项目 label（= 槽键，见下 workSlots）；workFile = 打开的文件（项目内相对路径）。
+    // wkPreview = 预览列（最右，常驻）；wkMainTab = 下沉区当前 tab（'chat' 助手 / 'file' 编辑区），同时只显一个；
+    // wkAssist = 聊天 tab 是否在场；wkPrevW = 预览列宽 px（拖分界条调，见 work.js applyWorkCols）——**全局，不按项目分槽**
+    // （是窗口几何，不是项目内容）。
     // wkAssistMode = 助手形态（'side'=靠栏 = 聊天 tab 内容 / 'float'=悬浮卡 / 'slim'=收敛输入栏）；
     // wkAssistH = 悬浮卡高度（宽由锚栏宽给定，见 sidebar/work.js applyAssistMode）。
     // wkPvTab = 右栏「页态」：'' = 预览态（挂项目预览帧 #wk-pv-body）/ 已注册工具 id = 工具态（顶 tab 条
@@ -221,24 +222,33 @@
     // 预览态 ⇄ 工具态由顶栏「工具栏」胶囊切（工具态时胶囊变「关闭」，点回预览态）。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
     wkMainTab: 'chat', wkPrevW: 420, wkPvTab: '',
+    // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件）。2026-10-15 由
+    // sidebar/work.js 的模块局部变量提升到 state 并**随项目入槽**（此前不持久化 ⇒ 重启恒回「文件」，
+    // 这既是待办 #5 的一半，也让「切项目恢复上次侧栏页」成为可能）。
+    wkTab: 'files',
     // wkChats = 下沉区打开的聊天 tab 开放集（浏览器 tab 模型）：条目 = 会话 hash，或 'new'（空对话 /
-    // 首页的哨兵键）。**持久化 + 切换工作项目时重置**（2026-10-13 用户待办 11 推翻 2026-10-07 的
-    // 「不持久化」定案：刷新恢复已打开标签页；跨项目泄露防线不变——存档与 workProj 同次写入，
-    // selectProject 切项目先清空再 saveWork，绝不残留他项目条目）。增/删/切换唯一口 = sidebar/work.js
-    // （wkEnsureTab / wkCloseTab；路由落地由 syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
+    // 首页的哨兵键）。增/删/切换唯一口 = sidebar/work-layout.js（wkEnsureTab / wkCloseTab；路由落地由
+    // syncWorkTabs 并入）。× 只从顶栏移除，不删会话。
     wkChats: [],
     // wkFiles = 下沉区打开的文件 tab 开放集（与 wkChats 完全同构的浏览器 tab 模型，2026-10-12 加入）：
     // 条目 = **项目内相对 POSIX 路径**（如 MATH/main.tex —— 顶栏标签必须带目录段才认得出是哪一本）；
-    // 激活项仍是单值 state.workFile（照旧持久化，恢复上次那篇）。同样**持久化、按项目重置**（2026-10-13
-    // 随待办 11 起一并持久化，防线同 wkChats）。增唯一口 = sidebar/work/work-layout.js wkEnsureFileTab
+    // 激活项仍是单值 state.workFile。增唯一口 = sidebar/work/work-layout.js wkEnsureFileTab
     // （applyPanes 兜底并入当前 workFile）；删/切换 = work-editor.js closeWkFile。**非激活 tab 不保留
     // 编辑器态**——本模型是单编辑器 + 切前 flush，刻意不承诺「各自保留未保存内容」。
     wkFiles: [],
     wkAssistMode: 'side', wkAssistH: 430,
-    // wkPanes = 视图浮层两开关（预览/侧边栏）按项目分槽：<项目 label> → 取值。
-    // 无槽 = 用 WK_PANES_DEF（sidebar/work-state.js）；未选项目（workProj 空）不落槽。
-    // 读写唯一口 = stashWorkPanes / loadWorkPanes（core/storage.js）。
-    wkPanes: {} }
+    // ---------- 项目槽（2026-10-15 待办 #5/#8/#9 根治）----------
+    // workSlots: <项目 label> → 该项目的一整套 work 界面状态（键 = WORK_SLOT_DEF，sidebar/work-state.js）。
+    // 上面那些同名 live 字段 = **当前项目槽的活视图**：切项目 = stash 旧槽 → 换 workProj → load 新槽
+    // （唯一口 = stashWorkSlot / loadWorkSlot，core/storage.js），因此**切项目不再清空**（旧的
+    // `state.wkChats = []` / `wkFiles = []` 重置已删——那等于把「切回来恢复」永久做掉），跨项目串台
+    // 由「槽按 label 分家」保证：任何一槽只装自己项目的条目。
+    // 语境唯一源 = getWorkContext()（sidebar/work-context.js）；顶栏该显示什么 = getWorkSurfaceProjection()。
+    workSlots: {},
+    // workSlotKey = **live 字段当前镜像的那一槽的键**。不变量：workSlotKey === workProj
+    // （空 workProj 时两者皆空）。两者不等 = live 与语境脱钩（漂移），由 reconcileWorkSurface 归一。
+    // 它是「切项目」这件事的唯一判据——stash 用 workSlotKey 而不是 workProj，否则换指针后归档会写错槽。
+    workSlotKey: '' }
 
   // ---------- 元素 ----------
   // 一元素一所有者：仅本模块（会话视图骨架）持有下列 DOM 句柄；charEl → core/char.js、
@@ -297,28 +307,85 @@
       state.mgrView = m
     } catch { /* 忽略 */ }
   }
-  // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
-  // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
-  function stashWorkPanes() {
-    if (!state.workProj) return
-    state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+  // ---------- 项目槽（2026-10-15 待办 #5/#8/#9 根治）----------
+  // 槽 = <项目 label> → 一整套 work 界面状态（键见 sidebar/work-state.js 的 WORK_SLOT_DEF）。
+  // state 上那些同名 live 字段是**当前项目槽的活视图**：切项目 = stash 旧槽 → 换 workProj → load 新槽。
+  // 因此「切项目清空顶栏」被**删除**（那等于把「切回来恢复」永久做掉）；跨项目串台由槽分家保证。
+  // live → 槽（唯一写口；saveWork 与切项目共用）。写进 **workSlotKey**（live 当前镜像的那一槽），
+  // 不是 workProj——切项目时两者在换指针的瞬间不等，认 workProj 会把旧 live 写进新槽。
+  function stashWorkSlot() {
+    const key = state.workSlotKey || state.workProj
+    if (!key) return
+    state.workSlots[key] = {
+      wkTab: state.wkTab,
+      wkMainTab: state.wkMainTab,
+      wkAssist: !!state.wkAssist,
+      wkAssistMode: state.wkAssistMode,
+      wkAssistH: state.wkAssistH,
+      wkChats: state.wkChats.slice(),
+      wkFiles: state.wkFiles.slice(),
+      workFile: state.workFile,
+      wkPreview: !!state.wkPreview,
+      wkPvTab: state.wkPvTab,
+      panelPinned: !!state.panelPinned,
+    }
   }
-  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 def（两开关缺省 = work 领域值，由调用方传入
-  // WK_PANES_DEF——本模块是 core 叶子，不依赖 feature 的 work-state.js）。只写 state，渲染由调用方
-  // （applyPanes / applySidebarPin）负责——纯函数不许碰 DOM。
-  function loadWorkPanes(label, def) {
-    const s = (label && state.wkPanes[label]) || null
-    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
-    state.wkPreview = val('workspace')
-    state.panelPinned = val('sidebar')
+  // 槽 → live（唯一读口）：有槽用槽，无槽回落 def（def 由调用方传入 WORK_SLOT_DEF——本模块是 core 叶子，
+  // 不依赖 feature 的 work-state.js）。槽值是**持久化区 = 外部边界**，逐键做类型/枚举归一后才落 state；
+  // 只写 state，渲染由调用方负责（applyPanes / applySidebarPin）——纯函数不许碰 DOM。
+  function loadWorkSlot(label, def) {
+    const s = (label && state.workSlots[label]) || null
+    const str = (k, ok) => (s && typeof s[k] === 'string' && (!ok || ok.includes(s[k])) ? s[k] : def[k])
+    const num = (k) => (s && typeof s[k] === 'number' && s[k] > 0 ? s[k] : def[k])
+    const bool = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
+    const arr = (k) => (s && Array.isArray(s[k]) ? s[k].filter((x) => typeof x === 'string' && x) : def[k].slice())
+    state.wkTab = str('wkTab', ['files', 'chat', 'ws'])
+    state.wkMainTab = str('wkMainTab', ['chat', 'file'])
+    state.wkAssist = bool('wkAssist')
+    state.wkAssistMode = str('wkAssistMode', ['side', 'float', 'slim'])
+    state.wkAssistH = num('wkAssistH')
+    state.wkChats = arr('wkChats')
+    state.wkFiles = arr('wkFiles')
+    state.workFile = str('workFile') // 非字符串 → def（''）
+    state.wkPreview = bool('wkPreview')
+    state.wkPvTab = str('wkPvTab')
+    state.panelPinned = bool('panelPinned')
   }
-  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽。
-  // wkChats/wkFiles（顶栏标签开放集）自 2026-10-13 起一并持久化（用户待办 11「已打开标签页刷新后
-  // 消失」）：存档总与当前 workProj 同次写入（切换项目时 selectProject 先清空再 saveWork），故恢复
-  // 即当前项目的开放集，无跨项目串台。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的
+  // 顶栏开放集 / 侧栏页 / 开关 / 打开的文件）。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
+  // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
   function saveWork() {
-    stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkChats: state.wkChats, wkFiles: state.wkFiles })
+    stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+  }
+  // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
+  // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
+  function migrateLegacyWork(d, def) {
+    const key = typeof d.workProj === 'string' ? d.workProj : ''
+    if (!key) return
+    const panes = (d.wkPanes && d.wkPanes[key]) || null
+    const slot = { ...def, wkChats: [], wkFiles: [] }
+    if (Array.isArray(d.wkChats)) slot.wkChats = d.wkChats.filter((x) => typeof x === 'string' && x)
+    if (Array.isArray(d.wkFiles)) slot.wkFiles = d.wkFiles.filter((x) => typeof x === 'string' && x)
+    if (typeof d.workFile === 'string') slot.workFile = d.workFile
+    if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') slot.wkMainTab = d.wkMainTab
+    if (typeof d.wkAssist === 'boolean') slot.wkAssist = d.wkAssist
+    if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') slot.wkAssistMode = d.wkAssistMode
+    if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) slot.wkAssistH = d.wkAssistH
+    if (typeof d.wkPvTab === 'string') slot.wkPvTab = d.wkPvTab
+    if (panes) {
+      if (typeof panes.workspace === 'boolean') slot.wkPreview = panes.workspace
+      if (typeof panes.sidebar === 'boolean') slot.panelPinned = panes.sidebar
+    }
+    state.workSlots[key] = slot
+    // 其余项目的旧 wkPanes 槽只剩两开关，用 def 补齐成完整槽（保住「每项目记住预览/侧栏开关」）
+    for (const [k, v] of Object.entries(d.wkPanes || {})) {
+      if (!k || !v || typeof v !== 'object' || state.workSlots[k]) continue
+      const s = { ...def, wkChats: [], wkFiles: [] }
+      if (typeof v.workspace === 'boolean') s.wkPreview = v.workspace
+      if (typeof v.sidebar === 'boolean') s.panelPinned = v.sidebar
+      state.workSlots[k] = s
+    }
   }
   function loadWork(def) {
     try {
@@ -328,25 +395,14 @@
       if (!d) return
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
-      if (typeof d.workFile === 'string') state.workFile = d.workFile
-      if (d.wkPanes && typeof d.wkPanes === 'object') {
-        for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
+      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW // 全局：预览列宽
+      if (d.workSlots && typeof d.workSlots === 'object') {
+        for (const [k, v] of Object.entries(d.workSlots)) if (k && v && typeof v === 'object') state.workSlots[k] = v
+      } else {
+        migrateLegacyWork(d, def) // 旧扁平形态 → 槽（一次性；此后存档恒新形态）
       }
-      loadWorkPanes(state.workProj, def) // 两开关 = 恢复项目的槽（无槽回落缺省）
-      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
-      if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
-      // wkChats/wkFiles（work 顶栏标签开放集）2026-10-13 起持久化（用户待办 11）：刷新恢复已打开的
-      // 聊天胶囊与文件 pill（此前 2026-10-07 定案为不持久化，被本待办推翻）。存档与 workProj 同次
-      // 写入（切项目先清空），恢复无须再按项目过滤；非字符串条目一律丢弃（持久化区是外部边界）。
-      // 「切换工作项目即清空」的语义不变（selectProject 显式清空 + saveWork），跨项目绝不残留。
-      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((x) => typeof x === 'string' && x)
-      if (Array.isArray(d.wkFiles)) state.wkFiles = d.wkFiles.filter((x) => typeof x === 'string' && x)
-      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
-      // wkPvTab（右栏页态：'' = 预览态 / 工具 id）全局一份，不按项目分槽；未注册的旧 id 由
-      // applyPvTab 的 pane 判定自然落成「无 pane 在场」，切一次 tab 即归一（见 work.js setPvTab）。
-      if (typeof d.wkPvTab === 'string') state.wkPvTab = d.wkPvTab
-      if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
-      if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      loadWorkSlot(state.workProj, def) // 当前项目槽 → live（无槽回落缺省）
+      state.workSlotKey = state.workProj // 恢复即对齐：live 自此镜像该项目槽（不变量见 ui-state.js）
     } catch { /* 忽略 */ }
   }
 
@@ -5127,13 +5183,95 @@ function setFirstSendHash(v) { firstSendHash = v }
     ).join('')
   }
 
-  // 两开关的缺省（新项目 / 无槽时用）。键名 = 槽内键名（state.wkPanes[<label>]），与 core/ui-state.js 初值对应。
-  const WK_PANES_DEF = { workspace: true, sidebar: false }
+  // 项目槽缺省（新项目 / 无槽时用）。**键名 = 槽内键名 = state 上同名 live 字段**
+  // （state.workSlots[<label>]，见 core/ui-state.js 与 core/storage.js 的 stashWorkSlot/loadWorkSlot）。
+  // 一个键一件事，槽与 live 字段一一对应，不再有两套命名（旧 wkPanes 的 workspace/sidebar 已并入
+  // wkPreview/panelPinned，由 loadWork 的迁移一次性折叠）。
+  const WORK_SLOT_DEF = {
+    wkTab: 'files',        // 侧栏体：'files' 文件树 / 'chat' 会话列表 / 'ws' 工作区根散件
+    wkMainTab: 'chat',     // 下沉区：'chat' 助手 / 'file' 编辑区
+    wkAssist: true,        // 聊天 tab 是否在场
+    wkAssistMode: 'side',  // 助手形态：'side' 靠栏 / 'float' 悬浮卡 / 'slim' 收敛输入栏
+    wkAssistH: 430,        // 悬浮卡高度 px
+    wkChats: [],           // 顶栏聊天胶囊开放集（会话 hash 或 'new'）
+    wkFiles: [],           // 顶栏文件 pill 开放集（项目内相对 POSIX 路径）
+    workFile: '',          // 当前打开的文件（项目内相对路径）
+    wkPreview: true,       // 右栏预览列是否在场
+    wkPvTab: '',           // 右栏页态：'' = 预览态 / 已注册工具 id
+    panelPinned: false,    // 侧栏是否被主动打开（桌面）
+  }
+
+
+  // 「当前 work 面在哪儿」的唯一只读源。kind 区分两种语境：
+  //   'project'   = 某个具体工作项目（含它的会话/文件/预览）
+  //   'workspace' = 工作区根散件视图（wkTab==='ws'）或无项目选中
+  function getWorkContext() {
+    const projectKey = state.workProj || ''
+    return {
+      kind: projectKey && state.wkTab !== 'ws' ? 'project' : 'workspace',
+      projectKey,
+      projectLabel: projectKey, // 槽键 = 项目 label（/gateway/sessions 的 groups label）
+      mode: state.sbMode, // 'chat' | 'work'
+      selectedTab: state.wkTab, // 'files' | 'chat' | 'ws'
+    }
+  }
+
+  // 槽只读取用（不落 live、不改槽）。无槽返回 null——调用方自己决定回落缺省还是走 def。
+  function getWorkProjectSlot(key) {
+    return (key && state.workSlots[key]) || null
+  }
+
+  // work 顶栏（下沉区 tab 条）该显示什么：**只回答 work 面自己的资源**（聊天胶囊 / 文件 pill /
+  // 当前文件），且只取**当前语境那一槽**——这正是「顶栏按项目分家」的落地（待办 #9）。
+  // 它绝不回答「哪张管理卡能不能开」——那是 registry 的 isCardAllowedInContext。
+  //
+  // 读哪一份：**live 就是当前槽的活视图**（不变量 workSlotKey === workProj）——运行期对顶栏开放集的
+  // 增删只落在 live（openWorkFile / wkEnsureTab），只有在 stash 那一刻才回写槽；因此问的是「当前那
+  // 一槽」时读 live 才准（读槽会读到上一次 stash 的旧值，顶栏滞后一拍）。问**别的**项目（未来跨项目
+  // 预览/对账）才落到它自己的槽。空语境（工作区根/无项目）两族皆空。
+  function getWorkSurfaceProjection(ctx) {
+    const c = ctx || getWorkContext()
+    const isLive = c.kind === 'project' && c.projectKey === state.workSlotKey
+    const slot = c.kind !== 'project' ? null : (isLive ? state : getWorkProjectSlot(c.projectKey))
+    return {
+      tab: c.selectedTab,
+      chats: slot && Array.isArray(slot.wkChats) ? slot.wkChats.slice() : [],
+      files: slot && Array.isArray(slot.wkFiles) ? slot.wkFiles.slice() : [],
+      activeFile: slot ? slot.workFile || '' : '',
+    }
+  }
+
+  // 切工作项目（**唯一口**）：stash 当前槽 → 换 workProj → load 新槽 → 对齐 workSlotKey。
+  // 只动状态，不渲染（调用方按需 renderWorkChrome / applyPanes / renderEditor…），
+  // 纯状态函数不碰 DOM，便于探针与复用。同 label 重复调用 = 无操作。
+  function switchWorkProject(label) {
+    const key = label || ''
+    if (key === state.workSlotKey && key === state.workProj) return false
+    stashWorkSlot() // 旧 live 归入它自己的槽（认 workSlotKey，不认新指针）
+    state.workProj = key
+    loadWorkSlot(key, WORK_SLOT_DEF) // 新项目：有槽恢复（含顶栏开放集/侧栏页/开关），无槽回落缺省
+    state.workSlotKey = key
+    return true
+  }
+
+  // 语境归一（启动恢复 / 切项目 / 路由恢复共用；**幂等**）。守护的不变量：
+  //   workSlotKey === workProj（live 必须镜像当前项目的槽）
+  // 不等即漂移——按 workProj 重取槽，把 live 拉回正轨（而不是让两套值并存各自演化）。
+  // 槽缺失时同一路径补缺省槽，故「首次进某项目」与「漂移修复」共用一条链，无第二份初始化旁路。
+  function reconcileWorkSurface() {
+    if (state.workSlotKey !== state.workProj) {
+      state.workSlotKey = '' // 强制重取：stash 不该把漂移的 live 写进任何槽
+      loadWorkSlot(state.workProj, WORK_SLOT_DEF)
+      state.workSlotKey = state.workProj
+    } else if (state.workProj && !state.workSlots[state.workProj]) {
+      state.workSlots[state.workProj] = { ...WORK_SLOT_DEF, wkChats: [], wkFiles: [] } // 无槽 = 补缺省
+    }
+  }
 
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
   // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
-  // （侧边栏）按项目分槽存 state.wkPanes，切项目时由 stashWorkPanes / loadWorkPanes 换槽。
+  // （侧边栏）按项目分槽存 state.workSlots，切项目时由 work-context.js switchWorkProject 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
   //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
@@ -5152,10 +5290,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
   const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
   let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
-  let wkTab = 'files'      // 'files' | 'chat' | 'ws'（ws = 工作区根散件视图；入口 = 项目下拉「工作区」行，
-                           // 与项目并列，2026-10-14 待办 9 返修——不再设独立 tab）
-  // 注（2026-10-15 注册域隔离）：wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下整块
-  // #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
+  // 侧栏体当前页 = **state.wkTab**（'files' | 'chat' | 'ws'）；2026-10-15 从本文件的模块局部变量提升到
+  // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
+  // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下
+  // 整块 #chat-panel 隐掉；工作区根应用 tab 的入表判据在 registry.js（按 state.preview / state.mgr 的语境）。
   let wkTree = null        // 当前项目文件树（/gateway/project 的 files）；null = 未加载
   let wkLoading = false
   let wkErr = ''
@@ -5268,7 +5406,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链随之删除——侧栏开关回归汉堡/收起钮直管）
 
   // 侧边栏开关的落地入口：真源始终是 state.panelPinned，而「让侧栏开合」的唯一口是 recent.js 的 setPanel
-  // ——本函数只把它按项目槽里的值调一次（loadWorkPanes 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
+  // ——本函数只把它按项目槽里的值调一次（loadWorkSlot 已把槽写进 state）。移动端侧栏是全屏抽屉，恢复
   // 打开态会盖住主区，故不恢复（槽里的值照常存，切回桌面端仍按它开合）。
   function applySidebarPin() {
     if (isMobile()) return
@@ -5805,11 +5943,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // （底部卡显示「7 个项目」、下拉却是空的，就是这个错位）。合并为一条渲染路径后无处可漂移。
   function renderWorkChrome() {
     const lab = document.querySelector('#wk-proj-seat .wk-proj-label')
-    if (lab) lab.textContent = wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
+    if (lab) lab.textContent = state.wkTab === 'ws' ? '工作区' : (state.workProj || '选择项目')
     const ft = $('wk-foot-text')
     if (ft) {
       const n = wkProjGroups().length
-      ft.textContent = `${wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
+      ft.textContent = `${state.wkTab === 'ws' ? '工作区' : state.workProj || 'Floria'} · ${n} 个项目`
     }
     const seat = $('wk-proj-seat')
     if (seat) seat.classList.toggle('empty', !state.workProj)
@@ -5825,7 +5963,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       ? ps
           .map(
             (g) =>
-              `<button class="wkp-row${g.label === state.workProj && wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
+              `<button class="wkp-row${g.label === state.workProj && state.wkTab !== 'ws' ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
               `<span class="wkp-name">${esc(g.label)}</span>` +
               `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
           )
@@ -5833,7 +5971,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
     box.innerHTML =
       rows +
-      `<button class="wkp-row${wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
+      `<button class="wkp-row${state.wkTab === 'ws' ? ' on' : ''}" data-wkproj="__ws__" title="工作区根散落的非项目文件">` +
       `<span class="wkp-name">工作区</span><span class="wkp-tag">全局</span></button>`
   }
 
@@ -5841,10 +5979,10 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
     const nb = $('wk-new')
-    const isChat = wkTab === 'chat'
+    const isChat = state.wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
     const pop = $('wk-new-pop')
-    if (pop && wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
+    if (pop && state.wkTab !== 'files') pop.hidden = true // 文件菜单只在文件 tab 有意义，切走即收
   }
 
   // 侧栏体的唯一渲染出口：HTML 全量算好再比对写入。比对是自动对账的必要条件——每 5s 一次无脑重写
@@ -5867,8 +6005,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function wkBodyHtml() {
-    if (wkTab === 'ws') return wkWsHtml()
-    if (wkTab === 'chat') {
+    if (state.wkTab === 'ws') return wkWsHtml()
+    if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
       const list = state.workProj
@@ -5972,12 +6110,12 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 不再设独立 tab。切到 ws 视图不动 state.workProj（编辑/会话/预览链全不感知），只换侧栏体。
   function enterWsView() {
     hideWkPops()
-    wkTab = 'ws'
+    state.wkTab = 'ws'
     if (!wkWsEntries && !wkWsLoading && !wkWsErr) loadWsDir(wkWsPath)
     renderWorkChrome()
     renderWorkBody()
     // 不进 #mgr-tabs：那是 chat 侧栏的行（work 模式整块 hidden），工作区根应用 tab 的语境判据在
-    // registry.js（state.preview / state.mgr），与 work 侧栏的 wkTab 无关（2026-10-15 注册域隔离）。
+    // registry.js（state.preview / state.mgr），与 work 侧栏的 state.wkTab 无关（2026-10-15 注册域隔离）。
   }
 
   // ---------- 数据 ----------
@@ -6048,20 +6186,17 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function selectProject(label) {
     hideWkPops()
     if (!label || label === state.workProj) return
-    if (wkTab === 'ws') {
-      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；wkTab 的 on 类只在 tab 点击 handler 里切换）
-      wkTab = 'files'
+    if (state.wkTab === 'ws') {
+      // 从工作区浏览态选项目 = 回文件 tab（tab 条 on 同步；state.wkTab 的 on 类只在 tab 点击 handler 里切换）
+      state.wkTab = 'files'
       document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x.dataset.wktab === 'files'))
     }
     if (wkEdDirty) await wkEdFlush() // 切项目前 flush 旧项目文件的 pending 编辑
-    stashWorkPanes() // 旧项目的两开关先归档（此刻 state.workProj 还是旧值——saveWork 里那一次归档只认当前项目）
-    state.workProj = label
-    loadWorkPanes(label, WK_PANES_DEF) // 新项目：有槽恢复该项目的开关，无槽回落缺省（缺省值归 work 领域）
-    state.workFile = ''
-    state.wkMainTab = 'chat' // 换了项目 = 旧文件 tab 作废，回到聊天 tab
-    state.wkChats = [] // 换项目 = 顶栏标签栏重置（旧项目会话胶囊不残留；纯运行时，不持久化）
-    state.wkFiles = [] // 同上：文件 pill 开放集也随项目重置（旧项目的文件路径在新项目里无意义）
-    wkOpen.clear()
+    // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
+    // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
+    // 「切回来恢复」永久做掉，是待办 #9 的根因）。
+    switchWorkProject(label)
+    wkOpen.clear() // 展开集是纯运行时视图态，不随槽持久化
     renderWorkChrome()
     saveWork()
     enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
@@ -6091,7 +6226,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderTopbar() // 顶栏与会话列表同拍对账（2026-10-13 待办 13）：wkTabName 按会话标题渲染，
     // SSE 改题/集合变化只会先落到 renderWorkChrome 这条链——缺这口时顶栏胶囊标题要等下一次
     // applyPanes（用户交互）才追上，「更新不及时」的根因即此。innerHTML 比对，未变零写 DOM。
-    if (wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
+    if (state.wkTab === 'ws') await loadWsDir(wkWsPath, true) // 工作区浏览态：5s 对账走 ws 链（静默，失败保旧层）
     else if (state.workProj) await loadProjectTree(state.workProj, silent)
     else renderWorkBody() // 未选项目时列表/空态也要跟上（loadProjectTree 早退不渲染）
     if (body && sc && body.scrollTop !== sc) body.scrollTop = sc
@@ -6136,7 +6271,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderEditor()
     await ensureProjectList()
     renderWorkChrome()
-    if (wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
+    if (state.wkTab === 'ws' && !wkWsEntries && !wkWsLoading && !wkWsErr) await loadWsDir(wkWsPath)
     if (state.workProj && !wkTree && !wkLoading && !wkErr) await loadProjectTree(state.workProj)
     renderWorkPreview() // 挂在 ensureProjectList 之后：hasPreview 来自 groups，先拉列表才知道
     cmtLoad(state.workProj) // 评论恢复态补拉（评论面板与原文标记共用；needToken 未解锁时早退，由门后补拉再调）
@@ -7409,7 +7544,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 新建 / 上传的落点目录（唯一判定）：文件 tab 且有打开文件 → 其父目录（用户当前上下文）；
   // 否则项目根（''）。树浏览无独立「当前目录」态，不引入。
   function wkNewContextDir() {
-    if (wkTab !== 'files' || !state.workFile) return ''
+    if (state.wkTab !== 'files' || !state.workFile) return ''
     const i = state.workFile.lastIndexOf('/')
     return i < 0 ? '' : state.workFile.slice(0, i)
   }
@@ -7684,8 +7819,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 加号按 tab 分派：聊天 tab = 直接新建对话；文件 tab = 展开新建菜单（创建/上传，功能待接入）
     $('wk-new').addEventListener('click', (e) => {
       e.stopPropagation() // 同步：先掐断 document 的收起委托，否则菜单刚开就被关掉
-      if (wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
-      if (wkTab !== 'files') {
+      if (state.wkTab === 'ws') return // 工作区视图只读：不落新建/上传（落点不在任何项目 label 下）
+      if (state.wkTab !== 'files') {
         newWorkChat()
         return
       }
@@ -7703,7 +7838,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     })
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
-        wkTab = b.dataset.wktab
+        state.wkTab = b.dataset.wktab
         document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
         renderWorkBody()
       }),
@@ -7760,7 +7895,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const body = $('wk-body')
     const dropDir = (e) => {
       const row = e.target.closest ? e.target.closest('[data-wkdir]') : null
-      return row ? row.dataset.wkdir : wkTab === 'files' ? '' : null
+      return row ? row.dataset.wkdir : state.wkTab === 'files' ? '' : null
     }
     const canDrop = (from, dir) =>
       from !== dir && !dir.startsWith(from + '/') && from.split('/').slice(0, -1).join('/') !== dir
@@ -7778,7 +7913,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       e.dataTransfer.effectAllowed = 'move'
     })
     body.addEventListener('dragover', (e) => {
-      if (!wkDragPath || wkTab !== 'files') return
+      if (!wkDragPath || state.wkTab !== 'files') return
       const dir = dropDir(e)
       if (dir == null || !canDrop(wkDragPath, dir)) { dndMark(null); return }
       e.preventDefault()
@@ -7792,7 +7927,7 @@ function setFirstSendHash(v) { firstSendHash = v }
       const from = wkDragPath
       wkDragPath = ''
       dndMark(null)
-      if (!from || wkTab !== 'files') return
+      if (!from || state.wkTab !== 'files') return
       const dir = dropDir(e)
       if (dir == null || !canDrop(from, dir)) return
       e.preventDefault()
@@ -7822,7 +7957,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 启动一次：恢复持久化状态 → 绑定事件 → 落地（顺序不可换：绑定要先于 applySbMode 的渲染，
   // 否则 work 面板首个渲染出来的行（文件树/新聊天）没有容器级委托）
   function initWork() {
-    loadWork(WK_PANES_DEF)
+    loadWork(WORK_SLOT_DEF) // 读盘：恢复模式/当前项目/预览列宽 + 全部项目槽 → 当前槽落到 live
+    reconcileWorkSurface() // 语境归一：守护 workSlotKey === workProj（启动/路由恢复共用，幂等）
     // 外部卡申报按缓存即时回填（同步、无网络）：刷新后在门解锁前 tab 就在位，/manage/ext:… 直进也有卡
     // 可解析；权威清单由 ensureWork → syncWorkExtCards 拉新覆盖。必须在 loadWork 之后（要知道工作项目）。
     hydrateExtCards(state.workProj)

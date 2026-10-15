@@ -37,28 +37,85 @@ import { state } from './ui-state.js'
       state.mgrView = m
     } catch { /* 忽略 */ }
   }
-  // 两开关 → 工作项目的槽（唯一写口，saveWork 调用）。未选项目不落槽。
-  // 必须在 workProj 还是**旧值**时调用才能归档旧项目（见 sidebar/work.js selectProject）。
-  function stashWorkPanes() {
-    if (!state.workProj) return
-    state.wkPanes[state.workProj] = { workspace: !!state.wkPreview, sidebar: !!state.panelPinned }
+  // ---------- 项目槽（2026-10-15 待办 #5/#8/#9 根治）----------
+  // 槽 = <项目 label> → 一整套 work 界面状态（键见 sidebar/work-state.js 的 WORK_SLOT_DEF）。
+  // state 上那些同名 live 字段是**当前项目槽的活视图**：切项目 = stash 旧槽 → 换 workProj → load 新槽。
+  // 因此「切项目清空顶栏」被**删除**（那等于把「切回来恢复」永久做掉）；跨项目串台由槽分家保证。
+  // live → 槽（唯一写口；saveWork 与切项目共用）。写进 **workSlotKey**（live 当前镜像的那一槽），
+  // 不是 workProj——切项目时两者在换指针的瞬间不等，认 workProj 会把旧 live 写进新槽。
+  function stashWorkSlot() {
+    const key = state.workSlotKey || state.workProj
+    if (!key) return
+    state.workSlots[key] = {
+      wkTab: state.wkTab,
+      wkMainTab: state.wkMainTab,
+      wkAssist: !!state.wkAssist,
+      wkAssistMode: state.wkAssistMode,
+      wkAssistH: state.wkAssistH,
+      wkChats: state.wkChats.slice(),
+      wkFiles: state.wkFiles.slice(),
+      workFile: state.workFile,
+      wkPreview: !!state.wkPreview,
+      wkPvTab: state.wkPvTab,
+      panelPinned: !!state.panelPinned,
+    }
   }
-  // 槽 → 两开关（唯一读口）：有槽用槽，无槽回落 def（两开关缺省 = work 领域值，由调用方传入
-  // WK_PANES_DEF——本模块是 core 叶子，不依赖 feature 的 work-state.js）。只写 state，渲染由调用方
-  // （applyPanes / applySidebarPin）负责——纯函数不许碰 DOM。
-  function loadWorkPanes(label, def) {
-    const s = (label && state.wkPanes[label]) || null
-    const val = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
-    state.wkPreview = val('workspace')
-    state.panelPinned = val('sidebar')
+  // 槽 → live（唯一读口）：有槽用槽，无槽回落 def（def 由调用方传入 WORK_SLOT_DEF——本模块是 core 叶子，
+  // 不依赖 feature 的 work-state.js）。槽值是**持久化区 = 外部边界**，逐键做类型/枚举归一后才落 state；
+  // 只写 state，渲染由调用方负责（applyPanes / applySidebarPin）——纯函数不许碰 DOM。
+  function loadWorkSlot(label, def) {
+    const s = (label && state.workSlots[label]) || null
+    const str = (k, ok) => (s && typeof s[k] === 'string' && (!ok || ok.includes(s[k])) ? s[k] : def[k])
+    const num = (k) => (s && typeof s[k] === 'number' && s[k] > 0 ? s[k] : def[k])
+    const bool = (k) => (s && typeof s[k] === 'boolean' ? s[k] : def[k])
+    const arr = (k) => (s && Array.isArray(s[k]) ? s[k].filter((x) => typeof x === 'string' && x) : def[k].slice())
+    state.wkTab = str('wkTab', ['files', 'chat', 'ws'])
+    state.wkMainTab = str('wkMainTab', ['chat', 'file'])
+    state.wkAssist = bool('wkAssist')
+    state.wkAssistMode = str('wkAssistMode', ['side', 'float', 'slim'])
+    state.wkAssistH = num('wkAssistH')
+    state.wkChats = arr('wkChats')
+    state.wkFiles = arr('wkFiles')
+    state.workFile = str('workFile') // 非字符串 → def（''）
+    state.wkPreview = bool('wkPreview')
+    state.wkPvTab = str('wkPvTab')
+    state.panelPinned = bool('panelPinned')
   }
-  // work 模式状态持久化（2026-09-25）：刷新后恢复模式与当前项目/文件、两开关、下沉区当前 tab、预览列宽。
-  // wkChats/wkFiles（顶栏标签开放集）自 2026-10-13 起一并持久化（用户待办 11「已打开标签页刷新后
-  // 消失」）：存档总与当前 workProj 同次写入（切换项目时 selectProject 先清空再 saveWork），故恢复
-  // 即当前项目的开放集，无跨项目串台。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
+  // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的
+  // 顶栏开放集 / 侧栏页 / 开关 / 打开的文件）。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
+  // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
   function saveWork() {
-    stashWorkPanes() // 两开关随项目归档（唯一写口），与下面其余 work 状态同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, workFile: state.workFile, wkPanes: state.wkPanes, wkAssist: !!state.wkAssist, wkMainTab: state.wkMainTab, wkPrevW: state.wkPrevW, wkPvTab: state.wkPvTab, wkAssistMode: state.wkAssistMode, wkAssistH: state.wkAssistH, wkChats: state.wkChats, wkFiles: state.wkFiles })
+    stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+  }
+  // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
+  // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
+  function migrateLegacyWork(d, def) {
+    const key = typeof d.workProj === 'string' ? d.workProj : ''
+    if (!key) return
+    const panes = (d.wkPanes && d.wkPanes[key]) || null
+    const slot = { ...def, wkChats: [], wkFiles: [] }
+    if (Array.isArray(d.wkChats)) slot.wkChats = d.wkChats.filter((x) => typeof x === 'string' && x)
+    if (Array.isArray(d.wkFiles)) slot.wkFiles = d.wkFiles.filter((x) => typeof x === 'string' && x)
+    if (typeof d.workFile === 'string') slot.workFile = d.workFile
+    if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') slot.wkMainTab = d.wkMainTab
+    if (typeof d.wkAssist === 'boolean') slot.wkAssist = d.wkAssist
+    if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') slot.wkAssistMode = d.wkAssistMode
+    if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) slot.wkAssistH = d.wkAssistH
+    if (typeof d.wkPvTab === 'string') slot.wkPvTab = d.wkPvTab
+    if (panes) {
+      if (typeof panes.workspace === 'boolean') slot.wkPreview = panes.workspace
+      if (typeof panes.sidebar === 'boolean') slot.panelPinned = panes.sidebar
+    }
+    state.workSlots[key] = slot
+    // 其余项目的旧 wkPanes 槽只剩两开关，用 def 补齐成完整槽（保住「每项目记住预览/侧栏开关」）
+    for (const [k, v] of Object.entries(d.wkPanes || {})) {
+      if (!k || !v || typeof v !== 'object' || state.workSlots[k]) continue
+      const s = { ...def, wkChats: [], wkFiles: [] }
+      if (typeof v.workspace === 'boolean') s.wkPreview = v.workspace
+      if (typeof v.sidebar === 'boolean') s.panelPinned = v.sidebar
+      state.workSlots[k] = s
+    }
   }
   function loadWork(def) {
     try {
@@ -68,25 +125,14 @@ import { state } from './ui-state.js'
       if (!d) return
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
-      if (typeof d.workFile === 'string') state.workFile = d.workFile
-      if (d.wkPanes && typeof d.wkPanes === 'object') {
-        for (const [k, v] of Object.entries(d.wkPanes)) if (k && v && typeof v === 'object') state.wkPanes[k] = v
+      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW // 全局：预览列宽
+      if (d.workSlots && typeof d.workSlots === 'object') {
+        for (const [k, v] of Object.entries(d.workSlots)) if (k && v && typeof v === 'object') state.workSlots[k] = v
+      } else {
+        migrateLegacyWork(d, def) // 旧扁平形态 → 槽（一次性；此后存档恒新形态）
       }
-      loadWorkPanes(state.workProj, def) // 两开关 = 恢复项目的槽（无槽回落缺省）
-      if (typeof d.wkAssist === 'boolean') state.wkAssist = d.wkAssist
-      if (d.wkMainTab === 'chat' || d.wkMainTab === 'file') state.wkMainTab = d.wkMainTab
-      // wkChats/wkFiles（work 顶栏标签开放集）2026-10-13 起持久化（用户待办 11）：刷新恢复已打开的
-      // 聊天胶囊与文件 pill（此前 2026-10-07 定案为不持久化，被本待办推翻）。存档与 workProj 同次
-      // 写入（切项目先清空），恢复无须再按项目过滤；非字符串条目一律丢弃（持久化区是外部边界）。
-      // 「切换工作项目即清空」的语义不变（selectProject 显式清空 + saveWork），跨项目绝不残留。
-      if (Array.isArray(d.wkChats)) state.wkChats = d.wkChats.filter((x) => typeof x === 'string' && x)
-      if (Array.isArray(d.wkFiles)) state.wkFiles = d.wkFiles.filter((x) => typeof x === 'string' && x)
-      if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW
-      // wkPvTab（右栏页态：'' = 预览态 / 工具 id）全局一份，不按项目分槽；未注册的旧 id 由
-      // applyPvTab 的 pane 判定自然落成「无 pane 在场」，切一次 tab 即归一（见 work.js setPvTab）。
-      if (typeof d.wkPvTab === 'string') state.wkPvTab = d.wkPvTab
-      if (d.wkAssistMode === 'side' || d.wkAssistMode === 'float' || d.wkAssistMode === 'slim') state.wkAssistMode = d.wkAssistMode
-      if (typeof d.wkAssistH === 'number' && d.wkAssistH > 0) state.wkAssistH = d.wkAssistH
+      loadWorkSlot(state.workProj, def) // 当前项目槽 → live（无槽回落缺省）
+      state.workSlotKey = state.workProj // 恢复即对齐：live 自此镜像该项目槽（不变量见 ui-state.js）
     } catch { /* 忽略 */ }
   }
 
@@ -94,10 +140,10 @@ export {
   UI_KEY,
   loadMgrView,
   loadWork,
-  loadWorkPanes,
+  loadWorkSlot,
   patchUI,
   readUI,
   saveMgrView,
   saveWork,
-  stashWorkPanes,
+  stashWorkSlot,
 }

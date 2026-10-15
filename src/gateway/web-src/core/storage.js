@@ -46,6 +46,10 @@ import { state } from './ui-state.js'
   function stashWorkSlot() {
     const key = state.workSlotKey || state.workProj
     if (!key) return
+    // activeChat 只在 **work 模式**下由 state.currentHash 记入：chat 模式里 currentHash 会被侧栏
+    // 别处导航改写（全局/他项目会话），若照记会把不属于该项目的会话写进槽（存档来自外部边界，
+    // 后续切回会导到错会话）。非 work 模式保留槽里原有值。
+    const prevAC = state.workSlots[key] && typeof state.workSlots[key].activeChat === 'string' ? state.workSlots[key].activeChat : ''
     state.workSlots[key] = {
       wkTab: state.wkTab,
       wkMainTab: state.wkMainTab,
@@ -54,6 +58,7 @@ import { state } from './ui-state.js'
       wkAssistH: state.wkAssistH,
       wkChats: state.wkChats.slice(),
       wkFiles: state.wkFiles.slice(),
+      activeChat: state.sbMode === 'work' ? state.currentHash || '' : prevAC, // 该项目当前会话（切回时的恢复目标；见 work-context.switchWorkProject）
       workFile: state.workFile,
       wkPreview: !!state.wkPreview,
       wkPvTab: state.wkPvTab,

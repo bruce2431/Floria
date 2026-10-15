@@ -54,16 +54,25 @@ import { WORK_SLOT_DEF } from './work-state.js'
   }
 
   // 切工作项目（**唯一口**）：stash 当前槽 → 换 workProj → load 新槽 → 对齐 workSlotKey。
-  // 只动状态，不渲染（调用方按需 renderWorkChrome / applyPanes / renderEditor…），
-  // 纯状态函数不碰 DOM，便于探针与复用。同 label 重复调用 = 无操作。
+  // 只动状态，不渲染、不导航（调用方按需 renderWorkChrome / applyPanes / renderEditor…），
+  // 纯状态函数不碰 DOM，便于探针与复用。
+  // **返回目标路由** = 新项目槽上次的活动会话 hash（'' = 该项目没有活动会话 ⇒ 空态首页）；
+  // 同 label 重复调用 = 无操作，返回 null（调用方据此不导航）。
+  // 「切项目该回哪一屏」由本口一次答清，**不再**交给 enforceWorkScope 统一强制跳 '#/'——那会把
+  // 「切项目」与「路由弹回」两种意图混成一条，且空路由被 wkActiveKey 转成 'new' 后由 open-set
+  // 兜底并入 ⇒ 每切一次项目凭空多一枚「新对话」胶囊（2026-10-15 根因）。
   function switchWorkProject(label) {
     const key = label || ''
-    if (key === state.workSlotKey && key === state.workProj) return false
+    if (key === state.workSlotKey && key === state.workProj) return null
     stashWorkSlot() // 旧 live 归入它自己的槽（认 workSlotKey，不认新指针）
     state.workProj = key
     loadWorkSlot(key, WORK_SLOT_DEF) // 新项目：有槽恢复（含顶栏开放集/侧栏页/开关），无槽回落缺省
     state.workSlotKey = key
-    return true
+    // 上一激活键属于**旧项目**的顶栏 tab 生命周期（跨项目不连续）：不清则 syncWorkTabs 的「开会话顶掉
+    // 占位」会拿旧项目的 prev 去摘新项目槽里合法的 new 胶囊。work.js 的模块级变量经单 IIFE 共享作用域可见。
+    wkPrevActiveKey = null
+    const s = state.workSlots[key]
+    return s && typeof s.activeChat === 'string' ? s.activeChat : ''
   }
 
   // 语境归一（启动恢复 / 切项目 / 路由恢复共用；**幂等**）。守护的不变量：

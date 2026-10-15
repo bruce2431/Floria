@@ -15,6 +15,10 @@
     wkAssistH: 430,        // 悬浮卡高度 px
     wkChats: [],           // 顶栏聊天胶囊开放集（会话 hash 或 'new'）
     wkFiles: [],           // 顶栏文件 pill 开放集（项目内相对 POSIX 路径）
+    // 该项目**切换前停在哪个会话**（'' = 无活动会话）。**槽专属字段，无同名 live 字段**——
+    // 活动会话的真源是路由 state.currentHash，本键只在 stash 那一刻记下它，供切回时作恢复目标
+    // （switchWorkProject 返回它，调用方显式 navigate）。不是顶栏开放集，不进 wkChats。
+    activeChat: '',
     workFile: '',          // 当前打开的文件（项目内相对路径）
     wkPreview: true,       // 右栏预览列是否在场
     wkPvTab: '',           // 右栏页态：'' = 预览态 / 已注册工具 id

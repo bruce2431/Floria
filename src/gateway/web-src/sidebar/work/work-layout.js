@@ -105,8 +105,7 @@
     state.wkAssist = false // 聊天 tab 全关：收起聊天栏（文件 / 预览还在即可）
     if (state.sbMode === 'work' && !state.workFile && !state.wkPreview) {
       state.wkAssist = true
-      wkEnsureTab(WK_NEW_TAB)
-      navigate('#/')
+      navigate('#/') // 全无 → 回空态首页（助手栏在场即满足「至少一栏」）；**不**再造 new 胶囊——胶囊只由主动新建入集
     }
     applyPanes(); saveWork()
   }
@@ -127,7 +126,10 @@
       const k = state.wkChats[i]
       if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
     }
-    wkEnsureTab(key)
+    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）**不**自动补 new 胶囊。
+    // new 只由用户主动新建（newWorkChat）入集；空路由 = 无活动胶囊的空态（2026-10-15 切项目凭空多
+    // new 的根因：此处曾**无条件**把当前激活键并入开放集，把首页路由转成 new 并持久化）。
+    if (key !== WK_NEW_TAB) wkEnsureTab(key)
     wkPrevActiveKey = key
     renderTopbar()
     // 2026-10-06 根修「work 侧栏选中灰底更新慢」：可见的会话列表在 #wk-body（renderWorkBody 渲），
@@ -147,9 +149,11 @@
         state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      // 占位新对话 tab 只在**聊天 tab 正被显示**时并入（2026-10-14 待办 16）：文件 tab 在场时并入会
-      // 把「打开文件顶掉占位」的摘除立即加回来。不变量 = 占位「新对话」胶囊存在 ⇔ 新对话正被显示。
-      if (state.wkAssist && wkShownTab() === 'chat') wkEnsureTab(wkActiveKey())
+      // 并入当前**真实会话**（仅当聊天 tab 正被显示、且路由停在具体会话上）。空路由不并入 new：
+      // new 胶囊只由用户主动新建（newWorkChat）入集，空态 = 无活动胶囊（2026-10-15 切项目凭空多 new
+      // 的根因之一）。文件 tab 在场时不并入——否则会把「打开文件顶掉占位」的摘除立刻加回来。
+      const k = wkActiveKey()
+      if (state.wkAssist && wkShownTab() === 'chat' && k !== WK_NEW_TAB) wkEnsureTab(k)
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')

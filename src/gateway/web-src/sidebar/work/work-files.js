@@ -310,11 +310,15 @@
     // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
     // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
     // 「切回来恢复」永久做掉，是待办 #9 的根因）。
-    switchWorkProject(label)
+    const target = switchWorkProject(label) // 返回该项目槽上次的活动会话（'' = 无活动会话）
     wkOpen.clear() // 展开集是纯运行时视图态，不随槽持久化
     renderWorkChrome()
+    // 目标路由由切项目这一侧**显式导航**（切项目意图 ≠ 路由弹回）：有上次会话则回它，无则回空态首页。
+    // **不写 wkChats**——空态不等于「新对话 tab」（那要用户主动新建）；此处若走 enforceWorkScope 的
+    // 无条件 navigate('#/')，空路由会被 open-set 兜底转成 new 并持久化（切项目凭空多新对话胶囊的根因）。
+    navigate(target ? '#/' + encodeURIComponent(target) : '#/')
+    renderProjSeat() // 新项目的席位（新会话目标项目）随项目换；路由已由上一行定值，不再强制弹回
     saveWork()
-    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
     applyPanes() // 再落地两开关（含「至少保留一栏」判定 + 视图浮层行同步 + 顶栏按归一后的路由重渲）
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     renderEditor()

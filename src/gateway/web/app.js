@@ -316,6 +316,10 @@
   function stashWorkSlot() {
     const key = state.workSlotKey || state.workProj
     if (!key) return
+    // activeChat 只在 **work 模式**下由 state.currentHash 记入：chat 模式里 currentHash 会被侧栏
+    // 别处导航改写（全局/他项目会话），若照记会把不属于该项目的会话写进槽（存档来自外部边界，
+    // 后续切回会导到错会话）。非 work 模式保留槽里原有值。
+    const prevAC = state.workSlots[key] && typeof state.workSlots[key].activeChat === 'string' ? state.workSlots[key].activeChat : ''
     state.workSlots[key] = {
       wkTab: state.wkTab,
       wkMainTab: state.wkMainTab,
@@ -324,6 +328,7 @@
       wkAssistH: state.wkAssistH,
       wkChats: state.wkChats.slice(),
       wkFiles: state.wkFiles.slice(),
+      activeChat: state.sbMode === 'work' ? state.currentHash || '' : prevAC, // 该项目当前会话（切回时的恢复目标；见 work-context.switchWorkProject）
       workFile: state.workFile,
       wkPreview: !!state.wkPreview,
       wkPvTab: state.wkPvTab,
@@ -5195,6 +5200,10 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkAssistH: 430,        // 悬浮卡高度 px
     wkChats: [],           // 顶栏聊天胶囊开放集（会话 hash 或 'new'）
     wkFiles: [],           // 顶栏文件 pill 开放集（项目内相对 POSIX 路径）
+    // 该项目**切换前停在哪个会话**（'' = 无活动会话）。**槽专属字段，无同名 live 字段**——
+    // 活动会话的真源是路由 state.currentHash，本键只在 stash 那一刻记下它，供切回时作恢复目标
+    // （switchWorkProject 返回它，调用方显式 navigate）。不是顶栏开放集，不进 wkChats。
+    activeChat: '',
     workFile: '',          // 当前打开的文件（项目内相对路径）
     wkPreview: true,       // 右栏预览列是否在场
     wkPvTab: '',           // 右栏页态：'' = 预览态 / 已注册工具 id
@@ -5242,16 +5251,25 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // 切工作项目（**唯一口**）：stash 当前槽 → 换 workProj → load 新槽 → 对齐 workSlotKey。
-  // 只动状态，不渲染（调用方按需 renderWorkChrome / applyPanes / renderEditor…），
-  // 纯状态函数不碰 DOM，便于探针与复用。同 label 重复调用 = 无操作。
+  // 只动状态，不渲染、不导航（调用方按需 renderWorkChrome / applyPanes / renderEditor…），
+  // 纯状态函数不碰 DOM，便于探针与复用。
+  // **返回目标路由** = 新项目槽上次的活动会话 hash（'' = 该项目没有活动会话 ⇒ 空态首页）；
+  // 同 label 重复调用 = 无操作，返回 null（调用方据此不导航）。
+  // 「切项目该回哪一屏」由本口一次答清，**不再**交给 enforceWorkScope 统一强制跳 '#/'——那会把
+  // 「切项目」与「路由弹回」两种意图混成一条，且空路由被 wkActiveKey 转成 'new' 后由 open-set
+  // 兜底并入 ⇒ 每切一次项目凭空多一枚「新对话」胶囊（2026-10-15 根因）。
   function switchWorkProject(label) {
     const key = label || ''
-    if (key === state.workSlotKey && key === state.workProj) return false
+    if (key === state.workSlotKey && key === state.workProj) return null
     stashWorkSlot() // 旧 live 归入它自己的槽（认 workSlotKey，不认新指针）
     state.workProj = key
     loadWorkSlot(key, WORK_SLOT_DEF) // 新项目：有槽恢复（含顶栏开放集/侧栏页/开关），无槽回落缺省
     state.workSlotKey = key
-    return true
+    // 上一激活键属于**旧项目**的顶栏 tab 生命周期（跨项目不连续）：不清则 syncWorkTabs 的「开会话顶掉
+    // 占位」会拿旧项目的 prev 去摘新项目槽里合法的 new 胶囊。work.js 的模块级变量经单 IIFE 共享作用域可见。
+    wkPrevActiveKey = null
+    const s = state.workSlots[key]
+    return s && typeof s.activeChat === 'string' ? s.activeChat : ''
   }
 
   // 语境归一（启动恢复 / 切项目 / 路由恢复共用；**幂等**）。守护的不变量：
@@ -5466,8 +5484,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     state.wkAssist = false // 聊天 tab 全关：收起聊天栏（文件 / 预览还在即可）
     if (state.sbMode === 'work' && !state.workFile && !state.wkPreview) {
       state.wkAssist = true
-      wkEnsureTab(WK_NEW_TAB)
-      navigate('#/')
+      navigate('#/') // 全无 → 回空态首页（助手栏在场即满足「至少一栏」）；**不**再造 new 胶囊——胶囊只由主动新建入集
     }
     applyPanes(); saveWork()
   }
@@ -5488,7 +5505,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       const k = state.wkChats[i]
       if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
     }
-    wkEnsureTab(key)
+    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）**不**自动补 new 胶囊。
+    // new 只由用户主动新建（newWorkChat）入集；空路由 = 无活动胶囊的空态（2026-10-15 切项目凭空多
+    // new 的根因：此处曾**无条件**把当前激活键并入开放集，把首页路由转成 new 并持久化）。
+    if (key !== WK_NEW_TAB) wkEnsureTab(key)
     wkPrevActiveKey = key
     renderTopbar()
     // 2026-10-06 根修「work 侧栏选中灰底更新慢」：可见的会话列表在 #wk-body（renderWorkBody 渲），
@@ -5508,9 +5528,11 @@ function setFirstSendHash(v) { firstSendHash = v }
         state.wkMainTab = 'chat'
         toast('至少保留一栏')
       }
-      // 占位新对话 tab 只在**聊天 tab 正被显示**时并入（2026-10-14 待办 16）：文件 tab 在场时并入会
-      // 把「打开文件顶掉占位」的摘除立即加回来。不变量 = 占位「新对话」胶囊存在 ⇔ 新对话正被显示。
-      if (state.wkAssist && wkShownTab() === 'chat') wkEnsureTab(wkActiveKey())
+      // 并入当前**真实会话**（仅当聊天 tab 正被显示、且路由停在具体会话上）。空路由不并入 new：
+      // new 胶囊只由用户主动新建（newWorkChat）入集，空态 = 无活动胶囊（2026-10-15 切项目凭空多 new
+      // 的根因之一）。文件 tab 在场时不并入——否则会把「打开文件顶掉占位」的摘除立刻加回来。
+      const k = wkActiveKey()
+      if (state.wkAssist && wkShownTab() === 'chat' && k !== WK_NEW_TAB) wkEnsureTab(k)
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
       const shown = wkShownTab()
       chatArea.classList.toggle('wk-show-chat', shown === 'chat')
@@ -6195,11 +6217,15 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 切项目 = stash 旧槽 → 换 workProj → load 新槽（唯一口 work-context.js switchWorkProject）。
     // 旧项目的顶栏开放集/侧栏页/开关归入它自己的槽，新项目从自己的槽恢复——**不再清空**（清空等于把
     // 「切回来恢复」永久做掉，是待办 #9 的根因）。
-    switchWorkProject(label)
+    const target = switchWorkProject(label) // 返回该项目槽上次的活动会话（'' = 无活动会话）
     wkOpen.clear() // 展开集是纯运行时视图态，不随槽持久化
     renderWorkChrome()
+    // 目标路由由切项目这一侧**显式导航**（切项目意图 ≠ 路由弹回）：有上次会话则回它，无则回空态首页。
+    // **不写 wkChats**——空态不等于「新对话 tab」（那要用户主动新建）；此处若走 enforceWorkScope 的
+    // 无条件 navigate('#/')，空路由会被 open-set 兜底转成 new 并持久化（切项目凭空多新对话胶囊的根因）。
+    navigate(target ? '#/' + encodeURIComponent(target) : '#/')
+    renderProjSeat() // 新项目的席位（新会话目标项目）随项目换；路由已由上一行定值，不再强制弹回
     saveWork()
-    enforceWorkScope() // 换项目 → 助手栏若停在别的项目的会话，先退回本项目的新对话（归位 currentHash）
     applyPanes() // 再落地两开关（含「至少保留一栏」判定 + 视图浮层行同步 + 顶栏按归一后的路由重渲）
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     renderEditor()

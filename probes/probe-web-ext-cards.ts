@@ -71,17 +71,16 @@ ok('I3 静态卡表 CARDS 为空表 + registerCard 契约（各卡自注册）',
   ok('I3 插件卡顶层 registerCard(pluginsCardDef) + refresh 契约', /registerCard\(pluginsCardDef\)/.test(pluginsCardJs) && /refresh\(\) \{ renderMgrGrid\(\) \}/.test(pluginsCardJs))
   ok('I3 外部申报卡（ext-card）不含第一方卡注册（外部走 EXT 分表，壳由宿主生成）', !/registerCard\(/.test(extCardJs) && /setExtCardRenderer\(mountExtCard\)/.test(extCardJs))
 }
-ok('I3 cardOf 查三张表（CARDS → APP_TABS → EXT，后两张经 ext-runtime 只读访问口）', /const cardOf = \(id\) => CARDS\.find\(\(c\) => c\.id === id\) \|\| appTabs\(\)\.find\(\(c\) => c\.id === id\) \|\| extTabs\(\)\.find\(/.test(registryJs))
+// 2026-10-15 注册域隔离 Step2：cardOf 加了域门（隐藏卡查无此卡），三表查询链原样保留，
+// 前缀由 `const cardOf = (id) =>` 变为「域判据 || 槽内卡 ? … : undefined」。
+ok('I3 cardOf 查三张表（CARDS → APP_TABS → EXT，后两张经 ext-runtime 只读访问口）', /const cardOf = \(id\) =>[\s\S]{0,200}?CARDS\.find\(\(c\) => c\.id === id\) \|\| appTabs\(\)\.find\(\(c\) => c\.id === id\) \|\| extTabs\(\)\.find\(/.test(registryJs))
 // 2026-10-15 注册域隔离返修：renderMgrTabs 不再是「无条件 CARDS.concat(appTabs(), extTabs())」——
-// apps 段受「语境 = 工作区根（预览全局根 / 正开 app: 卡）」门控、ext 段受「语境 = EXT 所属项目」门控
-// （后者曾致 Chat 串 tab / 离开预览后 ext tab 残留）。逐步断言取代旧的单行 includes（细化见
-// probe-registry-scope.ts）。
+// 三表合流后**过同一个域判据** isCardAllowedInContext（apps 段 = 工作区根语境、ext 段 = 所属项目）。
+// 逐步断言取代旧的单行 includes（细化见 probe-registry-scope.ts）。
 ok('I3 renderMgrTabs 合流三张表但仍受语境门控（apps 段工作区根、ext 段项目匹配）',
-  /CARDS\.concat\(apps, ext\)/.test(registryJs) &&
-  !/CARDS\.concat\(appTabs\(\), extTabs\(\)\)/.test(registryJs) &&
-  /isGlobalLabel\(state\.preview\)\s*\|\|\s*onAppCard\s*\?\s*appTabs\(\)\s*:\s*\[\]/.test(registryJs) &&
-  /ctx\s*===\s*el/.test(registryJs) &&
-  /startsWith\(\s*'ext:'\s*\+\s*el\s*\+\s*':'/.test(registryJs))
+  /CARDS\.concat\(appTabs\(\), extTabs\(\)\)\s*\n\s*\.filter\(\(v\) => v\.tab && isCardAllowedInContext\(v\.id, state\)\)/.test(registryJs) &&
+  /if \(id\.startsWith\('app:'\)\) return m\.startsWith\('app:'\) \|\| isGlobalLabel\(raw\)/.test(registryJs) &&
+  /extLabel\(\) !== label/.test(registryJs))
 const regBody = body(extRuntimeJs, 'function registerExtCards(')
 ok('I3 EXT 注册只写 EXT、不碰静态卡表 CARDS', regBody.includes('EXT.push({') && !regBody.includes('CARDS'))
 ok('I3 外部卡 mount 一律经注入的 extRender（宿主生成壳），无外部代码注入点', regBody.includes('mount: (body) => extRender(body, label, c)'))
@@ -118,7 +117,7 @@ const hydBody = body(extRuntimeJs, 'function hydrateExtCards(')
 ok('I5 回填走同一注册口（不另写第二套建表逻辑）', hydBody.includes('registerExtCards(label, e.cards, true)') && hydBody.includes('registerQuoteActions(label, e.quoteActions)'))
 ok('I5 启动恢复接线（work-mount.js initWork 在 loadWork 之后回填）', /loadWork\(WK_PANES_DEF\)[\s\S]{0,400}?hydrateExtCards\(state\.workProj\)/.test(workMountJs))
 ok('I5 切项目回填（work-files.js selectProject 换槽即换卡）', /state\.workProj = label[\s\S]{0,900}?hydrateExtCards\(label\)/.test(workFilesJs))
-ok('I5 路由直进回填（route.js mgr 分支按 id 里的 label 回填，先于 renderMgr）', /hydrateExtCardId\(r\.mgr\)[\s\S]{0,80}?renderMgr\(\)/.test(routeJs))
+ok('I5 路由直进回填（route.js mgr 分支按 id 里的 label 回填，先于 renderMgr）', /hydrateExtCardId\(r\.mgr\)[\s\S]{0,260}?renderMgr\(\)/.test(routeJs))
 ok('I5 网络权威刷新不落给右栏开关独占（work-files.js syncWorkExtCards 在预览帧不在场时补拉 + ensureWork 补拉链含它）', body(workFilesJs, 'function syncWorkExtCards(').includes('if (state.workProj && !wkFrameNeeded()) syncExtCards(state.workProj)') && /cmtLoad\(state\.workProj\)[\s\S]{0,200}?syncWorkExtCards\(\)/.test(workFilesJs))
 ok('I5 帧在场判定 = wkFrameNeeded（work-preview.js：栏在场且无宿主 pane 工具遮挡；帧工具态帧须留场）', body(workPreviewJs, 'function wkFrameNeeded()').includes('return !t || !t.pane'))
 ok('I5 帧工具显隐：宿主 pane 工具才隐预览帧（work-preview.js，帧工具内容归预览页自管）', body(workPreviewJs, 'function applyPvTab()').includes('if (body) body.hidden = !!tool && !!tool.pane'))

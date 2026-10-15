@@ -14,7 +14,7 @@ import { GATEWAY, HOT_RELOAD, initGateway, detectGateway, setGatewayPorts } from
 import { I } from './core/icons.js'
 import { initLive, setLiveModelHook, setLivePorts } from './engine/live.js'
 import { applySessionModel } from './inputbar/model-select.js'
-import { bootRegistry } from './engine/registry.js'
+import { bootRegistry, isCardAllowedInContext } from './engine/registry.js'
 import { loadSessions } from './engine/sessions.js'
 import { inputEl, overlay, sInput, sidebar, state } from './engine/state.js'
 import { isMobile } from './core/util.js'
@@ -99,6 +99,9 @@ import { renderCtxMeter } from './inputbar/ctx-meter.js'
     const b = e.target.closest('.mgr-tab')
     if (!b) return
     const k = b.dataset.mgr
+    // 注册域门（2026-10-15 Step2）：路由门在 route() 的 mgr 分支，此处挡在导航前——重渲前的残留
+    // 按钮（语境已变：离开预览/换项目/停用应用）点了也不得切进域外卡（同一判据，不另立一套）。
+    if (!isCardAllowedInContext(k, state)) return
     // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
     if (state.mgr === k) navigate('#/')
     else { saveMgrView(); navigate('#mgr/' + k) }

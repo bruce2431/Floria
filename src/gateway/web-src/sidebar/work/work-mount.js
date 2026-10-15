@@ -218,20 +218,8 @@
         openWorkFile(f.dataset.wkfile)
         return
       }
-      const s = e.target.closest('.sess-item')
-      if (s && s.dataset.hash) {
-        wkEnsureTab(s.dataset.hash) // 显式打开一个会话 = 顶栏占一枚胶囊
-        // 点会话 = 明确要看这个会话：聊天 tab 顶上来（否则文件 tab 占着格，看着像「点了没反应」）
-        state.wkMainTab = 'chat'
-        state.wkAssist = true
-        state.wkAssistMode = 'side'
-        // 与侧栏会话条目同语义（recent.js bindSessClicks）：已在该会话内不重复 navigate
-        if (s.dataset.hash !== state.currentHash) navigate('#/' + encodeURIComponent(s.dataset.hash))
-        applyPanes() // 新胶囊 + active 落地
-        saveWork()
-        if (isMobile()) setPanel(false)
-        return
-      }
+      // 会话行（.sess-item）不在本委托里：行行为统一协议见 recent.js（activateSession / bindSessionRows），
+      // 接线点在 work-files.js renderWorkBody 的重建分支。此处只留文件树目录/文件 + 拖拽。
     })
     // 文件树拖拽移动（2026-10-14 待办 10，仿 Obsidian）：行 draggable（wkTreeHtml），投放目标 =
     // 目录行（含收起态）与树空白（= 项目根，仅文件 tab）。wkDragPath 记拖动起点，dragover 按

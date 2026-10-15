@@ -2130,6 +2130,11 @@ function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort
   function route() {
     closeMentionPop()
     const r = parseRoute()
+    // 入站语境快照（2026-10-15 注册域隔离 Step2）：state.mgr/state.preview 在本函数内会被清空/改写，
+    // 而「这张卡在不在域内」必须按**入站时**的语境判——否则 r.mgr 一旦写进 state.mgr，卡就靠自己的
+    // id 认领了自己（自授权），隐藏卡再度可由手敲/残留路由打开。快照后立刻被下面清空的两行作废，
+    // 只在此处读一次。sbMode/workProj 一并带上（work 语境口径）。
+    const ctx0 = { mgr: state.mgr, preview: state.preview, sbMode: state.sbMode, workProj: state.workProj }
     // work 模式与视图卡（管理/预览）互斥（2026-09-25）：work 主区两栏只在会话卡在场时成立，
     // 进入 mgr/preview 一律强制回 chat 模式（顶部 tab 高亮、#work-panel 显隐、主区 .work 由
     // applySbMode 一并落地）。反向（work 里点开管理 tab）由 mgr-tabs 点击走 navigate → 命中此处。
@@ -2158,7 +2163,15 @@ function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort
     if (r.name === 'home') renderHome()
     // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进
     // /manage/ext:… 时表是空的，不先回填则 openCard 查无此卡、主区空白（缓存真源与刷新恢复链见 registry.js）。
-    else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
+    // 注册域门（2026-10-15 Step2）：回填 EXT 后按 **ctx0**（入站语境）判该卡在不在域内——域外（别的
+    // 项目的外部卡 / 非工作区根语境的 app 卡）退回首页，不得靠 URL 直接切进主区。极端后果（知情取舍）：
+    // 冷启动/刷新停在 /manage/<app|ext> URL 上时 ctx0 无语境 ⇒ 落首页，须经原入口（工作区根/项目预览）
+    // 重新进入——「卡 tab 在什么语境显示」与「卡在什么语境可开」从此是同一条判据。
+    else if (r.name === 'mgr') {
+      hydrateExtCardId(r.mgr)
+      if (!isCardAllowedInContext(r.mgr, ctx0)) { navigate('#/'); return }
+      state.mgr = r.mgr; loadMgrView(); renderMgr()
+    }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
     // 注册域随语境重算（2026-10-15 注册域隔离）：#mgr-tabs 的 EXT 段只在「当前语境 = EXT 所属项目」
@@ -3568,12 +3581,34 @@ function setLastNavHash(v) { lastNavHash = v }
   if (IS_TOUCH_DEVICE) document.body.classList.add('touch')
 
   // ---------- 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸显示完整标题 ----------
-  // #recent-body 是 overflow 裁剪容器，行内加宽必被裁剪；hover 时把该行临时 position:fixed
-  // 浮到原位（fixed 不受祖先 overflow 裁剪），原位插同高占位防行高塌陷，背景/阴影/上移/宽度
-  // 四路同步过渡到「扶起」终态；离开/列表滚动/窗口 resize/SSE 重建立即还原。触摸设备不启用。
+  // #recent-body / #wk-body 都是 overflow 裁剪容器，行内加宽必被裁剪；hover 时把该行临时
+  // position:fixed 浮到原位（fixed 不受祖先 overflow 裁剪），原位插同高占位防行高塌陷，背景/
+  // 阴影/上移/宽度四路同步过渡到「扶起」终态；离开/列表滚动/窗口 resize/SSE 重建立即还原。
+  // 触摸设备不启用。两处列表（chat 侧栏 / work 下沉区）共用本实现，靠 opts.root 区分滚动容器。
   let liftEl = null
   let liftSpacer = null
-  let liftBound = false
+  // 扶起的滚动/滚轮拍回监听按**行所在滚动容器**挂（chat = #recent-body；work 下沉区 = #wk-body）：
+  // 每容器只挂一次（重复挂 = 同一次滚动触发多遍拍回）。窗口 resize 与容器无关，只挂一次。
+  const liftBoundRoots = new WeakSet()
+  let liftWinBound = false
+  function liftBindRoot(root) {
+    if (!liftWinBound) { liftWinBound = true; window.addEventListener('resize', liftClear) }
+    if (!root || liftBoundRoots.has(root)) return
+    liftBoundRoots.add(root)
+    root.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
+    // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
+    // viewport、把 DOM 祖先从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后 Chrome 还会按
+    // 静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达 +0 scroll，
+    // v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表 = 滚动意图：同步拍回 +
+    // 强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
+    // non-passive 保证监听先于默认滚动动作执行。浮窗开着 = 一并关闭（滚轮 = 菜单外交互）。
+    // liftCool 与 scroll 门同参续期：滚轮持续 = 非静止态，防边界拍回/重扶循环。
+    root.addEventListener('wheel', () => {
+      liftCool = Date.now() + 150
+      if (rowMenuPop) closeRowMenu()
+      if (liftEl) { liftClear(true); void root.offsetHeight }
+    }, { passive: false })
+  }
   // 滚动静默期（2026-09-08 侧栏滚轮失效根修）：scroll 后 150ms 内 hover 不扶起。
   // 不变量：扶起（fixed 化+插占位符=布局重排）只发生在列表静止态——滚动中扶起与滚动互搏：
   // 每格滚动触发「拍回删占位符（内容缩一行高）→ hover 重算重扶插占位符（内容长回）」，
@@ -3631,45 +3666,59 @@ function setLastNavHash(v) { lastNavHash = v }
       el.style.background = ''; el.style.boxShadow = ''; el.style.transform = ''
       if (target > r.width + 1) el.style.width = target + 'px'
     }
-    if (!liftBound) {
-      liftBound = true
-      bodyEl.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
-      window.addEventListener('resize', liftClear)
-      // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
-      // viewport、把 DOM 祖先 #recent-body 从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后
-      // Chrome 还会按静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达
-      // +0 scroll，v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表=滚动意图：
-      // 同步拍回+强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
-      // non-passive 保证监听先于默认滚动动作执行。浮窗开着=一并关闭（滚轮=菜单外交互）。
-      // liftCool 与 scroll 门同参续期：滚轮持续=非静止态，防边界拍回/重扶循环。
-      bodyEl.addEventListener('wheel', () => {
-        liftCool = Date.now() + 150
-        if (rowMenuPop) closeRowMenu()
-        if (liftEl) { liftClear(true); void bodyEl.offsetHeight }
-      }, { passive: false })
-    }
+    liftBindRoot(opts.root || bodyEl)
   }
-  function bindSessLift(root) {
+  // liftRoot = 行所在的滚动容器：扶起的滚动 / 滚轮拍回监听挂它（见 liftBindRoot）。
+  function bindSessLift(root, liftRoot) {
     // hover 扶起仅桌面指针设备绑定；触屏不启用（iPad 桌面模式 matchMedia 伪装 hover:hover
     // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——触屏长按扶起走 openRowMenu 直调，不经此处
     if (IS_TOUCH_DEVICE || !matchMedia('(hover: hover) and (pointer: fine)').matches) return
+    const lr = liftRoot || bodyEl
     root.querySelectorAll('.sess-item').forEach((el) => {
-      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el) })
+      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el, { root: lr }) })
       el.addEventListener('mouseleave', liftClear)
     })
   }
 
-  function bindSessClicks(root) {
+  // ---------- 会话行协议（2026-10-15 统一 Chat/Work 会话行生命周期）----------
+  // `.sess-item` 在 chat 侧栏（#recent-body / 项目管理卡列表）与 work 下沉区（#wk-body 里的 .wk-chats）
+  // 各渲一份，**行 HTML 本来就是同一份实现（itemHtml）**——行为也必须同源。回归根因：work 侧只在
+  // #wk-body 容器上委托了一段「改 wkMainTab/wkAssist + navigate」，既没接本文件的点击语义（reLiftHash
+  // 重扶 / 移动端收侧栏），也没接 hover 扶起 ⇒ 同一行两模式表现分叉（浮起不一致 / 选中滞后 / 点了
+  // 像没反应）。协议两个出口，谁拥有行谁接线：
+  //   activateSession(hash, { source })  —— 会话激活唯一口
+  //   bindSessionRows(root, { source })  —— 行行为唯一接线口（点击 → activateSession + hover 扶起）
+  // 接线点 = 行节点**新建后**（innerHTML 重写分支里）：chat 侧 renderList/renderProject（mgr.js）/
+  // work 侧 renderWorkBody（work-files.js）。
+
+  // 会话激活唯一口。source='work' 才落 work 页面态（顶栏胶囊 + 聊天栏顶上来）——那是「在下沉区点行」
+  // 的语义；chat 侧栏点行不该改 work 布局。导航 / 移动端收侧栏两模式一致。
+  function activateSession(hash, opts = {}) {
+    if (!hash) return
+    if (opts.source === 'work') {
+      wkEnsureTab(hash) // 显式打开一个会话 = 顶栏占一枚胶囊
+      // 点会话 = 明确要看这个会话：聊天 tab 顶上来（否则文件 tab 占着格，看着像「点了没反应」）
+      state.wkMainTab = 'chat'
+      state.wkAssist = true
+      state.wkAssistMode = 'side'
+    }
+    // 已在该会话内：不 navigate（route→ 重建整列换节点，浮起行随之消亡重扶，闪一次扶起动画）
+    if (hash !== state.currentHash) {
+      reLiftHash = hash // 2026-09-05 重建后重扶被点行（新节点 :hover 不恢复，不重扶=点击即拍回）
+      navigate('#/' + encodeURIComponent(hash))
+    }
+    if (opts.source === 'work') { applyPanes(); saveWork() } // 新胶囊 + active 落地
+    if (isMobile()) setPanel(false)
+  }
+
+  // 行行为接线（点击 + hover 扶起）。**只在行节点新建后调用**：节点未变时重复调用会让同一节点累积
+  // 多份监听。opts.root = 行所在滚动容器（扶起的滚动拍回挂它）；缺省 #recent-body。
+  function bindSessionRows(root, opts = {}) {
+    if (!root) return
+    const liftRoot = opts.root || bodyEl
     root.querySelectorAll('.sess-item').forEach((b) =>
-      b.addEventListener('click', () => {
-        // 已在该会话内：不 navigate（route→renderRecent 会整列重建，浮起行随之消亡重扶，闪一次扶起动画）
-        if (b.dataset.hash === state.currentHash) return
-        reLiftHash = b.dataset.hash // 2026-09-05 重建后重扶被点行（新节点 :hover 不恢复，不重扶=点击即拍回）
-        navigate('#/' + encodeURIComponent(b.dataset.hash))
-        if (isMobile()) setPanel(false)
-      }),
-    )
-    bindSessLift(root)
+      b.addEventListener('click', () => activateSession(b.dataset.hash, opts)))
+    bindSessLift(root, liftRoot)
   }
 
   // ---------- 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；2026-09-27 泛化为注册式）----------
@@ -4052,37 +4101,42 @@ function setLastNavHash(v) { lastNavHash = v }
       }
     }
     if (prevTop) bodyEl.scrollTop = prevTop
-    // 2026-09-05 重建后统一重扶出口：① 触屏长按菜单开着 → 按菜单 hash 重扶对应行（浮起须随新节点重建）；
-    // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
-    // 不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标。
-    // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
-    //    光标所在行同样拍回；按最近光标落点重扶。
-    //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
-    if (rowMenuPop && rowMenuTouch) {
-      // 触屏长按的浮起：整列重建会换掉行节点，浮窗（body 下）不受影响但浮起须按行标识重扶
-      reliftRowMenu()
-    } else if (reLiftHash) {
-      const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
-      reLiftHash = null
-      if (el) liftStart(el, { anim: false })
-    } else if (mouseXY && Date.now() >= liftCool) {
-      // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
-      // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
-      // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
-      // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
-      const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
-      if (hit && hit.dataset.hash) liftStart(hit, { anim: false })
-      else if (prevLift &&
-        mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
-        mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
-        // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-        // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
-        const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
-        if (el) liftStart(el, { anim: false })
-      }
-    }
+    reliftAfterRebuild(bodyEl, prevLift)
     renderBubble()
     renderSearch()
+  }
+
+  // 列表重建后的统一重扶出口（chat 侧栏 renderRecent / work 下沉区 renderWorkBody 共用；root = 该列表
+  // 的滚动容器，prevLift = 重建前的浮起快照，仅 chat 侧提供）。2026-09-05 起的三条线索：
+  // ① 触屏长按菜单开着 → 按菜单行标识重扶（浮窗挂 body 下不受重建影响，浮起须随新节点重建）；
+  // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
+  //    不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标；
+  // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
+  //    光标所在行同样拍回，按最近光标落点重扶。
+  //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
+  function reliftAfterRebuild(root, prevLift) {
+    if (rowMenuPop && rowMenuTouch) { reliftRowMenu(); return }
+    if (reLiftHash) {
+      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
+      reLiftHash = null
+      if (el) liftStart(el, { anim: false, root })
+      return
+    }
+    if (!mouseXY || Date.now() < liftCool) return
+    // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
+    // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
+    // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
+    // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
+    const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
+    if (hit && hit.dataset.hash && root.contains(hit)) { liftStart(hit, { anim: false, root }); return }
+    if (prevLift &&
+      mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
+      mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
+      // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
+      // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
+      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
+      if (el) liftStart(el, { anim: false, root })
+    }
   }
 
   // 管理视图（插件/技能预览，Codex 风格）：渲染到主聊天区（侧栏会话列表保持不变）。
@@ -4158,7 +4212,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     const box = document.createElement('div')
     // 2026-08-25「在一个列表中」堆叠视图：项目会话显示所属项目短编号气泡（Pj16），根会话无气泡
     box.innerHTML = sorted().map((s) => itemHtml(s, true)).join('')
-    bindSessClicks(box)
+    bindSessionRows(box)
     bodyEl.appendChild(box)
   }
 
@@ -4203,13 +4257,13 @@ function setFirstSendHash(v) { firstSendHash = v }
           }
         }),
       )
-      bindSessClicks(box)
+      bindSessionRows(box)
       bodyEl.appendChild(box)
     } else {
       const root = ALL.filter((s) => s.projectScope !== 'project')
       const box = document.createElement('div')
       box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
-      bindSessClicks(box)
+      bindSessionRows(box)
       bodyEl.appendChild(box)
     }
   }
@@ -4552,25 +4606,44 @@ function setFirstSendHash(v) { firstSendHash = v }
   // engine/ext-runtime.js），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
   let CARDS = []
   function registerCard(def) { if (def && def.id) CARDS.push(def) }
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || appTabs().find((c) => c.id === id) || extTabs().find((c) => c.id === id)
   // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
   function refreshCard(id) { cardOf(id)?.refresh?.() }
 
-  // ---------- 注册域（2026-10-15 注册域隔离返修）----------
-  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下 #chat-panel 整块 hidden，本行不可见，
-  // 故三张表的入表门控一律按 **chat 语境** 判，不得无条件合流（回归：普通 chat 串出工作区根的应用 tab；
-  // 离开预览后外部卡 tab 仍在，均可由 extTabs()/appTabs() 有残留解释）：
-  //   CARDS    = 第一方卡，恒显（当前唯一 tab:true 者 = 插件）
-  //   APP_TABS = 工作区根应用（项目/模型/神经元…）。**仅**当语境 = 工作区根时进表——预览全局根
-  //              （state.preview = 全局根 label）或正开着某张 app: 卡（点击后 state.preview 已清，
-  //              须靠 mgr id 认领，否则 tab 一点就消失）。普通 chat / 其它项目预览下都不显示。
-  //              「应用已启用」由 appTabs() 自身过滤（applyAppTabs 按 APPS_ENABLED 取集）。
-  //   EXT      = 当前预览项目申报的外部卡。**仅**当语境 = EXT 所属项目时进表——ctx = work 看工作项目、
-  //              chat 看预览路由 state.preview（work 分支此时该行不可见，保留只为语境口径完整），
-  //              或正开着该 label 的某张 ext 卡（同上的 mgr id 认领）。
+  // ---------- 注册域：卡片归属语境（2026-10-15 注册域隔离 Step2）----------
+  // 「这张卡在不在域内」的**唯一判据**，四个入口共用（缺一即漏；回归：只滤 tab 而让隐藏卡仍可由路由
+  // 或卡 id 切进主区）：renderMgrTabs 取集 / cardOf 解析（openCard「唯一切卡口」据此拒绝隐藏卡）/
+  // route 的 mgr 分支 + mgr-tabs 点击委托（按**入站**语境快照判，见 chat/route.js）。
+  // 域 = 卡的归属：CARDS（第一方 plugins/preview/session）恒在域内（工具栏卡，与语境无关）；
+  //   app:<id>          工作区根应用 → 仅语境 = 工作区根；
+  //   ext:<label>:<id>  项目外部卡   → 仅语境 = 该 label，且 EXT 运行表当前正属该 label。
+  // 语境（唯一状态源）：work 看工作项目 label、chat 看预览路由 label；**已开着的 app/ext 卡自身即其
+  // 语境**——st.mgr 命名空间占先，故 renderMgr 清掉 state.preview 后 openCard 仍认得自己（点击 tab 后
+  // preview 已清，靠 mgr id 认领）。「应用已启用」由 appTabs() 自身过滤（ext-runtime.applyAppTabs）。
+  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下整块 hidden 不可见，故 work 语境
+  // （state.workProj）只影响「预览/工作项目」这条口径，不另立一套判据。
+  function isCardAllowedInContext(id, st) {
+    if (typeof id !== 'string' || !id) return false
+    if (CARDS.some((c) => c.id === id)) return true
+    const m = typeof st.mgr === 'string' ? st.mgr : ''
+    const raw = (st.sbMode === 'work' ? st.workProj : st.preview) || ''
+    if (id.startsWith('app:')) return m.startsWith('app:') || isGlobalLabel(raw)
+    if (id.startsWith('ext:')) {
+      const label = id.slice(4, id.lastIndexOf(':'))
+      if (!label || extLabel() !== label) return false
+      return m.startsWith('ext:' + label + ':') || raw === label
+    }
+    return false
+  }
+  // 按 id 取卡：**域内才可解析**——隐藏卡一律查无此卡，于是 refreshCard / deactivateCard / openCard
+  // 三个消费点同受此门。**例外 = 当前槽内那张卡**：openCard 切异卡时须能解析离场卡以调其 deactivate，
+  // 而此刻 state.mgr 可能已指向新卡、语境不再匹配，但它在场 ⇒ 必须认。
+  const cardOf = (id) => (isCardAllowedInContext(id, state) || currentCardId() === id
+    ? CARDS.find((c) => c.id === id) || appTabs().find((c) => c.id === id) || extTabs().find((c) => c.id === id)
+    : undefined)
 
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
+  // 取集 = 三表合流后**过同一个域判据**（显示与可切入必须同一条：显示过而切入不过 = 串域）。
   // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）；**语境变更**由
   // 变更点显式调用本函数（applySbMode 的模式切换 / route 末尾 / 切项目），硬性不变量：不得由卡片注册
   // 或应用目录同步直接触发全局重渲，一律经本函数按当前语境取集。
@@ -4579,13 +4652,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    const onAppCard = typeof state.mgr === 'string' && state.mgr.startsWith('app:')
-    const apps = isGlobalLabel(state.preview) || onAppCard ? appTabs() : []
-    const el = extLabel()
-    const ctx = state.sbMode === 'work' ? state.workProj : state.preview
-    const onExtCard = !!el && typeof state.mgr === 'string' && state.mgr.startsWith('ext:' + el + ':')
-    const ext = el && (onExtCard || ctx === el) ? extTabs() : []
-    const html = CARDS.concat(apps, ext).filter((v) => v.tab)
+    const html = CARDS.concat(appTabs(), extTabs())
+      .filter((v) => v.tab && isCardAllowedInContext(v.id, state))
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
     if (html === mgrTabsHtml) return
@@ -4621,12 +4689,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
     return makeCard(id)
   }
-  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。**域外 id 一律返回 null**（不回落任何视图，
+  // 也不动槽内现卡——拒绝不该顺带拆掉当前视图）；未知 id 同此口。
   // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
   // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
   // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
   // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
   function openCard(id, payload) {
+    if (!isCardAllowedInContext(id, state)) return null // 注册域门（与 cardOf 同判据）：隐藏卡不得由任何入口切入
     const c = cardOf(id)
     if (!c) return null
     const prev = currentCardId()
@@ -5785,9 +5855,14 @@ function setFirstSendHash(v) { firstSendHash = v }
     updateWkTools()
     const html = wkBodyHtml()
     if (body.innerHTML !== html) {
+      // 重建前先还原浮起：旧行节点随 innerHTML 消亡，浮起态必须强制拍回防孤儿浮卡（与 renderRecent 同口径）
+      liftClear(true)
       body.innerHTML = html
-      // 重渲换掉了行节点：长按浮窗若开着，按行标识把新节点重新扶起（浮窗本身挂在 body 下不受影响）
-      reliftRowMenu()
+      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 扶起），
+      // 实现在 recent.js；**只在重建分支接线**——未重写时节点未变，重复接线会让同一节点累积多份监听。
+      // 滚动容器 #wk-body 一并传入（扶起的滚动/滚轮拍回挂它）。随后按重建前线索重扶（点击导航/悬停）。
+      bindSessionRows(body, { source: 'work', root: body })
+      reliftAfterRebuild(body)
     }
   }
 
@@ -7674,20 +7749,8 @@ function setFirstSendHash(v) { firstSendHash = v }
         openWorkFile(f.dataset.wkfile)
         return
       }
-      const s = e.target.closest('.sess-item')
-      if (s && s.dataset.hash) {
-        wkEnsureTab(s.dataset.hash) // 显式打开一个会话 = 顶栏占一枚胶囊
-        // 点会话 = 明确要看这个会话：聊天 tab 顶上来（否则文件 tab 占着格，看着像「点了没反应」）
-        state.wkMainTab = 'chat'
-        state.wkAssist = true
-        state.wkAssistMode = 'side'
-        // 与侧栏会话条目同语义（recent.js bindSessClicks）：已在该会话内不重复 navigate
-        if (s.dataset.hash !== state.currentHash) navigate('#/' + encodeURIComponent(s.dataset.hash))
-        applyPanes() // 新胶囊 + active 落地
-        saveWork()
-        if (isMobile()) setPanel(false)
-        return
-      }
+      // 会话行（.sess-item）不在本委托里：行行为统一协议见 recent.js（activateSession / bindSessionRows），
+      // 接线点在 work-files.js renderWorkBody 的重建分支。此处只留文件树目录/文件 + 拖拽。
     })
     // 文件树拖拽移动（2026-10-14 待办 10，仿 Obsidian）：行 draggable（wkTreeHtml），投放目标 =
     // 目录行（含收起态）与树空白（= 项目根，仅文件 tab）。wkDragPath 记拖动起点，dragover 按
@@ -8128,6 +8191,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     const b = e.target.closest('.mgr-tab')
     if (!b) return
     const k = b.dataset.mgr
+    // 注册域门（2026-10-15 Step2）：路由门在 route() 的 mgr 分支，此处挡在导航前——重渲前的残留
+    // 按钮（语境已变：离开预览/换项目/停用应用）点了也不得切进域外卡（同一判据，不另立一套）。
+    if (!isCardAllowedInContext(k, state)) return
     // 管理视图进/出走 hash 路由（#mgr/<kind> / #/）：刷新后可恢复当前管理视图
     if (state.mgr === k) navigate('#/')
     else { saveMgrView(); navigate('#mgr/' + k) }

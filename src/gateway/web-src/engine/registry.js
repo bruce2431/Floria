@@ -23,25 +23,44 @@ import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-
   // engine/ext-runtime.js），侧栏 tab 因此是 CARDS / APP_TABS / EXT 之和。
   let CARDS = []
   function registerCard(def) { if (def && def.id) CARDS.push(def) }
-  const cardOf = (id) => CARDS.find((c) => c.id === id) || appTabs().find((c) => c.id === id) || extTabs().find((c) => c.id === id)
   // 契约出口：卡外的局部重渲（如 mgr-data 拉完清单刷插件卡网格）不必懂该卡实现，只报 id。
   function refreshCard(id) { cardOf(id)?.refresh?.() }
 
-  // ---------- 注册域（2026-10-15 注册域隔离返修）----------
-  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下 #chat-panel 整块 hidden，本行不可见，
-  // 故三张表的入表门控一律按 **chat 语境** 判，不得无条件合流（回归：普通 chat 串出工作区根的应用 tab；
-  // 离开预览后外部卡 tab 仍在，均可由 extTabs()/appTabs() 有残留解释）：
-  //   CARDS    = 第一方卡，恒显（当前唯一 tab:true 者 = 插件）
-  //   APP_TABS = 工作区根应用（项目/模型/神经元…）。**仅**当语境 = 工作区根时进表——预览全局根
-  //              （state.preview = 全局根 label）或正开着某张 app: 卡（点击后 state.preview 已清，
-  //              须靠 mgr id 认领，否则 tab 一点就消失）。普通 chat / 其它项目预览下都不显示。
-  //              「应用已启用」由 appTabs() 自身过滤（applyAppTabs 按 APPS_ENABLED 取集）。
-  //   EXT      = 当前预览项目申报的外部卡。**仅**当语境 = EXT 所属项目时进表——ctx = work 看工作项目、
-  //              chat 看预览路由 state.preview（work 分支此时该行不可见，保留只为语境口径完整），
-  //              或正开着该 label 的某张 ext 卡（同上的 mgr id 认领）。
+  // ---------- 注册域：卡片归属语境（2026-10-15 注册域隔离 Step2）----------
+  // 「这张卡在不在域内」的**唯一判据**，四个入口共用（缺一即漏；回归：只滤 tab 而让隐藏卡仍可由路由
+  // 或卡 id 切进主区）：renderMgrTabs 取集 / cardOf 解析（openCard「唯一切卡口」据此拒绝隐藏卡）/
+  // route 的 mgr 分支 + mgr-tabs 点击委托（按**入站**语境快照判，见 chat/route.js）。
+  // 域 = 卡的归属：CARDS（第一方 plugins/preview/session）恒在域内（工具栏卡，与语境无关）；
+  //   app:<id>          工作区根应用 → 仅语境 = 工作区根；
+  //   ext:<label>:<id>  项目外部卡   → 仅语境 = 该 label，且 EXT 运行表当前正属该 label。
+  // 语境（唯一状态源）：work 看工作项目 label、chat 看预览路由 label；**已开着的 app/ext 卡自身即其
+  // 语境**——st.mgr 命名空间占先，故 renderMgr 清掉 state.preview 后 openCard 仍认得自己（点击 tab 后
+  // preview 已清，靠 mgr id 认领）。「应用已启用」由 appTabs() 自身过滤（ext-runtime.applyAppTabs）。
+  // #mgr-tabs 是 chat 侧栏（#chat-panel 内）那一行——work 模式下整块 hidden 不可见，故 work 语境
+  // （state.workProj）只影响「预览/工作项目」这条口径，不另立一套判据。
+  function isCardAllowedInContext(id, st) {
+    if (typeof id !== 'string' || !id) return false
+    if (CARDS.some((c) => c.id === id)) return true
+    const m = typeof st.mgr === 'string' ? st.mgr : ''
+    const raw = (st.sbMode === 'work' ? st.workProj : st.preview) || ''
+    if (id.startsWith('app:')) return m.startsWith('app:') || isGlobalLabel(raw)
+    if (id.startsWith('ext:')) {
+      const label = id.slice(4, id.lastIndexOf(':'))
+      if (!label || extLabel() !== label) return false
+      return m.startsWith('ext:' + label + ':') || raw === label
+    }
+    return false
+  }
+  // 按 id 取卡：**域内才可解析**——隐藏卡一律查无此卡，于是 refreshCard / deactivateCard / openCard
+  // 三个消费点同受此门。**例外 = 当前槽内那张卡**：openCard 切异卡时须能解析离场卡以调其 deactivate，
+  // 而此刻 state.mgr 可能已指向新卡、语境不再匹配，但它在场 ⇒ 必须认。
+  const cardOf = (id) => (isCardAllowedInContext(id, state) || currentCardId() === id
+    ? CARDS.find((c) => c.id === id) || appTabs().find((c) => c.id === id) || extTabs().find((c) => c.id === id)
+    : undefined)
 
   // 侧栏 tab 生成。契约 = <button class="mgr-tab" data-mgr="<id>">，两处消费点据此零改动：
   // app.js 的点击**委托**在 #mgr-tabs 容器上（本函数重渲不清事件）、route.js syncMgrTabs 按 state.mgr 切 .on。
+  // 取集 = 三表合流后**过同一个域判据**（显示与可切入必须同一条：显示过而切入不过 = 串域）。
   // 表变更后的重渲由 ext-runtime 经 setTabRefresh 回调本函数（见文件末的模块体注入）；**语境变更**由
   // 变更点显式调用本函数（applySbMode 的模式切换 / route 末尾 / 切项目），硬性不变量：不得由卡片注册
   // 或应用目录同步直接触发全局重渲，一律经本函数按当前语境取集。
@@ -50,13 +69,8 @@ import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-
   function renderMgrTabs() {
     const box = $('mgr-tabs')
     if (!box) return
-    const onAppCard = typeof state.mgr === 'string' && state.mgr.startsWith('app:')
-    const apps = isGlobalLabel(state.preview) || onAppCard ? appTabs() : []
-    const el = extLabel()
-    const ctx = state.sbMode === 'work' ? state.workProj : state.preview
-    const onExtCard = !!el && typeof state.mgr === 'string' && state.mgr.startsWith('ext:' + el + ':')
-    const ext = el && (onExtCard || ctx === el) ? extTabs() : []
-    const html = CARDS.concat(apps, ext).filter((v) => v.tab)
+    const html = CARDS.concat(appTabs(), extTabs())
+      .filter((v) => v.tab && isCardAllowedInContext(v.id, state))
       .map((v) => `<button class="mgr-tab" data-mgr="${v.id}" title="${esc(v.tip)}">${I[v.icon]}<span>${v.title}</span></button>`)
       .join('')
     if (html === mgrTabsHtml) return
@@ -92,12 +106,14 @@ import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-
     if (curCardEl && curCardEl !== sessionCard && curCardEl.dataset.view === id) return curCardEl
     return makeCard(id)
   }
-  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。未知 id 返回 null（不回落任何视图）。
+  // 切卡唯一入口：查卡 → 换卡 → 交给卡自己的 mount 渲染。**域外 id 一律返回 null**（不回落任何视图，
+  // 也不动槽内现卡——拒绝不该顺带拆掉当前视图）；未知 id 同此口。
   // 生命周期契约：切到**异**卡时先调离场卡的 deactivate()（同 id 复用/软重入不触发，避免整卡重渲
   // 误拆视图态）；会话卡的 deactivate=teardownSessionView（卸净会话态，见 session-card.js）。
   // mount 契约：mount(host, ctx)，host = 卡体元素(.view-body)，ctx = { id, payload, rerender }。
   // 卡内「整卡重渲」（插件卡切 kind/cat）走 ctx.rerender()，由本通道出，卡不反向依赖 registry。
   function openCard(id, payload) {
+    if (!isCardAllowedInContext(id, state)) return null // 注册域门（与 cardOf 同判据）：隐藏卡不得由任何入口切入
     const c = cardOf(id)
     if (!c) return null
     const prev = currentCardId()
@@ -129,6 +145,7 @@ export {
   bootRegistry,
   currentCardId,
   deactivateCard,
+  isCardAllowedInContext,
   openCard,
   refreshCard,
   registerCard,

@@ -12,7 +12,7 @@ import { ALL, bodyEl, state } from '../engine/state.js'
 import { esc, isMobile } from '../core/util.js'
 import { closeMentionPop } from '../inputbar/mention.js'
 import { openCard } from '../engine/registry.js'
-import { bindSessClicks, itemHtml, setPanel } from './recent.js'
+import { bindSessionRows, itemHtml, setPanel } from './recent.js'
 /* @module sidebar/mgr.js */
   // 管理视图统一入口（route 的 mgr 分支 / 侧栏 tab 内切换 / 神经元进出层级）：清会话全局槽后整卡切到 state.mgr。
   function renderMgr() {
@@ -34,7 +34,7 @@ import { bindSessClicks, itemHtml, setPanel } from './recent.js'
     const box = document.createElement('div')
     // 2026-08-25「在一个列表中」堆叠视图：项目会话显示所属项目短编号气泡（Pj16），根会话无气泡
     box.innerHTML = sorted().map((s) => itemHtml(s, true)).join('')
-    bindSessClicks(box)
+    bindSessionRows(box)
     bodyEl.appendChild(box)
   }
 
@@ -79,13 +79,13 @@ import { bindSessClicks, itemHtml, setPanel } from './recent.js'
           }
         }),
       )
-      bindSessClicks(box)
+      bindSessionRows(box)
       bodyEl.appendChild(box)
     } else {
       const root = ALL.filter((s) => s.projectScope !== 'project')
       const box = document.createElement('div')
       box.innerHTML = root.length ? root.map(itemHtml).join('') : '<div class="no-hit" style="padding:10px">暂无根会话</div>'
-      bindSessClicks(box)
+      bindSessionRows(box)
       bodyEl.appendChild(box)
     }
   }

@@ -88,12 +88,34 @@ import { renderList, renderProject } from './mgr.js'
   if (IS_TOUCH_DEVICE) document.body.classList.add('touch')
 
   // ---------- 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸显示完整标题 ----------
-  // #recent-body 是 overflow 裁剪容器，行内加宽必被裁剪；hover 时把该行临时 position:fixed
-  // 浮到原位（fixed 不受祖先 overflow 裁剪），原位插同高占位防行高塌陷，背景/阴影/上移/宽度
-  // 四路同步过渡到「扶起」终态；离开/列表滚动/窗口 resize/SSE 重建立即还原。触摸设备不启用。
+  // #recent-body / #wk-body 都是 overflow 裁剪容器，行内加宽必被裁剪；hover 时把该行临时
+  // position:fixed 浮到原位（fixed 不受祖先 overflow 裁剪），原位插同高占位防行高塌陷，背景/
+  // 阴影/上移/宽度四路同步过渡到「扶起」终态；离开/列表滚动/窗口 resize/SSE 重建立即还原。
+  // 触摸设备不启用。两处列表（chat 侧栏 / work 下沉区）共用本实现，靠 opts.root 区分滚动容器。
   let liftEl = null
   let liftSpacer = null
-  let liftBound = false
+  // 扶起的滚动/滚轮拍回监听按**行所在滚动容器**挂（chat = #recent-body；work 下沉区 = #wk-body）：
+  // 每容器只挂一次（重复挂 = 同一次滚动触发多遍拍回）。窗口 resize 与容器无关，只挂一次。
+  const liftBoundRoots = new WeakSet()
+  let liftWinBound = false
+  function liftBindRoot(root) {
+    if (!liftWinBound) { liftWinBound = true; window.addEventListener('resize', liftClear) }
+    if (!root || liftBoundRoots.has(root)) return
+    liftBoundRoots.add(root)
+    root.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
+    // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
+    // viewport、把 DOM 祖先从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后 Chrome 还会按
+    // 静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达 +0 scroll，
+    // v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表 = 滚动意图：同步拍回 +
+    // 强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
+    // non-passive 保证监听先于默认滚动动作执行。浮窗开着 = 一并关闭（滚轮 = 菜单外交互）。
+    // liftCool 与 scroll 门同参续期：滚轮持续 = 非静止态，防边界拍回/重扶循环。
+    root.addEventListener('wheel', () => {
+      liftCool = Date.now() + 150
+      if (rowMenuPop) closeRowMenu()
+      if (liftEl) { liftClear(true); void root.offsetHeight }
+    }, { passive: false })
+  }
   // 滚动静默期（2026-09-08 侧栏滚轮失效根修）：scroll 后 150ms 内 hover 不扶起。
   // 不变量：扶起（fixed 化+插占位符=布局重排）只发生在列表静止态——滚动中扶起与滚动互搏：
   // 每格滚动触发「拍回删占位符（内容缩一行高）→ hover 重算重扶插占位符（内容长回）」，
@@ -151,45 +173,59 @@ import { renderList, renderProject } from './mgr.js'
       el.style.background = ''; el.style.boxShadow = ''; el.style.transform = ''
       if (target > r.width + 1) el.style.width = target + 'px'
     }
-    if (!liftBound) {
-      liftBound = true
-      bodyEl.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
-      window.addEventListener('resize', liftClear)
-      // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
-      // viewport、把 DOM 祖先 #recent-body 从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后
-      // Chrome 还会按静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达
-      // +0 scroll，v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表=滚动意图：
-      // 同步拍回+强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
-      // non-passive 保证监听先于默认滚动动作执行。浮窗开着=一并关闭（滚轮=菜单外交互）。
-      // liftCool 与 scroll 门同参续期：滚轮持续=非静止态，防边界拍回/重扶循环。
-      bodyEl.addEventListener('wheel', () => {
-        liftCool = Date.now() + 150
-        if (rowMenuPop) closeRowMenu()
-        if (liftEl) { liftClear(true); void bodyEl.offsetHeight }
-      }, { passive: false })
-    }
+    liftBindRoot(opts.root || bodyEl)
   }
-  function bindSessLift(root) {
+  // liftRoot = 行所在的滚动容器：扶起的滚动 / 滚轮拍回监听挂它（见 liftBindRoot）。
+  function bindSessLift(root, liftRoot) {
     // hover 扶起仅桌面指针设备绑定；触屏不启用（iPad 桌面模式 matchMedia 伪装 hover:hover
     // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——触屏长按扶起走 openRowMenu 直调，不经此处
     if (IS_TOUCH_DEVICE || !matchMedia('(hover: hover) and (pointer: fine)').matches) return
+    const lr = liftRoot || bodyEl
     root.querySelectorAll('.sess-item').forEach((el) => {
-      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el) })
+      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el, { root: lr }) })
       el.addEventListener('mouseleave', liftClear)
     })
   }
 
-  function bindSessClicks(root) {
+  // ---------- 会话行协议（2026-10-15 统一 Chat/Work 会话行生命周期）----------
+  // `.sess-item` 在 chat 侧栏（#recent-body / 项目管理卡列表）与 work 下沉区（#wk-body 里的 .wk-chats）
+  // 各渲一份，**行 HTML 本来就是同一份实现（itemHtml）**——行为也必须同源。回归根因：work 侧只在
+  // #wk-body 容器上委托了一段「改 wkMainTab/wkAssist + navigate」，既没接本文件的点击语义（reLiftHash
+  // 重扶 / 移动端收侧栏），也没接 hover 扶起 ⇒ 同一行两模式表现分叉（浮起不一致 / 选中滞后 / 点了
+  // 像没反应）。协议两个出口，谁拥有行谁接线：
+  //   activateSession(hash, { source })  —— 会话激活唯一口
+  //   bindSessionRows(root, { source })  —— 行行为唯一接线口（点击 → activateSession + hover 扶起）
+  // 接线点 = 行节点**新建后**（innerHTML 重写分支里）：chat 侧 renderList/renderProject（mgr.js）/
+  // work 侧 renderWorkBody（work-files.js）。
+
+  // 会话激活唯一口。source='work' 才落 work 页面态（顶栏胶囊 + 聊天栏顶上来）——那是「在下沉区点行」
+  // 的语义；chat 侧栏点行不该改 work 布局。导航 / 移动端收侧栏两模式一致。
+  function activateSession(hash, opts = {}) {
+    if (!hash) return
+    if (opts.source === 'work') {
+      wkEnsureTab(hash) // 显式打开一个会话 = 顶栏占一枚胶囊
+      // 点会话 = 明确要看这个会话：聊天 tab 顶上来（否则文件 tab 占着格，看着像「点了没反应」）
+      state.wkMainTab = 'chat'
+      state.wkAssist = true
+      state.wkAssistMode = 'side'
+    }
+    // 已在该会话内：不 navigate（route→ 重建整列换节点，浮起行随之消亡重扶，闪一次扶起动画）
+    if (hash !== state.currentHash) {
+      reLiftHash = hash // 2026-09-05 重建后重扶被点行（新节点 :hover 不恢复，不重扶=点击即拍回）
+      navigate('#/' + encodeURIComponent(hash))
+    }
+    if (opts.source === 'work') { applyPanes(); saveWork() } // 新胶囊 + active 落地
+    if (isMobile()) setPanel(false)
+  }
+
+  // 行行为接线（点击 + hover 扶起）。**只在行节点新建后调用**：节点未变时重复调用会让同一节点累积
+  // 多份监听。opts.root = 行所在滚动容器（扶起的滚动拍回挂它）；缺省 #recent-body。
+  function bindSessionRows(root, opts = {}) {
+    if (!root) return
+    const liftRoot = opts.root || bodyEl
     root.querySelectorAll('.sess-item').forEach((b) =>
-      b.addEventListener('click', () => {
-        // 已在该会话内：不 navigate（route→renderRecent 会整列重建，浮起行随之消亡重扶，闪一次扶起动画）
-        if (b.dataset.hash === state.currentHash) return
-        reLiftHash = b.dataset.hash // 2026-09-05 重建后重扶被点行（新节点 :hover 不恢复，不重扶=点击即拍回）
-        navigate('#/' + encodeURIComponent(b.dataset.hash))
-        if (isMobile()) setPanel(false)
-      }),
-    )
-    bindSessLift(root)
+      b.addEventListener('click', () => activateSession(b.dataset.hash, opts)))
+    bindSessLift(root, liftRoot)
   }
 
   // ---------- 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；2026-09-27 泛化为注册式）----------
@@ -572,37 +608,42 @@ import { renderList, renderProject } from './mgr.js'
       }
     }
     if (prevTop) bodyEl.scrollTop = prevTop
-    // 2026-09-05 重建后统一重扶出口：① 触屏长按菜单开着 → 按菜单 hash 重扶对应行（浮起须随新节点重建）；
-    // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
-    // 不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标。
-    // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
-    //    光标所在行同样拍回；按最近光标落点重扶。
-    //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
-    if (rowMenuPop && rowMenuTouch) {
-      // 触屏长按的浮起：整列重建会换掉行节点，浮窗（body 下）不受影响但浮起须按行标识重扶
-      reliftRowMenu()
-    } else if (reLiftHash) {
-      const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
-      reLiftHash = null
-      if (el) liftStart(el, { anim: false })
-    } else if (mouseXY && Date.now() >= liftCool) {
-      // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
-      // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
-      // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
-      // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
-      const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
-      if (hit && hit.dataset.hash) liftStart(hit, { anim: false })
-      else if (prevLift &&
-        mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
-        mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
-        // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-        // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
-        const el = [...bodyEl.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
-        if (el) liftStart(el, { anim: false })
-      }
-    }
+    reliftAfterRebuild(bodyEl, prevLift)
     renderBubble()
     renderSearch()
+  }
+
+  // 列表重建后的统一重扶出口（chat 侧栏 renderRecent / work 下沉区 renderWorkBody 共用；root = 该列表
+  // 的滚动容器，prevLift = 重建前的浮起快照，仅 chat 侧提供）。2026-09-05 起的三条线索：
+  // ① 触屏长按菜单开着 → 按菜单行标识重扶（浮窗挂 body 下不受重建影响，浮起须随新节点重建）；
+  // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
+  //    不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标；
+  // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
+  //    光标所在行同样拍回，按最近光标落点重扶。
+  //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
+  function reliftAfterRebuild(root, prevLift) {
+    if (rowMenuPop && rowMenuTouch) { reliftRowMenu(); return }
+    if (reLiftHash) {
+      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
+      reLiftHash = null
+      if (el) liftStart(el, { anim: false, root })
+      return
+    }
+    if (!mouseXY || Date.now() < liftCool) return
+    // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
+    // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
+    // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
+    // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
+    const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
+    if (hit && hit.dataset.hash && root.contains(hit)) { liftStart(hit, { anim: false, root }); return }
+    if (prevLift &&
+      mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
+      mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
+      // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
+      // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
+      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
+      if (el) liftStart(el, { anim: false, root })
+    }
   }
 
   // 管理视图（插件/技能预览，Codex 风格）：渲染到主聊天区（侧栏会话列表保持不变）。
@@ -613,7 +654,8 @@ export function setFirstSendHash(v) { firstSendHash = v }
 
 export {
   IS_TOUCH_DEVICE,
-  bindSessClicks,
+  activateSession,
+  bindSessionRows,
   bindSessLift,
   closeRenameDialog,
   closeRowMenu,
@@ -621,7 +663,6 @@ export {
   confirmRename,
   firstSendHash,
   itemHtml,
-  liftBound,
   liftClear,
   liftCool,
   liftEl,
@@ -633,6 +674,7 @@ export {
   projIdOf,
   registerRowMenu,
   reLiftHash,
+  reliftAfterRebuild,
   reliftRowMenu,
   renameErr,
   renameInput,

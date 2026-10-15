@@ -108,9 +108,14 @@
     updateWkTools()
     const html = wkBodyHtml()
     if (body.innerHTML !== html) {
+      // 重建前先还原浮起：旧行节点随 innerHTML 消亡，浮起态必须强制拍回防孤儿浮卡（与 renderRecent 同口径）
+      liftClear(true)
       body.innerHTML = html
-      // 重渲换掉了行节点：长按浮窗若开着，按行标识把新节点重新扶起（浮窗本身挂在 body 下不受影响）
-      reliftRowMenu()
+      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 扶起），
+      // 实现在 recent.js；**只在重建分支接线**——未重写时节点未变，重复接线会让同一节点累积多份监听。
+      // 滚动容器 #wk-body 一并传入（扶起的滚动/滚轮拍回挂它）。随后按重建前线索重扶（点击导航/悬停）。
+      bindSessionRows(body, { source: 'work', root: body })
+      reliftAfterRebuild(body)
     }
   }
 

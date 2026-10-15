@@ -20,7 +20,7 @@ import { renderMgr } from '../sidebar/mgr.js'
 import { firstSendHash, newWebSession, renderRecent } from '../sidebar/recent.js'
 import { setSbMode, syncWorkTabs, workScopeOk } from '../sidebar/work.js'
 import { clearRailExt, openProjectPreview } from '../feature/preview-frame.js'
-import { openCard, renderMgrTabs } from '../engine/registry.js'
+import { isCardAllowedInContext, openCard, renderMgrTabs } from '../engine/registry.js'
 import { hydrateExtCardId } from '../engine/ext-runtime.js'
 /* @module chat/route.js */
   // ---------- 路由 ----------
@@ -60,6 +60,11 @@ import { hydrateExtCardId } from '../engine/ext-runtime.js'
   function route() {
     closeMentionPop()
     const r = parseRoute()
+    // 入站语境快照（2026-10-15 注册域隔离 Step2）：state.mgr/state.preview 在本函数内会被清空/改写，
+    // 而「这张卡在不在域内」必须按**入站时**的语境判——否则 r.mgr 一旦写进 state.mgr，卡就靠自己的
+    // id 认领了自己（自授权），隐藏卡再度可由手敲/残留路由打开。快照后立刻被下面清空的两行作废，
+    // 只在此处读一次。sbMode/workProj 一并带上（work 语境口径）。
+    const ctx0 = { mgr: state.mgr, preview: state.preview, sbMode: state.sbMode, workProj: state.workProj }
     // work 模式与视图卡（管理/预览）互斥（2026-09-25）：work 主区两栏只在会话卡在场时成立，
     // 进入 mgr/preview 一律强制回 chat 模式（顶部 tab 高亮、#work-panel 显隐、主区 .work 由
     // applySbMode 一并落地）。反向（work 里点开管理 tab）由 mgr-tabs 点击走 navigate → 命中此处。
@@ -88,7 +93,15 @@ import { hydrateExtCardId } from '../engine/ext-runtime.js'
     if (r.name === 'home') renderHome()
     // 外部卡（ext:<label>:<id>）先按缓存回填运行时表再渲染卡：EXT 只活在内存里，刷新直进
     // /manage/ext:… 时表是空的，不先回填则 openCard 查无此卡、主区空白（缓存真源与刷新恢复链见 registry.js）。
-    else if (r.name === 'mgr') { state.mgr = r.mgr; hydrateExtCardId(r.mgr); loadMgrView(); renderMgr() }
+    // 注册域门（2026-10-15 Step2）：回填 EXT 后按 **ctx0**（入站语境）判该卡在不在域内——域外（别的
+    // 项目的外部卡 / 非工作区根语境的 app 卡）退回首页，不得靠 URL 直接切进主区。极端后果（知情取舍）：
+    // 冷启动/刷新停在 /manage/<app|ext> URL 上时 ctx0 无语境 ⇒ 落首页，须经原入口（工作区根/项目预览）
+    // 重新进入——「卡 tab 在什么语境显示」与「卡在什么语境可开」从此是同一条判据。
+    else if (r.name === 'mgr') {
+      hydrateExtCardId(r.mgr)
+      if (!isCardAllowedInContext(r.mgr, ctx0)) { navigate('#/'); return }
+      state.mgr = r.mgr; loadMgrView(); renderMgr()
+    }
     else if (r.name === 'preview') { state.preview = r.label; openProjectPreview(r.label, true) }
     else renderSession(r.hash)
     // 注册域随语境重算（2026-10-15 注册域隔离）：#mgr-tabs 的 EXT 段只在「当前语境 = EXT 所属项目」

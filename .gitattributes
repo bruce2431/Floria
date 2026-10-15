@@ -1,0 +1,34 @@
+# 磁盘 EOL 必须确定，否则「生成物」不可复现。
+#
+# 事故：src/gateway/web-assets.generated.ts 由 scripts/gen-web-assets.ts 把
+# src/gateway/web/** 的**原始字节**做 base64 内嵌。本机 core.autocrlf=true 且此前无
+# .gitattributes——工作区文本文件的 EOL 取决于「git checkout 写成 CRLF」还是「编辑器写成
+# LF」，于是同一份源码会生成两份不同的 base64 表，web-assets.generated.ts 反复变脏
+# （2026-10-15 发现）。
+# 钉死文本资源为 LF；二进制资源显式声明 -text，避免被通配误当文本做 CRLF→LF 改写
+# （2026-10-15 教训：`src/gateway/web/** text eol=lf` 曾把 jpg/mp4/woff2 各吃掉 1~2 字节）。
+# 文本（LF）：html / js / css / json / svg —— 其余（woff2 / jpg / webp / ico / mp4 / webm）为二进制。
+
+src/gateway/web/*.html text eol=lf
+src/gateway/web/*.js   text eol=lf
+src/gateway/web/*.css  text eol=lf
+src/gateway/web/*.json text eol=lf
+src/gateway/web/*.svg  text eol=lf
+src/gateway/web/**/*.html text eol=lf
+src/gateway/web/**/*.js   text eol=lf
+src/gateway/web/**/*.css  text eol=lf
+src/gateway/web/**/*.json text eol=lf
+src/gateway/web/**/*.svg  text eol=lf
+
+src/gateway/web/*.woff2  -text
+src/gateway/web/*.jpg    -text
+src/gateway/web/*.webp   -text
+src/gateway/web/*.ico    -text
+src/gateway/web/*.mp4    -text
+src/gateway/web/*.webm   -text
+src/gateway/web/**/*.woff2 -text
+src/gateway/web/**/*.jpg   -text
+src/gateway/web/**/*.webp  -text
+src/gateway/web/**/*.ico   -text
+src/gateway/web/**/*.mp4   -text
+src/gateway/web/**/*.webm  -text

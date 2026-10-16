@@ -1,5 +1,5 @@
 // 消息渲染基元：工具行/概括折叠/真空状态行（liveFoldBody）+ 状态行判定 + 文件变更判定辅助（子模块见 chat/messages/*）
-import { setImageSrcResolver } from '../core/markdown.js'
+import { setAttachmentResolver, setImageSrcResolver } from '../core/markdown.js'
 import { esc } from '../core/util.js'
 import { findSession } from '../engine/sessions.js'
 import { live } from '../engine/state.js'
@@ -16,6 +16,15 @@ import { toolIcon } from './messages/icons.js'
     const s = findSession(live.curUuid)
     const label = s ? (s.projectLabel || '') : ''
     return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent('.claude/images/' + code)}` : null
+  })
+  // 附件引用取图（2026-10-16）：正文里的 `![](uploads/x.png)`（上传落盘件，会话 cwd 相对）→ 同一
+  // GET /gateway/file 链（label 同口径、path 直接就是正文里那条相对路径）。取不到 label → null
+  // ⇒ 渲染层保留原文。此前这类引用不匹配 MD_IMG_CODE（只认裸文件名）→ 发送后的消息里直接显示
+  // 原始 md 文本 `![…](uploads/…)`（用户实报「上传图片会有类似 [image 的东西」）。
+  setAttachmentResolver((code) => {
+    const s = findSession(live.curUuid)
+    const label = s ? (s.projectLabel || '') : ''
+    return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent(code)}` : null
   })
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）
   const TOOL_NAMES = {

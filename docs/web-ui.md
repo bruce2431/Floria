@@ -212,7 +212,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **链路**：web `.q-item` 点击（事件委托，`cursor:pointer` + `title` 提示）→ `/clients` WS 发 `{type:'queue-nudge', sessionId}` → 网关按会话精确路由（未在线回 status；**不 resumeAndDeliver**——离线会话没有生成流可断）→ CLI `gatewayClient.ts` → `src/bridge/gatewayQueueNudgeHandle.ts`（模块级句柄）→ REPL 注册 handler：**先判活两条（缺一不可）——①有在飞回合**（`abortController` 存活）、**②队列里有可 drain 的用户消息**；**再动作**——`hasForegroundTasks` 命中则 `backgroundAll()`（= Ctrl+B，`tasks/LocalShellTask/LocalShellTask.tsx`）把在跑的 bash/子代理转后台，最后 `requestQueueNudge()` 置位断流标记。headless 无句柄 → 静默忽略。
 
-**气泡归属（不变量）**：**气泡属于文字、不属于图片**——气泡壳（`padding`/`border-radius`/`background`/虚线边框/hover）挂在文字段 `.q-text` 上，`.q-item` 是纯命中盒（`cursor:pointer` + 命中区，自带零壳）；`width: fit-content` 令气泡按文字收窄。归属由 **DOM 结构本身**决定（有无 `.q-text`），无类名、无布尔状态源。三态：纯文本项=一个气泡；纯图项=无 `.q-text` ⇒ 无气泡、整张图即点击体；文字+图项=文字带气泡、图片在气泡外裸渲染（`.q-imgs` 仅在前面有件时留 `margin-top`）。**排队图恒用 `.q-img`，绝不换 `.msg-img`**——lightbox 委托（`chat/messages.js`）只认 `.msg-img` ⇒ 点排队图**结构上不可能**开大图，只触发上面的 `queue-nudge`（与「只有已发送图片才有大图」同一机制，无需额外守卫）。
+**气泡归属（不变量）**：**气泡属于文字、不属于图片**——气泡壳（`padding`/`border-radius`/`background`/虚线边框/hover）挂在文字段 `.q-text` 上，`.q-item` 是纯命中盒（`cursor:pointer` + 命中区，自带零壳）；`width: fit-content` 令气泡按文字收窄。归属由 **DOM 结构本身**决定（有无 `.q-text`），无类名、无布尔状态源。三态：纯文本项=一个气泡；纯图项=无 `.q-text` ⇒ 无气泡、整张图即点击体；文字+图项=文字带气泡、图片在气泡外裸渲染（`.q-imgs` 仅在前面有件时留 `margin-top`）。**排队图恒用 `.q-img`，绝不换 `.msg-img`**——lightbox 委托（`chat/messages.js`）只认 `.msg-img`（及**底栏胶囊 `.img-pill`**，2026-10-16 增：点胶囊缩略图开大图，`.img-x` 排除）⇒ 点排队图**结构上不可能**开大图，只触发上面的 `queue-nudge`（与「只有已发送图片才有大图」同一机制，无需额外守卫）。
 
 **右对齐（`.q-body` 必须是块流）**：`.queue-dock` 整体 `align-items: flex-end`，`.q-body` 内三段（`.q-who`/`.q-text`/`.q-imgs`）须**右缘一致**——`fit-content` 的气泡若不额外处理会落在 q-body **左侧**、与更宽的图片错开成阶梯状，故 `.q-text` 加 `margin-left: auto`、`.q-who` 加 `text-align: right`（同 `.msg.user .who`）、**`.q-imgs` 加 `justify-content: flex-end`**（图片组贴 q-body 右缘）。三个方向必须同时给：`.q-img` 的 `max-width: min(160px, 100%)` 含百分比，百分比在内在尺寸计算阶段不可解析 ⇒ 浏览器按**原始宽**估 `.q-imgs` 的 max-content，`.q-body`（`flex: 1`）被撑得比实渲染的图片宽（实测 259 vs 160 CSS px）⇒ 只给气泡 `margin-left: auto` 时气泡落在 body 右缘、图片留在 body 左缘，右缘错开成阶梯（2026-09-19 实测复现）。**`.q-body` 不得改成 flex 列**：它同时是 `.q-item`（flex 行）的 `flex: 1; min-width: 0` 子项，改 flex 列后 `.q-imgs` 退化为收缩宽度的 flex 子项，`.q-img` 的 `max-width: min(160px, 100%)` 里的 `100%` 变成循环依赖、图片塌成细条（浏览器把该百分比解析到极小值）。
 
@@ -299,14 +299,14 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 23. web 附件上传：+ 浮窗「上传文件」行 + 正文原文引用 / 文件卡片 UI
 
-底栏 + 浮窗「上传」组在「选择图片」行下新增「上传文件…」行：任意类型、可多选，选完即上传（不经输入栏暂存）。上传**往编辑器 doc 插一条 Markdown 原文引用**（图片 `![](uploads/x.png)` 行内直渲、文件 `[名](uploads/x)` 文件名链接），占位路径用**相对路径**（2026-10-15 待办 13）；底栏 `#img-pills` 胶囊行 2026-10-16 待办 6 还原为 `pending*` 内部态的**可见回显**（不产生第二份内容真相，见 §67.3）。
+底栏 + 浮窗「上传」组在「选择图片」行下新增「上传文件…」行：任意类型、可多选，选完即上传（不经输入栏暂存）。**正文引用落点按 target 分**（2026-10-16 待办 2，见 §67.3）：底栏 composer 只进 `#img-pills` 胶囊行、不自动插输入框正文；work 编辑卡插正文引用。引用形态 = 图片 `![](uploads/x.png)` 行内直渲 / 文件 `[名](uploads/x)` 链接，路径用**相对路径**（2026-10-15 待办 13）；底栏 `#img-pills` 胶囊行 2026-10-16 待办 6 还原为 `pending*` 内部态的**可见回显**。
 
 **链路**：
-- **输入态**：`#file-upload` change → `images.js` `addUploadFiles` 逐个 `POST /gateway/upload?name=<文件名>&sid=<当前会话>|&project=<newProject>`（原始字节直传；**落盘跟随会话**——存量会话带 sid、首页尚无会话带 `state.newProject`、纯首页无参落全局根）→ 成功 `pendingFiles.push({name, abs, size})` + `renderImgPills()` 回显文件卡 + `insertAttachmentMarkdown('composer', att)` 往底栏 doc 插 `[名](uploads/…)` 链接。**图片**走 `addImageFiles`：`encodeImg` base64 入 `pendingImages` + 落盘 + 插 `![](uploads/…)`（落盘失败时视觉上行仍有效，仅无引用）。
+- **输入态**：`#file-upload` change → `images.js` `addUploadFiles` 逐个 `POST /gateway/upload?name=<文件名>&sid=<当前会话>|&project=<newProject>`（原始字节直传；**落盘跟随会话**——存量会话带 sid、首页尚无会话带 `state.newProject`、纯首页无参落全局根）→ 成功 `pendingFiles.push({name, abs, size})` + `renderImgPills()` 回显文件卡（**底栏不插正文**；work 编辑卡才 `insertAttachmentMarkdown('work', att)`）。**图片**走 `addImageFiles`：`encodeImg` base64 入 `pendingImages` + 落盘（时间戳名），底栏不插引用 / work 插 `![](uploads/…)`（落盘失败时视觉上行仍有效，仅无引用）。
 - **发送态**：`gwSend` 把待发文件拼 `[文件:<会话 cwd 相对路径>]` 占位进消息文本（与 `[Image #N]` 同位追加；CLI/模型端即普通文本）→ 发送成功清 `pendingFiles`；`syncGwSend` 的 hasContent 计入文件。**相对化**：占位路径由 `send.js` `relUploadPath(abs)` 按**目标会话 cwd** 相对化（`relPath` 纯函数：大小写不敏感逐段比对、`\ /` 通用、跨盘符/无 cwd 退绝对路径）；新会话 jsonl 未落盘无 cwd 源 → wsession 响应附 `cwd` + 网关 `readSession` 记录缺失分支从 id 编码路径派生 cwd。乐观气泡文本不含文件占位。
 - **渲染态**（乐观与落盘同构）：`userBodyHtml` 剥 `[文件:...]` 占位 → `userFilesHtml`/`fileCardsHtml` 渲染**文件卡片**（`.msg-files` 在 `.body`/`.msg-imgs` 之后气泡外下方右对齐，卡片=dshFile 图标 + basename，title=完整路径，**点击复制路径**）；乐观气泡渲 `p.files` 卡片同构；排队区剥占位不渲染卡片。占位文本原样进 `pendingUserMsgs`/转录，剥占位只在渲染层。
 
-**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、9 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；两条链共用 + 浮窗「上传」组，**输出同为一套正文原文引用**（图片行内直渲、文件超链接）。底栏 `#img-pills` 胶囊行仅镜像 `pending*`（缩略图/文件卡 + × 移除），非内容真相；@ 浮窗「上传」组（`uploadedMentionItems`，待办 6）可把本次已上传附件插回正文引用。
+**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、9 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；两条链共用 + 浮窗「上传」组，底栏**输出同为胶囊行**（`pending*` 镜像，非内容真相）；正文引用（图片行内直渲、文件超链接）落 work 编辑卡或经 @ 浮窗「上传」组（`uploadedMentionItems`）插回。
 
 ## 24. 会话间通信来源行：提及 chip 带 sid + 气泡/排队区灰字
 
@@ -877,13 +877,20 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - 可编辑面（用户改勾选态）走 CM6：`editor/editor-transactions.js` `toggleTaskLineCM(view, line, checked)`，经 `editor-api` facade 的 `toggleTask(line, checked)` 调度。
 - **可编辑面渲染**（2026-10-16 待办 2）：vendor GFM 已产出 `TaskMarker` 节点（恰 3 字符 `[ ]`/`[x]`/`[X]`）但 livePreview/markdownStylePlugin 都不渲染它 ⇒ `editor/task-list.js` `edTaskPlugin` 把它 `Decoration.replace` 成真 `<input type=checkbox class="cm-task-checkbox">`（mousedown → `toggleTaskLineCM` 写回 `[ ]`↔`[x]`）。光标/拖选落在该行时显源码（同 wkEdHrPlugin 口径）。**真 `<input>` 两处同源**，禁 CSS 伪元素。
 
-### 67.3 附件 = 正文原文引用（#13）+ 胶囊行镜像（#6 还原）
+### 67.3 附件落点按 target 分 = 底栏胶囊 / work 正文引用（#13 + #6 + 2026-10-16 待办 2）
 
-**附件内容唯一真相 = 正文 Markdown 原文引用**：图片 `![](uploads/x.png)`、文件 `[文件名](uploads/x.pdf)`，上传后经 `editor/editor-attachments.js` `uploadAttachment` / `insertAttachmentMarkdown` **插进编辑器 doc**。
+**落盘**：上传经 `editor/editor-attachments.js` `uploadAttachment` → `POST /gateway/upload` 落 `<会话根>/uploads/`；**落盘名 = 时间戳 `YYYYMMDDHHMMSS.<ext>`**（`uploadStampName`，取代旧客户端原名 + 网关 `-1/-2` 自然数去重）。
 
-- 底栏 `#img-pills` 附件行（2026-10-16 待办 6 还原）**只是 `pendingImages`/`pendingFiles` 内部态的可见回显**——缩略图/文件卡 + `×` 移除（`inputbar/images.js` `renderImgPills`，`#img-pills` 元素在 `index.html` 的 `#input-bar` 内、`#cm-host` 之前，默认 `hidden`）。它不产生第二份内容真相：正文引用照旧由 `insertAttachmentMarkdown` 插入，胶囊只镜像待发附件、发送后随 `clearPending*` 隐藏。
-- **@ 已上传文件**（同轮新增）：@ 浮窗「上传」组列出本次上传的附件（`uploadedMentionItems()` → `mention.js`，`kind:'imgpick'|'filepick'`，选中把同一份正文引用原文写回 doc）。组序首位见 `GROUP_ORDER`。
-- **渲染同源**：图片引用行内直渲（`edAttImgPlugin`，`![](uploads/x)` 原子替换为 `<img class="cm-att-img">`）；消息流侧同口径经 `mdHtml` 渲 `<img class="msg-img md-img">`。历史消息 / 乐观气泡 / 队列 / work 编辑区四处一致。
+**正文引用落点按 `target` 分**（2026-10-16 待办 2 定案，`insertAttachmentMarkdown` 只在这些 target 被调用）：
+- **底栏 composer**：上传/粘贴图片/文件**只进 `#img-pills` 胶囊行**，**不自动往输入框正文插 `![]()` 引用**（`inputbar/images.js addImageFiles` 判 `tgtEd !== 'composer'`）。
+- **work 编辑卡**：插正文引用（图片 `![](uploads/x.png)` 行内直渲、文件 `[名](uploads/x)` 链接）——编辑卡是文档面，正文引用即内容。
+- **@ 浮窗「上传」组**：把本次上传附件插回正文（`uploadedMentionItems()` → `mention.js`，`kind:'imgpick'|'filepick'`）——底栏要引用走此路。组序首位见 `GROUP_ORDER`。
+
+**发送链与正文解耦**：`pendingImages`/`pendingFiles` 仍是发送链内部态（`send.js` 消费 `[Image #N]` 占位 + images base64 视觉上行 / `[文件:占位]` 相对化上行），与正文是否插引用无关。底栏 `#img-pills` 胶囊行（待办 6 还原）是 `pending*` 的**可见回显**——缩略图/文件卡 + `×` 移除（`renderImgPills`，元素在 `#input-bar` 内、`#cm-host` 之前，默认 `hidden`，发送后随 `clearPending*` 隐藏）。
+
+- **渲染同源**：图片引用行内直渲（`edAttImgPlugin`，`![](uploads/x)` 原子替换为 `<img class="cm-att-img">`）——**底栏 composer 与 work 编辑区两宿主同挂该插件**（2026-10-16 待办 1 补齐 work 侧）。**消息流侧同源**（2026-10-16）：`core/markdown.js` 的 `mdInline` 对 `MD_ATT_CODE`（`^(?:\.{1,2}\/)*uploads\/…$`，会话 cwd 相对/跨会话补发两形态）经**注入式** `setAttachmentResolver`（`chat/messages.js` 注册，label 同 `.claude/images` 一条链 → `GET /gateway/file?label=&path=`）渲成 `<img class="msg-img md-att-img">`——此前只认裸文件名（`MD_IMG_CODE`），发送后的消息里直接显示原始 md 文本 `![…](uploads/…)`（用户实报「类似 [image 的东西」）。
+- **正文内联图尺寸 = 文字行高**（2026-10-16 待办 2）：CM 面 `.cm-att-img img`、消息面 `.msg .md-att-img` 同为 `max-height:1.4em`（参考即梦）——正文内联图**只在用户主动引用（@ 艾特 / work 正文引用）时出现**；底栏上传/粘贴图片**不插正文**（只进胶囊）。**胶囊缩略图（`#img-pills .img-pill img`）几何不动**。
+- **大图预览一条链**：胶囊缩略图（`.img-pill`）、消息面正文内联小图（`.msg-img` / `.msg.md-att-img`）、**编辑面正文内联小图（`.cm-att-img`：底栏 @ 引用图 / work 编辑卡上传图）** 都走 `chat/messages/msg-actions.js` 的文档级 lightbox 委托（单例 `#img-lightbox`，点任意处/Esc 关闭），不另起预览实现。编辑面小图接同一委托**不靠新增路径**：`edAttImgPlugin` 的 widget `ignoreEvent()===true` ⇒ CM6 不消费该事件，点击直达 document；匹配臂补 `.cm-att-img` 即成。**注意此处不是 CM6 吞事件**——只认 `.msg-img` 时编辑面点小图无反应纯属匹配臂缺口（2026-10-16 用户实测「发送出来的小图可以、编辑面与编辑卡的不行」）。
 - 可点击区域 = 光标/拖选落在引用区间内即还原源码（widget 不挂），故可编辑。
 
 ### 67.4 选中文本包裹 = CM6 事务命令（#15）
@@ -898,6 +905,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 ### 67.5 已渲染 Markdown 的复制口径（#16）
 
 复制一律经 `editor/editor-clipboard.js` `copyRenderedSelection({selection, container})` → `core/markdown.js` 的 `data-md` 链（`selectionMd` → `messageMd`），底栏 `inputbar/ctx-meter.js` 的**全局复制拦截器**为唯一入口。
+
+- **图片随复制走**（2026-10-16）：拦截器除 `text/plain` 外，经同件 `copyRenderedImages(selection)` 把选区覆盖到的 `img.msg-img` 写成 `text/html`（`<img src=绝对 URL>`）分量。此前拦截器只写 `text/plain` 便 `preventDefault`，**图片被整个丢掉**（「复制图片 → 粘到底栏」得不到任何图）。**粘贴侧**（`inputbar/images.js`）：`clipboardFiles(cd)` = `cd.files` ∪ `cd.items(kind==='file')`（截图/跨应用位图常只落 `items`，旧只读 `files` 恒漏 ⇒ 胶囊「完全不显示」）；无文件时 `clipboardImageUrls(html)` 取 `text/html` 里**同源** `<img>`（跳过 `data:`/跨域）→ `addImageUrls` 拉回字节合成 `File` → 复用 `addImageFiles`（编码/落盘/胶囊全链同路）。底栏 `cmOnPaste` 与 work 编辑卡 `wkEdOnPaste` 同款；有纯文本时不拦（文本照常入正文，图片并行成胶囊）。
 
 - **块级**（`p`/`li`/代码块/数学块）：优先取 `data-md`（原文），无则回落可见文本。
 - **整块数学公式被选中** → 得 `$…$`（行内）/ `$$…$$`（块级）源码，而非 KaTeX 渲染出的字符。

@@ -3,7 +3,8 @@ import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js
 import { surroundExt, wrapKeymap } from '../../editor/editor-transactions.js'
 import { cmMathExt } from '../../editor/cm-math.js'
 import { edTaskPlugin } from '../../editor/task-list.js'
-import { addImageFiles, addUploadFiles } from '../../inputbar/images.js'
+import { edAttImgPlugin } from '../../editor/editor-attachments.js'
+import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from '../../inputbar/images.js'
 /* @module sidebar/work/work-cm.js */
   // ---------- 编辑区（主区左栏） ----------
   // 所有可编辑文本文件（markdown 与代码/纯文本一视同仁）都是常驻 CodeMirror 6 编辑器：整篇恒可编辑，
@@ -101,11 +102,15 @@ import { addImageFiles, addUploadFiles } from '../../inputbar/images.js'
   function wkEdOnPaste(event) {
     if (!wkEdView || wkEdView.state.readOnly) return
     const cd = event.clipboardData
-    const all = Array.from((cd && cd.files) || [])
+    // 文件两态合一（2026-10-16，同底栏 cmOnPaste）：位图常只落 cd.items，旧只读 cd.files 会漏
+    const all = clipboardFiles(cd)
     const imgs = all.filter((f) => /^image\//.test(f.type))
     const docs = all.filter((f) => !/^image\//.test(f.type))
     if (imgs.length) { event.preventDefault(); event.stopPropagation(); addImageFiles(imgs, 'work'); return }
-    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work') }
+    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work'); return }
+    // 无文件但有同源图（消息区复制图片）→ 拉字节插正文引用（编辑卡是文档面，插引用即内容）
+    const urls = clipboardImageUrls(cd && cd.getData ? cd.getData('text/html') : '')
+    if (urls.length) { event.preventDefault(); event.stopPropagation(); addImageUrls(urls, 'work') }
   }
 
   // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
@@ -169,6 +174,7 @@ import { addImageFiles, addUploadFiles } from '../../inputbar/images.js'
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
+        edAttImgPlugin, // 附件行内图片：`![](uploads/x.png)` 原子渲成 <img>（与底栏同件；补「编辑卡片缺图片渲染」）
       ]
     }
     const L = wkEdLangFor(CM, e)

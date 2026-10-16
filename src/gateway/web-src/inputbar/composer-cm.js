@@ -9,7 +9,7 @@ import { surroundExt, wrapKeymap } from '../editor/editor-transactions.js'
 import { edAttImgPlugin } from '../editor/editor-attachments.js'
 import { edTaskPlugin } from '../editor/task-list.js'
 import { cmMathExt } from '../editor/cm-math.js'
-import { addImageFiles, addUploadFiles } from './images.js'
+import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from './images.js'
 /* @module inputbar/composer-cm.js */
   // vendor 全局（index.html 先于 app.js 载入，eval 期取值安全；work-cm.js 同款别名）
   const CMG = window.CMLiveMarkdown
@@ -188,12 +188,23 @@ import { addImageFiles, addUploadFiles } from './images.js'
   function cmOnPaste(event, view) {
     if (gateAwait) return false
     const cd = event.clipboardData
-    const all = Array.from((cd && cd.files) || [])
+    // 文件两态合一（2026-10-16）：截图/从网页或别的应用复制的**位图**只落在 cd.items，cd.files 为空——
+    // 旧 Array.from(cd.files) 恒漏 ⇒ 粘到底栏「完全不显示胶囊」（用户实测）。clipboardFiles 取并集。
+    const all = clipboardFiles(cd)
     const imgs = all.filter((f) => /^image\//.test(f.type))
     // 非图片文件粘贴也进附件链（2026-10-15 待办 13：上传落盘 → 原文插 md 引用，与 + 浮窗「上传文件」同链）
     const docs = all.filter((f) => !/^image\//.test(f.type))
     if (imgs.length) { event.preventDefault(); addImageFiles(imgs); return true }
     if (docs.length) { event.preventDefault(); addUploadFiles(docs); return true }
+    // 剪贴板无文件：从 text/html 里找同源 <img>（消息区选中图片复制 = 只有 html 分量带图）→
+    // 拉回字节 → 复用 addImageFiles 成胶囊。有文本时**不拦**（文本照常入正文，图片并行成胶囊）。
+    const urls = clipboardImageUrls(cd && cd.getData ? cd.getData('text/html') : '')
+    if (urls.length) {
+      addImageUrls(urls)
+      const hasText = !!(cd && cd.getData && cd.getData('text/plain'))
+      if (!hasText) { event.preventDefault(); return true }
+      return false
+    }
     // 纯文本粘贴：CM 天然只收文本（无 text/html 富格式问题），走原生事务保 undo 栈
     if (!cd || !cd.getData('text/plain')) return false
     return false // 文本粘贴交 CM 默认（等价旧 execCommand insertText 的纯文本语义）

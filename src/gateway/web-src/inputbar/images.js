@@ -1,15 +1,12 @@
-// 附件链（2026-10-15 待办 13 改造；2026-10-16 待办 6 还原胶囊行）。
-// 上传（粘贴/拖拽/+ 浮窗）→ 落盘（POST /gateway/upload）→ **原文插 md 引用**：图片 `![名](uploads/x.png)`
-// 行内直渲（editor-attachments.edAttImgPlugin）、文件 `[名](uploads/x)` 文件名链接——**正文引用仍是唯一表达**
-// （v3.36.0 定案不撤，待办 6「增加」= 补缺不替换）。
-// 待办 6 增补两件：
-//   ① **附件胶囊行还原**（`#img-pills`）：pendingImages 缩略图 + pendingFiles 文件卡（× 可移除），
-//      是**发送链内部态的可见回显**（看见待发的附件、随时撤掉），不产生第二份内容真相——正文引用照旧由
-//      insertAttachmentMarkdown 插，胶囊只镜像 pending* 数组。
-//   ② **@ 已上传文件**：本次上传的文件（pendingFiles + 已落盘的图片）进 @ 浮窗「上传」组
-//      （mention.js 消费 uploadedMentionItems），选中插回 md 引用。
+// 附件链（2026-10-15 待办 13 改造；2026-10-16 待办 6 还原胶囊行；2026-10-16 待办 2 收口底栏口径）。
+// 上传（粘贴/拖拽/+ 浮窗）→ 落盘（POST /gateway/upload，落盘名 = 时间戳 `YYYYMMDDHHMMSS.<ext>`）。
+// **正文引用落点按 target 分**（2026-10-16 待办 2 定案）：
+//   · 底栏 composer：**只进附件胶囊行**（`#img-pills`），不自动往输入框正文插 md 引用——胶囊即待发表达。
+//   · work 编辑卡：插正文引用（图片 `![名](uploads/x.png)` 行内直渲 editor-attachments.edAttImgPlugin、
+//     文件 `[名](uploads/x)` 链接）——编辑卡是文档面，正文引用即内容。
+//   · @ 浮窗「上传」组：把本次已上传附件插回正文（mention.js 消费 uploadedMentionItems）——正文引用此路可达。
 // 发送链不变量原样保留：pendingImages/pendingFiles 仍是发送链内部态（send.js 消费：[Image #N] 占位 +
-// images base64 视觉上行 / [文件:占位] 相对化上行）。
+// images base64 视觉上行 / [文件:占位] 相对化上行），与正文是否插引用无关。
 import { toast, esc } from '../core/util.js'
 import { I } from '../core/icons.js'
 import { syncGwSend } from './send.js'
@@ -103,8 +100,9 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
       r.readAsDataURL(file)
     })
   }
-  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列 + 原文件上传落盘 → 原文插 `![名](uploads/x)`
-  // md 引用（CM 行内直渲）。落盘失败时视觉上行仍有效（无 md 引用，发送链 [Image #N] 照旧上行）。
+  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列（胶囊缩略图）+ 原文件上传落盘（时间戳名）。
+  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](uploads/x)`（CM 行内直渲）。
+  // 落盘失败时视觉上行仍有效（无 attName、@ 不可引用，发送链 [Image #N] 照旧上行）。
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
     const tgtEd = target || 'composer'
@@ -116,7 +114,9 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
       const att = await uploadAttachment(f)
       if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
-      if (att) insertAttachmentMarkdown(tgtEd, att)
+      // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
+      // 「不要自动在正文渲染，被图片胶囊劫持」）；work 编辑卡粘贴仍插正文并内联渲染（待办 1）。
+      if (att && tgtEd !== 'composer') insertAttachmentMarkdown(tgtEd, att)
       renderImgPills()
     }
     syncGwSend()
@@ -139,11 +139,68 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
     syncGwSend()
   }
 
+// ---------- 剪贴板取图（2026-10-16：复制→粘到底栏成胶囊）----------
+// 取剪贴板文件：cd.files 与 cd.items(kind==='file') 的并集。截图/从网页或别的应用复制的**位图**
+// 只落在 items（异步 getAsFile），cd.files 为空——旧实现只读 cd.files，故这类粘贴走不到
+// addImageFiles，胶囊行「完全不显示」（用户实测）。files 非空时以 files 为准（items 是其镜像，去重）。
+function clipboardFiles(cd) {
+  if (!cd) return []
+  const files = Array.from(cd.files || [])
+  if (files.length) return files
+  const out = []
+  for (const it of Array.from(cd.items || [])) {
+    if (!it || it.kind !== 'file') continue
+    const f = it.getAsFile()
+    if (f) out.push(f)
+  }
+  return out
+}
+// 从剪贴板 text/html 里取**同源** <img> 的 URL（pathname+search）：消息区选中图片复制时
+// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/image-cache/…">`。
+// 只认同源（跨域取不到字节、data: 无意义）→ 交给 addImageUrls 拉回字节。
+function clipboardImageUrls(html) {
+  const s = String(html || '')
+  if (!s || !/<img\b/i.test(s)) return []
+  let doc
+  try { doc = new DOMParser().parseFromString(s, 'text/html') } catch { return [] }
+  const out = []
+  for (const img of Array.from(doc.querySelectorAll('img'))) {
+    const raw = img.getAttribute('src') || ''
+    if (!raw || /^data:/i.test(raw)) continue
+    let u
+    try { u = new URL(raw, location.href) } catch { continue }
+    if (u.origin !== location.origin) continue
+    out.push(u.pathname + u.search)
+  }
+  return out
+}
+// 把同源图片 URL 拉回字节 → 合成 File → 复用 addImageFiles（编码/落盘/胶囊全链同路，
+// 不另起一套）。取不到的图静默跳过（降级为「少一张」而非整次粘贴失败）。
+async function addImageUrls(urls, target) {
+  const list = Array.from(urls || [])
+  if (!list.length) return
+  const files = []
+  for (const u of list) {
+    try {
+      const r = await fetch(u, { credentials: 'same-origin' })
+      if (!r.ok) continue
+      const b = await r.blob()
+      if (!/^image\//.test(b.type)) continue
+      const ext = (b.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+      files.push(new File([b], 'clipboard.' + ext, { type: b.type }))
+    } catch { /* 跳过取不到的图 */ }
+  }
+  if (files.length) await addImageFiles(files, target)
+}
+
 export {
   addImageFiles,
+  addImageUrls,
   addUploadFiles,
   clearPendingImages,
   clearPendingFiles,
+  clipboardFiles,
+  clipboardImageUrls,
   encodeImg,
   pendingImages,
   pendingFiles,

@@ -3,6 +3,7 @@
 // 公式块由 phAttr 还原 `$…$`/`$$…$$`）。本件是消费门面：selectionMd（选区级）→ 块级 data-md →
 // 纯文本三级降级，供全局 copy 拦截（inputbar/ctx-meter.js 唯一入口）调用。
 import { messageMd, selectionMd } from '../core/markdown.js'
+import { esc } from '../core/util.js'
 /* @module editor/editor-clipboard.js */
 
 
@@ -19,4 +20,22 @@ import { messageMd, selectionMd } from '../core/markdown.js'
     return null
   }
 
-export { copyRenderedSelection }
+  // copyRenderedImages(selection) → `<img src="…">` 片段或 ''（2026-10-16「复制图片」）：
+  // 选区覆盖到的消息图片（.msg-img：气泡外的图片块 + 正文内联小图 + AI 图）→ 绝对 src 的 img 片段，
+  // 由全局 copy 拦截作为 text/html 写进剪贴板。**必须做**——拦截原本只写 text/plain，选中图片复制时
+  // 图片被整个丢掉，粘到底栏什么都得不到（「复制图片底栏没胶囊」根因之一）。绝对 URL 是粘贴端
+  // 的同源判据（见 inputbar/images.clipboardImageUrls）与拉字节的地址。
+  function copyRenderedImages(selection) {
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return ''
+    const out = []
+    for (const img of document.querySelectorAll('img.msg-img')) {
+      let hit = false
+      try { hit = selection.containsNode(img, true) } catch (_) { hit = false }
+      if (!hit) continue
+      const src = img.currentSrc || img.src
+      if (src) out.push(`<img src="${esc(src)}" alt="${esc(img.alt || '')}">`)
+    }
+    return out.length ? '<div>' + out.join('') + '</div>' : ''
+  }
+
+export { copyRenderedImages, copyRenderedSelection }

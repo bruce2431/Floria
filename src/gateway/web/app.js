@@ -529,6 +529,14 @@ function setConnUp(v) { connUp = v }
   const MD_IMG_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/
   let mdImgResolver = null
   const setImageSrcResolver = (fn) => { mdImgResolver = fn }
+  // 附件引用（2026-10-16）：正文里的 `![](uploads/x.png)`——@ 艾特插入 / 上传后发送的原文（会话 cwd
+  // 相对路径，跨会话补发为 `../<项目>/uploads/x`）。渲染成**行内小图**（与文字同高，见 styles.css
+  // `.msg .md-att-img`），类名带 msg-img ⇒ 复用既有 lightbox 委托（点小图看大图、点空白关闭），与
+  // 消息流里的图片是同一条预览链。取图 URL 同样注入（core 不依赖 feature）：无 resolver / 无 label
+  // → 保留原文（不兜底）。
+  const MD_ATT_CODE = /^(?:\.{1,2}\/)*uploads\/[^)\s]+$/
+  let mdAttResolver = null
+  const setAttachmentResolver = (fn) => { mdAttResolver = fn }
 
   // ---------- 数学公式（2026-10-06，仅 web；CLI 侧不渲染，Markdown.tsx 不挂 math 扩展） ----------
   // 支持 $…$ 行内、$$…$$ 块级，另兼容 \(…\) 行内 / \[…\] 块级。抽取必须发生在 esc 之前、且在原文上——
@@ -643,6 +651,11 @@ function setConnUp(v) { connUp = v }
     // 图片代号（AI 生成图）：![](文件名.png) → <img>，code 过白名单 + resolver 拼取图 URL；
     // 不匹配或无 resolver 则保留原文（不兜底）。必须在下方链接替换之前，否则被拆成 ! + <a>。
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, code) => {
+      // 附件引用（uploads/）：行内小图（与文字同高），类含 msg-img ⇒ 与消息图片共用 lightbox
+      if (mdAttResolver && MD_ATT_CODE.test(code)) {
+        const aurl = mdAttResolver(code)
+        if (aurl) return `<img class="msg-img md-att-img" loading="lazy" alt="${alt}" src="${esc(aurl)}">`
+      }
       if (!mdImgResolver || !MD_IMG_CODE.test(code)) return `![${alt}](${code})`
       const url = mdImgResolver(code)
       if (!url) return `![${alt}](${code})`
@@ -2581,6 +2594,15 @@ function setLastNavHash(v) { lastNavHash = v }
     const label = s ? (s.projectLabel || '') : ''
     return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent('.claude/images/' + code)}` : null
   })
+  // 附件引用取图（2026-10-16）：正文里的 `![](uploads/x.png)`（上传落盘件，会话 cwd 相对）→ 同一
+  // GET /gateway/file 链（label 同口径、path 直接就是正文里那条相对路径）。取不到 label → null
+  // ⇒ 渲染层保留原文。此前这类引用不匹配 MD_IMG_CODE（只认裸文件名）→ 发送后的消息里直接显示
+  // 原始 md 文本 `![…](uploads/…)`（用户实报「上传图片会有类似 [image 的东西」）。
+  setAttachmentResolver((code) => {
+    const s = findSession(live.curUuid)
+    const label = s ? (s.projectLabel || '') : ''
+    return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent(code)}` : null
+  })
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）
   const TOOL_NAMES = {
     Read: '阅读', Edit: '编辑', Write: '写入', Grep: '搜索', Glob: '查找文件',
@@ -3046,15 +3068,12 @@ function setLastNavHash(v) { lastNavHash = v }
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
-    if (ids.length) {
-      txt = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
-    } else {
-      // non-vision 模型：CLI 不把 image 块写进消息 content（processUserInput 丢弃，
-      // 见 skipInputImages），display 链无 imageId → 占位符按 id 精确剥的旧条件失效，
-      // 会以 [Image #N] 裸文本上屏。此处全剥：占位是 web 发送端内部令牌，对应图片
-      // 已由 userImgsHtml 依同一批 id 渲染，不剥就重影。
-      txt = txt.replace(/\s*\[Image #\d+\]/g, '')
-    }
+    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ image-cache 文件名 ↔ 图片块
+    // imageId 同源），**永不上屏：无条件全剥**。旧「只剥有 image 块对应的那几个 id」在链上任何一处
+    // 少一张图时（网关曾按 ≤4 张静默截断；non-vision 模型 CLI 丢弃 image 块同理）多出的占位会漏成
+    // 消息裸文本（用户实测 [Image #5] [Image #6] [Image #7]）。对应图片本体由 userImgsHtml 依图片块
+    // imageId（无图片块时回落文本占位）另行渲染，与剥除无关、不重影。
+    txt = txt.replace(/\s*\[Image #\d+\]/g, '')
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
@@ -3124,11 +3143,33 @@ function setLastNavHash(v) { lastNavHash = v }
     document.body.appendChild(lb)
     return lb
   }
+  // 除消息内缩略图外，底栏附件胶囊缩略图（`.img-pill`）也走同链——复用单例 lightbox（禁另起一套），
+  // 胶囊 dataUrl 直接作 src（本地无请求）。（2026-10-16：胶囊点击大图预览）
+  // 注意：`.img-pill img` 恒 `pointer-events:none`（点击落在包裹层），故匹配 `.img-pill` 再取内层 img；
+  // 且须排除 `.img-x`（移除钮）——它也在 `.img-pill` 内，命中则只移除不开预览。
+  // 编辑面内联小图（`.cm-att-img`：底栏 @ 引用图 / work 编辑卡上传图，editor-attachments.edAttImgPlugin
+  // 渲成 `<span class="cm-att-img"><img>`）同链——此前只认 `.msg-img` ⇒ 编辑面点小图无反应（2026-10-16
+  // 用户实测「发送出来的小图可以、编辑面里的不行」）。widget `ignoreEvent()===true` ⇒ 点击直达 document。
   document.addEventListener('click', (e) => {
-    const im = e.target.closest && e.target.closest('.msg-img')
-    if (!im) return
+    const t = e.target
+    if (!t || !t.closest) return
+    let src = ''
+    const mimg = t.closest('.msg-img')
+    if (mimg) src = mimg.currentSrc || mimg.src
+    else {
+      const aimg = t.closest('.cm-att-img')
+      if (aimg) {
+        const im = aimg.querySelector('img')
+        if (im) src = im.currentSrc || im.src
+      } else if (!t.closest('.img-x')) {
+        const pill = t.closest('.img-pill')
+        const im = pill && pill.querySelector('img')
+        if (im) src = im.currentSrc || im.src
+      }
+    }
+    if (!src) return
     const lb = ensureLightbox()
-    lb.querySelector('img').src = im.currentSrc || im.src
+    lb.querySelector('img').src = src
     lb.classList.add('on')
   })
 
@@ -5493,6 +5534,15 @@ function edCmg() {
   function isImageAttachment(name) { return ATT_IMG_RE.test(String(name || '')) }
   function isDocumentAttachment(name) { return !isImageAttachment(name) }
 
+  // 落盘名 = 时间戳 `YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名——取代客户端原名（image.png/image-3.png）
+  // 与服务端 `-1/-2` 自然数去重（2026-10-16 待办）。同一秒内多张极端情形仍由网关去重兜底。
+  function uploadStampName(file) {
+    const ext = (/(\.[A-Za-z0-9]+)$/.exec(file.name || '') || [, ''])[1]
+    const d = new Date()
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ext}`
+  }
+
   // ---------- 上传（与 + 浮窗「上传文件」同一端点/落点/认证链） ----------
   // POST /gateway/upload（原始字节直传）→ 网关落盘 <会话根>/uploads/；sid=当前会话、无会话时
   // project=newSessionProject()（与 gwSend 首送建会话归属同源，保证上传落点=消息会话落点）。
@@ -5502,7 +5552,7 @@ function edCmg() {
       ? '&sid=' + encodeURIComponent(state.currentHash)
       : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     try {
-      const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(file.name || 'file') + ctx), {
+      const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(uploadStampName(file)) + ctx), {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: file,
@@ -5601,6 +5651,24 @@ function edCmg() {
     }
     if (container) return messageMd(container) || null
     return null
+  }
+
+  // copyRenderedImages(selection) → `<img src="…">` 片段或 ''（2026-10-16「复制图片」）：
+  // 选区覆盖到的消息图片（.msg-img：气泡外的图片块 + 正文内联小图 + AI 图）→ 绝对 src 的 img 片段，
+  // 由全局 copy 拦截作为 text/html 写进剪贴板。**必须做**——拦截原本只写 text/plain，选中图片复制时
+  // 图片被整个丢掉，粘到底栏什么都得不到（「复制图片底栏没胶囊」根因之一）。绝对 URL 是粘贴端
+  // 的同源判据（见 inputbar/images.clipboardImageUrls）与拉字节的地址。
+  function copyRenderedImages(selection) {
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return ''
+    const out = []
+    for (const img of document.querySelectorAll('img.msg-img')) {
+      let hit = false
+      try { hit = selection.containsNode(img, true) } catch (_) { hit = false }
+      if (!hit) continue
+      const src = img.currentSrc || img.src
+      if (src) out.push(`<img src="${esc(src)}" alt="${esc(img.alt || '')}">`)
+    }
+    return out.length ? '<div>' + out.join('') + '</div>' : ''
   }
 
 
@@ -6783,11 +6851,15 @@ function edCmg() {
   function wkEdOnPaste(event) {
     if (!wkEdView || wkEdView.state.readOnly) return
     const cd = event.clipboardData
-    const all = Array.from((cd && cd.files) || [])
+    // 文件两态合一（2026-10-16，同底栏 cmOnPaste）：位图常只落 cd.items，旧只读 cd.files 会漏
+    const all = clipboardFiles(cd)
     const imgs = all.filter((f) => /^image\//.test(f.type))
     const docs = all.filter((f) => !/^image\//.test(f.type))
     if (imgs.length) { event.preventDefault(); event.stopPropagation(); addImageFiles(imgs, 'work'); return }
-    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work') }
+    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work'); return }
+    // 无文件但有同源图（消息区复制图片）→ 拉字节插正文引用（编辑卡是文档面，插引用即内容）
+    const urls = clipboardImageUrls(cd && cd.getData ? cd.getData('text/html') : '')
+    if (urls.length) { event.preventDefault(); event.stopPropagation(); addImageUrls(urls, 'work') }
   }
 
   // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
@@ -6851,6 +6923,7 @@ function edCmg() {
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
+        edAttImgPlugin, // 附件行内图片：`![](uploads/x.png)` 原子渲成 <img>（与底栏同件；补「编辑卡片缺图片渲染」）
       ]
     }
     const L = wkEdLangFor(CM, e)
@@ -8917,8 +8990,13 @@ function edCmg() {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
     const text = copyRenderedSelection({ selection: sel }) || sel.toString()
-    if (!text) return
-    e.clipboardData.setData('text/plain', text)
+    // 2026-10-16 图片随复制走：选区覆盖到的消息图片写成 text/html（<img src=绝对 URL>）。此前本拦截
+    // 只写 text/plain 便 preventDefault ⇒ 复制图片时图片被整个丢掉，「复制 → 粘到底栏」得不到任何图。
+    // 两路并存：有文本仍有纯文本（粘成文字），有图片多带 html 分量（粘到底栏 → 拉字节 → 图片胶囊）。
+    const html = copyRenderedImages(sel)
+    if (!text && !html) return
+    if (text) e.clipboardData.setData('text/plain', text)
+    if (html) e.clipboardData.setData('text/html', html)
     e.preventDefault()
   })
   // 模型 seat 的 chevron 是静态 DOM（dsh 移植，随 open 翻转），初始塞入 dsh IconChevronDownOutline14
@@ -9788,12 +9866,23 @@ function edCmg() {
   function cmOnPaste(event, view) {
     if (gateAwait) return false
     const cd = event.clipboardData
-    const all = Array.from((cd && cd.files) || [])
+    // 文件两态合一（2026-10-16）：截图/从网页或别的应用复制的**位图**只落在 cd.items，cd.files 为空——
+    // 旧 Array.from(cd.files) 恒漏 ⇒ 粘到底栏「完全不显示胶囊」（用户实测）。clipboardFiles 取并集。
+    const all = clipboardFiles(cd)
     const imgs = all.filter((f) => /^image\//.test(f.type))
     // 非图片文件粘贴也进附件链（2026-10-15 待办 13：上传落盘 → 原文插 md 引用，与 + 浮窗「上传文件」同链）
     const docs = all.filter((f) => !/^image\//.test(f.type))
     if (imgs.length) { event.preventDefault(); addImageFiles(imgs); return true }
     if (docs.length) { event.preventDefault(); addUploadFiles(docs); return true }
+    // 剪贴板无文件：从 text/html 里找同源 <img>（消息区选中图片复制 = 只有 html 分量带图）→
+    // 拉回字节 → 复用 addImageFiles 成胶囊。有文本时**不拦**（文本照常入正文，图片并行成胶囊）。
+    const urls = clipboardImageUrls(cd && cd.getData ? cd.getData('text/html') : '')
+    if (urls.length) {
+      addImageUrls(urls)
+      const hasText = !!(cd && cd.getData && cd.getData('text/plain'))
+      if (!hasText) { event.preventDefault(); return true }
+      return false
+    }
     // 纯文本粘贴：CM 天然只收文本（无 text/html 富格式问题），走原生事务保 undo 栈
     if (!cd || !cd.getData('text/plain')) return false
     return false // 文本粘贴交 CM 默认（等价旧 execCommand insertText 的纯文本语义）
@@ -11992,8 +12081,9 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       r.readAsDataURL(file)
     })
   }
-  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列 + 原文件上传落盘 → 原文插 `![名](uploads/x)`
-  // md 引用（CM 行内直渲）。落盘失败时视觉上行仍有效（无 md 引用，发送链 [Image #N] 照旧上行）。
+  // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列（胶囊缩略图）+ 原文件上传落盘（时间戳名）。
+  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](uploads/x)`（CM 行内直渲）。
+  // 落盘失败时视觉上行仍有效（无 attName、@ 不可引用，发送链 [Image #N] 照旧上行）。
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
     const tgtEd = target || 'composer'
@@ -12005,7 +12095,9 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       const att = await uploadAttachment(f)
       if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
-      if (att) insertAttachmentMarkdown(tgtEd, att)
+      // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
+      // 「不要自动在正文渲染，被图片胶囊劫持」）；work 编辑卡粘贴仍插正文并内联渲染（待办 1）。
+      if (att && tgtEd !== 'composer') insertAttachmentMarkdown(tgtEd, att)
       renderImgPills()
     }
     syncGwSend()
@@ -12027,6 +12119,60 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     }
     syncGwSend()
   }
+
+// ---------- 剪贴板取图（2026-10-16：复制→粘到底栏成胶囊）----------
+// 取剪贴板文件：cd.files 与 cd.items(kind==='file') 的并集。截图/从网页或别的应用复制的**位图**
+// 只落在 items（异步 getAsFile），cd.files 为空——旧实现只读 cd.files，故这类粘贴走不到
+// addImageFiles，胶囊行「完全不显示」（用户实测）。files 非空时以 files 为准（items 是其镜像，去重）。
+function clipboardFiles(cd) {
+  if (!cd) return []
+  const files = Array.from(cd.files || [])
+  if (files.length) return files
+  const out = []
+  for (const it of Array.from(cd.items || [])) {
+    if (!it || it.kind !== 'file') continue
+    const f = it.getAsFile()
+    if (f) out.push(f)
+  }
+  return out
+}
+// 从剪贴板 text/html 里取**同源** <img> 的 URL（pathname+search）：消息区选中图片复制时
+// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/image-cache/…">`。
+// 只认同源（跨域取不到字节、data: 无意义）→ 交给 addImageUrls 拉回字节。
+function clipboardImageUrls(html) {
+  const s = String(html || '')
+  if (!s || !/<img\b/i.test(s)) return []
+  let doc
+  try { doc = new DOMParser().parseFromString(s, 'text/html') } catch { return [] }
+  const out = []
+  for (const img of Array.from(doc.querySelectorAll('img'))) {
+    const raw = img.getAttribute('src') || ''
+    if (!raw || /^data:/i.test(raw)) continue
+    let u
+    try { u = new URL(raw, location.href) } catch { continue }
+    if (u.origin !== location.origin) continue
+    out.push(u.pathname + u.search)
+  }
+  return out
+}
+// 把同源图片 URL 拉回字节 → 合成 File → 复用 addImageFiles（编码/落盘/胶囊全链同路，
+// 不另起一套）。取不到的图静默跳过（降级为「少一张」而非整次粘贴失败）。
+async function addImageUrls(urls, target) {
+  const list = Array.from(urls || [])
+  if (!list.length) return
+  const files = []
+  for (const u of list) {
+    try {
+      const r = await fetch(u, { credentials: 'same-origin' })
+      if (!r.ok) continue
+      const b = await r.blob()
+      if (!/^image\//.test(b.type)) continue
+      const ext = (b.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+      files.push(new File([b], 'clipboard.' + ext, { type: b.type }))
+    } catch { /* 跳过取不到的图 */ }
+  }
+  if (files.length) await addImageFiles(files, target)
+}
 
   async function gwSend() {
     if (!GATEWAY) return false

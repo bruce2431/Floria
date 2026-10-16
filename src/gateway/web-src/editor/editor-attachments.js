@@ -15,6 +15,15 @@ import { edCmg } from './cm-global.js'
   function isImageAttachment(name) { return ATT_IMG_RE.test(String(name || '')) }
   function isDocumentAttachment(name) { return !isImageAttachment(name) }
 
+  // 落盘名 = 时间戳 `YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名——取代客户端原名（image.png/image-3.png）
+  // 与服务端 `-1/-2` 自然数去重（2026-10-16 待办）。同一秒内多张极端情形仍由网关去重兜底。
+  function uploadStampName(file) {
+    const ext = (/(\.[A-Za-z0-9]+)$/.exec(file.name || '') || [, ''])[1]
+    const d = new Date()
+    const p = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ext}`
+  }
+
   // ---------- 上传（与 + 浮窗「上传文件」同一端点/落点/认证链） ----------
   // POST /gateway/upload（原始字节直传）→ 网关落盘 <会话根>/uploads/；sid=当前会话、无会话时
   // project=newSessionProject()（与 gwSend 首送建会话归属同源，保证上传落点=消息会话落点）。
@@ -24,7 +33,7 @@ import { edCmg } from './cm-global.js'
       ? '&sid=' + encodeURIComponent(state.currentHash)
       : (tgt ? '&project=' + encodeURIComponent(tgt) : '')
     try {
-      const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(file.name || 'file') + ctx), {
+      const r = await fetch(apiUrl('/gateway/upload?name=' + encodeURIComponent(uploadStampName(file)) + ctx), {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: file,

@@ -3545,8 +3545,11 @@ function resumeAndDeliver(sessionId: string, frame: Record<string, unknown>, fb:
 
 // 2026-08-28 遥测端图片上行校验：前端把图片以 base64（无 data: 前缀）随 'send' 上行，
 // 逐项校验后透传给 CLI（CLI 侧 gatewayClient 构造 pastedContents → 与本地粘贴图片同链路）。
-// 限制：≤4 张/条（API 多图保守上限）、单张 base64 ≤7MB（API 限 5MB 二进制，留编码余量）、
-// mediaType 白名单 image/*（png/jpeg/gif/webp）；不合法项静默丢弃。
+// 限制：单张 base64 ≤7MB（API 限 5MB 二进制，留编码余量）、mediaType 白名单 image/*（png/jpeg/gif/webp）。
+// **张数上限归发送方（web 前端 pendingImages ≥9 拦截），本处不再另设更小的数**——2026-10-16 根修：
+// 原 `raw.slice(0, 4)` 的静默截断与前端 9 张上限不一致，第 5 张起被悄悄丢掉，而消息文本里的
+// `[Image #N]` 占位早已按 9 张拼好 → 多出的占位无图可对应，漏成消息裸文本（用户实测
+// [Image #5] [Image #6] [Image #7]）。同一条链上的张数策略只留一个真源（发送方）。
 // 2026-09-06 显式 id 透传：web 前端 2026-09-02 起分配全会话唯一 id（[Image #N] 占位与之一一
 // 对应），此处此前重组时把 id 剥掉 → CLI pastedContentsFromImages 收不到显式号，回落每条从 1
 // 递增——同会话所有带图消息全存 1.png 互覆错图，且占位 [Image #N] 与落盘 imagePasteIds 错位
@@ -3555,7 +3558,7 @@ function resumeAndDeliver(sessionId: string, frame: Record<string, unknown>, fb:
 function sanitizeInboundImages(raw: unknown): Array<{ id?: number; content: string; mediaType: string; filename?: string }> {
   if (!Array.isArray(raw)) return []
   const out: Array<{ id?: number; content: string; mediaType: string; filename?: string }> = []
-  for (const item of raw.slice(0, 4)) {
+  for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const it = item as { id?: unknown; content?: unknown; mediaType?: unknown; filename?: unknown }
     if (typeof it.content !== 'string' || !it.content || it.content.length > 7_000_000) continue

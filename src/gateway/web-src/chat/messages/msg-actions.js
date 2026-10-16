@@ -158,15 +158,12 @@ import { ICON_COPY, writeClipboard } from './usage.js'
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
-    if (ids.length) {
-      txt = txt.replace(new RegExp('\\s*\\[Image #(' + ids.join('|') + ')\\]', 'g'), '')
-    } else {
-      // non-vision 模型：CLI 不把 image 块写进消息 content（processUserInput 丢弃，
-      // 见 skipInputImages），display 链无 imageId → 占位符按 id 精确剥的旧条件失效，
-      // 会以 [Image #N] 裸文本上屏。此处全剥：占位是 web 发送端内部令牌，对应图片
-      // 已由 userImgsHtml 依同一批 id 渲染，不剥就重影。
-      txt = txt.replace(/\s*\[Image #\d+\]/g, '')
-    }
+    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ image-cache 文件名 ↔ 图片块
+    // imageId 同源），**永不上屏：无条件全剥**。旧「只剥有 image 块对应的那几个 id」在链上任何一处
+    // 少一张图时（网关曾按 ≤4 张静默截断；non-vision 模型 CLI 丢弃 image 块同理）多出的占位会漏成
+    // 消息裸文本（用户实测 [Image #5] [Image #6] [Image #7]）。对应图片本体由 userImgsHtml 依图片块
+    // imageId（无图片块时回落文本占位）另行渲染，与剥除无关、不重影。
+    txt = txt.replace(/\s*\[Image #\d+\]/g, '')
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
     // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
@@ -236,11 +233,33 @@ import { ICON_COPY, writeClipboard } from './usage.js'
     document.body.appendChild(lb)
     return lb
   }
+  // 除消息内缩略图外，底栏附件胶囊缩略图（`.img-pill`）也走同链——复用单例 lightbox（禁另起一套），
+  // 胶囊 dataUrl 直接作 src（本地无请求）。（2026-10-16：胶囊点击大图预览）
+  // 注意：`.img-pill img` 恒 `pointer-events:none`（点击落在包裹层），故匹配 `.img-pill` 再取内层 img；
+  // 且须排除 `.img-x`（移除钮）——它也在 `.img-pill` 内，命中则只移除不开预览。
+  // 编辑面内联小图（`.cm-att-img`：底栏 @ 引用图 / work 编辑卡上传图，editor-attachments.edAttImgPlugin
+  // 渲成 `<span class="cm-att-img"><img>`）同链——此前只认 `.msg-img` ⇒ 编辑面点小图无反应（2026-10-16
+  // 用户实测「发送出来的小图可以、编辑面里的不行」）。widget `ignoreEvent()===true` ⇒ 点击直达 document。
   document.addEventListener('click', (e) => {
-    const im = e.target.closest && e.target.closest('.msg-img')
-    if (!im) return
+    const t = e.target
+    if (!t || !t.closest) return
+    let src = ''
+    const mimg = t.closest('.msg-img')
+    if (mimg) src = mimg.currentSrc || mimg.src
+    else {
+      const aimg = t.closest('.cm-att-img')
+      if (aimg) {
+        const im = aimg.querySelector('img')
+        if (im) src = im.currentSrc || im.src
+      } else if (!t.closest('.img-x')) {
+        const pill = t.closest('.img-pill')
+        const im = pill && pill.querySelector('img')
+        if (im) src = im.currentSrc || im.src
+      }
+    }
+    if (!src) return
     const lb = ensureLightbox()
-    lb.querySelector('img').src = im.currentSrc || im.src
+    lb.querySelector('img').src = src
     lb.classList.add('on')
   })
 

@@ -5,7 +5,7 @@ import { stage, progScrollUntil, stageRelease, stageFollow, stageSync } from '..
 import { gateSubmit } from '../engine/auth.js'
 import { gateAwait, gws } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { copyRenderedSelection } from '../editor/editor-clipboard.js'
+import { copyRenderedImages, copyRenderedSelection } from '../editor/editor-clipboard.js'
 import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../engine/state.js'
 import { toast, isMobile } from '../core/util.js'
 import { renderSettle, btnMode } from './approval.js'
@@ -171,8 +171,13 @@ import { setPanel } from '../sidebar/recent.js'
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed) return
     const text = copyRenderedSelection({ selection: sel }) || sel.toString()
-    if (!text) return
-    e.clipboardData.setData('text/plain', text)
+    // 2026-10-16 图片随复制走：选区覆盖到的消息图片写成 text/html（<img src=绝对 URL>）。此前本拦截
+    // 只写 text/plain 便 preventDefault ⇒ 复制图片时图片被整个丢掉，「复制 → 粘到底栏」得不到任何图。
+    // 两路并存：有文本仍有纯文本（粘成文字），有图片多带 html 分量（粘到底栏 → 拉字节 → 图片胶囊）。
+    const html = copyRenderedImages(sel)
+    if (!text && !html) return
+    if (text) e.clipboardData.setData('text/plain', text)
+    if (html) e.clipboardData.setData('text/html', html)
     e.preventDefault()
   })
   // 模型 seat 的 chevron 是静态 DOM（dsh 移植，随 open 翻转），初始塞入 dsh IconChevronDownOutline14

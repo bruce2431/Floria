@@ -316,14 +316,20 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* AI 生成图（2026-10-03）：模型输出 ![](文件名.png) 渲染在回复正文 .blocks 内（不在 .msg-imgs），
    故单列样式；上限 480px 超出收缩，复用 .msg-img 类接入既有 lightbox 委托（点图看大图）。 */
 .msg .blocks .md-img { display: block; max-width: min(100%, 480px); height: auto; border-radius: 10px; margin: 6px 0; cursor: zoom-in; }
+/* 正文内附件引用小图（2026-10-16）：消息正文里的 `![](uploads/x.png)`（@ 艾特插入 / 发送后回显）压到
+   **文字行高**（参考即梦），与 CM 编辑面 .cm-att-img 同口径——正文内联图只在用户主动引用时出现，不做成大图块。
+   类含 msg-img ⇒ 复用既有 lightbox 委托（点小图看大图、点空白关闭），与消息流内图片同一条预览链 */
+.msg .md-att-img { display: inline-block; max-height: 1.4em; max-width: 4.2em; width: auto; height: auto; border-radius: 4px; margin: 0 3px; vertical-align: -0.3em; cursor: zoom-in; }
 /* 任务列表真实复选框（2026-10-15 待办 10）：core/markdown.js 行解析产出
    <input type="checkbox" class="md-task-checkbox" data-task-line disabled>——只读展示（勾选态由源码决定，
    渲染面不改消息内容；可编辑面走 CM6，见 editor-transactions.toggleTaskLineCM）。禁 CSS 伪元素模拟。 */
 .md-task-checkbox { appearance: auto; width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: var(--blue); cursor: default; }
 /* CM6 行内附件图片 widget（2026-10-15 待办 13 / editor-attachments.edAttImgPlugin）：`![](uploads/x)`
-   原子替换为 <img>；光标/拖选落在区间内 = 还原源码（widget 不挂），故此处只管可见态几何。 */
-.cm-att-img { display: inline-block; line-height: 0; margin: 0 2px; vertical-align: middle; }
-.cm-att-img img { max-width: min(100%, 320px); max-height: 160px; border-radius: 8px; display: block; }
+   原子替换为 <img>；光标/拖选落在区间内 = 还原源码（widget 不挂），故此处只管可见态几何。
+   2026-10-16 待办 2：正文内联图压到「和文字一样大小」（参考即梦）——只改此正文渲染几何，胶囊行
+   （#img-pills .img-pill img，尺寸另在下方）不动。 */
+.cm-att-img { display: inline-block; line-height: 0; margin: 0 3px; vertical-align: middle; }
+.cm-att-img img { max-height: 1.4em; max-width: 4.2em; width: auto; border-radius: 4px; display: inline-block; vertical-align: -0.3em; }
 /* CM6 编辑面任务复选框（2026-10-16 待办 2 / editor/task-list.edTaskPlugin）：`- [ ]` 的 TaskMarker
    三字符被替换成真 <input type=checkbox>，点击写回源码（[ ]↔[x]）。与只读面 .md-task-checkbox 同几何，
    区别：可点 + accent 高亮。禁伪元素模拟（须真 input 才能落到 CM widget）。 */
@@ -1123,6 +1129,7 @@ body.kb-open #input-wrap { transition: none; }
   position: relative; flex: none;
   width: 64px; height: 64px;
   border-radius: 12px; overflow: visible;
+  cursor: zoom-in; /* 点击胶囊缩略图 → 大图预览（lightbox，msg-actions 文档级委托；img 恒 pointer-events:none） */
 }
 #img-pills .img-pill img {
   width: 100%; height: 100%;

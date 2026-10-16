@@ -824,10 +824,22 @@ function setConnUp(v) { connUp = v }
   function messageMd(root) {
     return root ? joinMdBlocks(topDataMd(root), (el) => el.dataset.md).trim() : ''
   }
-  // 块内容的起/止边界点：降到最后一级叶子节点。不能用 selectNodeContents——它把边界放在
-  // 元素层 (el,0)/(el,len)，那两点在内容「外侧」，文本选区的边界永远在内容「内侧」，两者
-  // 比较恒不等 ⇒ 覆盖判定必然失败（整段选中也会被当成碎片降级成渲染文本）。
+  // 块内容的起/止边界点 = 块内**首个/末个内容文本节点**（跳过装饰/chrome：KaTeX 的空 <span class="strut">、
+  // 代码块 .code-head、图表 .chart-bar、按钮）。盲降 firstChild/lastChild 会落到这些无文本/旁枝节点上，
+  // 边界点落在内容之外 → isPointInRange 恒 false ⇒ 整块选全也被当成碎片降级成渲染文本（待办 5 根因）。
+  // 块内无内容文本（<hr>、纯图段）回退元素自身边界（元素层点，void 块整块选中时仍成立）。
   function contentEdges(el) {
+    const SKIP = 'button, .code-head, .chart-bar, iframe'
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: (t) => (t.parentElement && t.parentElement.closest(SKIP)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    })
+    let first = null
+    let last = null
+    let n
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue && n.nodeValue.length) { if (!first) first = n; last = n }
+    }
+    if (first) return [[first, 0], [last, last.nodeValue.length]]
     let a = el
     let b = el
     while (a.firstChild) a = a.firstChild
@@ -5334,6 +5346,30 @@ function edCmg() {
     view.dispatch(tr, { scrollIntoView: true })
   }
 
+  // 选中即包裹（待办 4，Obsidian surround）：有非空选区时，敲成对 md 符号（`*` `**` `` ` `` `_` `~`）
+  // **不替换选区**，而是在选区两侧各插一个同符号——`*` 敲两次即 `**…**`。无选区（光标）原样输入，
+  // 故中文 IME 组合（inputHandler 里 from===to）完全不受影响。挂 EditorView.inputHandler（可打印字符
+  // 的唯一输入口），禁绑单字符 keymap（会与 IME/键盘布局打架）。
+  const SURROUND_CH = new Set(['*', '`', '_', '~'])
+  function surroundSelection(view, from, to, text, EditorSelection) {
+    if (!view || view.state.readOnly) return false
+    if (text.length !== 1 || !SURROUND_CH.has(text)) return false
+    const st = view.state
+    if (!st.selection.ranges.some((r) => !r.empty)) return false // 全空选区 = 普通输入
+    const tr = st.changeByRange((range) => {
+      if (range.empty) return { changes: { from: range.from, insert: text }, range: EditorSelection.cursor(range.from + text.length) }
+      const body = st.sliceDoc(range.from, range.to)
+      const ins = text + body + text
+      return { changes: { from: range.from, to: range.to, insert: ins }, range: EditorSelection.range(range.from + text.length, range.to + text.length) }
+    })
+    view.dispatch(tr, { scrollIntoView: true })
+    return true
+  }
+  // 宿主挂载口：composer/work 两编辑面共用同一扩展（同一命令层，无第二套包裹实现）。
+  function surroundExt(CM) {
+    return CM.EditorView.inputHandler.of((view, from, to, text) => surroundSelection(view, from, to, text, CM.EditorSelection))
+  }
+
   // 任务勾选（待办 10 可编辑面）：把第 line 行（1-based）行首列表标记后的 `[ ]` / `[x]` 改写为
   // checked 形态；该行无任务标记则不动（返回 false）。
   function toggleTaskLineCM(view, line, checked) {
@@ -5665,6 +5701,53 @@ function edCmg() {
       }
     }, { decorations: (v) => v.decorations })
   }
+
+
+  const edTaskBoxWidget = class extends edCmg().WidgetType {
+    constructor(view, line, checked) { super(); this.view = view; this.line = line; this.checked = checked }
+    eq(o) { return o.line === this.line && o.checked === this.checked } // 不比较 view（单例宿主）
+    ignoreEvent() { return true } // 事件自管（mousedown），不冒泡给 CM
+    toDOM() {
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.className = 'cm-task-checkbox'
+      box.checked = this.checked
+      box.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const v = this.view
+        if (v && !v.state.readOnly) toggleTaskLineCM(v, this.line, !this.checked)
+      })
+      return box
+    }
+  }
+
+  const edTaskPlugin = edCmg().ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view) }
+    update(u) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view) }
+    build(view) {
+      const CM = edCmg()
+      const st = view.state
+      const activeLines = new Set()
+      for (const r of st.selection.ranges) {
+        const a = st.doc.lineAt(r.from).number
+        const b = st.doc.lineAt(r.to).number
+        for (let l = a; l <= b; l++) activeLines.add(l)
+      }
+      const isDrag = st.field(CM.mouseSelectingField, false)
+      const deco = []
+      CM.syntaxTree(st).iterate({
+        enter: (node) => {
+          if (node.name !== 'TaskMarker') return
+          const line = st.doc.lineAt(node.from)
+          if (activeLines.has(line.number) && !isDrag) return // 本行激活 = 显源码
+          const checked = /^\[[xX]\]$/.test(st.sliceDoc(node.from, node.to))
+          deco.push(CM.Decoration.replace({ widget: new edTaskBoxWidget(view, line.number, checked) }).range(node.from, node.to))
+        },
+      })
+      return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+  }, { decorations: (v) => v.decorations })
 
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
@@ -6672,6 +6755,7 @@ function edCmg() {
       extensions: [
         CM.history(),
         CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap, ...wrapKeymap()]),
+        surroundExt(CM), // 待办 4：选中文本 + 敲 * / ` / _ / ~ → 两侧包裹（不替换选区）
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
         CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
@@ -6686,9 +6770,24 @@ function edCmg() {
     // 聚焦时上报活跃面。既有专属链（评论装饰/补全/保存/热换语言）原样不动，仍走本模块自有符号。
     makeEditorFacade({ id: 'work', view: wkEdView })
     wkEdView.contentDOM.addEventListener('focus', () => editorApiSetActive('work'))
+    // 粘贴图片/文件（待办 7）：编辑卡片直接粘贴 → 上传落盘 + 原文插 md 引用（与底栏同链，
+    // 落点 target='work'）。捕获阶段直挂，先于 CM 自身的粘贴处理；纯文本粘贴不拦（交 CM 默认）。
+    wkEdView.contentDOM.addEventListener('paste', wkEdOnPaste, true)
     if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
     try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
     return wkEdView
+  }
+
+  // 编辑卡片粘贴（待办 7）：剪贴板含图片/文件 → 上传落盘 + 原文插引用（target='work'）。
+  // 纯文本粘贴不拦（返回，交 CM 默认，保留 undo 栈与 IME 语义）。落点=当前项目（newSessionProject）。
+  function wkEdOnPaste(event) {
+    if (!wkEdView || wkEdView.state.readOnly) return
+    const cd = event.clipboardData
+    const all = Array.from((cd && cd.files) || [])
+    const imgs = all.filter((f) => /^image\//.test(f.type))
+    const docs = all.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) { event.preventDefault(); event.stopPropagation(); addImageFiles(imgs, 'work'); return }
+    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work') }
   }
 
   // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
@@ -6751,6 +6850,7 @@ function edCmg() {
         CM.linkPlugin(),
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
+        edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
       ]
     }
     const L = wkEdLangFor(CM, e)
@@ -8776,8 +8876,8 @@ function edCmg() {
     $('file-upload').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
-  // 附件胶囊行（#img-pills）已随 2026-10-15 待办 13 退役：附件 = 原文 md 引用（editor-attachments），
-  // 无独立胶囊 UI，监听随之移除。pendingImages/pendingFiles 只剩发送链内部态（+ 浮窗缩略图仍可移除）。
+  // 附件胶囊行（#img-pills）2026-10-16 待办 6 还原：渲染 + × 移除监听收在 inputbar/images.js
+  // （renderImgPills 自绑），本模块不挂胶囊事件。正文引用仍是唯一内容真相（editor-attachments）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
@@ -9278,7 +9378,7 @@ function edCmg() {
   }
   function mentionChipIcon(kind, ptype) {
     if (kind === 'session') return MENTION_SESSION_ICON
-    if (kind === 'path') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
+    if (kind === 'path' || kind === 'filepick' || kind === 'imgpick') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
     if (kind === 'skill') return MENTION_SKILL_ICON
     return MENTION_PLUGIN_ICON
   }
@@ -9394,6 +9494,8 @@ function edCmg() {
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
+    // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。排最前（GROUP_ORDER 亦首位）。
+    for (const u of uploadedMentionItems()) if (match(u.name)) items.push(u)
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
@@ -9448,6 +9550,14 @@ function edCmg() {
   function selectMentionItem(it) {
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
       pickEnter(it).then(() => { if (mention.open) renderMentionPop() })
+      return
+    }
+    // 已上传附件（待办 6）：把正文 md 引用原文写回 doc（与自动插入同一形态，CM 行内直渲）。
+    if (it.kind === 'imgpick' || it.kind === 'filepick') {
+      const pos = cmView ? cmView.state.selection.main.from : mention.anchor
+      composerReplaceRange(mention.anchor, pos, it.md + ' ')
+      closeMentionPop()
+      syncGwSend()
       return
     }
     if (it.kind === 'path') insertMention('path', it.path, '', 'file')
@@ -9710,6 +9820,7 @@ function edCmg() {
       extensions: [
         cmCM.history(),
         cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap, ...wrapKeymap()]),
+        surroundExt(cmCM), // 待办 4：选中文本 + 敲 * / ` / _ / ~ → 两侧包裹（不替换选区）
         cmCM.EditorView.lineWrapping,
         cmEditComp.of([cmCM.EditorView.editable.of(true), cmCM.EditorState.readOnly.of(false)]),
         cmPhComp.of(cmCM.placeholder(cmPhText)),
@@ -9728,6 +9839,7 @@ function edCmg() {
         cmChipPlugin,
         cmAtomic,
         edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
+        edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox
         cmCM.editorTheme,
         cmThemeSpec(),
         cmCM.EditorView.updateListener.of(cmOnUpdate),
@@ -11792,12 +11904,14 @@ function setApprovalPending(v) { approvalPending = v }
   // 白板内 token 表单：回车提交（无发送按钮）—— 设备配对版已移除输入框，此绑定随 #g-token-input 删除
 
 function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
-  // ---------- 视觉上行内部态（无底栏 UI；发送链 [Image #N] 契约不变，2026-08-28 起同口径） ----------
-  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl}。发送时文本拼 [Image #N] 占位 +
-  // images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
+  // ---------- 视觉上行内部态 ----------
+  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?}。发送时文本拼 [Image #N]
+  // 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
+  // attName = 同次上传落盘后的文件名（`uploads/<attName>` 正文引用的键；落盘失败则无，胶囊照显、@ 不可引用）。
   let pendingImages = []
   function clearPendingImages() {
     pendingImages = []
+    renderImgPills()
     syncGwSend()
   }
   // pendingFiles: {name, abs, size}（落盘文件）。发送时文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行
@@ -11805,7 +11919,47 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   let pendingFiles = []
   function clearPendingFiles() {
     pendingFiles = []
+    renderImgPills()
     syncGwSend()
+  }
+  // ---------- 附件胶囊行（#img-pills）：pending* 的可见回显（待办 6 还原）----------
+  // 图片缩略图 + 文件卡同轨（CSS 见 styles.css #img-pills），× 从 pending* 数组摘除并重渲。
+  // 一次绑定（dataset.bound）防重复挂监听；元素可能随后才入 DOM，故 renderImgPills 每次调用都补绑。
+  function onPillRemove(e) {
+    const b = e.target && e.target.closest ? e.target.closest('.img-x') : null
+    if (!b) return
+    if (b.dataset.i != null && b.dataset.i !== '') pendingImages.splice(+b.dataset.i, 1)
+    else if (b.dataset.f != null && b.dataset.f !== '') pendingFiles.splice(+b.dataset.f, 1)
+    renderImgPills()
+    syncGwSend()
+  }
+  function renderImgPills() {
+    const box = $('img-pills')
+    if (!box) return
+    if (box.dataset.bound !== '1') { box.dataset.bound = '1'; box.addEventListener('click', onPillRemove) }
+    if (!pendingImages.length && !pendingFiles.length) {
+      box.hidden = true
+      box.textContent = ''
+      return
+    }
+    box.hidden = false
+    box.innerHTML =
+      pendingImages
+        .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${esc(p.filename)}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
+        .join('') +
+      pendingFiles
+        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
+        .join('')
+  }
+  // @ 浮窗「上传」组的数据源（mention.js 消费）：本次上传、可被正文引用的附件。
+  // 形态 = {kind:'imgpick'|'filepick', name, md}——md 即选中后写回 doc 的正文引用原文（与自动插入同一形态）。
+  function uploadedMentionItems() {
+    const out = []
+    for (const p of pendingImages) {
+      if (p.attName) out.push({ kind: 'imgpick', name: p.attName, md: `![${p.attName}](uploads/${encodeURIComponent(p.attName)})` })
+    }
+    for (const f of pendingFiles) out.push({ kind: 'filepick', name: f.name, md: `[${f.name}](uploads/${encodeURIComponent(f.name)})` })
+    return out
   }
   // 编码：≤1.5MB 且 png/jpg/webp 直传原 base64（截图文字不重压）；否则 canvas 重编码 jpeg
   // （长边 ≤1568 对齐 API 推荐输入、质量 0.85），把手机照片压到几百 KB 再走 WS。
@@ -11840,13 +11994,19 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   }
   // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列 + 原文件上传落盘 → 原文插 `![名](uploads/x)`
   // md 引用（CM 行内直渲）。落盘失败时视觉上行仍有效（无 md 引用，发送链 [Image #N] 照旧上行）。
-  async function addImageFiles(files) {
+  // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
+  async function addImageFiles(files, target) {
+    const tgtEd = target || 'composer'
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
       if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
-      try { pendingImages.push(await encodeImg(f)) } catch { toast('图片读取失败'); continue }
+      let enc
+      try { enc = await encodeImg(f) } catch { toast('图片读取失败'); continue }
       const att = await uploadAttachment(f)
-      if (att) insertAttachmentMarkdown('composer', att)
+      if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
+      pendingImages.push(enc)
+      if (att) insertAttachmentMarkdown(tgtEd, att)
+      renderImgPills()
     }
     syncGwSend()
   }
@@ -11854,14 +12014,16 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
   // 已开）；首页尚无会话时 project=newSessionProject()——与 gwSend 首送建会话的归属参数同源，
   // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
-  async function addUploadFiles(files) {
+  async function addUploadFiles(files, target) {
+    const tgtEd = target || 'composer'
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
       const att = await uploadAttachment(f)
       if (!att) continue
       pendingFiles.push(att)
       toast('已上传 ' + att.name)
-      insertAttachmentMarkdown('composer', att)
+      insertAttachmentMarkdown(tgtEd, att)
+      renderImgPills()
     }
     syncGwSend()
   }

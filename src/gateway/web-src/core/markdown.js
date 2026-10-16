@@ -307,10 +307,22 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
   function messageMd(root) {
     return root ? joinMdBlocks(topDataMd(root), (el) => el.dataset.md).trim() : ''
   }
-  // 块内容的起/止边界点：降到最后一级叶子节点。不能用 selectNodeContents——它把边界放在
-  // 元素层 (el,0)/(el,len)，那两点在内容「外侧」，文本选区的边界永远在内容「内侧」，两者
-  // 比较恒不等 ⇒ 覆盖判定必然失败（整段选中也会被当成碎片降级成渲染文本）。
+  // 块内容的起/止边界点 = 块内**首个/末个内容文本节点**（跳过装饰/chrome：KaTeX 的空 <span class="strut">、
+  // 代码块 .code-head、图表 .chart-bar、按钮）。盲降 firstChild/lastChild 会落到这些无文本/旁枝节点上，
+  // 边界点落在内容之外 → isPointInRange 恒 false ⇒ 整块选全也被当成碎片降级成渲染文本（待办 5 根因）。
+  // 块内无内容文本（<hr>、纯图段）回退元素自身边界（元素层点，void 块整块选中时仍成立）。
   function contentEdges(el) {
+    const SKIP = 'button, .code-head, .chart-bar, iframe'
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode: (t) => (t.parentElement && t.parentElement.closest(SKIP)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    })
+    let first = null
+    let last = null
+    let n
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue && n.nodeValue.length) { if (!first) first = n; last = n }
+    }
+    if (first) return [[first, 0], [last, last.nodeValue.length]]
     let a = el
     let b = el
     while (a.firstChild) a = a.firstChild

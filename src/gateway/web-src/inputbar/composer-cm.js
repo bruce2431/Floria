@@ -5,8 +5,9 @@
 // setInputText = 全文替换——消费链（send/mention/quote/commands/ctx-meter/live）只认这两口。
 // 旧 #input contenteditable 与 #input-md 渲染层（md-preview.js 整模块）退役。
 import { makeEditorFacade, editorApiSetActive } from '../editor/editor-api.js'
-import { wrapKeymap } from '../editor/editor-transactions.js'
+import { surroundExt, wrapKeymap } from '../editor/editor-transactions.js'
 import { edAttImgPlugin } from '../editor/editor-attachments.js'
+import { edTaskPlugin } from '../editor/task-list.js'
 import { cmMathExt } from '../editor/cm-math.js'
 import { addImageFiles, addUploadFiles } from './images.js'
 /* @module inputbar/composer-cm.js */
@@ -219,6 +220,7 @@ import { addImageFiles, addUploadFiles } from './images.js'
       extensions: [
         cmCM.history(),
         cmCM.keymap.of([...cmCM.defaultKeymap, ...cmCM.historyKeymap, ...wrapKeymap()]),
+        surroundExt(cmCM), // 待办 4：选中文本 + 敲 * / ` / _ / ~ → 两侧包裹（不替换选区）
         cmCM.EditorView.lineWrapping,
         cmEditComp.of([cmCM.EditorView.editable.of(true), cmCM.EditorState.readOnly.of(false)]),
         cmPhComp.of(cmCM.placeholder(cmPhText)),
@@ -237,6 +239,7 @@ import { addImageFiles, addUploadFiles } from './images.js'
         cmChipPlugin,
         cmAtomic,
         edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
+        edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox
         cmCM.editorTheme,
         cmThemeSpec(),
         cmCM.EditorView.updateListener.of(cmOnUpdate),

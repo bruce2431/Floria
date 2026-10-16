@@ -9,6 +9,7 @@ import { findSession, sessionCwd } from '../engine/sessions.js'
 import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
 import { syncGwSend } from './send.js'
+import { uploadedMentionItems } from './images.js'
 import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
 /* @module inputbar/mention.js */
   // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
@@ -185,7 +186,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   }
   function mentionChipIcon(kind, ptype) {
     if (kind === 'session') return MENTION_SESSION_ICON
-    if (kind === 'path') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
+    if (kind === 'path' || kind === 'filepick' || kind === 'imgpick') return ptype === 'dir' ? MENTION_DIR_ICON : MENTION_FILE_ICON
     if (kind === 'skill') return MENTION_SKILL_ICON
     return MENTION_PLUGIN_ICON
   }
@@ -301,6 +302,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
+    // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。排最前（GROUP_ORDER 亦首位）。
+    for (const u of uploadedMentionItems()) if (match(u.name)) items.push(u)
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
@@ -355,6 +358,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   function selectMentionItem(it) {
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
       pickEnter(it).then(() => { if (mention.open) renderMentionPop() })
+      return
+    }
+    // 已上传附件（待办 6）：把正文 md 引用原文写回 doc（与自动插入同一形态，CM 行内直渲）。
+    if (it.kind === 'imgpick' || it.kind === 'filepick') {
+      const pos = cmView ? cmView.state.selection.main.from : mention.anchor
+      composerReplaceRange(mention.anchor, pos, it.md + ' ')
+      closeMentionPop()
+      syncGwSend()
       return
     }
     if (it.kind === 'path') insertMention('path', it.path, '', 'file')

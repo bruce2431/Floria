@@ -96,6 +96,9 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'editor/editor-clipboard.js', part: 1 },
   // CM6 数学插件（2026-10-15 待办 11）：文法取自 core/math-spec.js，两编辑器共用本件（cmMathExt）。
   { file: 'editor/cm-math.js', part: 1 },
+  // CM6 任务列表复选框（2026-10-16 待办 2）：任务行 `- [ ]` 的 TaskMarker 三字符渲成真 <input>，
+  // 点击写回源码（toggleTaskLineCM）。依赖 cm-global + editor-transactions（均在上）。
+  { file: 'editor/task-list.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。

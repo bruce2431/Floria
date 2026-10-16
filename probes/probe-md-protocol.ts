@@ -3,7 +3,9 @@
 // 锁的是「同一份能力只落一处」的协议，而非某个函数的具体写法：
 //   #10 任务列表 → core/markdown.js 产**真** <input type=checkbox>（非 CSS 伪元素），data-md 仍挂整行原文；
 //   #11 数学文法唯一真源 = core/math-spec.js，消息流 + 两条 CM6 链共用（禁第二套正则）；
-//   #13 附件 = 原文 md 引用（禁「底栏胶囊 + 正文引用」两套真相）；
+//   #13/#6 附件 = 原文 md 引用（内容唯一真相）；底栏 #img-pills 胶囊行 2026-10-16 还原为 pending* 回显 + @ 上传组；
+//   #2 任务行 TaskMarker → editor/task-list.js 真 <input>；#4 选中敲 * ` _ ~ → surroundExt 包裹；
+//   #5 contentEdges 用 TreeWalker 取内容文本节点（禁 firstChild 盲降）；
 //   #15 包裹 = editor/editor-transactions 的 CM6 事务（禁直接改 DOM），两宿主共用一张 keymap；
 //   #16 复制 = editor/editor-clipboard 门面收敛到 core/markdown.js 的 data-md 链。
 // 运行：BUN="F:/@WrokSpace/.tools/bun/bun.exe"; "$BUN" probes/probe-md-protocol.ts
@@ -74,6 +76,7 @@ ok(!/r\.from < to && r\.to > from/.test(cmMath), '#11 cm-math 无开区间残留
 
 const composer = read('src/gateway/web-src/inputbar/composer-cm.js')
 const workcm = read('src/gateway/web-src/sidebar/work/work-cm.js')
+const mention = read('src/gateway/web-src/inputbar/mention.js')
 ok(/cmMathExt\(cmCM\)/.test(composer), '#11 底栏挂 cmMathExt')
 ok(/cmMathExt\(CM\)/.test(workcm), '#11 work 编辑区挂 cmMathExt')
 
@@ -95,8 +98,12 @@ const imgs = read('src/gateway/web-src/inputbar/images.js')
 const ctxm = read('src/gateway/web-src/inputbar/ctx-meter.js')
 const idx = read('src/gateway/web/index.html')
 ok(/insertAttachmentMarkdown\(/.test(imgs), '#13 images.js 上传后插原文 md 引用')
-ok(!/renderImgPills/.test(imgs), '#13 images.js 不再导出 renderImgPills（胶囊退役）')
-ok(!/<div id="img-pills"/.test(idx) && !/\$\('img-pills'\)|getElementById\('img-pills'\)/.test(ctxm), '#13 #img-pills 元素已移除且无活引用（仅注释留痕）')
+ok(/function renderImgPills\(/.test(imgs) && /uploadedMentionItems/.test(imgs), '#6 images.js 胶囊行还原 + @ 上传组数据源')
+ok(/<div id="img-pills"/.test(idx) && /\$\('img-pills'\)/.test(imgs), '#6 #img-pills 元素在 index.html、images.js 有活引用')
+ok(/uploadedMentionItems/.test(mention) && /imgpick/.test(mention), '#6 mention.js 消费「上传」组（imgpick/filepick）')
+const tasklist = read('src/gateway/web-src/editor/task-list.js')
+ok(/edTaskPlugin/.test(tasklist) && /TaskMarker/.test(tasklist) && /toggleTaskLineCM/.test(tasklist), '#2 task-list.js TaskMarker → 真 input 写回源码')
+ok(/function contentEdges\(/.test(mkSrc) && /createTreeWalker/.test(mkSrc), '#5 contentEdges 改 TreeWalker（不做 firstChild 盲降）')
 ok(/copyRenderedSelection/.test(ctxm) && !/selectionMd\b/.test(ctxm.match(/import[^\n]*/g)?.join('\n') || ''), '#16 ctx-meter 复制走 editor-clipboard 门面')
 const attach = read('src/gateway/web-src/editor/editor-attachments.js')
 ok(/!\[[^\]]*\]\(/.test(attach) && /\[[^\]]*\]\(/.test(attach), '#13 图片 `![]()` / 文件 `[]()` 两种引用形态')
@@ -104,11 +111,12 @@ ok(/edAttImgPlugin/.test(attach), '#13 图片引用行内直渲（edAttImgPlugin
 
 // 拼接注册 + 样式
 const bundle = read('scripts/bundle-web-modules.ts')
-for (const f of ['core/math-spec.js', 'editor/cm-global.js', 'editor/editor-transactions.js', 'editor/editor-api.js', 'editor/editor-markdown.js', 'editor/editor-attachments.js', 'editor/editor-clipboard.js', 'editor/cm-math.js']) {
+for (const f of ['core/math-spec.js', 'editor/cm-global.js', 'editor/editor-transactions.js', 'editor/editor-api.js', 'editor/editor-markdown.js', 'editor/editor-attachments.js', 'editor/editor-clipboard.js', 'editor/cm-math.js', 'editor/task-list.js']) {
   ok(bundle.includes(`file: '${f}'`), `bundle 注册 ${f}`)
 }
 const css = read('src/gateway/web/styles.css')
 ok(/\.md-task-checkbox \{/.test(css), '#10 styles.css 有 .md-task-checkbox')
+ok(/\.cm-task-checkbox \{/.test(css) && /#img-pills \{/.test(css), '#2/#6 styles.css 有 .cm-task-checkbox 与 #img-pills 胶囊样式')
 ok(/\.cm-att-img/.test(css), '#13 styles.css 有 .cm-att-img（行内图片）')
 
 console.log(`\n[probe-md-protocol] PASS=${pass} FAIL=${fail}`)

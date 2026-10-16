@@ -130,8 +130,8 @@ import { setPanel } from '../sidebar/recent.js'
     $('file-upload').value = '' // 允许重复选同一文件
     closeCmdPop()
   })
-  // 附件胶囊行（#img-pills）已随 2026-10-15 待办 13 退役：附件 = 原文 md 引用（editor-attachments），
-  // 无独立胶囊 UI，监听随之移除。pendingImages/pendingFiles 只剩发送链内部态（+ 浮窗缩略图仍可移除）。
+  // 附件胶囊行（#img-pills）2026-10-16 待办 6 还原：渲染 + × 移除监听收在 inputbar/images.js
+  // （renderImgPills 自绑），本模块不挂胶囊事件。正文引用仍是唯一内容真相（editor-attachments）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
   // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，

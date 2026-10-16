@@ -20,6 +20,30 @@ import { edCmg } from './cm-global.js'
     view.dispatch(tr, { scrollIntoView: true })
   }
 
+  // 选中即包裹（待办 4，Obsidian surround）：有非空选区时，敲成对 md 符号（`*` `**` `` ` `` `_` `~`）
+  // **不替换选区**，而是在选区两侧各插一个同符号——`*` 敲两次即 `**…**`。无选区（光标）原样输入，
+  // 故中文 IME 组合（inputHandler 里 from===to）完全不受影响。挂 EditorView.inputHandler（可打印字符
+  // 的唯一输入口），禁绑单字符 keymap（会与 IME/键盘布局打架）。
+  const SURROUND_CH = new Set(['*', '`', '_', '~'])
+  function surroundSelection(view, from, to, text, EditorSelection) {
+    if (!view || view.state.readOnly) return false
+    if (text.length !== 1 || !SURROUND_CH.has(text)) return false
+    const st = view.state
+    if (!st.selection.ranges.some((r) => !r.empty)) return false // 全空选区 = 普通输入
+    const tr = st.changeByRange((range) => {
+      if (range.empty) return { changes: { from: range.from, insert: text }, range: EditorSelection.cursor(range.from + text.length) }
+      const body = st.sliceDoc(range.from, range.to)
+      const ins = text + body + text
+      return { changes: { from: range.from, to: range.to, insert: ins }, range: EditorSelection.range(range.from + text.length, range.to + text.length) }
+    })
+    view.dispatch(tr, { scrollIntoView: true })
+    return true
+  }
+  // 宿主挂载口：composer/work 两编辑面共用同一扩展（同一命令层，无第二套包裹实现）。
+  function surroundExt(CM) {
+    return CM.EditorView.inputHandler.of((view, from, to, text) => surroundSelection(view, from, to, text, CM.EditorSelection))
+  }
+
   // 任务勾选（待办 10 可编辑面）：把第 line 行（1-based）行首列表标记后的 `[ ]` / `[x]` 改写为
   // checked 形态；该行无任务标记则不动（返回 false）。
   function toggleTaskLineCM(view, line, checked) {
@@ -53,4 +77,4 @@ import { edCmg } from './cm-global.js'
     ]
   }
 
-export { insertAtCursorCM, toggleTaskLineCM, wrapKeymap, wrapSelectionCM }
+export { insertAtCursorCM, surroundExt, toggleTaskLineCM, wrapKeymap, wrapSelectionCM }

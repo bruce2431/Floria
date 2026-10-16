@@ -18,10 +18,10 @@
 - **设备配对授权**：新设备连入时授权门出一次性配对码，PC 端 `/server auth add <配对码>` 完成授权；票证持久化挂域 cookie，换网不重复授权。
 - **实时处理折叠 + 回复操作条**：处理中折叠流式展开旁白/思考/工具步 + 「正在处理」实时计时；回复落地自动收起为「已处理 X」（计时定格），仅保留总结。回复操作条含复制（按块级标签还原原始 markdown）/ 用量明细面板（本轮+合计/缓存/模型）/ 时间。
 - **动态模型定价**：`/cost` 与状态行按厂商官网价目页实时计价（官网未列才回落 models.dev 目录，都没有记 0、不套别的模型费率）；峰谷只对价目带 period 的模型生效（DeepSeek；周末 + 法定节假日自动抓取判空闲）。恢复会话的金额从转录派生重新计价、不落盘任何计数器。
-- **视图卡片化 + chat ⇄ work 双模式**：web 主区一视图一卡（注册表 `views/registry.js`，`#chat-area` 为无形共享槽）；`floria·work` 为 Prism 式工作区——侧栏白卡 + 编辑/聊天下沉洞 + 预览常驻右栏 + 顶栏会话胶囊；编辑区统一 CodeMirror 6（markdown Live Preview + 代码高亮）+ 自动保存。
+- **视图卡片化 + chat ⇄ work 双模式**：web 主区一视图一卡（注册表 `views/registry.js`，`#chat-area` 为无形共享槽）；`floria·work` 为 Prism 式工作区——侧栏白卡 + 编辑/聊天下沉洞 + 预览常驻右栏 + 顶栏会话胶囊；编辑区统一 CodeMirror 6（markdown Live Preview + 代码高亮 + `- [ ]` 任务清单真复选框 + 选中敲 `*`/`` ` ``/`_`/`~` 成对包裹）+ 自动保存。
 - **夜晚模式**：`<html data-theme>` 驱动，缺省跟随系统 `prefers-color-scheme`，手动切换写 `localStorage['floria-theme']`。
 - **消息渲染增强**：数学公式 KaTeX（`$…$` / `$$…$$`，仅 web）、```chart 双段围栏（web 渲 html / CLI 显 ascii）、围栏代码块 codex 化（头栏 + 语法高亮 + 软换行）、轮次导航轨、底栏任务栏浮窗、全局统一滚动条。
-- **带图/带文件消息全链**：web 端拖拽/粘贴上传图片（一次最多 9 张）与任意文件（胶囊/卡片），气泡内联缩略图 + lightbox 查看；CLI/web 双端渲染一致。
+- **带图/带文件消息全链**：web 端拖拽/粘贴上传图片（一次最多 9 张）与任意文件，上传即在原处插 md 引用（编辑区/底栏行内直渲缩略图），附件胶囊行镜像待发项（可单个移除），`@` 浮窗「上传」组引用本次已上传附件；发送后气泡内联缩略图 + lightbox 查看；CLI/web 双端渲染一致。
 - **生图能力层（provider-neutral，`services/imagegen/`）**：按 `imageCapabilities[model].outputImage` 判定输出侧生图模型——会话模型即生图模型走**直连链**（请求经 fetch 覆写转生图核心），否则文本模型会话按运行态挂 **`ImageGeneration` 工具**编排生图（回落凭据池 `tools.image` 绑定的 provider，让只有 deepseek 的会话也能编排另一家的生图模型）。厂商协议差异只在 adapter（首个 `adapters/gemini.ts`）；展示链（`.claude/images/` 落盘 + `![](文件名)` 回填 + `/gateway/file` + CLI/web markdown 渲染）全复用、零前端改动。
 - **项目评论批注**：work 右栏评论 tab + 文件内选中「添加评论」，存 `<项目>/.claude/comments.json`，原文内联标记 + 定位回跳。
 - **远程审批**：CLI 权限弹窗实时中继为 web 审批卡，iPad/手机可远程批准/拒绝，双端竞速先操作者生效。

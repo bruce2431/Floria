@@ -1,7 +1,9 @@
 // 编辑区 CodeMirror6 引擎：建视图 / 热换语言 / 主题 / 评论行装饰 / 选区行号（惰性建单例）。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js'
-import { wrapKeymap } from '../../editor/editor-transactions.js'
+import { surroundExt, wrapKeymap } from '../../editor/editor-transactions.js'
 import { cmMathExt } from '../../editor/cm-math.js'
+import { edTaskPlugin } from '../../editor/task-list.js'
+import { addImageFiles, addUploadFiles } from '../../inputbar/images.js'
 /* @module sidebar/work/work-cm.js */
   // ---------- 编辑区（主区左栏） ----------
   // 所有可编辑文本文件（markdown 与代码/纯文本一视同仁）都是常驻 CodeMirror 6 编辑器：整篇恒可编辑，
@@ -71,6 +73,7 @@ import { cmMathExt } from '../../editor/cm-math.js'
       extensions: [
         CM.history(),
         CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap, ...wrapKeymap()]),
+        surroundExt(CM), // 待办 4：选中文本 + 敲 * / ` / _ / ~ → 两侧包裹（不替换选区）
         CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
         CM.autocompletion({ override: [wkEdCompletionSource] }),
         wkEdLangComp.of(wkEdLangExt('')),
@@ -85,9 +88,24 @@ import { cmMathExt } from '../../editor/cm-math.js'
     // 聚焦时上报活跃面。既有专属链（评论装饰/补全/保存/热换语言）原样不动，仍走本模块自有符号。
     makeEditorFacade({ id: 'work', view: wkEdView })
     wkEdView.contentDOM.addEventListener('focus', () => editorApiSetActive('work'))
+    // 粘贴图片/文件（待办 7）：编辑卡片直接粘贴 → 上传落盘 + 原文插 md 引用（与底栏同链，
+    // 落点 target='work'）。捕获阶段直挂，先于 CM 自身的粘贴处理；纯文本粘贴不拦（交 CM 默认）。
+    wkEdView.contentDOM.addEventListener('paste', wkEdOnPaste, true)
     if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
     try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
     return wkEdView
+  }
+
+  // 编辑卡片粘贴（待办 7）：剪贴板含图片/文件 → 上传落盘 + 原文插引用（target='work'）。
+  // 纯文本粘贴不拦（返回，交 CM 默认，保留 undo 栈与 IME 语义）。落点=当前项目（newSessionProject）。
+  function wkEdOnPaste(event) {
+    if (!wkEdView || wkEdView.state.readOnly) return
+    const cd = event.clipboardData
+    const all = Array.from((cd && cd.files) || [])
+    const imgs = all.filter((f) => /^image\//.test(f.type))
+    const docs = all.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) { event.preventDefault(); event.stopPropagation(); addImageFiles(imgs, 'work'); return }
+    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work') }
   }
 
   // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
@@ -150,6 +168,7 @@ import { cmMathExt } from '../../editor/cm-math.js'
         CM.linkPlugin(),
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
+        edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
       ]
     }
     const L = wkEdLangFor(CM, e)

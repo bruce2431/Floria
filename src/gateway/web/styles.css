@@ -324,6 +324,10 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    原子替换为 <img>；光标/拖选落在区间内 = 还原源码（widget 不挂），故此处只管可见态几何。 */
 .cm-att-img { display: inline-block; line-height: 0; margin: 0 2px; vertical-align: middle; }
 .cm-att-img img { max-width: min(100%, 320px); max-height: 160px; border-radius: 8px; display: block; }
+/* CM6 编辑面任务复选框（2026-10-16 待办 2 / editor/task-list.edTaskPlugin）：`- [ ]` 的 TaskMarker
+   三字符被替换成真 <input type=checkbox>，点击写回源码（[ ]↔[x]）。与只读面 .md-task-checkbox 同几何，
+   区别：可点 + accent 高亮。禁伪元素模拟（须真 input 才能落到 CM widget）。 */
+.cm-task-checkbox { appearance: auto; width: 14px; height: 14px; margin: 0 4px 0 0; vertical-align: -2px; accent-color: var(--blue); cursor: pointer; }
 /* 用户消息文件卡片（2026-09-12 文件上传定案：像图片一样有 UI）——.msg-files 在 .body/.msg-imgs
    之后，气泡外下方右对齐；点击复制落盘路径（title=完整路径悬停可看） */
 .msg .msg-files { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-top: 5px; }

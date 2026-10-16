@@ -189,7 +189,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 **模块布局**：
 - `app.js` 入口=import 群 + 事件绑定 + 启动序列
 - `core/`（**叶子**：无状态/无连接/无订阅，可被任意层依赖）：icons（SVG 图标）、util（HTML 转义/toast/设备判定/新会话落项目）、storage（localStorage 读写 + mgrView/work 槽恢复，`loadWork`/`loadWorkSlot` 收 defaults 参数、不依赖 feature）、char（角色形象，自持 `charEl`）、markdown（渲染，`mdHtml` 入口）、ui-state（纯数据 `state` 对象字面量，`engine/state.js` 转出）、mention-syntax（@提及/引用的 6 正则 + 4 chip-html 纯符号，供 markdown 与 inputbar 共用）、math-spec（**数学公式文法唯一真源**：四分隔符 `MATH_SRC_*` 正则源串 + `MATH_EXTRACT_ORDER` 抽取序 + 行内合法性 `mathInlineOk`；消息流 `extractMath` 与 CM6 `editor/cm-math.js` 共用，**禁任一条链另写第二套正则**，见 §67.1）
-- `editor/`（**编辑内核模块组**：CM6 共享能力，被底栏 composer（`inputbar/composer-cm.js`）与 work 编辑区（`sidebar/work/work-cm.js`）两宿主共用，7 件）：`editor-api`（`makeEditorFacade({id:'composer'|'work'})` + `ED_EDITORS` 注册表 + `editorCommand(name,payload,target)` 统一调度）、`editor-transactions`（`wrapSelectionCM` 选区包裹 / `toggleTaskLineCM` 勾选翻转，CM6 事务命令）、`editor-markdown`、`editor-attachments`（`uploadAttachment`/`insertAttachmentMarkdown`，见 §67.3）、`editor-clipboard`（`copyRenderedSelection`，见 §67.5）、`cm-global`（CM6 全局主题宿主）、`cm-math`（`cmMathExt` 数学插件，文法取自 `core/math-spec.js`，见 §67.1）
+- `editor/`（**编辑内核模块组**：CM6 共享能力，被底栏 composer（`inputbar/composer-cm.js`）与 work 编辑区（`sidebar/work/work-cm.js`）两宿主共用，8 件）：`editor-api`（`makeEditorFacade({id:'composer'|'work'})` + `ED_EDITORS` 注册表 + `editorCommand(name,payload,target)` 统一调度）、`editor-transactions`（`wrapSelectionCM` 选区包裹 / `toggleTaskLineCM` 勾选翻转 / `surroundExt`（待办 4：选中敲 `* ` ` _ ~` 两侧成对包裹，挂 `EditorView.inputHandler`），CM6 事务命令）、`editor-markdown`、`editor-attachments`（`uploadAttachment`/`insertAttachmentMarkdown`，见 §67.3）、`editor-clipboard`（`copyRenderedSelection`，见 §67.5）、`cm-global`（CM6 全局主题宿主）、`cm-math`（`cmMathExt` 数学插件，文法取自 `core/math-spec.js`，见 §67.1）、`task-list`（`edTaskPlugin`：`- [ ]` 的 `TaskMarker` 渲成真 `<input type=checkbox>`、点击写回源码，见 §67.2）
 - `engine/`（**引擎**：持状态/连接/订阅，或仅向下依赖 core）：state（元素引用/共享可变态/媒体工具）、live（SSE 会话事件）、gateway（WS 连接/审批中继/apiSetModel）、sessions（会话映射/排序）、auth（门禁认证/设备认证）、viewport（可视视口/键盘几何）、panel（侧栏开合核 `applyPanelOpen`/`closePanel`，见 §53）、registry（**卡契约**：第一方 `CARDS` 表 + 单通道 `openCard`/`deactivateCard`/`registerCard`/`refreshCard` + `renderMgrTabs`/`bootRegistry` 槽位生命周期 + 语境门控（入表判据一律取自 `state.preview`/`state.mgr`，不 import sidebar），engine 永不 import views；顶层 `setTabRefresh(renderMgrTabs)` 把重渲口交给 ext-runtime）、ext-runtime（**外部卡运行时**：`EXT`/`APP_TABS`/`QACTIONS` 三表 + 申报缓存 `EXT_LABEL`（读口 `extLabel()`，另有 `isGlobalLabel()` 供 registry 判「语境 = 工作区根」）+ 浮窗动作表 `registerQuoteActions`/`clearQuoteActions`/`quoteActions` + 应用目录 `APP_CATALOG`/`setAppEnabled`/`syncGlobalPlugins` + `setExtCardRenderer`/`setTabRefresh`，2026-10-10 自 registry.js 拆出）、ext-decl（外部申报**纯校验** `isExtPath`/`normExtCards`/`normQuoteActions` + 壳 src 串 `extCardSrc`）
 - `sidebar/`：mgr-data（管理视图数据源 + 模型供应商映射）、recent(最近会话/拖宽)、mgr（管理视图编排 + 侧栏最近列表/项目树）、bubble-search、rail-ext（预览页注册的快捷按钮，见 §39）、**work-state**（work 槽状态定义与持久化：`workSlots[<label>]` + `loadWorkSlot`，含槽专属键 `activeChat`/`panelPinned`，见 §68.1）、**work-context**（当前项目语境派发：`stashWorkSlot`/`switchWorkProject`/`enforceWorkScope` + `kind`，见 §68.1）、work（**门面**：原 import 面 + 常量/state/scope）、work/**（work 模式 10 件：work-layout 布局落地 / work-preview 预览帧+页态+顶栏 / work-assist 列宽分界条+助手三态 / work-files 侧栏列表+文件树+自动对账 / work-cm CodeMirror6 引擎 / work-editor 评论标记+renderEditor+读写保存冲突 / work-rows 文件行操作+newWorkChat / work-mount 事件+initWork / work-canvas `.canvas` 画布视图 / work-tabmenu 顶栏胶囊右键菜单，见 §43/§54/§58）、work-tools（右栏工具注册表，见 §58）、comments（评论面板，见 §55/§58）
 - `inputbar/`：ctx-meter（ContextMeter/纯文本粘贴）、mention（@提及）、commands（命令菜单）、model-select（模型选择/状态域）、approval（审批卡/回合态/takeover/任务浮窗）、images（图片附件 + 文件上传）、quote（编辑器/消息流选区引用浮窗，见 §47）、send（gwSend/syncGwSend）
@@ -299,14 +299,14 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 ## 23. web 附件上传：+ 浮窗「上传文件」行 + 正文原文引用 / 文件卡片 UI
 
-底栏 + 浮窗「上传」组在「选择图片」行下新增「上传文件…」行：任意类型、可多选，选完即上传（不经输入栏暂存）。**附件不再有底栏胶囊行**——上传一律**往编辑器 doc 插一条 Markdown 原文引用**（图片 `![](uploads/x.png)` 行内直渲、文件 `[名](uploads/x)` 文件名链接），占位路径用**相对路径**（2026-10-15 待办 13；原 `#img-pills` 胶囊行退役，见 §67.3）。
+底栏 + 浮窗「上传」组在「选择图片」行下新增「上传文件…」行：任意类型、可多选，选完即上传（不经输入栏暂存）。上传**往编辑器 doc 插一条 Markdown 原文引用**（图片 `![](uploads/x.png)` 行内直渲、文件 `[名](uploads/x)` 文件名链接），占位路径用**相对路径**（2026-10-15 待办 13）；底栏 `#img-pills` 胶囊行 2026-10-16 待办 6 还原为 `pending*` 内部态的**可见回显**（不产生第二份内容真相，见 §67.3）。
 
 **链路**：
-- **输入态**：`#file-upload` change → `images.js` `addUploadFiles` 逐个 `POST /gateway/upload?name=<文件名>&sid=<当前会话>|&project=<newProject>`（原始字节直传；**落盘跟随会话**——存量会话带 sid、首页尚无会话带 `state.newProject`、纯首页无参落全局根）→ 成功 `pendingFiles.push({name, abs, size})`（**发送链内部态，无底栏 UI**）+ `insertAttachmentMarkdown('composer', att)` 往底栏 doc 插 `[名](uploads/…)` 链接。**图片**走 `addImageFiles`：`encodeImg` base64 入 `pendingImages` + 落盘 + 插 `![](uploads/…)`（落盘失败时视觉上行仍有效，仅无引用）。
+- **输入态**：`#file-upload` change → `images.js` `addUploadFiles` 逐个 `POST /gateway/upload?name=<文件名>&sid=<当前会话>|&project=<newProject>`（原始字节直传；**落盘跟随会话**——存量会话带 sid、首页尚无会话带 `state.newProject`、纯首页无参落全局根）→ 成功 `pendingFiles.push({name, abs, size})` + `renderImgPills()` 回显文件卡 + `insertAttachmentMarkdown('composer', att)` 往底栏 doc 插 `[名](uploads/…)` 链接。**图片**走 `addImageFiles`：`encodeImg` base64 入 `pendingImages` + 落盘 + 插 `![](uploads/…)`（落盘失败时视觉上行仍有效，仅无引用）。
 - **发送态**：`gwSend` 把待发文件拼 `[文件:<会话 cwd 相对路径>]` 占位进消息文本（与 `[Image #N]` 同位追加；CLI/模型端即普通文本）→ 发送成功清 `pendingFiles`；`syncGwSend` 的 hasContent 计入文件。**相对化**：占位路径由 `send.js` `relUploadPath(abs)` 按**目标会话 cwd** 相对化（`relPath` 纯函数：大小写不敏感逐段比对、`\ /` 通用、跨盘符/无 cwd 退绝对路径）；新会话 jsonl 未落盘无 cwd 源 → wsession 响应附 `cwd` + 网关 `readSession` 记录缺失分支从 id 编码路径派生 cwd。乐观气泡文本不含文件占位。
 - **渲染态**（乐观与落盘同构）：`userBodyHtml` 剥 `[文件:...]` 占位 → `userFilesHtml`/`fileCardsHtml` 渲染**文件卡片**（`.msg-files` 在 `.body`/`.msg-imgs` 之后气泡外下方右对齐，卡片=dshFile 图标 + basename，title=完整路径，**点击复制路径**）；乐观气泡渲 `p.files` 卡片同构；排队区剥占位不渲染卡片。占位文本原样进 `pendingUserMsgs`/转录，剥占位只在渲染层。
 
-**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、9 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；两条链共用 + 浮窗「上传」组，**输出同为一套正文原文引用**（图片行内直渲、文件超链接），底栏无胶囊行。
+**与图片附件的关系**：图片走 base64 内联（不落盘、随 send images 上行、9 张上限/自动压缩），文件走落盘链（留盘可复用、无数量上限）；两条链共用 + 浮窗「上传」组，**输出同为一套正文原文引用**（图片行内直渲、文件超链接）。底栏 `#img-pills` 胶囊行仅镜像 `pending*`（缩略图/文件卡 + × 移除），非内容真相；@ 浮窗「上传」组（`uploadedMentionItems`，待办 6）可把本次已上传附件插回正文引用。
 
 ## 24. 会话间通信来源行：提及 chip 带 sid + 气泡/排队区灰字
 
@@ -875,12 +875,14 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - `[ ]` 未勾选、`[x]`/`[X]` 均 `checked`；`disabled` = 只读展示（**渲染面不改消息内容**）。
 - `data-md` 仍挂**整行原文**（`- [ ] 待办甲`）⇒ 复制得原文，渲染出的勾选框不改变复制口径。
 - 可编辑面（用户改勾选态）走 CM6：`editor/editor-transactions.js` `toggleTaskLineCM(view, line, checked)`，经 `editor-api` facade 的 `toggleTask(line, checked)` 调度。
+- **可编辑面渲染**（2026-10-16 待办 2）：vendor GFM 已产出 `TaskMarker` 节点（恰 3 字符 `[ ]`/`[x]`/`[X]`）但 livePreview/markdownStylePlugin 都不渲染它 ⇒ `editor/task-list.js` `edTaskPlugin` 把它 `Decoration.replace` 成真 `<input type=checkbox class="cm-task-checkbox">`（mousedown → `toggleTaskLineCM` 写回 `[ ]`↔`[x]`）。光标/拖选落在该行时显源码（同 wkEdHrPlugin 口径）。**真 `<input>` 两处同源**，禁 CSS 伪元素。
 
-### 67.3 附件 = 正文原文引用（#13）
+### 67.3 附件 = 正文原文引用（#13）+ 胶囊行镜像（#6 还原）
 
-**禁「底栏胶囊 + 正文引用」两套真相**——附件一律以 Markdown 原文引用落进编辑器 doc：图片 `![](uploads/x.png)`、文件 `[文件名](uploads/x.pdf)`。
+**附件内容唯一真相 = 正文 Markdown 原文引用**：图片 `![](uploads/x.png)`、文件 `[文件名](uploads/x.pdf)`，上传后经 `editor/editor-attachments.js` `uploadAttachment` / `insertAttachmentMarkdown` **插进编辑器 doc**。
 
-- 上传后**只往编辑器 doc 插一条引用**（`editor/editor-attachments.js` `uploadAttachment` / `insertAttachmentMarkdown`）；不再有底栏 `#img-pills` 胶囊行（元素已从 `index.html` 移除，`inputbar/images.js` 不再导出 `renderImgPills`）。
+- 底栏 `#img-pills` 附件行（2026-10-16 待办 6 还原）**只是 `pendingImages`/`pendingFiles` 内部态的可见回显**——缩略图/文件卡 + `×` 移除（`inputbar/images.js` `renderImgPills`，`#img-pills` 元素在 `index.html` 的 `#input-bar` 内、`#cm-host` 之前，默认 `hidden`）。它不产生第二份内容真相：正文引用照旧由 `insertAttachmentMarkdown` 插入，胶囊只镜像待发附件、发送后随 `clearPending*` 隐藏。
+- **@ 已上传文件**（同轮新增）：@ 浮窗「上传」组列出本次上传的附件（`uploadedMentionItems()` → `mention.js`，`kind:'imgpick'|'filepick'`，选中把同一份正文引用原文写回 doc）。组序首位见 `GROUP_ORDER`。
 - **渲染同源**：图片引用行内直渲（`edAttImgPlugin`，`![](uploads/x)` 原子替换为 `<img class="cm-att-img">`）；消息流侧同口径经 `mdHtml` 渲 `<img class="msg-img md-img">`。历史消息 / 乐观气泡 / 队列 / work 编辑区四处一致。
 - 可点击区域 = 光标/拖选落在引用区间内即还原源码（widget 不挂），故可编辑。
 
@@ -891,6 +893,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - 有选区：左右加括号（`*text*` / `**text**` / `` ` `` 等）；多选区（多 range）独立处理。
 - 空选区：插入成对符号、光标居中。
 - **两宿主共用**：work 编辑区与底栏 composer 同一份 `wrapKeymap()`（Mod-b `**` / Mod-i `*` / Mod-e `` ` ``），经 `editor/editor-api.js` 的 `ED_EDITORS` 注册表 + `editorCommand(name, payload, target)` 统一调度（`makeEditorFacade({id:'composer'|'work'})`）。
+- **选中即包裹（待办 4）**：`editor-transactions.js` `surroundExt(CM)` 挂 `EditorView.inputHandler`——**有非空选区**时敲成对符号（`*` `` ` `` `_` `~`）**不替换选区**，在选区两侧各插一个同符号（敲两次 `*` 即 `**…**`）；**无选区（光标）原样输入**，故中文 IME 组合（`inputHandler` 里 `from===to`）完全不受影响。**禁绑单字符 keymap**（与 IME/键盘布局打架）。
 
 ### 67.5 已渲染 Markdown 的复制口径（#16）
 
@@ -899,6 +902,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **块级**（`p`/`li`/代码块/数学块）：优先取 `data-md`（原文），无则回落可见文本。
 - **整块数学公式被选中** → 得 `$…$`（行内）/ `$$…$$`（块级）源码，而非 KaTeX 渲染出的字符。
 - **仅选中公式内部字符**（选区完全落在 `.katex`/`.math-block` 内、不覆盖整个 `data-md` 块）：**得该公式的 Markdown 源码**（整式复制，等价于选中整块）——因为 KaTeX 的渲染产物对「公式」无独立 `data-md` 锚，其可见字符不是合法源码；复制公式**任意子串**均回退为整式源码，防「复制出乱码字符」。判据由 `isCoveredByRange` / `intersectFragment` / `contentEdges` 决定：选区与 `data-md` 块**相交即整块取源**，不比字符粒度。
+- **内容边界取点（2026-10-16 待办 5 根因修）**：`contentEdges(el)` 取块的起/止边界点**必须落到块内首个/末个内容文本节点**——用 `TreeWalker(SHOW_TEXT)` 并 `REJECT` 掉装饰/chrome（`button`、`.code-head`、`.chart-bar`、`iframe`）；此前盲降 `firstChild`/`lastChild` 会落到 KaTeX 的**空** `<span class="strut">` 或代码块 chrome 上，边界点落在内容之外 ⇒ `isPointInRange` 恒 `false` ⇒ **整块选全也降级成渲染文本**（实报：公式框选只得纯字符）。块内无内容文本（`<hr>`/纯图段）才回退元素自身边界。
 - **跨块部分选中**：按块拼接（`joinMdBlocks`），顶层 `data-md`（`topDataMd`）优先于逐节点文本。
 
 **探针锚点**：`probes/probe-md-protocol.ts`（45 断言，锁本节全部五条：真 `<input>` 任务框 + `data-md` 原文、math-spec 单源与三链挂载、无 `execCommand|contenteditable`、`ED_EDITORS`/`editorCommand`/`makeEditorFacade`、附件原文引用与 `#img-pills` 退役、`copyRenderedSelection`→`selectionMd`）、`probes/probe-math-render.ts`（KaTeX 四形态 + 代码遮罩 + 货币假阳性 + 无 katex 兜底 + `data-md` 复制契约）、`probes/probe-md-image.ts`（`mdHtml` 入口 `/gateway/file` 解析）、`probes/probe-user-bubble-parity.ts`（乐观/落盘气泡同构）、`probes/probe-quote-ref.ts`（引用/提及链路）。

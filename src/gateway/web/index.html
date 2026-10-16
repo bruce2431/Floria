@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=551" />
+  <link rel="stylesheet" href="/styles.css?v=552" />
 </head>
 <body>
 <div id="app">
@@ -255,7 +255,9 @@
               <!-- CM6 底栏接管（2026-10-14 #17 B 口径，真所见即所得）：挂载点由 inputbar/composer-cm.js
                    建 EditorView（work 编辑区同款 live preview，输入即渲染）。doc 单真源 = CM State，
                    序列化令牌原文直接进 doc、chip 是其原子装饰视图（逻辑在 inputbar/composer-cm.js）。
-                   附件胶囊行（#img-pills）已随 2026-10-15 待办 13 退役：附件 = 原文 md 引用（editor-attachments） -->
+                   附件胶囊行（#img-pills）2026-10-16 待办 6 还原：pending* 内部态的可见回显（缩略图/文件卡 + ×
+                   移除），不替代正文 md 引用（引用仍是唯一内容真相，胶囊只镜像待发附件）。 -->
+              <div id="img-pills" hidden></div>
               <div id="cm-host"></div>
               <div class="row">
                 <div class="tools">
@@ -372,6 +374,6 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=6"></script>
-<script src="/app.js?v=551"></script>
+<script src="/app.js?v=552"></script>
 </body>
 </html>

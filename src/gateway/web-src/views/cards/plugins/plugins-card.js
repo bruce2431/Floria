@@ -124,10 +124,16 @@ import { appCatalog, isAppEnabled, setAppEnabled } from '../../../engine/ext-run
     )
   }
   // 应用胶囊：+（未启用）/ ✓（已启用）为唯一动作；已启用整卡不另设入口（点击 tab 在侧栏）
+  // 图标 = 应用自己申报的 `icon`（preview.json → normExtCards → APP_CATALOG，见 ext-decl.js），
+  // 不按 id 上色块、不取标题首字（2026-10-17 用户定案：模型/神经/本地媒体资源库各用自己的 icon）。
   function appCardHtml(a) {
     const on = isAppEnabled(a.id)
+    const ico = I[a.icon]
+    const icEl = ico
+      ? `<div class="mgr-ic ic">${ico}</div>`
+      : `<div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>`
     return (
-      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-card">${icEl}` +
       `<div class="mgr-meta"><div class="mgr-name">${esc(a.title)}${on ? '<span class="inst-badge">已启用</span>' : ''}</div>` +
       `<div class="mgr-desc">${esc(a.id)} · ${esc(a.path)}</div></div>` +
       `<button class="mgr-more app-toggle${on ? ' on' : ''}" data-app="${esc(a.id)}" title="${on ? '停用（移除侧栏 tab）' : '启用（侧栏出现该应用 tab）'}">${on ? '✓' : '+'}</button></div>`

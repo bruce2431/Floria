@@ -31,7 +31,9 @@ import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-
   // 或卡 id 切进主区）：renderMgrTabs 取集 / cardOf 解析（openCard「唯一切卡口」据此拒绝隐藏卡）/
   // route 的 mgr 分支 + mgr-tabs 点击委托（按**入站**语境快照判，见 chat/route.js）。
   // 域 = 卡的归属：CARDS（第一方 plugins/preview/session）恒在域内（工具栏卡，与语境无关）；
-  //   app:<id>          工作区根应用 → 仅语境 = 工作区根；
+  //   app:<id>          工作区根应用 → chat 模式恒在域内（工作区根 = chat 前端宿主；项目预览不改变这
+  //                     一归属），work 模式仅认「该卡自身正在槽内」。2026-10-17 待办 3：旧判据只认
+  //                     isGlobalLabel(state.preview)，而 chat 常态 state.preview 为空 ⇒ 应用 tab 全被滤掉；
   //   ext:<label>:<id>  项目外部卡   → 仅语境 = 该 label，且 EXT 运行表当前正属该 label。
   // 语境（唯一状态源）：work 看工作项目 label、chat 看预览路由 label；**已开着的 app/ext 卡自身即其
   // 语境**——st.mgr 命名空间占先，故 renderMgr 清掉 state.preview 后 openCard 仍认得自己（点击 tab 后
@@ -43,7 +45,7 @@ import { appTabs, extLabel, extTabs, isGlobalLabel, setTabRefresh } from './ext-
     if (CARDS.some((c) => c.id === id)) return true
     const m = typeof st.mgr === 'string' ? st.mgr : ''
     const raw = (st.sbMode === 'work' ? st.workProj : st.preview) || ''
-    if (id.startsWith('app:')) return m.startsWith('app:') || isGlobalLabel(raw)
+    if (id.startsWith('app:')) return st.sbMode !== 'work' || m.startsWith('app:') || isGlobalLabel(raw)
     if (id.startsWith('ext:')) {
       const label = id.slice(4, id.lastIndexOf(':'))
       if (!label || extLabel() !== label) return false

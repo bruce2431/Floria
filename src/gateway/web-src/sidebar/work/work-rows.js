@@ -101,8 +101,7 @@
     state.wkMainTab = 'chat' // 新建聊天 = 要看聊天 → 聊天 tab 顶上来、助手靠回栏
     state.wkAssist = true
     state.wkAssistMode = 'side'
-    wkEnsureTab(WK_NEW_TAB) // 空对话占自己一枚胶囊
-    navigate('#/')
+    navigate('#/') // 空对话只是激活哨兵，不入顶栏开放集（不渲染「新对话」胶囊）
     applyPanes()
     saveWork()
     if (isMobile()) setPanel(false)

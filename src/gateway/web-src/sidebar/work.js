@@ -36,8 +36,9 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
-  const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
-  let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
+  // 空路由（currentHash ''）的**激活哨兵键**：只用于「当前激活哪一项」的判定，**绝不进入** state.wkChats
+  // ——空对话不占顶栏胶囊（2026-10-17 待办 2；状态源仍只有 state.wkChats 一处）。
+  const WK_NEW_TAB = 'new'
   // 侧栏体当前页 = **state.wkTab**（'files' | 'chat'）；2026-10-15 从本文件的模块局部变量提升到
   // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
   // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下

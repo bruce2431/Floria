@@ -1833,6 +1833,9 @@ body.sb-resizing { cursor: grabbing !important; user-select: none; }
 .mgr-card { display: flex; gap: 12px; align-items: flex-start; padding: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; transition: border-color 0.15s, background 0.15s; }
 .mgr-card:hover { border-color: var(--border-soft); background: var(--hover); }
 .mgr-ic { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px; font-weight: 700; flex: none; user-select: none; }
+/* 应用卡 = 应用自己申报的 icon（无底色块，2026-10-17）：图标随主题前景色，尺寸与首字块一致 */
+.mgr-ic.ic { background: none; color: var(--text-2); }
+.mgr-ic.ic svg { width: 24px; height: 24px; }
 .mgr-meta { flex: 1; min-width: 0; }
 .mgr-name { font-size: 15px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
 .inst-badge { font-size: 11px; font-weight: 500; color: var(--text-2); background: var(--active); border-radius: 999px; padding: 1px 8px; flex: none; }

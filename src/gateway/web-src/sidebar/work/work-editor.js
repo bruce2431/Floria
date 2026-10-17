@@ -276,12 +276,6 @@
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
-    // 新对话占位被顶掉（2026-10-14 待办 16，对齐 syncWorkTabs「开会话顶掉占位」的定案）：在新对话
-    // 占位态打开文件 = 占位让位，顶栏不留悬空「新对话」胶囊；回到聊天由 applyPanes 兜底重开。
-    if (wkActiveKey() === WK_NEW_TAB) {
-      const i = state.wkChats.indexOf(WK_NEW_TAB)
-      if (i >= 0) state.wkChats.splice(i, 1)
-    }
     saveWork()
     applyPanes()
     renderWorkBody()

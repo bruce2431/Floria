@@ -32,7 +32,10 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
   let mathStore = null
   function renderMath(body, displayMode) {
     try {
-      return window.katex.renderToString(body, { displayMode, throwOnError: false, strict: false, output: 'html' })
+      // output 必须保留 mathml：`.katex-mathml` 里的 `<annotation encoding="application/x-tex">` 是碎片选区
+      // 复制时唯一能还原公式源码的凭据（copyTextOf 依赖它）；`output:'html'` 会把它砍掉 ⇒ 复制退化为纯字符。
+      // mathml 由 KaTeX 自带样式视觉隐藏，不影响排版。
+      return window.katex.renderToString(body, { displayMode, throwOnError: false, strict: false })
     } catch (_) { return null }
   }
   function extractMath(src) {
@@ -293,6 +296,18 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (n.nodeType === 3) { out += n.nodeValue; return }
       if (n.nodeType === 11) { n.childNodes.forEach(walk); return }
       if (n.nodeType !== 1) return
+      // 碎片选区里的公式：KaTeX 渲染树本身只有排好的字符（σ − π、上下标拆成多个 span），直接走文本会
+      // 「退化为纯字符」。KaTeX 在 mathml 里保留了原始 TeX 的 `<annotation>`，据此还原 `$…$` / `$$…$$`
+      // （2026-10-17 用户实测：任意粒度选区复制都不得丢公式源码）。整块选区仍由 data-md 走原文，不经过此支。
+      if (n.classList && (n.classList.contains('katex') || n.classList.contains('katex-display'))) {
+        const ann = n.querySelector('annotation[encoding="application/x-tex"]')
+        const tex = ann && ann.textContent
+        if (tex) {
+          const d = n.classList.contains('katex-display') ? '$$' : '$'
+          out += d + tex + d
+          return
+        }
+      }
       if (n.tagName === 'BR') { out += '\n'; return }
       const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
       if (sep && out && !out.endsWith('\n')) out += sep

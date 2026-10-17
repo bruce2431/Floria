@@ -67,7 +67,7 @@
 
   // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats。**持久化、按项目重置**
   // （2026-10-13 用户待办 11 推翻 2026-10-07 的不持久化定案；切项目清空的防线不变，见 selectProject）。
-  // 条目 = 会话 hash 或 WK_NEW_TAB。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
+  // 条目 = 会话 hash（**不含** WK_NEW_TAB：空态不占胶囊）。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
   // 增/删/渲染的唯一口都在本模块。
   const wkActiveKey = () => state.currentHash || WK_NEW_TAB
   const wkKeyHash = (key) => (key === WK_NEW_TAB ? '' : key)
@@ -110,27 +110,20 @@
     applyPanes(); saveWork()
   }
   // 路由落地后并入开放集并重渲顶栏（唯一外部入口，chat/route.js 调）：仅 work + 聊天栏在场时插手。
-  // 新会话窗口被替换（2026-10-06 用户定案）：在空对话 tab（新会话窗口）下从侧栏打开具体会话，
-  // 直接顶掉占位 new tab（新会话窗口即被该会话替换），顶栏不留单独的「新对话」胶囊。
-  // 只在「上一次激活 = new、本次激活 = 具体会话」时替换——后台挂着的 new tab（当前不在其上）不受影响。
+  // 开放集不变量（2026-10-17 待办 2）：**恒不含 new 哨兵**——空对话（含「+」新建）不占顶栏胶囊，
+  // new 只是激活键（currentHash===''）。历史上 new 曾被入集并持久化，故此处与「外项目污染」同点清剿。
   function syncWorkTabs() {
     const key = wkActiveKey()
-    if (state.sbMode !== 'work' || !state.wkAssist) { wkPrevActiveKey = key; return }
-    if (key !== WK_NEW_TAB && wkPrevActiveKey === WK_NEW_TAB) {
-      const i = state.wkChats.indexOf(WK_NEW_TAB)
-      if (i >= 0) state.wkChats.splice(i, 1)
-    }
-    // 自愈清剿（2026-10-14 待办 14）：历史污染的外项目条目（旧版无并入守卫时入集并被持久化）
-    // 在已知归属时一律移除，开放集回归「仅当前工作项目」不变量；查无此会话（未知）不判。
+    if (state.sbMode !== 'work' || !state.wkAssist) return
+    // 自愈清剿（2026-10-14 待办 14 / 2026-10-17 待办 2）：①历史污染的外项目条目（旧版无并入守卫时
+    // 入集并被持久化）在已知归属时一律移除；②new 哨兵条目（旧版 newWorkChat 主动入集并持久化）一并移除。
+    // 查无此会话（未知）不判。
     for (let i = state.wkChats.length - 1; i >= 0; i--) {
       const k = state.wkChats[i]
-      if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
+      if (k === WK_NEW_TAB || (findSession(k) && !workScopeOk(k))) state.wkChats.splice(i, 1)
     }
-    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）**不**自动补 new 胶囊。
-    // new 只由用户主动新建（newWorkChat）入集；空路由 = 无活动胶囊的空态（2026-10-15 切项目凭空多
-    // new 的根因：此处曾**无条件**把当前激活键并入开放集，把首页路由转成 new 并持久化）。
+    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）不并入；空态 = 无活动胶囊。
     if (key !== WK_NEW_TAB) wkEnsureTab(key)
-    wkPrevActiveKey = key
     renderTopbar()
     // 2026-10-06 根修「work 侧栏选中灰底更新慢」：可见的会话列表在 #wk-body（renderWorkBody 渲），
     // 不在 route()/SSE 的重渲出口里（refreshList 只渲 #recent-body）。路由落地若不重渲它，行上的
@@ -150,8 +143,7 @@
         toast('至少保留一栏')
       }
       // 并入当前**真实会话**（仅当聊天 tab 正被显示、且路由停在具体会话上）。空路由不并入 new：
-      // new 胶囊只由用户主动新建（newWorkChat）入集，空态 = 无活动胶囊（2026-10-15 切项目凭空多 new
-      // 的根因之一）。文件 tab 在场时不并入——否则会把「打开文件顶掉占位」的摘除立刻加回来。
+      // 空态 = 无活动胶囊（新建会话同样不占胶囊，2026-10-17 待办 2）。文件 tab 在场时不并入。
       const k = wkActiveKey()
       if (state.wkAssist && wkShownTab() === 'chat' && k !== WK_NEW_TAB) wkEnsureTab(k)
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）

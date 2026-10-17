@@ -69,9 +69,6 @@ import { WORK_SLOT_DEF } from './work-state.js'
     state.workProj = key
     loadWorkSlot(key, WORK_SLOT_DEF) // 新项目：有槽恢复（含顶栏开放集/侧栏页/开关），无槽回落缺省
     state.workSlotKey = key
-    // 上一激活键属于**旧项目**的顶栏 tab 生命周期（跨项目不连续）：不清则 syncWorkTabs 的「开会话顶掉
-    // 占位」会拿旧项目的 prev 去摘新项目槽里合法的 new 胶囊。work.js 的模块级变量经单 IIFE 共享作用域可见。
-    wkPrevActiveKey = null
     const s = state.workSlots[key]
     return s && typeof s.activeChat === 'string' ? s.activeChat : ''
   }

@@ -549,7 +549,10 @@ function setConnUp(v) { connUp = v }
   let mathStore = null
   function renderMath(body, displayMode) {
     try {
-      return window.katex.renderToString(body, { displayMode, throwOnError: false, strict: false, output: 'html' })
+      // output 必须保留 mathml：`.katex-mathml` 里的 `<annotation encoding="application/x-tex">` 是碎片选区
+      // 复制时唯一能还原公式源码的凭据（copyTextOf 依赖它）；`output:'html'` 会把它砍掉 ⇒ 复制退化为纯字符。
+      // mathml 由 KaTeX 自带样式视觉隐藏，不影响排版。
+      return window.katex.renderToString(body, { displayMode, throwOnError: false, strict: false })
     } catch (_) { return null }
   }
   function extractMath(src) {
@@ -810,6 +813,18 @@ function setConnUp(v) { connUp = v }
       if (n.nodeType === 3) { out += n.nodeValue; return }
       if (n.nodeType === 11) { n.childNodes.forEach(walk); return }
       if (n.nodeType !== 1) return
+      // 碎片选区里的公式：KaTeX 渲染树本身只有排好的字符（σ − π、上下标拆成多个 span），直接走文本会
+      // 「退化为纯字符」。KaTeX 在 mathml 里保留了原始 TeX 的 `<annotation>`，据此还原 `$…$` / `$$…$$`
+      // （2026-10-17 用户实测：任意粒度选区复制都不得丢公式源码）。整块选区仍由 data-md 走原文，不经过此支。
+      if (n.classList && (n.classList.contains('katex') || n.classList.contains('katex-display'))) {
+        const ann = n.querySelector('annotation[encoding="application/x-tex"]')
+        const tex = ann && ann.textContent
+        if (tex) {
+          const d = n.classList.contains('katex-display') ? '$$' : '$'
+          out += d + tex + d
+          return
+        }
+      }
       if (n.tagName === 'BR') { out += '\n'; return }
       const sep = COPY_PARA_TAGS.has(n.tagName) ? '\n\n' : (COPY_LINE_TAGS.has(n.tagName) ? '\n' : '')
       if (sep && out && !out.endsWith('\n')) out += sep
@@ -4749,7 +4764,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 或卡 id 切进主区）：renderMgrTabs 取集 / cardOf 解析（openCard「唯一切卡口」据此拒绝隐藏卡）/
   // route 的 mgr 分支 + mgr-tabs 点击委托（按**入站**语境快照判，见 chat/route.js）。
   // 域 = 卡的归属：CARDS（第一方 plugins/preview/session）恒在域内（工具栏卡，与语境无关）；
-  //   app:<id>          工作区根应用 → 仅语境 = 工作区根；
+  //   app:<id>          工作区根应用 → chat 模式恒在域内（工作区根 = chat 前端宿主；项目预览不改变这
+  //                     一归属），work 模式仅认「该卡自身正在槽内」。2026-10-17 待办 3：旧判据只认
+  //                     isGlobalLabel(state.preview)，而 chat 常态 state.preview 为空 ⇒ 应用 tab 全被滤掉；
   //   ext:<label>:<id>  项目外部卡   → 仅语境 = 该 label，且 EXT 运行表当前正属该 label。
   // 语境（唯一状态源）：work 看工作项目 label、chat 看预览路由 label；**已开着的 app/ext 卡自身即其
   // 语境**——st.mgr 命名空间占先，故 renderMgr 清掉 state.preview 后 openCard 仍认得自己（点击 tab 后
@@ -4761,7 +4778,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (CARDS.some((c) => c.id === id)) return true
     const m = typeof st.mgr === 'string' ? st.mgr : ''
     const raw = (st.sbMode === 'work' ? st.workProj : st.preview) || ''
-    if (id.startsWith('app:')) return m.startsWith('app:') || isGlobalLabel(raw)
+    if (id.startsWith('app:')) return st.sbMode !== 'work' || m.startsWith('app:') || isGlobalLabel(raw)
     if (id.startsWith('ext:')) {
       const label = id.slice(4, id.lastIndexOf(':'))
       if (!label || extLabel() !== label) return false
@@ -5009,10 +5026,16 @@ function setFirstSendHash(v) { firstSendHash = v }
     )
   }
   // 应用胶囊：+（未启用）/ ✓（已启用）为唯一动作；已启用整卡不另设入口（点击 tab 在侧栏）
+  // 图标 = 应用自己申报的 `icon`（preview.json → normExtCards → APP_CATALOG，见 ext-decl.js），
+  // 不按 id 上色块、不取标题首字（2026-10-17 用户定案：模型/神经/本地媒体资源库各用自己的 icon）。
   function appCardHtml(a) {
     const on = isAppEnabled(a.id)
+    const ico = I[a.icon]
+    const icEl = ico
+      ? `<div class="mgr-ic ic">${ico}</div>`
+      : `<div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>`
     return (
-      `<div class="mgr-card"><div class="mgr-ic" style="background:${mgrColor(a.id)}">${esc((a.title[0] || '?').toUpperCase())}</div>` +
+      `<div class="mgr-card">${icEl}` +
       `<div class="mgr-meta"><div class="mgr-name">${esc(a.title)}${on ? '<span class="inst-badge">已启用</span>' : ''}</div>` +
       `<div class="mgr-desc">${esc(a.id)} · ${esc(a.path)}</div></div>` +
       `<button class="mgr-more app-toggle${on ? ' on' : ''}" data-app="${esc(a.id)}" title="${on ? '停用（移除侧栏 tab）' : '启用（侧栏出现该应用 tab）'}">${on ? '✓' : '+'}</button></div>`
@@ -5340,9 +5363,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     state.workProj = key
     loadWorkSlot(key, WORK_SLOT_DEF) // 新项目：有槽恢复（含顶栏开放集/侧栏页/开关），无槽回落缺省
     state.workSlotKey = key
-    // 上一激活键属于**旧项目**的顶栏 tab 生命周期（跨项目不连续）：不清则 syncWorkTabs 的「开会话顶掉
-    // 占位」会拿旧项目的 prev 去摘新项目槽里合法的 new 胶囊。work.js 的模块级变量经单 IIFE 共享作用域可见。
-    wkPrevActiveKey = null
     const s = state.workSlots[key]
     return s && typeof s.activeChat === 'string' ? s.activeChat : ''
   }
@@ -5837,8 +5857,9 @@ function edCmg() {
   const IMG_EXT = /\.(png|jpe?g|webp|gif|svg|bmp|ico|avif)$/i
   const MD_EXT = /\.(md|markdown)$/i
   const WK_SAVE_MS = 1000 // 编辑区自动保存去抖（停止输入后多久落盘）
-  const WK_NEW_TAB = 'new' // 空对话 / 首页（currentHash ''）的哨兵 tab 键；真源 state.wkChats 用字符串承载
-  let wkPrevActiveKey = null // 上一次路由激活的 tab 键（判别「从空对话 tab 打开具体会话」见 syncWorkTabs）
+  // 空路由（currentHash ''）的**激活哨兵键**：只用于「当前激活哪一项」的判定，**绝不进入** state.wkChats
+  // ——空对话不占顶栏胶囊（2026-10-17 待办 2；状态源仍只有 state.wkChats 一处）。
+  const WK_NEW_TAB = 'new'
   // 侧栏体当前页 = **state.wkTab**（'files' | 'chat'）；2026-10-15 从本文件的模块局部变量提升到
   // state 并随项目入槽（core/ui-state.js / sidebar/work-context.js）——重启不再恒回「文件」。
   // 注（2026-10-15 注册域隔离）：state.wkTab 与 #mgr-tabs 的入表无关——那是 chat 侧栏的行，work 模式下
@@ -5972,7 +5993,7 @@ function edCmg() {
 
   // 打开的聊天 tab 开放集（浏览器 tab 模型）：真源 = state.wkChats。**持久化、按项目重置**
   // （2026-10-13 用户待办 11 推翻 2026-10-07 的不持久化定案；切项目清空的防线不变，见 selectProject）。
-  // 条目 = 会话 hash 或 WK_NEW_TAB。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
+  // 条目 = 会话 hash（**不含** WK_NEW_TAB：空态不占胶囊）。激活键 = 当前路由（currentHash；空 = 首页 ⇒ 'new'）。
   // 增/删/渲染的唯一口都在本模块。
   const wkActiveKey = () => state.currentHash || WK_NEW_TAB
   const wkKeyHash = (key) => (key === WK_NEW_TAB ? '' : key)
@@ -6015,27 +6036,20 @@ function edCmg() {
     applyPanes(); saveWork()
   }
   // 路由落地后并入开放集并重渲顶栏（唯一外部入口，chat/route.js 调）：仅 work + 聊天栏在场时插手。
-  // 新会话窗口被替换（2026-10-06 用户定案）：在空对话 tab（新会话窗口）下从侧栏打开具体会话，
-  // 直接顶掉占位 new tab（新会话窗口即被该会话替换），顶栏不留单独的「新对话」胶囊。
-  // 只在「上一次激活 = new、本次激活 = 具体会话」时替换——后台挂着的 new tab（当前不在其上）不受影响。
+  // 开放集不变量（2026-10-17 待办 2）：**恒不含 new 哨兵**——空对话（含「+」新建）不占顶栏胶囊，
+  // new 只是激活键（currentHash===''）。历史上 new 曾被入集并持久化，故此处与「外项目污染」同点清剿。
   function syncWorkTabs() {
     const key = wkActiveKey()
-    if (state.sbMode !== 'work' || !state.wkAssist) { wkPrevActiveKey = key; return }
-    if (key !== WK_NEW_TAB && wkPrevActiveKey === WK_NEW_TAB) {
-      const i = state.wkChats.indexOf(WK_NEW_TAB)
-      if (i >= 0) state.wkChats.splice(i, 1)
-    }
-    // 自愈清剿（2026-10-14 待办 14）：历史污染的外项目条目（旧版无并入守卫时入集并被持久化）
-    // 在已知归属时一律移除，开放集回归「仅当前工作项目」不变量；查无此会话（未知）不判。
+    if (state.sbMode !== 'work' || !state.wkAssist) return
+    // 自愈清剿（2026-10-14 待办 14 / 2026-10-17 待办 2）：①历史污染的外项目条目（旧版无并入守卫时
+    // 入集并被持久化）在已知归属时一律移除；②new 哨兵条目（旧版 newWorkChat 主动入集并持久化）一并移除。
+    // 查无此会话（未知）不判。
     for (let i = state.wkChats.length - 1; i >= 0; i--) {
       const k = state.wkChats[i]
-      if (k !== WK_NEW_TAB && findSession(k) && !workScopeOk(k)) state.wkChats.splice(i, 1)
+      if (k === WK_NEW_TAB || (findSession(k) && !workScopeOk(k))) state.wkChats.splice(i, 1)
     }
-    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）**不**自动补 new 胶囊。
-    // new 只由用户主动新建（newWorkChat）入集；空路由 = 无活动胶囊的空态（2026-10-15 切项目凭空多
-    // new 的根因：此处曾**无条件**把当前激活键并入开放集，把首页路由转成 new 并持久化）。
+    // 只并入**真实会话**：空路由（key === WK_NEW_TAB，即 currentHash===''）不并入；空态 = 无活动胶囊。
     if (key !== WK_NEW_TAB) wkEnsureTab(key)
-    wkPrevActiveKey = key
     renderTopbar()
     // 2026-10-06 根修「work 侧栏选中灰底更新慢」：可见的会话列表在 #wk-body（renderWorkBody 渲），
     // 不在 route()/SSE 的重渲出口里（refreshList 只渲 #recent-body）。路由落地若不重渲它，行上的
@@ -6055,8 +6069,7 @@ function edCmg() {
         toast('至少保留一栏')
       }
       // 并入当前**真实会话**（仅当聊天 tab 正被显示、且路由停在具体会话上）。空路由不并入 new：
-      // new 胶囊只由用户主动新建（newWorkChat）入集，空态 = 无活动胶囊（2026-10-15 切项目凭空多 new
-      // 的根因之一）。文件 tab 在场时不并入——否则会把「打开文件顶掉占位」的摘除立刻加回来。
+      // 空态 = 无活动胶囊（新建会话同样不占胶囊，2026-10-17 待办 2）。文件 tab 在场时不并入。
       const k = wkActiveKey()
       if (state.wkAssist && wkShownTab() === 'chat' && k !== WK_NEW_TAB) wkEnsureTab(k)
       wkEnsureFileTab(state.workFile) // 打开着的文件 ⇒ 顶栏必有一枚对应 pill（刷新恢复的 workFile 也在此并入）
@@ -7905,12 +7918,6 @@ function edCmg() {
     if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
-    // 新对话占位被顶掉（2026-10-14 待办 16，对齐 syncWorkTabs「开会话顶掉占位」的定案）：在新对话
-    // 占位态打开文件 = 占位让位，顶栏不留悬空「新对话」胶囊；回到聊天由 applyPanes 兜底重开。
-    if (wkActiveKey() === WK_NEW_TAB) {
-      const i = state.wkChats.indexOf(WK_NEW_TAB)
-      if (i >= 0) state.wkChats.splice(i, 1)
-    }
     saveWork()
     applyPanes()
     renderWorkBody()
@@ -8041,8 +8048,7 @@ function edCmg() {
     state.wkMainTab = 'chat' // 新建聊天 = 要看聊天 → 聊天 tab 顶上来、助手靠回栏
     state.wkAssist = true
     state.wkAssistMode = 'side'
-    wkEnsureTab(WK_NEW_TAB) // 空对话占自己一枚胶囊
-    navigate('#/')
+    navigate('#/') // 空对话只是激活哨兵，不入顶栏开放集（不渲染「新对话」胶囊）
     applyPanes()
     saveWork()
     if (isMobile()) setPanel(false)
@@ -9571,10 +9577,13 @@ function edCmg() {
     const ql = (q || '').trim().toLowerCase()
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
-    const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
+    // 会话：**空查询**只给近 48h 建议（免浮窗一开就几百条）；**有查询词**时搜全量——标题检索必须与
+    // 侧栏一致，不能因会话旧于 48h 就查不到（2026-10-17 用户实测：侧栏有「202610131215-有机随想」，
+    // 输入 @2026101312 却只剩文件命中）。
+    const cutoff = Date.now() - 48 * 3600 * 1000
     // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。排最前（GROUP_ORDER 亦首位）。
     for (const u of uploadedMentionItems()) if (match(u.name)) items.push(u)
-    for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
+    for (const s of [...ALL].filter((x) => ql || x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }

@@ -301,10 +301,13 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const ql = (q || '').trim().toLowerCase()
     const match = (s) => !ql || String(s).toLowerCase().includes(ql)
     const items = []
-    const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时
+    // 会话：**空查询**只给近 48h 建议（免浮窗一开就几百条）；**有查询词**时搜全量——标题检索必须与
+    // 侧栏一致，不能因会话旧于 48h 就查不到（2026-10-17 用户实测：侧栏有「202610131215-有机随想」，
+    // 输入 @2026101312 却只剩文件命中）。
+    const cutoff = Date.now() - 48 * 3600 * 1000
     // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。排最前（GROUP_ORDER 亦首位）。
     for (const u of uploadedMentionItems()) if (match(u.name)) items.push(u)
-    for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
+    for (const s of [...ALL].filter((x) => ql || x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }

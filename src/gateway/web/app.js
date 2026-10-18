@@ -9808,6 +9808,9 @@ function edCmg() {
     pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
     pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
     pickAll.seq++
+    // 作废在途轮时必须同步释放 busy：旧轮 finally 见 seq 不符只跳过写回、不会复位 busy，
+    // 否则下一次输入永远起不了新轮（文件搜索整组空白）
+    pickAll.busy = false
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
@@ -9924,6 +9927,20 @@ function edCmg() {
     if (!GATEWAY || gateAwait || state.mgr || !cmView) { closeMentionPop(); return }
     const st = cmView.state
     const pos = st.selection.main.from
+    // IME 组合期（移动端中文键盘敲字母即进入组合：marked text 未进 doc，WebKit 下 selection
+    // 常呈非空/跳位）——组合中不按选区与位置判定关窗，只维护已打开浮窗的查询词。
+    // 光标/选区在此刻不可信，任何「该关」判定都会把浮窗误杀（iPad 中文键盘 @C 实测）。
+    // compositionStarted（composing>=0）而非 composing（>0）：compositionstart 先把状态置 0，
+    // 首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
+    if (cmView.compositionStarted) {
+      if (!mention.open) return
+      const between = st.doc.sliceString(mention.anchor, pos)
+      if (pos > mention.anchor && !/[\n\r]/.test(between)) {
+        const q = between.slice(1)
+        if (q !== mention.q) { mention.q = q; renderMentionPop() }
+      }
+      return
+    }
     if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
     if (mention.open) {
       const between = st.doc.sliceString(mention.anchor, pos)

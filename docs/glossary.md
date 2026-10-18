@@ -72,9 +72,9 @@
 | 整理会话弹层 | `#organize-pop` | 「一个列表 / 按项目展开」切换浮层 | |
 | 模式 tabs | `#mode-tabs` | 项目/聊天两种列表排列 | |
 | 项目文件夹分组 | `.folder` | 按项目分组的折叠头（含行内「+」新建） | |
-| 会话 tab | `button.sess-item` | 最近列表里的单个会话条目；**排序 = 有状态（运行态点在场）置顶 + 组内 createdAt 降序**（`engine/sessions.js` `sessCmp` 单一排序器，createdAt 由网关 `/gateway/sessions` 透传 jsonl birthtime；气泡弹层/搜索覆盖层同序；项目胶囊与文件夹维持最近活跃不动） | 会话tab/会话行 |
+| 会话 tab | `button.sess-item` | 最近列表里的单个会话条目；**排序 = 有状态（运行态点在场）置顶 + 组内 createdAt 降序**（`engine/sessions.js` `sessCmp` 单一排序器，createdAt 由网关 `/gateway/sessions` 透传 jsonl birthtime；气泡弹层/搜索覆盖层同序；项目胶囊与文件夹维持最近活跃不动）；**work 侧栏另有置顶层**——`state.wkPins` 命中的会话先于 `sessCmp`（`wkBodyHtml` 排序，仅 work 列表消费；chat 侧栏不受影响） | 会话tab/会话行/置顶 |
 | 状态点 | `.dot` | tab 左侧运行态小点（web/CLI 同一判定链） | |
-| 行操作浮窗 | `.row-menu-pop` | 行右键（桌面）/ 长按（触屏）唤出的浮窗，挂 `document.body` 的 fixed 卡片，落点 = 行左下（长按）/ 指针处（右键）；与浮起同生同灭。**注册式（`registerRowMenu`）一源多用**：会话行（`recent.js`，重命名 / 关闭会话）与 work 文件树行（`work.js`，重命名 / 删除=移入 `.trash/`）——菜单项由各列表声明（web-ui §7 / §45） | 三点菜单/会话行菜单/文件行菜单/浮窗 |
+| 行操作浮窗 | `.row-menu-pop` | 行右键（桌面）/ 长按（触屏）唤出的浮窗，挂 `document.body` 的 fixed 卡片，落点 = 行左下（长按）/ 指针处（右键）；与浮起同生同灭。**注册式（`registerRowMenu`）一源多用**：会话行（`recent.js`，重命名 / 关闭会话；**置顶 / 取消置顶仅 work 侧栏行**）与 work 文件树行（`work.js`，重命名 / 删除=移入 `.trash/`）——菜单项由各列表声明（web-ui §7 / §45） | 三点菜单/会话行菜单/文件行菜单/浮窗 |
 | 侧栏浮起 | `.lift`/`.lift-anim` | 桌面 hover 时 tab 浮起动画态 | |
 | 搜索覆盖层 | `#search-overlay` | 全屏搜索全部对话 | |
 | 重命名弹窗 | `#rename-modal` | 重命名对话框，**一件两用**（`openRenameDialog({heading,placeholder,okText,value,onSubmit})`）：会话行 → 会话标题、work 文件行 → 文件/目录名（web-ui §7） | |

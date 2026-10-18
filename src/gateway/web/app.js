@@ -58,6 +58,8 @@
     dshSkill: '<svg viewBox="0 0 17 17" fill="none" stroke-width="1"><path d="M4.57788 5.77124H10.7029" stroke="currentColor"/><path d="M4.57788 8.89819H7.91879" stroke="currentColor"/><path d="M12.1404 1.19446C12.9442 1.19446 13.6404 1.81999 13.6404 2.64465V8.89856H12.6404V2.64465C12.6404 2.42015 12.4411 2.19446 12.1404 2.19446H3.14038C2.83968 2.19446 2.64038 2.42015 2.64038 2.64465V13.0929C2.64082 13.3172 2.84001 13.5421 3.14038 13.5421H8.88159V14.5421H3.14038C2.33675 14.5421 1.6408 13.9172 1.64038 13.0929V2.64465C1.64038 1.81999 2.33651 1.19446 3.14038 1.19446H12.1404Z" fill="currentColor"/><path d="M12.0051 15.1056C12.0051 13.6395 10.8166 12.451 9.35059 12.451C10.8166 12.451 12.0051 11.2626 12.0051 9.79651C12.0051 11.2626 13.1936 12.451 14.6597 12.451C13.1936 12.451 12.0051 13.6395 12.0051 15.1056Z" stroke="currentColor"/></svg>', // IconSkillOutlineRegular（技能：文档 + 星）
     dshPlugin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M7.84457 5.06199C11.6605 4.93876 14.7962 6.14848 14.8484 7.76397C14.8875 8.97461 13.1838 10.0696 10.7215 10.5942"/><path d="M5.12742 8.07731C5.00419 4.26138 6.21391 1.12568 7.8294 1.07351C9.04004 1.03441 10.135 2.73808 10.6596 5.20037"/><path d="M8.02457 10.6802C4.20865 10.8034 1.07294 9.5937 1.02077 7.97821C0.981678 6.76758 2.68535 5.67262 5.14763 5.14798"/><path d="M10.7476 7.89535C10.8708 11.7113 9.66109 14.847 8.0456 14.8991C6.83496 14.9382 5.74 13.2346 5.21536 10.7723"/></svg>', // IconPluginPinwheelOutlineRegular（插件：风车）
     dshUp: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 10L8.70711 6.70711C8.31658 6.31658 7.68342 6.31658 7.29289 6.70711L4 10"/></svg>', // IconChevronUpOutlineRegular（上级目录）
+    // 置顶（2026-10-18 work 侧栏会话 tab 菜单）：图钉，dsh 同族 16 viewBox / 1px 描线自绘。
+    dshPin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M5.5 1.75h5"/><path d="M6.5 1.75v4.1L5 7.35v1.15h6V7.35l-1.5-1.5V1.75"/><path d="M8 8.5v5.75"/></svg>',
     dshDownload: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 2.5V9.5"/><path d="M4.75 6.25 8 9.5l3.25-3.25"/><path d="M2.5 10.75v1.75a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1.75"/></svg>', // 下载（2026-10-14 待办 3：文件行菜单「下载」项；dsh 同族 1px 描线自绘）
     dshPaperclip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12.75 4.5V9.5C12.75 10.7598 12.2496 11.968 11.3588 12.8588C10.468 13.7496 9.25978 14.25 8 14.25C6.74022 14.25 5.53204 13.7496 4.64124 12.8588C3.75045 11.968 3.25 10.7598 3.25 9.5V5C3.25 4.13805 3.59241 3.3114 4.2019 2.7019C4.8114 2.09241 5.63805 1.75 6.5 1.75C7.36195 1.75 8.1886 2.09241 8.7981 2.7019C9.40759 3.3114 9.75 4.13805 9.75 5V9.5C9.75 9.96413 9.56563 10.4092 9.23744 10.7374C8.90925 11.0656 8.46413 11.25 8 11.25C7.53587 11.25 7.09075 11.0656 6.76256 10.7374C6.43437 10.4092 6.25 9.96413 6.25 9.5V5.5"/></svg>', // IconPaperclipOutlineRegular（上传文件）
     // ---- 命令菜单逐命令字形（2026-09-29）--------------------------------------------------------
@@ -236,6 +238,10 @@
     // （applyPanes 兜底并入当前 workFile）；删/切换 = work-editor.js closeWkFile。**非激活 tab 不保留
     // 编辑器态**——本模型是单编辑器 + 切前 flush，刻意不承诺「各自保留未保存内容」。
     wkFiles: [],
+    // wkPins = work 侧栏会话列表的置顶集（会话 hash 数组，右键/长按浮窗「置顶」写入）。
+    // **只在 work 侧栏渲染与排序**（chat 侧栏列表不读它）；**全局、不按项目分槽**——会话 hash 全局
+    // 唯一，且 work 列表只列当前项目会话，天然按项目隔离。持久化随 saveWork 同一 patch。
+    wkPins: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // ---------- 项目槽（2026-10-15 待办 #5/#8/#9 根治）----------
     // workSlots: <项目 label> → 该项目的一整套 work 界面状态（键 = WORK_SLOT_DEF，sidebar/work-state.js）。
@@ -361,7 +367,7 @@
   // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
   function saveWork() {
     stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, wkPins: state.wkPins, workSlots: state.workSlots })
   }
   // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
   // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
@@ -401,6 +407,8 @@
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
       if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW // 全局：预览列宽
+      // 置顶集（全局，仅 work 侧栏消费）：持久化区 = 外部边界，只收非空字符串
+      if (Array.isArray(d.wkPins)) state.wkPins = d.wkPins.filter((x) => typeof x === 'string' && x)
       if (d.workSlots && typeof d.workSlots === 'object') {
         for (const [k, v] of Object.entries(d.workSlots)) if (k && v && typeof v === 'object') state.workSlots[k] = v
       } else {
@@ -3707,7 +3715,24 @@ function setLastNavHash(v) { lastNavHash = v }
     return m ? m[0] : label || ''
   }
 
-  function itemHtml(s, showProj) {
+  // ---------- work 侧栏会话置顶（2026-10-18）----------
+  // 状态源 = state.wkPins（core/ui-state.js，随 saveWork 持久化）。**只在 work 侧栏渲染**：
+  // 排序与行内图钉标记都由 work 列表出口（work-files.js wkBodyHtml）消费；chat 侧栏列表不读、
+  // 菜单项也只对 #wk-body 内的行出现。置顶/取消置顶的唯一写口 = togglePin。
+  function isPinned(hash) {
+    return !!hash && state.wkPins.includes(hash)
+  }
+  function togglePin(hash) {
+    if (!hash) return
+    state.wkPins = isPinned(hash)
+      ? state.wkPins.filter((h) => h !== hash)
+      : state.wkPins.concat(hash)
+    saveWork()
+    renderWorkBody() // 列表唯一渲染出口（work-files.js）：重排 + 图钉标记一次落地
+    toast(isPinned(hash) ? '已置顶' : '已取消置顶')
+  }
+
+  function itemHtml(s, showProj, showPin) {
     const on = hashOf(s) === state.currentHash
     // 会话状态点：busy=绿（正在运行）· waiting=橘（等待用户）· idle=红（运行暂停/已完成）· 无=透明（CLI 未打开）
     const dotCls = s.state === 'busy' ? ' st-busy' : s.state === 'waiting' ? ' st-ask' : s.state === 'idle' ? ' st-wait' : ''
@@ -3716,8 +3741,10 @@ function setLastNavHash(v) { lastNavHash = v }
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
     // 2026-09-26 行操作入口 = 右键（桌面）/ 长按（触屏）唤出浮窗，三点按钮已删除（见 openRowMenu）
+    // 置顶标记只在调用方显式要求时渲染（work 侧栏传 true）——chat 侧栏即使同一会话已置顶也不出图钉
+    const pinIco = showPin && isPinned(hashOf(s)) ? `<span class="pin-ico" title="已置顶">${I.dshPin}</span>` : ''
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
-      <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}</button>`
+      <span class="dot${dotCls}"></span>${pinIco}<span class="title">${esc(s.title)}</span>${projTag}</button>`
   }
 
   // ---------- 真触屏判定（2026-09-05）：iPadOS Safari 桌面模式报 hover:hover+pointer:fine（与 macOS
@@ -4028,14 +4055,23 @@ function setLastNavHash(v) { lastNavHash = v }
   registerRowMenu({
     sel: '.sess-item',
     key: (el) => el.dataset.hash || null,
-    items: (el) =>
-      ALL.find((v) => hashOf(v) === el.dataset.hash)
-        ? [
-            { a: 'rename', icon: I.dshEdit, label: '重命名' },
-            { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
-          ]
-        : [],
-    pick: (a, el) => (a === 'rename' ? openSessionRename(el.dataset.hash) : closeSession(el.dataset.hash)),
+    items: (el) => {
+      const hash = el.dataset.hash
+      if (!ALL.find((v) => hashOf(v) === hash)) return []
+      // 置顶只属于 work 侧栏（行宿主 = #wk-body）：chat 侧栏 / 气泡弹层的会话行不渲染该项
+      const pinItems = el.closest('#wk-body')
+        ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
+        : []
+      return [
+        ...pinItems,
+        { a: 'rename', icon: I.dshEdit, label: '重命名' },
+        { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
+      ]
+    },
+    pick: (a, el) =>
+      a === 'pin' ? togglePin(el.dataset.hash)
+        : a === 'rename' ? openSessionRename(el.dataset.hash)
+          : closeSession(el.dataset.hash),
   })
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
@@ -6569,13 +6605,16 @@ function edCmg() {
     if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
+      // 置顶排序（2026-10-18）：wkPins 命中的会话恒排在 sessCmp 之前（组内仍按 sessCmp：
+      // 状态在线优先 + 创建时间新→旧）。只作用于 work 侧栏列表，chat 侧栏 renderList/renderProject 不变。
+      const pinRank = (s) => (isPinned(hashOf(s)) ? 0 : 1)
       const list = state.workProj
-        ? ALL.filter((s) => s.projectLabel === state.workProj).sort(sessCmp)
+        ? ALL.filter((s) => s.projectLabel === state.workProj).sort((a, b) => pinRank(a) - pinRank(b) || sessCmp(a, b))
         : []
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
       return list.length
-        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
+        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false, true)).join('')}</div>`
         : '<div class="wk-empty">该项目还没有聊天</div>'
     }
     if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'

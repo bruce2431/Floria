@@ -1928,6 +1928,11 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
   background: transparent; transform: translateY(-1px);
 }
 .sess-item.on .w-tag { border-color: transparent; background: var(--hairline-2); }
+/* work 侧栏会话置顶标记（2026-10-18）：行首图钉，只由 work 列表渲染（chat 侧栏无此节点）。
+   与 dot 同排：dot 是 5px 状态点，图钉 13px；两者都在标题前，标题仍 flex:1 保持单行省略。 */
+.sess-item .pin-ico { flex: 0 0 auto; display: flex; width: 13px; height: 13px; color: var(--text-3); }
+.sess-item .pin-ico svg { width: 13px; height: 13px; display: block; }
+.sess-item.on .pin-ico { color: var(--text-2); }
 
 .folder { display: flex; flex-direction: column; }
 .folder-head {

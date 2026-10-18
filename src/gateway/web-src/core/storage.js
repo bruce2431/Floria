@@ -91,7 +91,7 @@ import { state } from './ui-state.js'
   // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
   function saveWork() {
     stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, wkPins: state.wkPins, workSlots: state.workSlots })
   }
   // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
   // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
@@ -131,6 +131,8 @@ import { state } from './ui-state.js'
       if (d.sbMode === 'work' || d.sbMode === 'chat') state.sbMode = d.sbMode
       if (typeof d.workProj === 'string') state.workProj = d.workProj
       if (typeof d.wkPrevW === 'number' && d.wkPrevW > 0) state.wkPrevW = d.wkPrevW // 全局：预览列宽
+      // 置顶集（全局，仅 work 侧栏消费）：持久化区 = 外部边界，只收非空字符串
+      if (Array.isArray(d.wkPins)) state.wkPins = d.wkPins.filter((x) => typeof x === 'string' && x)
       if (d.workSlots && typeof d.workSlots === 'object') {
         for (const [k, v] of Object.entries(d.workSlots)) if (k && v && typeof v === 'object') state.workSlots[k] = v
       } else {

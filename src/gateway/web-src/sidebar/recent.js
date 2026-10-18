@@ -9,6 +9,7 @@ import { hashOf } from '../engine/sessions.js'
 import { bodyEl, sidebar, bubblePop, recentLabel, modeTabsEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isMobile } from '../core/util.js'
 import { applyPanelOpen } from '../engine/panel.js'
+import { saveWork } from '../core/storage.js'
 import { gwSend } from '../inputbar/send.js'
 import { renderBubble, renderSearch } from './bubble-search.js'
 import { renderList, renderProject } from './mgr.js'
@@ -64,7 +65,24 @@ import { renderList, renderProject } from './mgr.js'
     return m ? m[0] : label || ''
   }
 
-  function itemHtml(s, showProj) {
+  // ---------- work 侧栏会话置顶（2026-10-18）----------
+  // 状态源 = state.wkPins（core/ui-state.js，随 saveWork 持久化）。**只在 work 侧栏渲染**：
+  // 排序与行内图钉标记都由 work 列表出口（work-files.js wkBodyHtml）消费；chat 侧栏列表不读、
+  // 菜单项也只对 #wk-body 内的行出现。置顶/取消置顶的唯一写口 = togglePin。
+  function isPinned(hash) {
+    return !!hash && state.wkPins.includes(hash)
+  }
+  function togglePin(hash) {
+    if (!hash) return
+    state.wkPins = isPinned(hash)
+      ? state.wkPins.filter((h) => h !== hash)
+      : state.wkPins.concat(hash)
+    saveWork()
+    renderWorkBody() // 列表唯一渲染出口（work-files.js）：重排 + 图钉标记一次落地
+    toast(isPinned(hash) ? '已置顶' : '已取消置顶')
+  }
+
+  function itemHtml(s, showProj, showPin) {
     const on = hashOf(s) === state.currentHash
     // 会话状态点：busy=绿（正在运行）· waiting=橘（等待用户）· idle=红（运行暂停/已完成）· 无=透明（CLI 未打开）
     const dotCls = s.state === 'busy' ? ' st-busy' : s.state === 'waiting' ? ' st-ask' : s.state === 'idle' ? ' st-wait' : ''
@@ -73,8 +91,10 @@ import { renderList, renderProject } from './mgr.js'
     const projTag = showProj && s.projectScope === 'project' && s.projectLabel
       ? `<span class="w-tag" title="${esc(s.projectLabel)}">${esc(projIdOf(s.projectLabel))}</span>` : ''
     // 2026-09-26 行操作入口 = 右键（桌面）/ 长按（触屏）唤出浮窗，三点按钮已删除（见 openRowMenu）
+    // 置顶标记只在调用方显式要求时渲染（work 侧栏传 true）——chat 侧栏即使同一会话已置顶也不出图钉
+    const pinIco = showPin && isPinned(hashOf(s)) ? `<span class="pin-ico" title="已置顶">${I.dshPin}</span>` : ''
     return `<button class="sess-item${on ? ' on' : ''}" data-hash="${esc(hashOf(s))}" title="${esc(s.file)}">
-      <span class="dot${dotCls}"></span><span class="title">${esc(s.title)}</span>${projTag}</button>`
+      <span class="dot${dotCls}"></span>${pinIco}<span class="title">${esc(s.title)}</span>${projTag}</button>`
   }
 
   // ---------- 真触屏判定（2026-09-05）：iPadOS Safari 桌面模式报 hover:hover+pointer:fine（与 macOS
@@ -385,14 +405,23 @@ import { renderList, renderProject } from './mgr.js'
   registerRowMenu({
     sel: '.sess-item',
     key: (el) => el.dataset.hash || null,
-    items: (el) =>
-      ALL.find((v) => hashOf(v) === el.dataset.hash)
-        ? [
-            { a: 'rename', icon: I.dshEdit, label: '重命名' },
-            { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
-          ]
-        : [],
-    pick: (a, el) => (a === 'rename' ? openSessionRename(el.dataset.hash) : closeSession(el.dataset.hash)),
+    items: (el) => {
+      const hash = el.dataset.hash
+      if (!ALL.find((v) => hashOf(v) === hash)) return []
+      // 置顶只属于 work 侧栏（行宿主 = #wk-body）：chat 侧栏 / 气泡弹层的会话行不渲染该项
+      const pinItems = el.closest('#wk-body')
+        ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
+        : []
+      return [
+        ...pinItems,
+        { a: 'rename', icon: I.dshEdit, label: '重命名' },
+        { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
+      ]
+    },
+    pick: (a, el) =>
+      a === 'pin' ? togglePin(el.dataset.hash)
+        : a === 'rename' ? openSessionRename(el.dataset.hash)
+          : closeSession(el.dataset.hash),
   })
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
@@ -662,6 +691,7 @@ export {
   closeSession,
   confirmRename,
   firstSendHash,
+  isPinned,
   itemHtml,
   liftClear,
   liftCool,
@@ -683,5 +713,6 @@ export {
   renderRecent,
   rowMenuPop,
   setPanel,
+  togglePin,
   webCreating,
 }

@@ -1,4 +1,5 @@
 // 右栏页态内容补挂 + 侧栏（项目选择/项目列表/文件树/自动对账/数据补齐）与其渲染。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
+import { isPinned } from '../recent.js'
 /* @module sidebar/work/work-files.js */
 
   // ---------- 外部卡申报补拉 ----------
@@ -123,13 +124,16 @@
     if (state.wkTab === 'chat') {
       // 列表 = 当前项目下的会话，条目渲染复用 recent.js 的 itemHtml（与侧栏「项目展开」同一份实现，
       // 不另写一套行）；行操作浮窗（右键 / 长按）走 recent.js 的 document 级委托，此处无需接线。
+      // 置顶排序（2026-10-18）：wkPins 命中的会话恒排在 sessCmp 之前（组内仍按 sessCmp：
+      // 状态在线优先 + 创建时间新→旧）。只作用于 work 侧栏列表，chat 侧栏 renderList/renderProject 不变。
+      const pinRank = (s) => (isPinned(hashOf(s)) ? 0 : 1)
       const list = state.workProj
-        ? ALL.filter((s) => s.projectLabel === state.workProj).sort(sessCmp)
+        ? ALL.filter((s) => s.projectLabel === state.workProj).sort((a, b) => pinRank(a) - pinRank(b) || sessCmp(a, b))
         : []
       // 新建入口 = tab 行工具区的加号（updateWkTools 控制显隐），列表顶部不再占一行大按钮
       if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'
       return list.length
-        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false)).join('')}</div>`
+        ? `<div class="wk-chats">${list.map((s) => itemHtml(s, false, true)).join('')}</div>`
         : '<div class="wk-empty">该项目还没有聊天</div>'
     }
     if (!state.workProj) return '<div class="wk-empty">先在上方选择一个项目</div>'

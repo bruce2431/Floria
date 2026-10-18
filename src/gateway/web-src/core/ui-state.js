@@ -39,6 +39,10 @@
     // （applyPanes 兜底并入当前 workFile）；删/切换 = work-editor.js closeWkFile。**非激活 tab 不保留
     // 编辑器态**——本模型是单编辑器 + 切前 flush，刻意不承诺「各自保留未保存内容」。
     wkFiles: [],
+    // wkPins = work 侧栏会话列表的置顶集（会话 hash 数组，右键/长按浮窗「置顶」写入）。
+    // **只在 work 侧栏渲染与排序**（chat 侧栏列表不读它）；**全局、不按项目分槽**——会话 hash 全局
+    // 唯一，且 work 列表只列当前项目会话，天然按项目隔离。持久化随 saveWork 同一 patch。
+    wkPins: [],
     wkAssistMode: 'side', wkAssistH: 430,
     // ---------- 项目槽（2026-10-15 待办 #5/#8/#9 根治）----------
     // workSlots: <项目 label> → 该项目的一整套 work 界面状态（键 = WORK_SLOT_DEF，sidebar/work-state.js）。

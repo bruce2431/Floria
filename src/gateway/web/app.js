@@ -7740,6 +7740,23 @@ function edCmg() {
 
   let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
   let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
+
+  // 死路径收口：读回 404 = 该路径在盘上已不存在（改名/删除后残留的开放集条目，含持久化恢复的）。
+  // 摘出 state.wkFiles（顶栏 pill 的唯一来源），激活项按关 tab 同语义落到右邻/左邻/聊天；
+  // 不保留一枚永远「读取失败」的空壳胶囊。**只认 404**——网络错误/413/403 是「读不出内容」而非
+  // 「文件没了」，瞬时故障不该吞掉用户打开的视图。
+  function wkDropDeadFile(p) {
+    const i = state.wkFiles.indexOf(p)
+    if (i >= 0) state.wkFiles.splice(i, 1)
+    toast('文件不存在：' + p)
+    if (state.workFile !== p) { applyPanes(); return }
+    const next = state.wkFiles[i] != null ? state.wkFiles[i] : state.wkFiles[i - 1]
+    if (next != null) return openWorkFile(next)
+    state.workFile = ''
+    state.wkMainTab = 'chat'
+    renderEditor()
+    applyPanes()
+  }
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
@@ -7770,6 +7787,7 @@ function edCmg() {
         const res = await fetch(fileUrl(p))
         if (seq !== edSeq) return
         if (!res.ok) {
+          if (res.status === 404) return wkDropDeadFile(p)
           body.innerHTML =
             '<div class="wk-ed-empty">' +
             esc(res.status === 413 ? 'PDF 超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
@@ -7792,6 +7810,7 @@ function edCmg() {
       const res = await fetch(fileUrl(p))
       if (seq !== edSeq) return
       if (!res.ok) {
+        if (res.status === 404) return wkDropDeadFile(p)
         wkEdFile = p
         wkEdMeta = {
           isImg: false,

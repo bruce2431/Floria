@@ -222,8 +222,10 @@
     // wkPvTab = 右栏「页态」：'' = 预览态（挂项目预览帧 #wk-pv-body）/ 已注册工具 id = 工具态（顶 tab 条
     // + 该工具 pane 互斥显隐，注册表见 sidebar/work-tools.js）。与 wkPreview（栏在不在场）正交：
     // 预览态 ⇄ 工具态由顶栏「工具栏」胶囊切（工具态时胶囊变「关闭」，点回预览态）。
+    // wkPvCard = 预览态下当前激活的卡片 id（<项目>/.claude/preview/<id>/，元信息 card.json）；
+    // '' = 无卡项目（传统 index.html 单页）。随项目入槽；项目卡表变化时由 renderWorkPreview 归一。
     sbMode: 'chat', projects: [], workspace: '', workProj: '', workFile: '', wkAssist: true, wkPreview: true,
-    wkMainTab: 'chat', wkPrevW: 420, wkPvTab: '',
+    wkMainTab: 'chat', wkPrevW: 420, wkPvTab: '', wkPvCard: '',
     // wkTab = 侧栏体当前页（'files' 文件树 / 'chat' 会话列表）。2026-10-15 由
     // sidebar/work.js 的模块局部变量提升到 state 并**随项目入槽**（此前不持久化 ⇒ 重启恒回「文件」，
     // 这既是待办 #5 的一半，也让「切项目恢复上次侧栏页」成为可能）。
@@ -338,6 +340,7 @@
       workFile: state.workFile,
       wkPreview: !!state.wkPreview,
       wkPvTab: state.wkPvTab,
+      wkPvCard: state.wkPvCard,
       panelPinned: !!state.panelPinned,
     }
   }
@@ -360,6 +363,7 @@
     state.workFile = str('workFile') // 非字符串 → def（''）
     state.wkPreview = bool('wkPreview')
     state.wkPvTab = str('wkPvTab')
+    state.wkPvCard = str('wkPvCard')
     state.panelPinned = bool('panelPinned')
   }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的
@@ -4331,8 +4335,7 @@ function setLastNavHash(v) { lastNavHash = v }
 function setFirstSendHash(v) { firstSendHash = v }
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
   // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
-  // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道，同 default-preview
-  // 的 floria-open-session 先例；宿主侧此前无对应监听，本模块补上）。
+  // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道）。
   // 契约：预览页 → 宿主 parent.postMessage({ type:'floria-rail-register', items:[{id,icon,title}] }, '*')
   //       icon = I 图标表的键（不让预览页自送 SVG——视觉沿用侧栏现成图标，SPEC §6.4「不新增视觉」）
   //       title = 悬浮提示；id 由预览页自定义，点击时原样回传。
@@ -4939,7 +4942,7 @@ function setFirstSendHash(v) { firstSendHash = v }
 
   // ---------- 预览卡 ----------
   // 槽位预览卡（openProjectPreview，独占主区）：与 work 右栏「预览态」（sidebar/work.js
-  // renderWorkPreview）复用同一份 mountPreview——后端容器 / 静态页 / 默认页三级链只有这一处实现，
+  // renderWorkPreview）复用同一份 mountPreview——后端容器 / 静态页两级链只有这一处实现，
   // 在 feature/preview-frame.js。syncExtCards 亦在该件，供 sidebar/work.js 的补拉链调（外部卡申报）。
   const previewCardDef = {
     id: 'preview', title: '预览', tip: '项目预览', icon: 'folder', tab: false,
@@ -5103,26 +5106,112 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 两条外部输入共用 engine/ext-decl.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
   // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
   let extCardsSeq = 0
+  // ---------- 预览工作区卡片（2026-10-18）----------
+  // 一张卡 = <项目>/.claude/preview/<id>/ 一个目录（元信息 card.json，网关扫描后随同一份
+  // /gateway/preview-cards 响应下发 previewCards）。表属于「当前项目」：label 不同即空表，
+  // 不沿用上一项目的卡（与 EXT 同一条生命周期不变量）。宿主 tab 条与 iframe 加载都读本表。
+  let pvCards = []
+  let pvCardsLabel = ''
+  let pvCardsReady = false
+  let pvCardsInflight = null
+  let pvCardsInflightLabel = ''
+  let pvCardPayloads = [] // [{ label, card, payload }]：卡→卡跳转的交接数据，目标帧 load 时消费一次
+
+  function normPreviewCards(raw) {
+    const seen = new Set()
+    return (Array.isArray(raw) ? raw : [])
+      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      .map((c) => ({
+        id: typeof c.id === 'string' ? c.id.trim() : '',
+        title: typeof c.title === 'string' ? c.title.trim() : '',
+        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+        entry: typeof c.entry === 'string' && c.entry ? c.entry.trim() : 'index.html',
+        order: typeof c.order === 'number' && Number.isFinite(c.order) ? c.order : 100,
+        default: c.default === true,
+      }))
+      .filter((c) => {
+        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(c.id) || !c.title || seen.has(c.id)) return false
+        seen.add(c.id)
+        return true
+      })
+  }
+  function registerPreviewCards(label, cards) {
+    if (!label) return
+    pvCards = normPreviewCards(cards)
+    pvCardsLabel = label
+    pvCardsReady = true
+  }
+  // 当前项目的卡表（异 label = 空表，防串项目）。调用方按需 clone，不写回本表。
+  function previewCardsFor(label) {
+    return label && pvCardsLabel === label ? pvCards : []
+  }
+  function previewCardsReadyFor(label) {
+    return !!label && pvCardsLabel === label && pvCardsReady
+  }
+  function previewPaneCardDef(label, id) {
+    return previewCardsFor(label).find((c) => c.id === id) || null
+  }
+  // 归一化激活卡：命中现有表则原样；否则回落 default（无 default 取排序首张）；无卡表 = ''。
+  function previewCardNormId(label, id) {
+    const list = previewCardsFor(label)
+    if (!list.length) return ''
+    if (id && list.some((c) => c.id === id)) return id
+    const d = list.find((c) => c.default) || list[0]
+    return d.id
+  }
+  // 卡表就绪才返回；未就绪先取一次申报。in-flight 按 label 去重（work 首渲与 mount 同时问只发一次）。
+  function ensurePreviewDecls(label, force) {
+    if (!label) return Promise.resolve([])
+    if (!force && previewCardsReadyFor(label)) return Promise.resolve(previewCardsFor(label))
+    if (pvCardsInflight && pvCardsInflightLabel === label) return pvCardsInflight
+    const p = syncExtCards(label).then(() => (previewCardsReadyFor(label) ? previewCardsFor(label) : []))
+    pvCardsInflight = p
+    pvCardsInflightLabel = label
+    p.finally(() => {
+      if (pvCardsInflight === p) { pvCardsInflight = null; pvCardsInflightLabel = '' }
+    })
+    return p
+  }
+  // 卡→卡跳转的交接数据：源卡 postMessage 带 payload 时由宿主暂存，目标帧 load 后随 init 下发一次。
+  function setPendingCardPayload(label, card, payload) {
+    pvCardPayloads = pvCardPayloads.filter((p) => !(p.label === label && p.card === card))
+    pvCardPayloads.push({ label, card, payload })
+  }
+  function takePendingCardPayload(label, card) {
+    const i = pvCardPayloads.findIndex((p) => p.label === label && p.card === card)
+    if (i < 0) return null
+    const v = pvCardPayloads[i].payload
+    pvCardPayloads.splice(i, 1)
+    return v
+  }
+  // 卡页入口 URL 片段（卡目录内 entry，逐段编码；entry 已由网关/前端校验为安全相对路径）
+  function cardEntryPath(card) {
+    return card.entry.split('/').map(encodeURIComponent).join('/')
+  }
+
   function syncExtCards(label) {
     const seq = ++extCardsSeq
     clearExtCards()
     clearQuoteActions()
-    fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+    return fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
       .then((d) => {
         if (seq !== extCardsSeq) return
         registerExtCards(label, d && d.cards, true)
         registerQuoteActions(label, d && d.quoteActions)
+        registerPreviewCards(label, d && d.previewCards)
       })
-      .catch(() => {}) // 清单拿不到 = 该项目无外部卡/无浮窗动作（不猜不兜底）
+      .catch(() => {
+        // 清单拿不到 = 该项目无外部卡/无浮窗动作/无预览卡（空表是正常态，不猜不兜底）
+        if (seq === extCardsSeq) registerPreviewCards(label, [])
+      })
   }
 
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。
-  // 预览页加载三级策略（2026-08-19 Web 容器）：
+  // 预览页加载两级策略（2026-08-19 Web 容器；2026-10-18 删除宿主内置默认页）：
   //  ① preview.json 声明 backend → 网关 /gateway/backend 懒加载 spawn 后端进程，iframe 直连 http://127.0.0.1:<port>/
   //     （并 60s 心跳刷新网关侧 lastActive，防空闲回收误杀）；
-  //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
-  //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
+  //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载卡目录页；都没有 → 空态占位（不提供的项目不造页）。
   function openProjectPreview(label, hasPreview) {
     // 硬进入（异 label / 帧不在场；软重入不清不重建 shell，见 mountPreview 两级重入说明）：先卸会话视图
     // 再占预览槽——deactivateCard('session') 即 registry 契约出口，给到会话卡自身的 teardown 钩子
@@ -5135,21 +5224,37 @@ function setFirstSendHash(v) { firstSendHash = v }
     openCard('preview', { label, hasPreview })
   }
 
-  // 预览渲染器（三级链的唯一一份实现：后端容器 → 静态 preview → 默认主页）。两个消费方——
+  // 预览渲染器（两级链的唯一一份实现：后端容器 → 静态 preview）。两个消费方——
   // 槽位预览卡（openProjectPreview，独占主区）与 work 个性化工作区第三栏（sidebar/work.js），
   // 到 iframe 这一层没有第二套代码。
   // 2026-09-04 重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
   // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
   // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
-  // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
+  // 而无真源时曾记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
   // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat。故两级重入：同 label 且
   // iframe 在场（data-label 锚定）= 软重入——不重写 shell，三级链照跑但 mount 按 iframe 现有 src 校正
   // （同 src 零操作 = 零导航扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；
   // 异 label 或 iframe 不在场 = 硬挂载。
-  function mountPreview(container, label, hasPreview) {
+  function mountPreview(container, label, hasPreview, cardId) {
     if (!container) return
     // 换项目 = 换源：上一份的帧留不得（软重入只对同 label 成立）
     const prev = container.querySelector('.preview-frame')
+    const hard = !prev || prev.dataset.label !== label
+    // 卡片清单必须就位才能决定 URL（有卡 = 卡目录页，无卡 = 传统 index.html）。
+    // 清单未就绪先拉一次申报再重入；ensure 自带 in-flight 去重，这里只防同一容器并行重入。
+    if (!previewCardsReadyFor(label)) {
+      if (container.__pvWaitLabel === label) return
+      container.__pvWaitLabel = label
+      ensurePreviewDecls(label, hard).then(() => {
+        if (container.__pvWaitLabel === label) container.__pvWaitLabel = ''
+        if (container.isConnected) mountPreview(container, label, hasPreview, cardId)
+      })
+      return
+    }
+    container.__pvWaitLabel = ''
+    const list = previewCardsFor(label)
+    const card = list.length ? (previewPaneCardDef(label, cardId) || list.find((c) => c.default) || list[0]) : null
+    const cardActual = card ? card.id : ''
     if (prev && prev.dataset.label !== label) {
       cardBus.unregisterFrame(prev.__cardKey) // 换项目 = 上一份帧彻底拆除：表项当场注销（不等 isConnected 失格）
       container.innerHTML = ''
@@ -5161,6 +5266,15 @@ function setFirstSendHash(v) { firstSendHash = v }
         '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
         '</div>'
     }
+    // 无后端、无 .claude/preview 静态页 = 该项目没有可视预览：空态占位（宿主不再内置默认页）。
+    const mountEmpty = () => {
+      if (!container.isConnected) return
+      const body = container.querySelector('.preview-body')
+      if (!body) return
+      clearRailExt() // 旧文档注册的侧栏快捷按钮随文档失效
+      body.innerHTML = '<div class="preview-empty">该项目暂无预览</div>'
+      state.previewMounted = label
+    }
     const mount = (src, name, already) => {
       // 异步回程守卫：三级链是异步的，回来时容器可能已离场（槽位换卡 / work 关掉预览栏）
       if (!container.isConnected) return
@@ -5170,9 +5284,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       // 一律不走下方整区重建
       const cur = body.querySelector('.preview-frame')
       if (cur) {
-        // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
-        if (cur.getAttribute('src') !== src) { clearRailExt(); syncExtCards(label); cur.setAttribute('src', src) }
-        state.previewMounted = src.includes('/default-preview/') ? null : label
+        // iframe 换文档/换卡 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
+        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
+        cur.dataset.card = cardActual
+        state.previewMounted = label
         // 软重入也回表：同 el 复用 key，但 resetFrame 清掉旧文档的 ns/ready/cmds（换 src = 换了卡）
         cardBus.registerFrame({ kind: 'preview', label, el: cur })
         return
@@ -5186,15 +5301,14 @@ function setFirstSendHash(v) { firstSendHash = v }
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
-      syncExtCards(label) // 同上：清上一份文档的侧栏快捷按钮 + 上一份预览页申报的外部卡，重取本项目清单
       body.innerHTML =
-        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
+        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" data-card="${esc(cardActual)}" src="${src}"></iframe>` +
         (already
           ? ''
           : `<div class="preview-overlay"><div class="preview-overlay-spin"></div>` +
             `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
             `<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div></div>`)
-      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底 default 记 null：真源升级由软重入 src 校正驱动
+      state.previewMounted = label
       const frame = body.querySelector('.preview-frame')
       const overlay = body.querySelector('.preview-overlay')
       if (!frame) return
@@ -5207,6 +5321,13 @@ function setFirstSendHash(v) { firstSendHash = v }
       }
       frame.addEventListener('load', () => {
         frame.focus()
+        // 卡片身份 + 交接数据（卡→卡跳转）：以 dataset 为准（软重入换 src 时闭包里的 card 已过期）。
+        // 无卡（传统单页预览）不发，旧页不受影响。
+        const liveCard = frame.dataset.card || ''
+        if (liveCard) {
+          const payload = takePendingCardPayload(label, liveCard)
+          try { frame.contentWindow.postMessage({ type: 'floria-wk-card-init', card: liveCard, payload }, '*') } catch { /* 帧已销毁：丢弃 */ }
+        }
         if (!overlay) return
         // backend 容器（传了 name）：object_info 拉取渲染需数秒，缓冲后自动淡出；
         // 静态 preview / 默认主页（无 name）：无后端 loading，立即淡出不挡内容
@@ -5225,26 +5346,26 @@ function setFirstSendHash(v) { firstSendHash = v }
         // 网关同源代理 /backend/<label>/（访问票由上一拍 /gateway/backend 响应种下的 HttpOnly cookie 提供）
         const remotePage =
           location.protocol.startsWith('http') && ['127.0.0.1', 'localhost'].indexOf(location.hostname) < 0
-        mount(remotePage ? `/backend/${encodeURIComponent(label)}/` : d.url, d.name, !!d.alreadyRunning)
+        // 卡页 = 卡目录内 entry（默认 index.html）；无卡 = 后端根（传统单页预览）
+        const rel = card ? `${encodeURIComponent(card.id)}/${cardEntryPath(card)}` : ''
+        mount(remotePage ? `/backend/${encodeURIComponent(label)}/${rel}` : d.url + rel, d.name, !!d.alreadyRunning)
         if (window.__backendHeartbeat) clearInterval(window.__backendHeartbeat)
         window.__backendHeartbeat = setInterval(() => {
           fetch(`/gateway/backend?label=${encodeURIComponent(label)}&token=${encodeURIComponent(gToken || '')}`).catch(() => {})
         }, 60000)
       })
       .catch(() => {
-        // ② ③ 静态 preview / 默认项目主页兜底
-        const previewSrc = `/preview/${encodeURIComponent(label)}/index.html${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
-        const defaultSrc = `/default-preview/${encodeURIComponent(label)}/${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
-        if (hasPreview) {
-          fetch(previewSrc, { method: 'GET' })
-            .then((r) => {
-              if (!r.ok) throw new Error('HTTP ' + r.status)
-              mount(previewSrc)
-            })
-            .catch(() => mount(defaultSrc))
-        } else {
-          mount(defaultSrc)
-        }
+        // ② 静态 preview；项目未申报 preview 目录 → 空态
+        if (!hasPreview) { mountEmpty(); return }
+        const previewSrc = card
+          ? `/preview/${encodeURIComponent(label)}/${encodeURIComponent(card.id)}/${cardEntryPath(card)}${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
+          : `/preview/${encodeURIComponent(label)}/index.html${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
+        fetch(previewSrc, { method: 'GET' })
+          .then((r) => {
+            if (!r.ok) throw new Error('HTTP ' + r.status)
+            mount(previewSrc)
+          })
+          .catch(mountEmpty)
       })
   }
 
@@ -5309,13 +5430,17 @@ function setFirstSendHash(v) { firstSendHash = v }
     return WK_TOOL_DEFS.length ? WK_TOOL_DEFS[0].id : ''
   }
 
-  // tab 条渲染（唯一口）：首枚恒为「预览」页签（data-wkpv="" → state.wkPvTab='' 回预览态），
-  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // tab 条渲染（唯一口）：预览工作区卡片在前（每卡一枚，名称取 card.json 的 title，data-wkcard 定址），
+  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。**无卡项目的旧形态保留首枚「预览」页签**
+  // （data-wkpv="" → 回传统单页 index.html）；有卡时不再渲染它——卡片就是预览页本身。
+  // active 态由 work.js applyPvTab 落（卡 = state.wkPvCard，工具 = state.wkPvTab）。
   // 注：data-wkpv="" 仍被 [data-wkpv] 属性存在选择器命中，故点击委托（work-mount.js）不用改。
   function renderWkToolTabs() {
     const box = $('wk-pv-tabs')
     if (!box) return
-    const head = '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>'
+    const cards = previewCardsFor(state.workProj)
+    const head = (cards.length ? '' : '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>') +
+      cards.map((c) => `<button type="button" class="wk-pv-tab" data-wkcard="${esc(c.id)}">${esc(c.title)}</button>`).join('')
     box.innerHTML = head + wkToolDefs().map(
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')
@@ -5340,6 +5465,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     workFile: '',          // 当前打开的文件（项目内相对路径）
     wkPreview: true,       // 右栏预览列是否在场
     wkPvTab: '',           // 右栏页态：'' = 预览态 / 已注册工具 id
+    wkPvCard: '',          // 预览态当前卡 id（'' = 无卡项目的传统单页）
     panelPinned: false,    // 侧栏是否被主动打开（桌面）
   }
 
@@ -6134,6 +6260,12 @@ function edCmg() {
     return !t || !t.pane
   }
 
+  // 激活卡（唯一判定）：卡表为空 = ''（传统单页预览 index.html）；否则 state.wkPvCard 命中即用，
+  // 未命中回落 default / 排序首张。卡表属当前项目（previewCardsFor 异 label 返回空表）。
+  function wkCardNormId(id) {
+    return previewCardNormId(state.workProj, id === undefined ? state.wkPvCard : id)
+  }
+
   // 右栏 UI 落地（唯一处，纯渲染、不挂帧）：预览态 → 显 #wk-pv-body、隐全部工具 pane；工具态 → 隐预览帧、
   // 显该注册工具 pane（其余 pane 恒隐）。tab 条随栏在场常驻（首枚恒为「预览」，预览态下即 active）。
   // 顶栏「工具栏」胶囊跟着走：栏不在场 = 「工具栏」+ 插件图标（点它开栏），在场 = 「关闭」+ ✕（点它收栏）。
@@ -6143,7 +6275,11 @@ function edCmg() {
     const tool = id ? wkToolDef(id) : null
     const bar = $('wk-pv-tabs')
     if (bar) bar.hidden = !state.wkPreview
-    document.querySelectorAll('#work-preview .wk-pv-tab').forEach((b) => b.classList.toggle('on', b.dataset.wkpv === id))
+    const cardId = wkCardNormId()
+    if (previewCardsFor(state.workProj).length) state.wkPvCard = cardId
+    // 卡 tab 与工具 tab 互斥高亮：工具态（id 非空）时不亮任何卡；预览态亮当前卡。
+    document.querySelectorAll('#work-preview .wk-pv-tab[data-wkcard]').forEach((b) => b.classList.toggle('on', !id && b.dataset.wkcard === cardId))
+    document.querySelectorAll('#work-preview .wk-pv-tab[data-wkpv]').forEach((b) => b.classList.toggle('on', b.dataset.wkpv === id))
     for (const t of wkToolDefs()) {
       const el = t.pane ? $(t.pane) : null
       if (el) el.hidden = !tool || t.id !== id
@@ -6171,6 +6307,9 @@ function edCmg() {
     state.wkPreview = !!on
     if (!on) state.wkPvTab = ''
     else if (page !== undefined) state.wkPvTab = page === '' ? '' : wkToolNormId(page)
+    // 卡表已在时归一激活卡（表未就绪不能归一：会把持久化的卡 id 冲成 ''）；
+    // 未就绪由 renderWorkPreview 拉完申报后再归一。
+    if (on && previewCardsFor(state.workProj).length) state.wkPvCard = wkCardNormId()
     applyPanes()
     if (state.wkPreview) syncPvContent()
     saveWork()
@@ -6180,6 +6319,30 @@ function edCmg() {
   // （点 tab 就是要看这栏）。落地后补内容：工具态调该工具的 mount（注册表契约），预览态挂预览帧。
   function setPvTab(id) {
     setPvPane(true, id)
+  }
+
+  // 切预览卡（唯一口）：卡 tab 点击与「卡→宿主 floria-wk-card-switch」都走此处。
+  // 切卡 = 预览页态 + 该卡目录页进 iframe（renderWorkPreview 按 state.wkPvCard 组 URL）。
+  // payload = 源卡交接给目标卡的上下文（如编译失败→日志卡要知道哪一篇/哪一次编译），
+  // 目标帧 load 后经 floria-wk-card-init 下发；同卡重入不发 load，此处直接投递。
+  function setPvCard(id, payload) {
+    if (!previewCardsFor(state.workProj).length) return
+    const next = previewCardNormId(state.workProj, id)
+    if (!next) return
+    const same = next === state.wkPvCard && !state.wkPvTab && state.wkPreview
+    if (!same && payload !== undefined) setPendingCardPayload(state.workProj, next, payload)
+    state.wkPreview = true
+    state.wkPvTab = ''
+    state.wkPvCard = next
+    applyPanes()
+    syncPvContent()
+    saveWork()
+    if (same && payload !== undefined) {
+      const f = wkFrame()
+      if (f && f.contentWindow) {
+        try { f.contentWindow.postMessage({ type: 'floria-wk-card-init', card: next, payload }, '*') } catch { /* 帧已销毁：丢弃 */ }
+      }
+    }
   }
 
   // 页态落地后的内容补挂（唯一处）：预览态 → renderWorkPreview（挂/复挂预览帧）；工具态 → 该工具
@@ -6213,7 +6376,7 @@ function edCmg() {
   }
 
   // 预览帧挂载（唯一处）：内容渲染一律走 preview-card 的 mountPreview（与槽位预览卡同一份后端容器 /
-  // 静态页 / 默认页三级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
+  // 静态页两级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
   function hasPreviewOf(label) {
     return wkProjGroups().some((g) => g.label === label && g.hasPreview)
   }
@@ -6222,18 +6385,30 @@ function edCmg() {
     const el = $('wk-pv-body')
     if (!el || !state.workProj) return
     // 项目清单未就绪（token/设备门未解锁时 loadSessions 早退 ⇒ state.projects 为空）：此刻 hasPreview
-    // 不可信，挂 ③ 默认页会粘住真源。等门后补拉的 ensureWork 再入。
+    // 不可信，不挂任何源。等门后补拉的 ensureWork 再入。
     if (!wkProjGroups().length) return
+    const label = state.workProj
+    // 卡表未就绪：先取申报（与外部卡同一请求），落地后重渲 tab 条再挂帧——
+    // 不能先挂传统 index.html，再被卡表纠正（那是一次多余的整页导航）。
+    if (!previewCardsReadyFor(label)) {
+      ensurePreviewDecls(label).then(() => {
+        if (state.workProj !== label) return
+        renderWkToolTabs()
+        applyPvTab()
+        renderWorkPreview()
+      })
+      return
+    }
+    const cardId = wkCardNormId()
+    state.wkPvCard = cardId
     const f = el.querySelector('.preview-frame')
-    if (f && f.dataset.label === state.workProj) {
-      // 同项目已挂：一般交给 mountPreview 的软重入不重建（不重载 = 零导航扰动）；唯一例外是当前帧为
-      // ③ 默认页而项目确有 ② 静态预览 —— 首帧 hasPreview 未知时误挂，须重挂让软重入把 src 校正到真源。
-      const cur = f.getAttribute('src') || ''
-      if (!(cur.includes('/default-preview/') && hasPreviewOf(state.workProj))) return
+    if (f && f.dataset.label === label && (f.dataset.card || '') === cardId) {
+      // 同项目同卡已挂：交给 mountPreview 的软重入（不重载 = 零导航扰动）。
+      return
     }
     clearWkFrameTools() // 帧换文档：上一份预览页申报的工具 tab 失效（不变量同 rail-ext）
     wkFrameSentId = null
-    mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
+    mountPreview(el, label, hasPreviewOf(label), cardId)
   }
 
   // 顶栏 tab 条（唯一渲染口）：[聊天胶囊 × N] [文件 pill × N]（2026-10-12 文件 pill 起多枚并存）。
@@ -6565,8 +6740,7 @@ function edCmg() {
           .map(
             (g) =>
               `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
-              `<span class="wkp-name">${esc(g.label)}</span>` +
-              `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
+              `<span class="wkp-name">${esc(g.label)}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'
@@ -8311,6 +8485,8 @@ function edCmg() {
     // 首枚「预览」页签 data-wkpv="" → setPvTab('') → setPvPane(true, '')，经其中 `page === ''` 特判回预览态；
     // 切勿自以为要过 wkToolNormId——它会回落首枚工具（评论），表达不了「回预览」。
     $('wk-pv-tabs').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-wkcard]')
+      if (c) { setPvCard(c.dataset.wkcard); return } // 卡片 tab：切 iframe 到该卡目录页
       const b = e.target.closest('[data-wkpv]')
       if (b) setPvTab(b.dataset.wkpv)
     })
@@ -8320,7 +8496,19 @@ function edCmg() {
     // 帧工具的 pane 由预览页自管（宿主只渲 tab + 回传选中 id，见 syncPvContent/notifyFrame）。
     addEventListener('message', (e) => {
       const d = e.data
-      if (!d || d.type !== 'floria-wk-tool-register') return
+      if (!d || typeof d !== 'object') return
+      // 预览卡 → 宿主顶栏：请求切到另一张卡（2026-10-18 多卡片架构）。门禁同帧工具：
+      // e.source 必须就是右栏当前那枚 .preview-frame；目标卡必须在**当前项目**的卡表里，
+      // 不在表内整条丢弃（不猜、不跨项目跳）。payload 原样交接给目标卡（load 后 floria-wk-card-init）。
+      if (d.type === 'floria-wk-card-switch') {
+        const f = wkFrame()
+        if (!f || f.contentWindow !== e.source) return
+        const want = String(d.card || '')
+        if (!previewCardsFor(f.dataset.label || '').some((c) => c.id === want)) return
+        setPvCard(want, d.payload)
+        return
+      }
+      if (d.type !== 'floria-wk-tool-register') return
       const f = wkFrame()
       if (!f || f.contentWindow !== e.source) return
       const tools = (Array.isArray(d.tools) ? d.tools : [])
@@ -9100,14 +9288,6 @@ function edCmg() {
   // 展开态头部 floria 头像 = 折叠侧栏按钮（2026-09-02 调整：不再回首页新建会话）
   const logoBtn = document.querySelector('.floria-logo')
   if (logoBtn) logoBtn.addEventListener('click', () => setPanel(false))
-  // 默认项目主页（default-preview iframe）点会话 → 父级打开该会话（hash = 会话 uuid）
-  window.addEventListener('message', (e) => {
-    const d = e.data || {}
-    if (d.type === 'floria-open-session' && d.hash) {
-      navigate('#/' + encodeURIComponent(d.hash))
-      if (isMobile()) setPanel(false)
-    }
-  })
   // 两层消息流（2026-09-08 定案；2026-09-09 释放链铲除）：
   // ① 屏幕尺寸变化（旋转/缩放）→ 占位高度跟随新 clientHeight（「占位大小根据屏幕大小计算」）
   window.addEventListener('resize', () => { if (stage.active) stageSync() })
@@ -12757,6 +12937,12 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
     if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
+  // 开始编辑即关窗（2026-10-18 用户定案）：选区仍在、用户直接在编辑区继续敲字/退格/粘贴时，浮窗必须消失——
+  // 快照已对不上文档，继续挂着等于对过期选区动手。判据 = `beforeinput`（只覆盖真编辑；纯导航/复制不触发），
+  // 浮窗内输入框自身的编辑（target 在浮窗内）不关自己。
+  document.addEventListener('beforeinput', (e) => {
+    if (quotePop && !quotePop.contains(e.target)) closeQuotePop()
+  })
   // iPad（2026-10-14 Pj13 转派）：弹软键盘会触发 resize、浮窗内输入也会带出滚动——光标在浮窗输入框里时
   // 这两类事件都不是「锚点漂移」，不得关窗（豁免判据 = 焦点在浮窗内）；浮窗外滚动/真 resize 仍照常关。
   const quoteFocusInside = () => !!quotePop && quotePop.contains(document.activeElement)

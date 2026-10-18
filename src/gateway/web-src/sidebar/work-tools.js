@@ -14,6 +14,8 @@
 // registerWkFrameTools；宿主 → 帧回传选中 id 见 work.js notifyFrame）。
 
 import { esc } from '../core/util.js'
+import { state } from '../engine/state.js'
+import { previewCardsFor } from '../feature/preview-frame.js'
 /* @module sidebar/work-tools.js */
   const WK_TOOL_DEFS = []
 
@@ -63,13 +65,17 @@ import { esc } from '../core/util.js'
     return WK_TOOL_DEFS.length ? WK_TOOL_DEFS[0].id : ''
   }
 
-  // tab 条渲染（唯一口）：首枚恒为「预览」页签（data-wkpv="" → state.wkPvTab='' 回预览态），
-  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。active 态由 work.js applyPvTab 落。
+  // tab 条渲染（唯一口）：预览工作区卡片在前（每卡一枚，名称取 card.json 的 title，data-wkcard 定址），
+  // 其后 = 宿主注册序 + 帧申报序（wkToolDefs）。**无卡项目的旧形态保留首枚「预览」页签**
+  // （data-wkpv="" → 回传统单页 index.html）；有卡时不再渲染它——卡片就是预览页本身。
+  // active 态由 work.js applyPvTab 落（卡 = state.wkPvCard，工具 = state.wkPvTab）。
   // 注：data-wkpv="" 仍被 [data-wkpv] 属性存在选择器命中，故点击委托（work-mount.js）不用改。
   function renderWkToolTabs() {
     const box = $('wk-pv-tabs')
     if (!box) return
-    const head = '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>'
+    const cards = previewCardsFor(state.workProj)
+    const head = (cards.length ? '' : '<button type="button" class="wk-pv-tab" data-wkpv="">预览</button>') +
+      cards.map((c) => `<button type="button" class="wk-pv-tab" data-wkcard="${esc(c.id)}">${esc(c.title)}</button>`).join('')
     box.innerHTML = head + wkToolDefs().map(
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')

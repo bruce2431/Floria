@@ -21,7 +21,7 @@
  * HTTP/WS 用 node:http + ws（已验证可打包进 bun 编译产物），不依赖 Bun.serve。
  */
 import { createServer, request as httpRequest, type Server } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, renameSync, type FSWatcher } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, renameSync, type FSWatcher, type Dirent } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join, resolve, dirname, extname, basename, sep, isAbsolute, delimiter } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -147,6 +147,17 @@ interface PreviewCard {
   path: string // preview 目录内相对路径，可带 #片段（同页自我定位）
   host: 'view' // 渲染位置，由 preview 声明；本版只定义 view（主区独立视图卡）
   tab: boolean // host=view 时是否上侧栏 tab，缺省 true
+}
+// 预览工作区的独立卡片（2026-10-18）：<previewDir>/<id>/card.json，id = 目录名。
+// 每张卡是一份独立静态页（entry 默认 index.html），宿主把它注册成右栏工具栏 tab；
+// 卡片自带 title/order/default，宿主不猜渲染内容（与 PreviewCard 的外部调用语义分开）。
+interface PreviewPaneCard {
+  id: string
+  title: string
+  icon: string // core/icons.js I 表键（前端校验），缺省 plug
+  entry: string // 卡目录内相对路径，默认 index.html
+  order: number // tab 排序（小在前），缺省 100
+  default: boolean // 默认激活卡（至多一张；无声明时取排序首张）
 }
 // preview.json 的 quoteActions 声明（2026-09-28）：与 backend / cards 并列的第三种「项目向宿主申报
 // 界面能力」清单——宿主选中引用浮窗（.quote-pop）里追加的动作行。动作是**纯数据**（无 path、不指向
@@ -1397,6 +1408,55 @@ function readPreviewCards(previewDir: string): PreviewCard[] {
   return out
 }
 
+// 扫描 <previewDir>/<card>/card.json → 预览工作区卡片（2026-10-18）。目录即卡片，id = 目录名：
+//   { "title": "PDF", "entry": "index.html", "icon": "dshFile", "order": 10, "default": true }
+// 不合格条目整条丢弃（不猜不兜底）：目录名不合 id 规则 / card.json 缺失或坏 JSON / title 空 /
+// entry 越界或文件不存在。order 缺省 100；default 只认首张声明者，全无声明时排序首张为默认。
+// 卡片页经既有 /preview/<label>/<id>/<entry> 托管（无新路由）。
+function readPreviewPaneCards(previewDir: string): PreviewPaneCard[] {
+  let ents: Dirent[]
+  try {
+    ents = readdirSync(previewDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out: PreviewPaneCard[] = []
+  for (const e of ents) {
+    if (!e.isDirectory() || !/^[a-zA-Z0-9_-]{1,32}$/.test(e.name)) continue
+    const dir = join(previewDir, e.name)
+    const mf = join(dir, 'card.json')
+    if (!existsSync(mf)) continue
+    let raw: unknown
+    try {
+      raw = JSON.parse(readFileSync(mf, 'utf-8'))
+    } catch {
+      continue
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const c = raw as Record<string, unknown>
+    const title = typeof c.title === 'string' ? c.title.trim() : ''
+    const entry = typeof c.entry === 'string' && c.entry ? c.entry.trim() : 'index.html'
+    if (!title || entry.includes('#') || !isPreviewRelPath(entry)) continue
+    if (!existsSync(join(dir, entry)) || !statSync(join(dir, entry)).isFile()) continue
+    out.push({
+      id: e.name,
+      title,
+      icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+      entry,
+      order: typeof c.order === 'number' && Number.isFinite(c.order) ? c.order : 100,
+      default: c.default === true,
+    })
+  }
+  out.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+  let claimed = false
+  for (const c of out) {
+    if (c.default && !claimed) claimed = true
+    else c.default = false
+  }
+  if (!claimed && out.length) out[0].default = true
+  return out
+}
+
 // 读 <previewDir>/preview.json 的 quoteActions 声明。与 cards 同范式（不合格条目整条丢弃、不猜不兜底）：
 // id 非法 / 重名、title 空 → 丢。整个 quoteActions 缺失 = 空集。无 path/host —— 动作不指向文件。
 function readPreviewQuoteActions(previewDir: string): PreviewQuoteAction[] {
@@ -1783,8 +1843,8 @@ function mergeDisplayMessages(
 }
 
 // ============================================================================
-// 默认预览页数据（GET /gateway/project）：项目无 .claude/preview 时，前端 iframe 加载
-// web/default-preview/（GitHub 仓库风格），本函数提供文件树 / README / 会话元信息。
+// 项目元信息（GET /gateway/project）：work 侧栏文件树消费其中的 files；响应同时带 README /
+// 会话元信息（/gateway/project 的既有形状，不随宿主内置预览页下线而改变）。
 //  - 文件树：递归扫项目根，跳过重型/隐藏目录（.git/node_modules/.claude/.trash/dist 等），
 //    目录在前、名称字典序；深度 ≤4、条目预算 ≤400（node_modules 等被跳过，正常项目足够）。
 //  - README：项目根 README*（.md/.markdown/.txt）优先，内容截断防超大 payload。
@@ -2235,9 +2295,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // 安全加固（2026-08-15）：HTTP 数据接口与 WS 升级一致要求 token。
   //  - /gateway/health 保持公开探活（/server status、前端 detectGateway 只读 mode），响应已精简不含路径泄露；
   //  - 其余 /gateway/*（会话/插件/SSE/上报写接口）与 /preview/* 一律校验「query token 或 cookie 票证」，失败 401。
-  //  - /default-preview/* 是网关内置静态页（index.html/default.css/default.js，无敏感数据），
-  //    不锁 token（页内相对资源请求不带 token，锁了会 401 致 JS/CSS 加载失败）；敏感数据在
-  //    /gateway/project（属于 /gateway/* 已受保护），由页面 JS 从自身 URL query 读 token 附加。
+  //  - /gateway/project 属于 /gateway/* 已受保护（work 侧栏文件树消费）。
   // 2026-08-28 设备认证配对（用户定案：浏览器侧完全删除 token 授权链）：
   //  - 浏览器授权只走 floria_auth cookie 票证（手动配对：设备门显示请求码 → PC `/server auth add`
   //    → 设备 GET /gateway/activate?code=<码> 种 cookie）→ 授权设备 URL 干净、永久免认证。
@@ -2531,7 +2589,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
-  // 默认预览页数据：/gateway/project?label=<项目|工作区根> → 文件树 + README + 会话元信息（GitHub 仓库风格默认界面）
+  // 项目元信息：/gateway/project?label=<项目|工作区根> → 文件树 + README + 会话元信息（work 侧栏文件树消费 files）
   // 2026-10-15 待办7：工作区根 = 一个特殊「项目」（统一复用本路由，不留第三态）——label 不再硬判 scope==='project'，
   // findProjects 已含 scope==='global'（label「全局根 · 散装对话」），按唯一 label 命中即服务。pDir 仍用同一条
   // 公式 resolve(dir,'..','..')：项目 = <root>/<label>/.claude/projects → <root>/<label>；工作区根 =
@@ -2631,6 +2689,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
         label: cLabel,
         cards: readPreviewCards(cDir),
         quoteActions: readPreviewQuoteActions(cDir),
+        previewCards: readPreviewPaneCards(cDir),
       })
     } catch (e) {
       sendError(res, e)
@@ -3126,42 +3185,6 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     res.end(readFileSync(pvFile))
     return
   }
-  // 内置默认预览页（GitHub 仓库风格，项目无 .claude/preview 时的兜底界面）：
-  // /default-preview/<项目>/* → 内嵌 web 资源 default-preview/*（label 必须命中 findProjects 防任意路径）。
-  const dpMatch = /^\/default-preview\/([^/]+)((?:\/.*)?)$/.exec(url.pathname)
-  if (req.method === 'GET' && dpMatch) {
-    // 同 /preview：decode 失败保留原文（不崩进程），后续 404 兜底
-    let dpLabel = dpMatch[1]
-    try {
-      dpLabel = decodeURIComponent(dpMatch[1])
-    } catch {
-      /* 保留原文 */
-    }
-    const dpProj = findProjects(root).find((g) => g.scope === 'project' && g.label === dpLabel)
-    if (!dpProj) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-      res.end('Not Found')
-      return
-    }
-    let dpRel = (dpMatch[2] || '').replace(/^\//, '') || 'index.html'
-    try {
-      dpRel = decodeURIComponent(dpRel)
-    } catch {
-      /* 保留原文，readWebAsset 不命中自然 404 兜底 */
-    }
-    const dpBuf = readWebAsset(`default-preview/${dpRel}`)
-    if (!dpBuf) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-      res.end('Not Found')
-      return
-    }
-    res.writeHead(200, {
-      'Content-Type': MIME[extname(dpRel)] ?? 'application/octet-stream',
-      'Cache-Control': 'no-cache',
-    })
-    res.end(dpBuf)
-    return
-  }
   if (req.method === 'GET' && url.pathname === '/gateway/session') {
     const id = url.searchParams.get('id')
     if (!id) {
@@ -3361,7 +3384,7 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // 2026-08-28 SPA 路径路由：/session/<hash>、/manage/…、/project/<label> 非真实文件 → 一律回 index.html，
   // 由前端 parseRoute 按 location.pathname 解析（pushState 路由）。2026-08-29 全称定案：前端只生成全称前缀
   // （/session/、/manage/、/project/、/backend/），旧缩写（/s/、/mgr/、/pview/、/bp/）保留解析兼容。
-  // /preview、/default-preview、/backend 等真实路径在前面的分支已消费，不会落到此处。
+  // /preview、/backend 等真实路径在前面的分支已消费，不会落到此处。
   const isSpaRoute = /^\/(?:session\/|s\/|manage\/|mgr(?:\/|$)|project\/|pview\/)/.test(url.pathname)
   const rel = isSpaRoute || url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//, '')
   const embedded = readWebAsset(rel)

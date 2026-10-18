@@ -27,26 +27,112 @@ import { navigate } from '../chat/route.js'
   // 两条外部输入共用 engine/ext-decl.js 的同一份过滤器）。**一次请求取两份申报，不新增请求**。
   // seq 守卫：只有最后一次 sync 的响应可以落表（快速连点两个项目时先发的响应可能后到）。
   let extCardsSeq = 0
+  // ---------- 预览工作区卡片（2026-10-18）----------
+  // 一张卡 = <项目>/.claude/preview/<id>/ 一个目录（元信息 card.json，网关扫描后随同一份
+  // /gateway/preview-cards 响应下发 previewCards）。表属于「当前项目」：label 不同即空表，
+  // 不沿用上一项目的卡（与 EXT 同一条生命周期不变量）。宿主 tab 条与 iframe 加载都读本表。
+  let pvCards = []
+  let pvCardsLabel = ''
+  let pvCardsReady = false
+  let pvCardsInflight = null
+  let pvCardsInflightLabel = ''
+  let pvCardPayloads = [] // [{ label, card, payload }]：卡→卡跳转的交接数据，目标帧 load 时消费一次
+
+  function normPreviewCards(raw) {
+    const seen = new Set()
+    return (Array.isArray(raw) ? raw : [])
+      .filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      .map((c) => ({
+        id: typeof c.id === 'string' ? c.id.trim() : '',
+        title: typeof c.title === 'string' ? c.title.trim() : '',
+        icon: typeof c.icon === 'string' && c.icon ? c.icon : 'plug',
+        entry: typeof c.entry === 'string' && c.entry ? c.entry.trim() : 'index.html',
+        order: typeof c.order === 'number' && Number.isFinite(c.order) ? c.order : 100,
+        default: c.default === true,
+      }))
+      .filter((c) => {
+        if (!/^[a-zA-Z0-9_-]{1,32}$/.test(c.id) || !c.title || seen.has(c.id)) return false
+        seen.add(c.id)
+        return true
+      })
+  }
+  function registerPreviewCards(label, cards) {
+    if (!label) return
+    pvCards = normPreviewCards(cards)
+    pvCardsLabel = label
+    pvCardsReady = true
+  }
+  // 当前项目的卡表（异 label = 空表，防串项目）。调用方按需 clone，不写回本表。
+  function previewCardsFor(label) {
+    return label && pvCardsLabel === label ? pvCards : []
+  }
+  function previewCardsReadyFor(label) {
+    return !!label && pvCardsLabel === label && pvCardsReady
+  }
+  function previewPaneCardDef(label, id) {
+    return previewCardsFor(label).find((c) => c.id === id) || null
+  }
+  // 归一化激活卡：命中现有表则原样；否则回落 default（无 default 取排序首张）；无卡表 = ''。
+  function previewCardNormId(label, id) {
+    const list = previewCardsFor(label)
+    if (!list.length) return ''
+    if (id && list.some((c) => c.id === id)) return id
+    const d = list.find((c) => c.default) || list[0]
+    return d.id
+  }
+  // 卡表就绪才返回；未就绪先取一次申报。in-flight 按 label 去重（work 首渲与 mount 同时问只发一次）。
+  function ensurePreviewDecls(label, force) {
+    if (!label) return Promise.resolve([])
+    if (!force && previewCardsReadyFor(label)) return Promise.resolve(previewCardsFor(label))
+    if (pvCardsInflight && pvCardsInflightLabel === label) return pvCardsInflight
+    const p = syncExtCards(label).then(() => (previewCardsReadyFor(label) ? previewCardsFor(label) : []))
+    pvCardsInflight = p
+    pvCardsInflightLabel = label
+    p.finally(() => {
+      if (pvCardsInflight === p) { pvCardsInflight = null; pvCardsInflightLabel = '' }
+    })
+    return p
+  }
+  // 卡→卡跳转的交接数据：源卡 postMessage 带 payload 时由宿主暂存，目标帧 load 后随 init 下发一次。
+  function setPendingCardPayload(label, card, payload) {
+    pvCardPayloads = pvCardPayloads.filter((p) => !(p.label === label && p.card === card))
+    pvCardPayloads.push({ label, card, payload })
+  }
+  function takePendingCardPayload(label, card) {
+    const i = pvCardPayloads.findIndex((p) => p.label === label && p.card === card)
+    if (i < 0) return null
+    const v = pvCardPayloads[i].payload
+    pvCardPayloads.splice(i, 1)
+    return v
+  }
+  // 卡页入口 URL 片段（卡目录内 entry，逐段编码；entry 已由网关/前端校验为安全相对路径）
+  function cardEntryPath(card) {
+    return card.entry.split('/').map(encodeURIComponent).join('/')
+  }
+
   function syncExtCards(label) {
     const seq = ++extCardsSeq
     clearExtCards()
     clearQuoteActions()
-    fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+    return fetch(`/gateway/preview-cards?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
       .then((d) => {
         if (seq !== extCardsSeq) return
         registerExtCards(label, d && d.cards, true)
         registerQuoteActions(label, d && d.quoteActions)
+        registerPreviewCards(label, d && d.previewCards)
       })
-      .catch(() => {}) // 清单拿不到 = 该项目无外部卡/无浮窗动作（不猜不兜底）
+      .catch(() => {
+        // 清单拿不到 = 该项目无外部卡/无浮窗动作/无预览卡（空表是正常态，不猜不兜底）
+        if (seq === extCardsSeq) registerPreviewCards(label, [])
+      })
   }
 
   // 项目预览：主聊天区渲染 iframe，替换管理/会话界面；退出预览走侧栏导航（route 统一清心跳）。
-  // 预览页加载三级策略（2026-08-19 Web 容器）：
+  // 预览页加载两级策略（2026-08-19 Web 容器；2026-10-18 删除宿主内置默认页）：
   //  ① preview.json 声明 backend → 网关 /gateway/backend 懒加载 spawn 后端进程，iframe 直连 http://127.0.0.1:<port>/
   //     （并 60s 心跳刷新网关侧 lastActive，防空闲回收误杀）；
-  //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载 <项目>/.claude/preview/index.html；
-  //  ③ 兜底默认项目主页（GitHub 仓库风格，web/default-preview/，/gateway/project 拉取文件树/README/会话）。
+  //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载卡目录页；都没有 → 空态占位（不提供的项目不造页）。
   function openProjectPreview(label, hasPreview) {
     // 硬进入（异 label / 帧不在场；软重入不清不重建 shell，见 mountPreview 两级重入说明）：先卸会话视图
     // 再占预览槽——deactivateCard('session') 即 registry 契约出口，给到会话卡自身的 teardown 钩子
@@ -59,21 +145,37 @@ import { navigate } from '../chat/route.js'
     openCard('preview', { label, hasPreview })
   }
 
-  // 预览渲染器（三级链的唯一一份实现：后端容器 → 静态 preview → 默认主页）。两个消费方——
+  // 预览渲染器（两级链的唯一一份实现：后端容器 → 静态 preview）。两个消费方——
   // 槽位预览卡（openProjectPreview，独占主区）与 work 个性化工作区第三栏（sidebar/work.js），
   // 到 iframe 这一层没有第二套代码。
   // 2026-09-04 重挂根修：WS 重连 onopen→hideGate 恢复链（state.preview → route）会重挂 iframe，
   // src 恒回站点根——iPad 后台杀 WS 后回到前台必触发，用户被弹回 Pj15 等站点开始页。
   // 2026-09-17 软重入根治（「打开项目界面有概率跳回 chat」二轮）：旧幂等守卫要求 previewMounted===label，
-  // 而兜底 default-preview 恒记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
+  // 而无真源时曾记 null → 每次断连重连/门解锁都整区重写 shell + iframe 重载；iOS 上 iframe
   // 二次导航会污染主历史并诱发自发后退，落到 /session/<hash> 即被弹回会话 chat。故两级重入：同 label 且
   // iframe 在场（data-label 锚定）= 软重入——不重写 shell，三级链照跑但 mount 按 iframe 现有 src 校正
   // （同 src 零操作 = 零导航扰动；异 src 只换 src 纠正，覆盖 backend 就绪升级/default 换真源）；
   // 异 label 或 iframe 不在场 = 硬挂载。
-  function mountPreview(container, label, hasPreview) {
+  function mountPreview(container, label, hasPreview, cardId) {
     if (!container) return
     // 换项目 = 换源：上一份的帧留不得（软重入只对同 label 成立）
     const prev = container.querySelector('.preview-frame')
+    const hard = !prev || prev.dataset.label !== label
+    // 卡片清单必须就位才能决定 URL（有卡 = 卡目录页，无卡 = 传统 index.html）。
+    // 清单未就绪先拉一次申报再重入；ensure 自带 in-flight 去重，这里只防同一容器并行重入。
+    if (!previewCardsReadyFor(label)) {
+      if (container.__pvWaitLabel === label) return
+      container.__pvWaitLabel = label
+      ensurePreviewDecls(label, hard).then(() => {
+        if (container.__pvWaitLabel === label) container.__pvWaitLabel = ''
+        if (container.isConnected) mountPreview(container, label, hasPreview, cardId)
+      })
+      return
+    }
+    container.__pvWaitLabel = ''
+    const list = previewCardsFor(label)
+    const card = list.length ? (previewPaneCardDef(label, cardId) || list.find((c) => c.default) || list[0]) : null
+    const cardActual = card ? card.id : ''
     if (prev && prev.dataset.label !== label) {
       cardBus.unregisterFrame(prev.__cardKey) // 换项目 = 上一份帧彻底拆除：表项当场注销（不等 isConnected 失格）
       container.innerHTML = ''
@@ -85,6 +187,15 @@ import { navigate } from '../chat/route.js'
         '<div class="preview-body"><div class="preview-loading">正在加载…</div></div>' +
         '</div>'
     }
+    // 无后端、无 .claude/preview 静态页 = 该项目没有可视预览：空态占位（宿主不再内置默认页）。
+    const mountEmpty = () => {
+      if (!container.isConnected) return
+      const body = container.querySelector('.preview-body')
+      if (!body) return
+      clearRailExt() // 旧文档注册的侧栏快捷按钮随文档失效
+      body.innerHTML = '<div class="preview-empty">该项目暂无预览</div>'
+      state.previewMounted = label
+    }
     const mount = (src, name, already) => {
       // 异步回程守卫：三级链是异步的，回来时容器可能已离场（槽位换卡 / work 关掉预览栏）
       if (!container.isConnected) return
@@ -94,9 +205,10 @@ import { navigate } from '../chat/route.js'
       // 一律不走下方整区重建
       const cur = body.querySelector('.preview-frame')
       if (cur) {
-        // iframe 换文档 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
-        if (cur.getAttribute('src') !== src) { clearRailExt(); syncExtCards(label); cur.setAttribute('src', src) }
-        state.previewMounted = src.includes('/default-preview/') ? null : label
+        // iframe 换文档/换卡 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
+        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
+        cur.dataset.card = cardActual
+        state.previewMounted = label
         // 软重入也回表：同 el 复用 key，但 resetFrame 清掉旧文档的 ns/ready/cmds（换 src = 换了卡）
         cardBus.registerFrame({ kind: 'preview', label, el: cur })
         return
@@ -110,15 +222,14 @@ import { navigate } from '../chat/route.js'
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
-      syncExtCards(label) // 同上：清上一份文档的侧栏快捷按钮 + 上一份预览页申报的外部卡，重取本项目清单
       body.innerHTML =
-        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" src="${src}"></iframe>` +
+        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" data-card="${esc(cardActual)}" src="${src}"></iframe>` +
         (already
           ? ''
           : `<div class="preview-overlay"><div class="preview-overlay-spin"></div>` +
             `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
             `<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div></div>`)
-      state.previewMounted = src.includes('/default-preview/') ? null : label // 兜底 default 记 null：真源升级由软重入 src 校正驱动
+      state.previewMounted = label
       const frame = body.querySelector('.preview-frame')
       const overlay = body.querySelector('.preview-overlay')
       if (!frame) return
@@ -131,6 +242,13 @@ import { navigate } from '../chat/route.js'
       }
       frame.addEventListener('load', () => {
         frame.focus()
+        // 卡片身份 + 交接数据（卡→卡跳转）：以 dataset 为准（软重入换 src 时闭包里的 card 已过期）。
+        // 无卡（传统单页预览）不发，旧页不受影响。
+        const liveCard = frame.dataset.card || ''
+        if (liveCard) {
+          const payload = takePendingCardPayload(label, liveCard)
+          try { frame.contentWindow.postMessage({ type: 'floria-wk-card-init', card: liveCard, payload }, '*') } catch { /* 帧已销毁：丢弃 */ }
+        }
         if (!overlay) return
         // backend 容器（传了 name）：object_info 拉取渲染需数秒，缓冲后自动淡出；
         // 静态 preview / 默认主页（无 name）：无后端 loading，立即淡出不挡内容
@@ -149,26 +267,26 @@ import { navigate } from '../chat/route.js'
         // 网关同源代理 /backend/<label>/（访问票由上一拍 /gateway/backend 响应种下的 HttpOnly cookie 提供）
         const remotePage =
           location.protocol.startsWith('http') && ['127.0.0.1', 'localhost'].indexOf(location.hostname) < 0
-        mount(remotePage ? `/backend/${encodeURIComponent(label)}/` : d.url, d.name, !!d.alreadyRunning)
+        // 卡页 = 卡目录内 entry（默认 index.html）；无卡 = 后端根（传统单页预览）
+        const rel = card ? `${encodeURIComponent(card.id)}/${cardEntryPath(card)}` : ''
+        mount(remotePage ? `/backend/${encodeURIComponent(label)}/${rel}` : d.url + rel, d.name, !!d.alreadyRunning)
         if (window.__backendHeartbeat) clearInterval(window.__backendHeartbeat)
         window.__backendHeartbeat = setInterval(() => {
           fetch(`/gateway/backend?label=${encodeURIComponent(label)}&token=${encodeURIComponent(gToken || '')}`).catch(() => {})
         }, 60000)
       })
       .catch(() => {
-        // ② ③ 静态 preview / 默认项目主页兜底
-        const previewSrc = `/preview/${encodeURIComponent(label)}/index.html${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
-        const defaultSrc = `/default-preview/${encodeURIComponent(label)}/${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
-        if (hasPreview) {
-          fetch(previewSrc, { method: 'GET' })
-            .then((r) => {
-              if (!r.ok) throw new Error('HTTP ' + r.status)
-              mount(previewSrc)
-            })
-            .catch(() => mount(defaultSrc))
-        } else {
-          mount(defaultSrc)
-        }
+        // ② 静态 preview；项目未申报 preview 目录 → 空态
+        if (!hasPreview) { mountEmpty(); return }
+        const previewSrc = card
+          ? `/preview/${encodeURIComponent(label)}/${encodeURIComponent(card.id)}/${cardEntryPath(card)}${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
+          : `/preview/${encodeURIComponent(label)}/index.html${gToken ? '?token=' + encodeURIComponent(gToken) : ''}`
+        fetch(previewSrc, { method: 'GET' })
+          .then((r) => {
+            if (!r.ok) throw new Error('HTTP ' + r.status)
+            mount(previewSrc)
+          })
+          .catch(mountEmpty)
       })
   }
 
@@ -187,9 +305,15 @@ import { navigate } from '../chat/route.js'
 
 export {
   clearRailExt,
+  ensurePreviewDecls,
   mountPreview,
   openProjectPreview,
+  previewPaneCardDef,
+  previewCardNormId,
+  previewCardsFor,
+  previewCardsReadyFor,
   railExtItems,
+  setPendingCardPayload,
   setRailExtItems,
   syncExtCards,
 }

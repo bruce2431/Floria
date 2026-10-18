@@ -7,8 +7,7 @@ import { registerExtCards } from '../engine/ext-runtime.js'
 /* @module sidebar/rail-ext.js */
   // ---------- 预览页注册的侧栏快捷按钮（2026-09-23） ----------
   // 用途：.claude/preview 页面在 iframe 内运行，可经 postMessage 往 Floria 侧栏折叠带注册自己的
-  // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道，同 default-preview
-  // 的 floria-open-session 先例；宿主侧此前无对应监听，本模块补上）。
+  // 快捷按钮，点击回跳该页做动作（沿用既有 iframe ↔ 宿主 postMessage 通道）。
   // 契约：预览页 → 宿主 parent.postMessage({ type:'floria-rail-register', items:[{id,icon,title}] }, '*')
   //       icon = I 图标表的键（不让预览页自送 SVG——视觉沿用侧栏现成图标，SPEC §6.4「不新增视觉」）
   //       title = 悬浮提示；id 由预览页自定义，点击时原样回传。

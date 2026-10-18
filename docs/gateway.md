@@ -5,7 +5,7 @@
 
 ## 1. API 前缀与端点总览
 
-端点全挂 `/gateway/<端点>`：health / activate / shutdown / sessions / plugins / models / model / model-report / wsession[/stop] / diagnostics / session[/rename / .queued] / backend / project / file / image-cache / conversation / activity / upload / events。根 `/api` 撤空（不保留旧路径、无兼容双挂）。**不变量**：网关与 `/backend/<label>/` 代理页面共享同一 origin，端点若挂根，被代理页面写死的绝对路径会误打网关自身；前缀化后写错只 404，永不误伤网关（「故意打网关」的预览页显式用 `/gateway/*`）。CLI 侧 `gatewayClient`/`conversationDisplay`/`server`、前端 `app.js`/`sw.js`/`default-preview/default.js` 同此前缀。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开），sw 缓存排除同步 `/gateway/`。
+端点全挂 `/gateway/<端点>`：health / activate / shutdown / sessions / plugins / models / model / model-report / wsession[/stop] / diagnostics / session[/rename / .queued] / backend / project / file / image-cache / conversation / activity / upload / events。根 `/api` 撤空（不保留旧路径、无兼容双挂）。**不变量**：网关与 `/backend/<label>/` 代理页面共享同一 origin，端点若挂根，被代理页面写死的绝对路径会误打网关自身；前缀化后写错只 404，永不误伤网关（「故意打网关」的预览页显式用 `/gateway/*`）。CLI 侧 `gatewayClient`/`conversationDisplay`/`server`、前端 `app.js`/`sw.js` 同此前缀。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开），sw 缓存排除同步 `/gateway/`。
 
 **文件上传 `/gateway/upload`**：`POST /gateway/upload?name=<文件名>&sid=<会话hash>|&project=<项目>`，body=原始字节（单文件上限 20MB，超限 413，复用 `readBodyWithLimit`）。**落盘跟随会话**：sid 经 `decodeSessionPath`（base64url 解回 `<启动根>/.claude/projects/<uuid>.jsonl`、强制限便携根内）剥 `.claude/projects` marker 得会话启动根 = 落盘根（全局笔=全局根、项目会话=项目根、桥接 CLI=其 cwd，与消息占位相对化 relPath 同源）→ `<该根>/uploads/<文件名>`；解码失败回退 `sessionProjectRootOf` 磁盘扫描；新会话（首页首送前上传、无 sid）带 `project` → `webSessionProjectRoot` 同源解析（与 wsession 同语义，label 不命中回落全局根）；无会话上下文 → `getProjectRoot()`（exe 目录）。同名不覆盖 → `-1`/`-2` 序号；文件名 basename 化 + Windows 非法字符清洗（`\/:*?"<>|` 及控制符 → `_`）+ 保留名防护（CON/PRN/AUX/NUL/COM1-9/LPT1-9 加 `_` 前缀）+ 截断 120 字符。响应 `{ok, name, path:'uploads/<名>', abs, size}`；非超限错误 `sendError` 500。前端入口 = + 浮窗「上传文件」行（web-ui.md §23）。**文件占位相对化配套**：①wsession 响应附 `cwd`（=webSessionProjectRoot，与 spawnWebSession 的 spawn cwd 同源）——新会话 jsonl 未落盘，是首条消息文件占位相对化唯一 cwd 源；②`readSession` 记录缺失分支从 id 编码路径派生 cwd（新会话空 fetch 回调 `setSessionCwd(cwd)` 不洗掉 wsession 带回值）。
 
@@ -48,7 +48,7 @@
 
 ## 4. 项目预览页机制
 
-点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无预览或真预览 404 → 加载内置默认项目主页**（GitHub 仓库风格 `GET /default-preview/<项目>/*`，内嵌资源 `web/default-preview/`，数据来自 `GET /gateway/project?label=`：文件树/README/会话，会话点击 postMessage `floria-open-session` 通知父级跳会话）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管；默认主页是网关内置兜底。**label decode 防护**：`/preview/<label>` 与 `/default-preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程（default-preview 免鉴权公开可达，任意设备单请求即可触发）；新增同类路由照 `/backend` 同款防护。
+点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无后端且无 `.claude/preview/` 时显示空态占位「该项目暂无预览」，不再提供宿主内置默认页**（2026-10-18 删除 `/default-preview/*` 路由与 `web/default-preview/` 资源）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管。`GET /gateway/project?label=` 保留（work 侧栏文件树消费其 `files`；响应仍带 README/会话元信息，是既有形状）。**label decode 防护**：`/preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程；新增同类路由照 `/backend` 同款防护。
 
 ## 5. 远程宿主同源反代 /backend/<label>/
 
@@ -98,7 +98,7 @@
 - spawn 失败（缺解释器 ENOENT 等）经 `child.on('error')` 记入 `spawnError` → 就绪探测循环即时退出 → 抛给路由回 500 JSON（网关不退出）。**不变量：单个后端配置失败不得终止网关进程。**
 - **就绪探测用原生 net socket**（`backendReady`）：编译产物 node:http 的 request 对 aiohttp/Python 后端会挂起，net 直连写 HTTP 头读响应状态（200/404 即就绪）。
 - 生命周期：`stopLocalGateway` 遍历 killAllBackends（child.kill + taskkill /F /T /PID 兜底）+ 停回收 timer；空闲回收每 60s（仅 `--gateway` 模式）。
-- 前端三级加载：① `/gateway/backend` 命中 → iframe 直连 + 60s 心跳防误回收；② 静态 preview；③ 默认项目主页兜底。
+- 前端两级加载：① `/gateway/backend` 命中 → iframe 直连 + 60s 心跳防误回收；② 静态 preview；两者皆无 → 空态占位。
 
 ### 6.3 后端进程生命周期解耦
 
@@ -118,7 +118,7 @@
                "path": "cards/books.html", "host": "view", "tab": true } ] }
 ```
 
-- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…] }`。label 未命中 / 无 preview → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。**label 范围含全局根**（`全局根 · 散装对话`）：全局项的 preview 目录 = `<工作区根>/.claude/preview/`（`findProjects` 对该项 `hasPreview` 探此目录），与项目项共用同一条解析链——工作区根的卡片申报即落此处（web-ui.md §42「常驻应用卡」）。
+- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…], previewCards:[…] }`（**同一端点一次取三份申报**，见 §6.6/§6.7）。label 未命中 / 无 preview → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。**label 范围含全局根**（`全局根 · 散装对话`）：全局项的 preview 目录 = `<工作区根>/.claude/preview/`（`findProjects` 对该项 `hasPreview` 探此目录），与项目项共用同一条解析链——工作区根的卡片申报即落此处（web-ui.md §42「常驻应用卡」）。
 - 解析：`readPreviewJson(previewDir)` 是 `preview.json` 的**单一解析入口**（`readBackendCfg` 与 `readPreviewCards` 共用；`JSON.parse` 带 `try/catch`，坏 JSON / 顶层非对象一律返回 null ⇒ 空集，不抛到 `findProjects`）。`readPreviewCards` 逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空、`host === 'view'`、`isPreviewRelPath(path)` 为真；不合格项**整条丢弃**（不猜、不补默认值、不回落）。`icon` 非空串即留（是否为合法图标键由前端 `I` 表判定，缺省回落 `plug`）。
 - `isPreviewRelPath`：preview 目录内相对路径 —— 拒绝对路径 / 反斜杠 / `?` / 空段 / `.` `..` 段 / 解码后越界 / 非法 `%` 序列；允许尾随 `#片段`。**同款规则在前端 `engine/ext-decl.js` `isExtPath` 再写一份**——两条外部输入（网关读的 `preview.json` / 不过网关的 `postMessage`）各自守门，不是重复实现。
 - 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）；**同一条路由的 label 亦含全局根**（全局项 `pvDir` = `<工作区根>/.claude/preview`），故工作区根卡片页经 `/preview/全局根 · 散装对话/<path>` 托管。
@@ -132,10 +132,23 @@
 { "quoteActions": [ { "id": "vocab", "title": "生成单词卡", "icon": "plug" } ] }
 ```
 
-- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…] }`（**同一端点、一次请求取两份申报**，不新增路由）。
+- `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…], previewCards:[…] }`（同一端点，不新增路由）。
 - 解析：`readPreviewQuoteActions(previewDir)` 复用同一 `readPreviewJson` 单一解析入口。逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空；不合格项整条丢弃（不猜不补）。`icon` 非空串即留（是否合法由前端 `I` 表判定，缺省回落 `plug`）。段缺失 = 空集（正常态）。
 - **动作是纯数据**：无 `path`、不指向文件——宿主只渲染动作行，点击把 `id` 回发预览页（`floria-quote-action`），**执行逻辑留在项目页面自己的运行上下文**（要调项目自己的 API 与页面状态）。
 - 前端对应件 `engine/ext-decl.js` `normQuoteActions()`（同款字段校验，与 `isExtPath` 之于 `isPreviewRelPath` 同理由：两条外部输入各自守门）。
+
+### 6.7 预览工作区多卡片（`.claude/preview/<id>/card.json`，2026-10-18）
+
+**一张卡 = preview 目录下一个子目录**（`.claude/preview/<id>/`），卡自包含（自己的页面、脚本、资源），元信息在该目录的 `card.json`：
+
+```json
+{ "title": "PDF", "icon": "plug", "entry": "index.html", "order": 10, "default": true }
+```
+
+- 网关扫描 `readPreviewPaneCards(previewDir)`：只认**直接子目录**且含 `card.json`；`id` = 目录名（`/^[a-zA-Z0-9_-]{1,32}$/`）。字段校验：`title` 非空（缺失整条丢弃）、`entry` 缺省 `index.html` 且须为 `isPreviewRelPath` 安全相对路径、目标文件必须存在、`order` 数字（缺省 100，升序）、`default` 布尔。排序 = `order` 再 `id`；**至多一张 default**（首张为准），有卡表而未标 default 时前端回落排序首张。
+- 响应随 `/gateway/preview-cards` 的 `previewCards` 字段下发（与 `cards`/`quoteActions` 同一请求、同一生命周期）。`[]` = 无卡表 ⇒ 该项目沿用传统单页预览（`/preview/<label>/index.html`），旧项目零改动。
+- **卡页资源不需要新路由**：`/preview/<label>/<id>/<entry>` 与后端代理 `/backend/<label>/<id>/<entry>` 均已支持嵌套路径；网关只做卡表发现，不改托管规则。
+- 前端契约（tab 条渲染、切卡、卡↔宿主消息）见 web-ui.md §58「预览多卡片」。
 
 ## 7. web 独立会话进程链
 

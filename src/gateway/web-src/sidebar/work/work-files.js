@@ -84,8 +84,7 @@ import { isPinned } from '../recent.js'
           .map(
             (g) =>
               `<button class="wkp-row${g.label === state.workProj ? ' on' : ''}" data-wkproj="${esc(g.label)}">` +
-              `<span class="wkp-name">${esc(g.label)}</span>` +
-              `<span class="wkp-tag">${g.hasPreview ? '预览' : ''}</span></button>`,
+              `<span class="wkp-name">${esc(g.label)}</span></button>`,
           )
           .join('')
       : '<div class="wk-empty">未发现项目，点 ⟳ 重试</div>'

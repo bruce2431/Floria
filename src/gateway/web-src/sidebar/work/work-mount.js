@@ -73,6 +73,8 @@
     // 首枚「预览」页签 data-wkpv="" → setPvTab('') → setPvPane(true, '')，经其中 `page === ''` 特判回预览态；
     // 切勿自以为要过 wkToolNormId——它会回落首枚工具（评论），表达不了「回预览」。
     $('wk-pv-tabs').addEventListener('click', (e) => {
+      const c = e.target.closest('[data-wkcard]')
+      if (c) { setPvCard(c.dataset.wkcard); return } // 卡片 tab：切 iframe 到该卡目录页
       const b = e.target.closest('[data-wkpv]')
       if (b) setPvTab(b.dataset.wkpv)
     })
@@ -82,7 +84,19 @@
     // 帧工具的 pane 由预览页自管（宿主只渲 tab + 回传选中 id，见 syncPvContent/notifyFrame）。
     addEventListener('message', (e) => {
       const d = e.data
-      if (!d || d.type !== 'floria-wk-tool-register') return
+      if (!d || typeof d !== 'object') return
+      // 预览卡 → 宿主顶栏：请求切到另一张卡（2026-10-18 多卡片架构）。门禁同帧工具：
+      // e.source 必须就是右栏当前那枚 .preview-frame；目标卡必须在**当前项目**的卡表里，
+      // 不在表内整条丢弃（不猜、不跨项目跳）。payload 原样交接给目标卡（load 后 floria-wk-card-init）。
+      if (d.type === 'floria-wk-card-switch') {
+        const f = wkFrame()
+        if (!f || f.contentWindow !== e.source) return
+        const want = String(d.card || '')
+        if (!previewCardsFor(f.dataset.label || '').some((c) => c.id === want)) return
+        setPvCard(want, d.payload)
+        return
+      }
+      if (d.type !== 'floria-wk-tool-register') return
       const f = wkFrame()
       if (!f || f.contentWindow !== e.source) return
       const tools = (Array.isArray(d.tools) ? d.tools : [])

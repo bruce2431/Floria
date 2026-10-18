@@ -217,14 +217,6 @@ import { setPanel } from '../sidebar/recent.js'
   // 展开态头部 floria 头像 = 折叠侧栏按钮（2026-09-02 调整：不再回首页新建会话）
   const logoBtn = document.querySelector('.floria-logo')
   if (logoBtn) logoBtn.addEventListener('click', () => setPanel(false))
-  // 默认项目主页（default-preview iframe）点会话 → 父级打开该会话（hash = 会话 uuid）
-  window.addEventListener('message', (e) => {
-    const d = e.data || {}
-    if (d.type === 'floria-open-session' && d.hash) {
-      navigate('#/' + encodeURIComponent(d.hash))
-      if (isMobile()) setPanel(false)
-    }
-  })
   // 两层消息流（2026-09-08 定案；2026-09-09 释放链铲除）：
   // ① 屏幕尺寸变化（旋转/缩放）→ 占位高度跟随新 clientHeight（「占位大小根据屏幕大小计算」）
   window.addEventListener('resize', () => { if (stage.active) stageSync() })

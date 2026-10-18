@@ -62,6 +62,7 @@ import { state } from './ui-state.js'
       workFile: state.workFile,
       wkPreview: !!state.wkPreview,
       wkPvTab: state.wkPvTab,
+      wkPvCard: state.wkPvCard,
       panelPinned: !!state.panelPinned,
     }
   }
@@ -84,6 +85,7 @@ import { state } from './ui-state.js'
     state.workFile = str('workFile') // 非字符串 → def（''）
     state.wkPreview = bool('wkPreview')
     state.wkPvTab = str('wkPvTab')
+    state.wkPvCard = str('wkPvCard')
     state.panelPinned = bool('panelPinned')
   }
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的

@@ -26,7 +26,7 @@
 - **项目评论批注**：work 右栏评论 tab + 文件内选中「添加评论」，存 `<项目>/.claude/comments.json`，原文内联标记 + 定位回跳。
 - **远程审批**：CLI 权限弹窗实时中继为 web 审批卡，iPad/手机可远程批准/拒绝，双端竞速先操作者生效。
 - **会话间协作**：输入栏 `@` 浮窗或「+」菜单「引用会话」选定目标会话（目录寻址，无授权门），agent 可用 `session_send` 跨会话投递消息（含 `new_session` 拉起新会话）；接收侧与本地 user 消息同构落盘、同路入队，气泡外带一行来源灰字。
-- **项目个性化预览**：项目产物（架构图/可视化页）落 `<项目>/.claude/preview/`，由网关静态托管，web 项目预览页内直接查看；预览可申报卡片（`preview.json` cards 段）与浮窗动作（`quoteActions`）。
+- **项目个性化预览（多卡片）**：项目产物（架构图/可视化页）落 `<项目>/.claude/preview/`，由网关静态托管，web 项目预览页内直接查看；`preview.json` 可申报外部卡片（`cards`）与浮窗动作（`quoteActions`），preview 目录下的 `<id>/card.json` 则把预览拆成**多张独立卡**（各自 `title`/`entry`/`order`/`default`，宿主顶栏一卡一枚 tab，卡间经 `floria-wk-card-switch` 跳转）；无卡表项目沿用单页。
 - **WebSearch 本地多后端**：纯客户端四后端（searxng / brave / tavily / exa），密钥走凭据池 `webSearch` 段（Anthropic server-tool 链已退役）。
 - **神经元知识库（NEURON_RAG，默认 feature）**：BGE 本地嵌入 + `recall`/`remember` 内置工具 + leiden 社群认知形成链，全链 TS 化进 exe，无 python 子进程；全项目 `Neuron-PjN` 三层库 + 认知管线（mem→cog→社群命名）。
 - **web 前端分层治理**：`web-src/` 模块源码经拼接器生成单文件 `web/app.js`；`scripts/check-layering.ts` 校验依赖方向（core/engine/feature 分层），`--strict` 只对真违规非零。

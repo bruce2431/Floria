@@ -10,6 +10,12 @@
     return !t || !t.pane
   }
 
+  // 激活卡（唯一判定）：卡表为空 = ''（传统单页预览 index.html）；否则 state.wkPvCard 命中即用，
+  // 未命中回落 default / 排序首张。卡表属当前项目（previewCardsFor 异 label 返回空表）。
+  function wkCardNormId(id) {
+    return previewCardNormId(state.workProj, id === undefined ? state.wkPvCard : id)
+  }
+
   // 右栏 UI 落地（唯一处，纯渲染、不挂帧）：预览态 → 显 #wk-pv-body、隐全部工具 pane；工具态 → 隐预览帧、
   // 显该注册工具 pane（其余 pane 恒隐）。tab 条随栏在场常驻（首枚恒为「预览」，预览态下即 active）。
   // 顶栏「工具栏」胶囊跟着走：栏不在场 = 「工具栏」+ 插件图标（点它开栏），在场 = 「关闭」+ ✕（点它收栏）。
@@ -19,7 +25,11 @@
     const tool = id ? wkToolDef(id) : null
     const bar = $('wk-pv-tabs')
     if (bar) bar.hidden = !state.wkPreview
-    document.querySelectorAll('#work-preview .wk-pv-tab').forEach((b) => b.classList.toggle('on', b.dataset.wkpv === id))
+    const cardId = wkCardNormId()
+    if (previewCardsFor(state.workProj).length) state.wkPvCard = cardId
+    // 卡 tab 与工具 tab 互斥高亮：工具态（id 非空）时不亮任何卡；预览态亮当前卡。
+    document.querySelectorAll('#work-preview .wk-pv-tab[data-wkcard]').forEach((b) => b.classList.toggle('on', !id && b.dataset.wkcard === cardId))
+    document.querySelectorAll('#work-preview .wk-pv-tab[data-wkpv]').forEach((b) => b.classList.toggle('on', b.dataset.wkpv === id))
     for (const t of wkToolDefs()) {
       const el = t.pane ? $(t.pane) : null
       if (el) el.hidden = !tool || t.id !== id
@@ -47,6 +57,9 @@
     state.wkPreview = !!on
     if (!on) state.wkPvTab = ''
     else if (page !== undefined) state.wkPvTab = page === '' ? '' : wkToolNormId(page)
+    // 卡表已在时归一激活卡（表未就绪不能归一：会把持久化的卡 id 冲成 ''）；
+    // 未就绪由 renderWorkPreview 拉完申报后再归一。
+    if (on && previewCardsFor(state.workProj).length) state.wkPvCard = wkCardNormId()
     applyPanes()
     if (state.wkPreview) syncPvContent()
     saveWork()
@@ -56,6 +69,30 @@
   // （点 tab 就是要看这栏）。落地后补内容：工具态调该工具的 mount（注册表契约），预览态挂预览帧。
   function setPvTab(id) {
     setPvPane(true, id)
+  }
+
+  // 切预览卡（唯一口）：卡 tab 点击与「卡→宿主 floria-wk-card-switch」都走此处。
+  // 切卡 = 预览页态 + 该卡目录页进 iframe（renderWorkPreview 按 state.wkPvCard 组 URL）。
+  // payload = 源卡交接给目标卡的上下文（如编译失败→日志卡要知道哪一篇/哪一次编译），
+  // 目标帧 load 后经 floria-wk-card-init 下发；同卡重入不发 load，此处直接投递。
+  function setPvCard(id, payload) {
+    if (!previewCardsFor(state.workProj).length) return
+    const next = previewCardNormId(state.workProj, id)
+    if (!next) return
+    const same = next === state.wkPvCard && !state.wkPvTab && state.wkPreview
+    if (!same && payload !== undefined) setPendingCardPayload(state.workProj, next, payload)
+    state.wkPreview = true
+    state.wkPvTab = ''
+    state.wkPvCard = next
+    applyPanes()
+    syncPvContent()
+    saveWork()
+    if (same && payload !== undefined) {
+      const f = wkFrame()
+      if (f && f.contentWindow) {
+        try { f.contentWindow.postMessage({ type: 'floria-wk-card-init', card: next, payload }, '*') } catch { /* 帧已销毁：丢弃 */ }
+      }
+    }
   }
 
   // 页态落地后的内容补挂（唯一处）：预览态 → renderWorkPreview（挂/复挂预览帧）；工具态 → 该工具
@@ -89,7 +126,7 @@
   }
 
   // 预览帧挂载（唯一处）：内容渲染一律走 preview-card 的 mountPreview（与槽位预览卡同一份后端容器 /
-  // 静态页 / 默认页三级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
+  // 静态页两级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
   function hasPreviewOf(label) {
     return wkProjGroups().some((g) => g.label === label && g.hasPreview)
   }
@@ -98,18 +135,30 @@
     const el = $('wk-pv-body')
     if (!el || !state.workProj) return
     // 项目清单未就绪（token/设备门未解锁时 loadSessions 早退 ⇒ state.projects 为空）：此刻 hasPreview
-    // 不可信，挂 ③ 默认页会粘住真源。等门后补拉的 ensureWork 再入。
+    // 不可信，不挂任何源。等门后补拉的 ensureWork 再入。
     if (!wkProjGroups().length) return
+    const label = state.workProj
+    // 卡表未就绪：先取申报（与外部卡同一请求），落地后重渲 tab 条再挂帧——
+    // 不能先挂传统 index.html，再被卡表纠正（那是一次多余的整页导航）。
+    if (!previewCardsReadyFor(label)) {
+      ensurePreviewDecls(label).then(() => {
+        if (state.workProj !== label) return
+        renderWkToolTabs()
+        applyPvTab()
+        renderWorkPreview()
+      })
+      return
+    }
+    const cardId = wkCardNormId()
+    state.wkPvCard = cardId
     const f = el.querySelector('.preview-frame')
-    if (f && f.dataset.label === state.workProj) {
-      // 同项目已挂：一般交给 mountPreview 的软重入不重建（不重载 = 零导航扰动）；唯一例外是当前帧为
-      // ③ 默认页而项目确有 ② 静态预览 —— 首帧 hasPreview 未知时误挂，须重挂让软重入把 src 校正到真源。
-      const cur = f.getAttribute('src') || ''
-      if (!(cur.includes('/default-preview/') && hasPreviewOf(state.workProj))) return
+    if (f && f.dataset.label === label && (f.dataset.card || '') === cardId) {
+      // 同项目同卡已挂：交给 mountPreview 的软重入（不重载 = 零导航扰动）。
+      return
     }
     clearWkFrameTools() // 帧换文档：上一份预览页申报的工具 tab 失效（不变量同 rail-ext）
     wkFrameSentId = null
-    mountPreview(el, state.workProj, hasPreviewOf(state.workProj))
+    mountPreview(el, label, hasPreviewOf(label), cardId)
   }
 
   // 顶栏 tab 条（唯一渲染口）：[聊天胶囊 × N] [文件 pill × N]（2026-10-12 文件 pill 起多枚并存）。

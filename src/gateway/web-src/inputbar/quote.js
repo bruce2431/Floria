@@ -203,6 +203,12 @@ import { gwSend, syncGwSend } from './send.js'
     if (quotePop && !quotePop.contains(e.target)) { closeQuotePop(); quoteSkipNextUp = true }
   })
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && quotePop) closeQuotePop() })
+  // 开始编辑即关窗（2026-10-18 用户定案）：选区仍在、用户直接在编辑区继续敲字/退格/粘贴时，浮窗必须消失——
+  // 快照已对不上文档，继续挂着等于对过期选区动手。判据 = `beforeinput`（只覆盖真编辑；纯导航/复制不触发），
+  // 浮窗内输入框自身的编辑（target 在浮窗内）不关自己。
+  document.addEventListener('beforeinput', (e) => {
+    if (quotePop && !quotePop.contains(e.target)) closeQuotePop()
+  })
   // iPad（2026-10-14 Pj13 转派）：弹软键盘会触发 resize、浮窗内输入也会带出滚动——光标在浮窗输入框里时
   // 这两类事件都不是「锚点漂移」，不得关窗（豁免判据 = 焦点在浮窗内）；浮窗外滚动/真 resize 仍照常关。
   const quoteFocusInside = () => !!quotePop && quotePop.contains(document.activeElement)

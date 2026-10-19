@@ -22,7 +22,7 @@ import { clearWkFrameTools, registerWkFrameTools, registerWkTool, wkToolDef, wkT
   // （侧边栏）按项目分槽存 state.workSlots，切项目时由 work-context.js switchWorkProject 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
-  //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
+  //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，无固定深度 / 每层 200 / 总预算 8000）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
   // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 右栏卡）。下沉区顶部一条
   // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件 pill×N] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话

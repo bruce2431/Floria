@@ -48,7 +48,7 @@
 
 ## 4. 项目预览页机制
 
-点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无后端且无 `.claude/preview/` 时显示空态占位「该项目暂无预览」，不再提供宿主内置默认页**（2026-10-18 删除 `/default-preview/*` 路由与 `web/default-preview/` 资源）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管。`GET /gateway/project?label=` 保留（work 侧栏文件树消费其 `files`；响应仍带 README/会话元信息，是既有形状）。**label decode 防护**：`/preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程；新增同类路由照 `/backend` 同款防护。
+点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无后端且无 `.claude/preview/` 时显示空态占位「该项目暂无预览」，不再提供宿主内置默认页**（2026-10-18 删除 `/default-preview/*` 路由与 `web/default-preview/` 资源）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管。`GET /gateway/project?label=` 保留（work 侧栏文件树消费其 `files`；响应仍带 README/会话元信息，是既有形状）。文件树由 `walkProjectTree` 递归扫项目根，跳过点开头条目与 `SKIP_TREE_DIRS`；**不设固定深度上限**，只受 `TREE_BUDGET = 8000` 总节点与 `TREE_PER_LEVEL = 200` 每层 cap 约束（预算全局共享、沿树递减），预算耗尽才退化为 `listOneLevel` 的单层浅节点。**label decode 防护**：`/preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程；新增同类路由照 `/backend` 同款防护。
 
 ## 5. 远程宿主同源反代 /backend/<label>/
 

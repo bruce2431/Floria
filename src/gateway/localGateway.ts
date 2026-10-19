@@ -1846,11 +1846,17 @@ function mergeDisplayMessages(
 // 项目元信息（GET /gateway/project）：work 侧栏文件树消费其中的 files；响应同时带 README /
 // 会话元信息（/gateway/project 的既有形状，不随宿主内置预览页下线而改变）。
 //  - 文件树：递归扫项目根，跳过重型/隐藏目录（.git/node_modules/.claude/.trash/dist 等），
-//    目录在前、名称字典序；深度 ≤4、条目预算 ≤400（node_modules 等被跳过，正常项目足够）。
+//    目录在前、名称字典序；不设固定深度上限（层级只受 TREE_BUDGET=8000 全局预算与
+//    TREE_PER_LEVEL=200 每层 cap 约束），预算耗尽才退化为 listOneLevel 的单层浅节点
+//    （node_modules 等被跳过，常规项目完整覆盖）。
 //  - README：项目根 README*（.md/.markdown/.txt）优先，内容截断防超大 payload。
 //  - 描述：从 README 首行标题推断，兜底项目名。
 // ============================================================================
 const SKIP_TREE_DIRS = new Set(['.git', 'node_modules', '.claude', '.trash', '.cache', 'dist', 'cli-dist', '.idea', '.vscode'])
+// 护栏：单次响应最多 TREE_BUDGET 个节点、每层最多 TREE_PER_LEVEL 个条目。
+// 目的只是防超大项目撑爆响应与前端渲染，不是业务裁剪——常规项目（数千文件）应完整覆盖。
+const TREE_BUDGET = 8000
+const TREE_PER_LEVEL = 200
 type TreeNode = { name: string; type: 'file' | 'dir'; children?: TreeNode[] }
 
 /** 轻量列出一层直接子项（不递归），供预算耗尽时保证目录至少可展开一层。 */
@@ -1867,7 +1873,7 @@ function listOneLevel(dir: string): TreeNode[] {
   })
   const out: TreeNode[] = []
   for (const e of entries) {
-    if (out.length >= 50) break
+    if (out.length >= TREE_PER_LEVEL) break
     if (e.name.startsWith('.')) continue
     if (e.isDirectory() && SKIP_TREE_DIRS.has(e.name)) continue
     out.push(e.isDirectory() ? { name: e.name, type: 'dir' } : { name: e.name, type: 'file' })
@@ -1875,8 +1881,9 @@ function listOneLevel(dir: string): TreeNode[] {
   return out
 }
 
-function walkProjectTree(dir: string, depth: number, budget: { n: number }): TreeNode[] | null {
-  if (depth > 3) return null
+// 不设固定深度上限：唯一约束是条目预算（同一 budget 对象全局共享、沿树递减）。此前 `depth > 3`
+// 会把第 5 层起的目录截成 listOneLevel 的浅节点（无 children）——文件树「展开四次后再无内容」的根因。
+function walkProjectTree(dir: string, budget: { n: number }): TreeNode[] | null {
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
@@ -1887,30 +1894,28 @@ function walkProjectTree(dir: string, depth: number, budget: { n: number }): Tre
     if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
     return a.name.localeCompare(b.name)
   })
-  // 每层 cap 50 防单层巨目录。预算按同级目录数平均分摊（同级互不挤占），
-  // 深度到顶用 listOneLevel 兜底，保证任意目录至少可展开看到下一级。
+  // 每层 cap TREE_PER_LEVEL 防单层巨目录。预算**全局共享**（同一对象沿整棵树递减）：此前按同级目录数
+  // 平均分摊，每深一层 sub.n 就再除以该层目录数，四五层后必然归零——文件树「展开四次后
+  // 再无内容」的第二重根因。共享后只要总量未耗尽，任意深的目录都能继续向下展开。
+  // 预算耗尽用 listOneLevel 兜底，保证边界目录至少可展开看到下一级。
   const out: TreeNode[] = []
   for (const e of entries) {
-    if (out.length >= 50) break
+    if (out.length >= TREE_PER_LEVEL) break
     if (budget.n <= 0) break
     if (e.name.startsWith('.')) continue
     if (e.isDirectory() && SKIP_TREE_DIRS.has(e.name)) continue
     budget.n--
     out.push(e.isDirectory() ? { name: e.name, type: 'dir' } : { name: e.name, type: 'file' })
   }
-  const dirs = out.filter((it) => it.type === 'dir')
-  if (dirs.length) {
-    const per = Math.floor(budget.n / dirs.length)
-    for (const it of dirs) {
-      const sub = { n: Math.max(0, per) }
-      const children = walkProjectTree(join(dir, it.name), depth + 1, sub)
-      if (children && children.length) it.children = children
-      else {
-        const shallow = listOneLevel(join(dir, it.name))
-        if (shallow.length) it.children = shallow
-      }
+  for (const it of out) {
+    if (it.type !== 'dir') continue
+    if (budget.n <= 0) break
+    const children = walkProjectTree(join(dir, it.name), budget)
+    if (children && children.length) it.children = children
+    else {
+      const shallow = listOneLevel(join(dir, it.name))
+      if (shallow.length) it.children = shallow
     }
-    budget.n = 0
   }
   return out
 }
@@ -2638,8 +2643,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     try {
       const pDir = resolve(pProj.dir, '..', '..') // pProj.dir = <root>/<label>/.claude/projects（工作区根 = <root>/.claude/projects）→ 上两级即项目根/工作区根
-      const budget = { n: 2000 }
-      const files = walkProjectTree(pDir, 0, budget) ?? []
+      const budget = { n: TREE_BUDGET }
+      const files = walkProjectTree(pDir, budget) ?? []
       const readme = findProjectReadme(pDir)
       const list = await listSessions(root)
       const pSessions = (list.sessions as Array<Record<string, unknown>>)

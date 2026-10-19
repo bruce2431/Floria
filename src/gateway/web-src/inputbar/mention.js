@@ -413,20 +413,12 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     if (!GATEWAY || gateAwait || state.mgr || !cmView) { closeMentionPop(); return }
     const st = cmView.state
     const pos = st.selection.main.from
-    // IME 组合期（移动端中文键盘敲字母即进入组合：marked text 未进 doc，WebKit 下 selection
-    // 常呈非空/跳位）——组合中不按选区与位置判定关窗，只维护已打开浮窗的查询词。
-    // 光标/选区在此刻不可信，任何「该关」判定都会把浮窗误杀（iPad 中文键盘 @C 实测）。
-    // compositionStarted（composing>=0）而非 composing（>0）：compositionstart 先把状态置 0，
-    // 首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
-    if (cmView.compositionStarted) {
-      if (!mention.open) return
-      const between = st.doc.sliceString(mention.anchor, pos)
-      if (pos > mention.anchor && !/[\n\r]/.test(between)) {
-        const q = between.slice(1)
-        if (q !== mention.q) { mention.q = q; renderMentionPop() }
-      }
-      return
-    }
+    // IME 组合期（中文键盘敲字母即进入组合）：组合中的 doc 文本是**临时拼音/候选**，
+    // 选区也不可信——拿它过滤会把浮窗筛空并按「无结果」关掉，或按选区判定误杀。
+    // 组合期一律不判不动（不开、不更新查询、不关），等 compositionend 上屏后的 doc 事务
+    // 走正常判定。compositionStarted（composing>=0）而非 composing（>0）：compositionstart
+    // 先把状态置 0，首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
+    if (cmView.compositionStarted) return
     if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
     if (mention.open) {
       const between = st.doc.sliceString(mention.anchor, pos)

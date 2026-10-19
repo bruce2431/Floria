@@ -6005,7 +6005,7 @@ function edCmg() {
   // （侧边栏）按项目分槽存 state.workSlots，切项目时由 work-context.js switchWorkProject 换槽。
   // 数据源全部是现成端点，本模块零后端改动：
   //   项目列表 → /gateway/sessions 的 groups（sessions.js 顺带存进 state.projects）
-  //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，深度 3 / 每层 50）
+  //   文件树   → GET /gateway/project?label=  的 files（walkProjectTree，无固定深度 / 每层 200 / 总预算 8000）
   //   单文件   → GET /gateway/file?label=&path=（只读原始字节，带路径穿越防护 + 4MB 上限）
   // 主区：sbMode=work → #chat-area 加 .work（CSS Grid 三列 = 下沉区 | 分界条 | 右栏卡）。下沉区顶部一条
   // .wk-topbar tab 顶栏（[+] [聊天胶囊×N] [文件 pill×N] [工具栏]）：聊天胶囊 = 开放集 state.wkChats 一会话
@@ -9927,20 +9927,12 @@ function edCmg() {
     if (!GATEWAY || gateAwait || state.mgr || !cmView) { closeMentionPop(); return }
     const st = cmView.state
     const pos = st.selection.main.from
-    // IME 组合期（移动端中文键盘敲字母即进入组合：marked text 未进 doc，WebKit 下 selection
-    // 常呈非空/跳位）——组合中不按选区与位置判定关窗，只维护已打开浮窗的查询词。
-    // 光标/选区在此刻不可信，任何「该关」判定都会把浮窗误杀（iPad 中文键盘 @C 实测）。
-    // compositionStarted（composing>=0）而非 composing（>0）：compositionstart 先把状态置 0，
-    // 首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
-    if (cmView.compositionStarted) {
-      if (!mention.open) return
-      const between = st.doc.sliceString(mention.anchor, pos)
-      if (pos > mention.anchor && !/[\n\r]/.test(between)) {
-        const q = between.slice(1)
-        if (q !== mention.q) { mention.q = q; renderMentionPop() }
-      }
-      return
-    }
+    // IME 组合期（中文键盘敲字母即进入组合）：组合中的 doc 文本是**临时拼音/候选**，
+    // 选区也不可信——拿它过滤会把浮窗筛空并按「无结果」关掉，或按选区判定误杀。
+    // 组合期一律不判不动（不开、不更新查询、不关），等 compositionend 上屏后的 doc 事务
+    // 走正常判定。compositionStarted（composing>=0）而非 composing（>0）：compositionstart
+    // 先把状态置 0，首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
+    if (cmView.compositionStarted) return
     if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
     if (mention.open) {
       const between = st.doc.sliceString(mention.anchor, pos)

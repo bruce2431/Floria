@@ -91,9 +91,17 @@ import { state } from './ui-state.js'
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的
   // 顶栏开放集 / 侧栏页 / 开关 / 打开的文件）。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
   // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
+  // 注意：wkPins **不在这里写**（2026-10-21 待办「置顶状态没有持久化」根治）。布局保存是高频动作
+  // （applyPanes / 切项目 / 开关面板全走本函数），而置顶集只由 togglePin 一处改；若跟着整包写，
+  // 另开着的标签页用自己内存里的旧 wkPins 保存一次布局就把别处刚置顶的结果覆盖回空——置顶看起来
+  // 「没持久化」。置顶因此独立写口 savePins()，布局保存不再携带它。
   function saveWork() {
     stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, wkPins: state.wkPins, workSlots: state.workSlots })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+  }
+  // 置顶集唯一写口（togglePin 调用；read-modify-write 由 patchUI 保证不碰其它段）。
+  function savePins() {
+    patchUI({ wkPins: state.wkPins })
   }
   // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
   // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
@@ -153,6 +161,7 @@ export {
   patchUI,
   readUI,
   saveMgrView,
+  savePins,
   saveWork,
   stashWorkSlot,
 }

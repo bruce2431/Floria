@@ -3,7 +3,7 @@ import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
 import { I } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live } from '../../engine/state.js'
-import { stripQuoteBodies } from '../../inputbar/mention.js'
+import { quoteBodiesAsMarkdown } from '../../inputbar/mention.js'
 import { ICON_COPY, writeClipboard } from './usage.js'
 /* @module chat/messages/msg-actions.js */
   // 消息复制（2026-10-09 定案：复制「原始 markdown 源码」，非渲染文本）：data-md 的生产与消费同处
@@ -166,8 +166,8 @@ import { ICON_COPY, writeClipboard } from './usage.js'
     txt = txt.replace(/\s*\[Image #\d+\]/g, '')
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
-    // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
-    txt = stripQuoteBodies(txt)
+    // 引用原文块 → 锚点胶囊 + 原文引用块（2026-10-21：原文照样显示，不再剥掉）
+    txt = quoteBodiesAsMarkdown(txt)
     const hasImg = m.blocks.some((b) => b.kind === 'image')
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }

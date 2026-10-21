@@ -4,7 +4,7 @@
 // .mention 族 = 输入栏现行为，三点确认 ①）。接缝签名与语义冻结：serializeInput = doc.toString()、
 // setInputText = 全文替换——消费链（send/mention/quote/commands/ctx-meter/live）只认这两口。
 // 旧 #input contenteditable 与 #input-md 渲染层（md-preview.js 整模块）退役。
-import { makeEditorFacade, editorApiSetActive } from '../editor/editor-api.js'
+import { editorApiSetActive, editorCommand, makeEditorFacade } from '../editor/editor-api.js'
 import { surroundExt, wrapKeymap } from '../editor/editor-transactions.js'
 import { edAttImgPlugin } from '../editor/editor-attachments.js'
 import { edTaskPlugin } from '../editor/task-list.js'
@@ -291,15 +291,14 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     const cur = cmView.state.doc.toString()
     const next = String(text || '')
     if (cur === next) return
-    cmView.dispatch({ changes: { from: 0, to: cur.length, insert: next }, selection: { anchor: next.length } })
+    editorCommand('replaceRange', { from: 0, to: cur.length, text: next }, 'composer')
   }
   // 令牌/文本追加到输入栏末尾（旧 appendMentionChip / insertRefChip 尾随落点同语义），光标到末尾
   function composerAppendToken(text) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
     const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
-    const ins = sep + text + ' '
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text + ' ' }, 'composer')
     cmView.focus()
   }
   // 引用令牌追加（quote.js）：块形态（含原文）单独起行，单行文件引用以空格衔接；光标落块尾 = 接着打字就是给引用的说明
@@ -308,22 +307,20 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     const doc = cmView.state.doc
     const block = String(token).indexOf('\n') >= 0
     const sep = doc.length ? (block ? '\n' : ' ') : ''
-    const ins = sep + token
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + token }, 'composer')
     cmView.focus()
   }
   function composerAppendText(text) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
     const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
-    const ins = sep + text
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text }, 'composer')
     cmView.focus()
   }
   // 区间替换（@ 提及落地：@查询区间 → 令牌 + 空格），光标落 ins 尾
   function composerReplaceRange(from, to, ins) {
     if (!cmView || cmView.state.readOnly) return
-    cmView.dispatch({ changes: { from, to, insert: ins }, selection: { anchor: from + ins.length } })
+    editorCommand('replaceRange', { from, to, text: ins }, 'composer')
     cmView.focus()
   }
   function composerFocus() { if (cmView) cmView.focus() }

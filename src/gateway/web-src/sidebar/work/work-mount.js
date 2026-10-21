@@ -185,8 +185,7 @@
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
         state.wkTab = b.dataset.wktab
-        document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
-        renderWorkBody()
+        renderWorkBody() // 高亮同步在 updateWkTools（唯一口，覆盖点击外的恢复路径）
       }),
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）

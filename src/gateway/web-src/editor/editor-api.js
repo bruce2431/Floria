@@ -28,7 +28,8 @@ import { insertAtCursorCM, toggleTaskLineCM, wrapSelectionCM } from './editor-tr
     return id ? ED_EDITORS.get(id) || null : (edActiveId ? ED_EDITORS.get(edActiveId) || null : null)
   }
   // 命令调度（方案「所有 Markdown 按钮经 editor-command 调度」唯一入口）：
-  //   editorCommand('wrap', {before, after}) / ('insert', {text}) / ('toggleTask', {line, checked}) / ('focus')
+  //   editorCommand('wrap', {before, after}) / ('insert', {text}) / ('toggleTask', {line, checked})
+  //   / ('replaceRange', {from, to, text}) / ('focus')
   // target 缺省 = 活跃编辑器；返回是否命中注册面（调用方据此给 toast）。
   function editorCommand(name, payload, target) {
     const ed = editorApiGet(target)
@@ -36,6 +37,7 @@ import { insertAtCursorCM, toggleTaskLineCM, wrapSelectionCM } from './editor-tr
     if (name === 'wrap') { wrapSelectionCM(ed.view, String(payload.before || ''), payload.after === undefined ? undefined : String(payload.after)); return true }
     if (name === 'insert') { insertAtCursorCM(ed.view, String(payload.text || '')); return true }
     if (name === 'toggleTask') { return toggleTaskLineCM(ed.view, payload.line, !!payload.checked) }
+    if (name === 'replaceRange') { return ed.replaceRange(payload.from, payload.to, payload.text) }
     if (name === 'focus') { ed.focus(); return true }
     throw new Error('editorCommand: 未知命令 ' + name)
   }
@@ -55,6 +57,17 @@ import { insertAtCursorCM, toggleTaskLineCM, wrapSelectionCM } from './editor-tr
       blur() { view.contentDOM.blur() },
       wrapSelection(before, after) { wrapSelectionCM(view, before, after) },
       insertText(text) { insertAtCursorCM(view, text) },
+      // 区间替换（统一调度 primitives：宿主自有的「设值 / 末尾追加 / @ 令牌落地」都经此落地，
+      // 光标恒落插入文本末尾；范围自动 clamp 到文档内，越界不抛错）。
+      replaceRange(from, to, text) {
+        const len = view.state.doc.length
+        const f = Math.min(Math.max(0, Number.isFinite(Number(from)) ? Number(from) : 0), len)
+        const rawTo = Number.isFinite(Number(to)) ? Number(to) : f
+        const t = Math.min(Math.max(f, rawTo), len)
+        const ins = String(text == null ? '' : text)
+        view.dispatch({ changes: { from: f, to: t, insert: ins }, selection: { anchor: f + ins.length } })
+        return true
+      },
       toggleTask(line, checked) { return toggleTaskLineCM(view, line, checked) },
       copyMarkdownSelection() { return view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to) },
       destroy() {

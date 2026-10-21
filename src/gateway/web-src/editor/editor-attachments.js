@@ -78,13 +78,18 @@ import { edCmg } from './cm-global.js'
     constructor(url, alt) { super(); this.url = url; this.alt = alt }
     eq(o) { return o.url === this.url && o.alt === this.alt }
     ignoreEvent() { return true }
-    toDOM() {
+    // 图字节异步到位 ⇒ 行高在 CM 量过之后才变；高度图陈旧会让**下方**的点击/光标映射整体偏移
+    // （2026-10-21 待办「概率出现点击位置与光标偏移」）。加载完/失败都求一次重量，把行高落回高度图。
+    toDOM(view) {
       const wrap = document.createElement('span')
       wrap.className = 'cm-att-img'
       const img = document.createElement('img')
       img.src = this.url
       img.alt = this.alt
       img.loading = 'lazy'
+      const remeasure = () => { if (view && view.dom.isConnected) view.requestMeasure() }
+      img.addEventListener('load', remeasure, { once: true })
+      img.addEventListener('error', remeasure, { once: true })
       wrap.appendChild(img)
       return wrap
     }

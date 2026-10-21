@@ -24,8 +24,9 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
   // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
-  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
-  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
+  // 原文块捕获（2026-10-21）：$3/$2 = 令牌与收尾令牌之间的原文，气泡里要原样渲染（见 quoteBodiesAsMarkdown）
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n([\s\S]*?)\n\[\/引用回复\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n([\s\S]*?)\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
   // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
@@ -236,14 +237,15 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return proj ? proj + '/' + file : file
   }
 
-  // 引用**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE / QUOTE_PDF_RE 出胶囊。
-  // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
-  // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
-  // 回复块与 PDF 块共用这一个收口（两族形态不同，但不该有第三个剥块入口）。
-  function stripQuoteBodies(text) {
+  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：锚点令牌照旧渲染成胶囊，原文**原样显示**在
+  // 胶囊下方，不再整块剥掉（「只要是引用都渲染原本的文本」）。落地形态 = markdown 引用块（每行前缀 `> `），
+  // 由 core/markdown.js 的 blockquote 分支渲染。模型侧原文不动（令牌块原样上行）。
+  // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
+  function quoteBodiesAsMarkdown(text) {
+    const quote = (body) => String(body).split('\n').map((l) => '> ' + l).join('\n')
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
-      .replace(QUOTE_PDF_BODY_RE, '$1')
+      .replace(QUOTE_REPLY_BODY_RE, (_, idx, title, body) => `[@引用回复:${idx}|${title}]\n${quote(body)}`)
+      .replace(QUOTE_PDF_BODY_RE, (_, token, body) => `${token}\n${quote(body)}`)
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -474,5 +476,5 @@ export {
   selectMention,
   selectMentionItem,
   serializeInput,
-  stripQuoteBodies,
+  quoteBodiesAsMarkdown,
 }

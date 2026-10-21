@@ -1,5 +1,5 @@
 // 右栏页态内容补挂 + 侧栏（项目选择/项目列表/文件树/自动对账/数据补齐）与其渲染。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
-import { isPinned } from '../recent.js'
+import { bindRowPeek, isPinned, peekClear } from '../recent.js'
 /* @module sidebar/work/work-files.js */
 
   // ---------- 外部卡申报补拉 ----------
@@ -93,6 +93,9 @@ import { isPinned } from '../recent.js'
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
   // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
+    // tab 高亮唯一同步点（2026-10-21 待办）：state.wkTab 还会被切项目/启动恢复经 loadWorkSlot 改写，
+    // 只在点击处理器里同步 class，恢复出来的「文件亮、内容却是聊天」就会错位。renderWorkBody 每次必经此处。
+    document.querySelectorAll('.wk-tab').forEach((b) => b.classList.toggle('on', b.dataset.wktab === state.wkTab))
     const nb = $('wk-new')
     const isChat = state.wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
@@ -108,13 +111,15 @@ import { isPinned } from '../recent.js'
     updateWkTools()
     const html = wkBodyHtml()
     if (body.innerHTML !== html) {
-      // 重建前先还原浮起：旧行节点随 innerHTML 消亡，浮起态必须强制拍回防孤儿浮卡（与 renderRecent 同口径）
-      liftClear(true)
+      // 重建前先收起展开态：旧行节点随 innerHTML 消亡，引用必须清掉（与 renderRecent 同口径）
+      expandClear()
+      peekClear()
       body.innerHTML = html
-      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 扶起），
+      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 横向延展），
       // 实现在 recent.js；**只在重建分支接线**——未重写时节点未变，重复接线会让同一节点累积多份监听。
-      // 滚动容器 #wk-body 一并传入（扶起的滚动/滚轮拍回挂它）。随后按重建前线索重扶（点击导航/悬停）。
+      // 滚动容器 #wk-body 一并传入（滚轮关闭行浮窗的监听挂它）。文件树行同绑延展（同一层，不另起一套）。
       bindSessionRows(body, { source: 'work', root: body })
+      bindRowPeek(body, '.wk-row')
       reliftAfterRebuild(body)
     }
   }

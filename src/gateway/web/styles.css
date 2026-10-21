@@ -172,7 +172,7 @@ a { text-decoration: none; color: inherit; }
 /* WebKit（iOS Safari）给「可点」元素（button/a/带 click 的元素）默认叠一层 tap highlight（半透明灰），
    它与 `:active` 同在**抬手的合成鼠标事件**里落定，于是松手瞬间行上会闪一帧灰（2026-09-27 用户 iPad 实测：
    长按 tab 唤出行浮窗、松手时 tab 闪一下——长按此前被文本选择吃掉，加 user-select:none 后这层才显形）。
-   本项目全部按压反馈都是自绘的（`.sess-item:hover` / `.lift` 浮起 / 长按手势），不需要系统这层叠加；
+   本项目全部按压反馈都是自绘的（`.sess-item:hover` / `.expanded` 展开 / 长按手势），不需要系统这层叠加；
    用它就要逐元素维护（浮窗菜单项、气泡行、将来新行型），故在唯一入口关掉一次。
    不变量：WebKit 不得给任何元素叠 tap highlight。 */
 * { -webkit-tap-highlight-color: transparent; }
@@ -1890,10 +1890,8 @@ body.touch .mgr-card .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 
 .sess-item {
   display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
   padding: 7px 10px; border-radius: 8px; color: var(--text); font-size: 13px; line-height: 1.4;
-  /* 变深不做动画（2026-09-06 用户定案）：hover/选中深底是「保存的状态」不浮起时静态展示。
-     原 0.12s 背景过渡与扶起 .lift-anim 抢同一属性——未选中行 hover 有可见变深脉冲，
-     选中行 .on 盖过 :hover 背景从不变深故无感；移除后扶起过渡成为唯一背景动画，
-     恢复路径（anim:false）也因此真正做到直接终态。 */
+  /* 变深不做动画（2026-09-06 用户定案）：hover/选中深底是「保存的状态」静态展示，不加过渡——
+     否则未选中行 hover 有可见变深脉冲。 */
   cursor: pointer; border: none;
   /* 长按唤出行浮窗 = 手势，不是选字（2026-09-27 用户 iPad 实机：长按 tab 选中了标题文字并弹出系统
      选择菜单「拷贝/查找所选内容/查询」，与行浮窗打架）。user-select: none 掐掉选中，touch-callout: none
@@ -2121,29 +2119,17 @@ html[data-theme="dark"] .folder-head { color: var(--text-2); }
   #input-wrap.docked { width: calc(100% - 32px); }
 }
 
-/* ===== 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸露出完整标题 =====
-   JS 把 hover 行临时 position:fixed（#recent-body overflow 裁剪容器，行内加宽必被裁）。
-   .lift = 扶起终态（浮起面+描边阴影+上移 2px），.lift-anim = 四路过渡（背景/阴影/上移/宽度）；
-   同优先级下写在 .sess-item:hover/.on 之后 → 浮起统一浮卡（--float-* 令牌，夜晚＝明显高于底板的抬升面）。
-   z-index 60 盖过主区与列表普通行。 */
-/* 浮起面在 work 白天模式下的换向（2026-10-06 用户报「work 日照模式 tab 浮起同样被盖住」）：
-   work 侧栏是白卡（--chat-bg），白底上再浮白卡 = 看不出浮起、选中样式被盖住；白天模式改取底板灰
-   --plane，与 chat 模式（灰底浮白卡）互为正负。描边/投影不另设，随 :root 白天令牌（深色描边+双层投影）
-   ——两个方向的浮起靠同一份边影强度读出来。夜晚两种模式的宿主都是深底，浮卡统一取更亮的抬升面
-   （见 html[data-theme="dark"] 的 --float-* 令牌），故此处只在非夜晚生效。 */
-html:not([data-theme="dark"]) #app.work { --float-bg: var(--plane); }
+/* ===== 会话 tab 标题延展（2026-10-21 起只横向，行高不变）=====
+   完整标题由 recent.js 的 .row-peek 克隆单行向右展开（fixed 覆盖层、pointer-events:none，真行留在
+   #recent-body / #wk-body 滚动链里）；行内标题恒单行省略。.expanded 仅作长按时的底色高亮，
+   **不得改为换行**——曾用 `white-space:normal` 让「…根治」的「治」掉到第二行，用户明确要求高度不变。 */
+.sess-item.expanded { background: var(--hover); }
 /* 白天模式行底换向（2026-10-06 用户「chat 白天下还是灰色的底子」）：悬停/选中底必须朝**远离宿主**的
    方向走才看得见。两种模式白天宿主不同——chat 侧栏透明于 #app 底（--plane #ececf1 灰）、work 侧栏是
    白卡（--chat-bg）——故单一 --selected/--hover 必有一边糊住：chat 宿主灰 ⇒ 取更亮的白；work 宿主白
    ⇒ 取更暗的灰。夜晚两模式宿主同为深底（#161616），方向一致更亮（--hover #242424 / --selected #303030），
    整块不动。作用域落 #app（全部消费点都在其内），--selected 全站仅 .sess-item.on 一处消费。 */
 html:not([data-theme="dark"]) #app:not(.work) { --hover: #f4f4f7; --selected: #ffffff; }
-.sess-item.lift {
-  background: var(--float-bg); border-radius: 10px;
-  box-shadow: 0 0 0 1px var(--float-line), var(--float-shadow);
-  transform: translateY(-2px);
-}
-.sess-item.lift-anim { transition: width 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease; }
 .folder-head .folder-add {
   flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: 5px; color: var(--text-3); cursor: pointer;
@@ -2159,7 +2145,7 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* ===== 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；参考 deepseek 菜单范式）=====
    浮窗由 JS 挂在行所属的 #sidebar（行不在侧栏内则挂 document.body；position:fixed，脱离 #recent-body /
    #wk-body 裁剪，且 DOM 上是侧栏子节点 ⇒ 悬停预览下指针移到浮窗不会触发 #sidebar 的 mouseleave），
-   落点 = 行左下 / 指针处。长按触发的浮起行 .lift 在上，浮窗 z-index 更高。菜单项由各列表注册
+   落点 = 行左下 / 指针处。浮窗 z-index 高于列表行。菜单项由各列表注册
    （会话行 / work 文件行）。user-select 同 .sess-item：长按/选择手势不得选中菜单文字。 */
 .row-menu-pop {
   position: fixed; z-index: 70; min-width: 156px;
@@ -2295,6 +2281,16 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #rename-modal .rename-ext-row[hidden] { display: none; }
 #rename-modal .rename-ext-label { flex: none; font-size: 12px; color: var(--ink-3); }
 #rename-modal .rename-ext-row .rename-input { height: 38px; border-radius: 19px; }
+/* 原生 <select> 下拉（2026-10-21 待办「没有兼容黑夜模式」）：透明底只管控件本体，弹出列表由
+   UA 按 color-scheme 画——深色下仍出白底浅字。显式给控件与 <option> 上色：Chromium/Windows
+   的 listbox 弹层会消费 option 的 background/color，与站点主题同源（--bg/--ink）。 */
+#rename-modal select.rename-input {
+  color-scheme: inherit;
+  background-color: var(--bg); color: var(--ink);
+}
+#rename-modal select.rename-input option {
+  background-color: var(--bg); color: var(--ink);
+}
 #rename-modal .rename-error {
   margin-top: 8px; font-size: 12px; line-height: 18px; color: #ec1313;
 }
@@ -2455,16 +2451,26 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 .wk-row.dir svg { color: var(--text-2); }
 /* 拖拽移动（2026-10-14 待办 10）落点高亮：目录行被悬停可落 / 树空白（#wk-body 本体）＝项目根可落 */
 .wk-row.wk-dnd, #wk-body.wk-dnd { outline: 1.5px dashed var(--accent, var(--text-2)); outline-offset: -1.5px; border-radius: 7px; background: var(--hover); }
-/* 长按扶起（触屏唤出文件行操作浮窗）：与 .sess-item.lift 同一份外观，宽度不动（文件树是缩进层级，
-   拉宽会盖住右侧栏位）——.lift 只负责脱出 #wk-body 的 overflow 裁剪并浮到浮窗之下。 */
-.wk-row.lift {
-  background: var(--float-bg); border-radius: 7px;
-  box-shadow: 0 0 0 1px var(--float-line), var(--float-shadow);
-  transform: translateY(-2px);
-}
-
 /* 聊天 tab 的会话列表：条目复用全局 .sess-item（recent.js itemHtml），此处只管纵向排布 */
 .wk-chats { display: flex; flex-direction: column; gap: 1px; padding: 6px 2px 0; }
+/* 行标题桌面悬停横向延展（2026-10-21）：recent.js 按行克隆出的 fixed 覆盖层。
+   pointer-events:none 不参与命中（真实行仍接收 hover/click、仍在列表流里 ⇒ 滚动链不变）；
+   width:max-content 让长标题/长路径向右展开而不是向下换行；超视口右侧由内联 max-width + overflow 截断。
+   会话行（.sess-item）与文件树行（.wk-row）共用，后者按自身字号/内距微调。 */
+.row-peek {
+  position: fixed; z-index: 70; display: flex; align-items: center; gap: 8px;
+  width: max-content; overflow: hidden; pointer-events: none;
+  background: var(--hover); color: var(--text);
+  border-radius: 8px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.16);
+  font-size: 13px; line-height: 1.4;
+}
+html[data-theme="dark"] .row-peek { color: var(--text-2); }
+/* 标题/路径必须保留可伸缩的 flex（2026-10-21 用户「点击时项目小胶囊右对齐消失」）：
+   克隆体宽 = max(原行宽, max-content)，`flex:0 0 auto` 时多出的原行宽没人吃掉，
+   尾部胶囊就被留在中间；改成 `1 1 auto` 后——行宽大于内容时标题吃掉余量把胶囊顶到右缘，
+   内容超过内联 max-width 时标题收缩省略、胶囊仍钉在右缘（不再被 overflow 裁掉）。 */
+.row-peek .title, .row-peek .wk-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-peek.wk-row { padding: 5px 10px; font-size: 12.5px; gap: 6px; }
 
 .wk-foot { display: flex; align-items: center; gap: 8px; margin: 4px 10px 10px; padding: 9px 12px; border-radius: 11px; background: var(--bg); border: 1px solid var(--border-soft); font-size: 12.5px; color: var(--text-2); cursor: pointer; }
 .wk-foot:hover { background: var(--hover); }
@@ -2482,7 +2488,10 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
    内容格裸落其上；预览列是漂在底板上的**白卡**（圆角 + 2px 缝，故卡片有形状）。左半边 #sidebar.open
    仍是白卡（Prism 式：底板上一张张卡）。预览关 → 列模板收成单列（:not(.wk-preview)），分界条与预览卡一并消失。
    #work-editor 刻意不用 .view-card：它是 work 常驻栏，带该类会落入 registry 的「槽里同一时刻恰好一张卡」语义。 */
-#work-editor { display: none; position: relative; min-height: 0; flex-direction: column; overflow: hidden; }
+/* --wk-ed-pad-x = 编辑区正文左右留白（2026-10-19）：行文本与块级 widget（代码块/表格）共用同一取值，
+   二者左边缘严格对齐（此前行文本 16px、块级 widget 贴边，宽窗下正文挤在两侧、观感差）。
+   窄屏回落 20px、宽窗渐增到 56px——纯观感度量，不影响编辑/光标逻辑。 */
+#work-editor { --wk-ed-pad-x: clamp(20px, 4vw, 56px); display: none; position: relative; min-height: 0; flex-direction: column; overflow: hidden; }
 #chat-area.work {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7px var(--wk-pw, 420px);
@@ -2745,13 +2754,14 @@ body.wk-assist-dragging iframe { pointer-events: none; }
    光标进入该行/拖选中 = 不加装饰、`---` 原样可编辑。横线绝对定位在该行竖直中线，行高不变。 */
 #work-editor .cm-line.wk-ed-hr { position: relative; }
 #work-editor .cm-line.wk-ed-hr::after {
-  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  content: ''; position: absolute; left: var(--wk-ed-pad-x); right: var(--wk-ed-pad-x); top: 50%;
   border-top: 1px solid var(--border); pointer-events: none;
 }
 .wk-ed-hr-hide { font-size: 0.01em; opacity: 0; pointer-events: none; }
 /* 表格 widget（库 TableWidget → `.cm-table-widget`）：库自带表线写的是 hsl(var(--border, …))，
    而本项目 --border 是十六进制（#ececec/#2a2a2a）⇒ hsl() 非法 ⇒ 边框声明在计算值阶段作废、全部无框。
    此处用项目令牌重写表线/表头底（同样是为 vendored 库的 hsl 假设兜底，与 .cm-header-* 覆盖同源）。 */
+#work-editor .cm-table-widget { margin: 12px var(--wk-ed-pad-x); }
 #work-editor .cm-table-widget table { border-collapse: collapse; width: 100%; }
 #work-editor .cm-table-widget th, #work-editor .cm-table-widget td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; }
 #work-editor .cm-table-widget th { background: color-mix(in srgb, var(--text) 7%, transparent); font-weight: 600; }
@@ -2761,21 +2771,25 @@ body.wk-assist-dragging iframe { pointer-events: none; }
    宿主统一为编辑器口径（EditorView.lineWrapping）：pre-wrap 软换行。底/边同聊天区代码块（--field-2 + --border），
    替换库的 hsl(var(--muted,…)) 回落值（本项目无 --muted，暗色下会留浅灰底）。 */
 #work-editor .cm-codeblock-widget {
-  margin: 6px 0; border: 1px solid var(--border); border-radius: 8px;
+  margin: 14px var(--wk-ed-pad-x); border: 1px solid var(--border); border-radius: 10px;
   background: var(--field-2); overflow: hidden;
 }
-#work-editor .cm-codeblock-widget pre { padding: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#work-editor .cm-codeblock-widget pre { padding: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #work-editor .cm-codeblock-line {
-  padding: 0 12px; min-height: 0; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--text);
+  padding: 0 16px; min-height: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--text);
 }
-#work-editor .cm-codeblock-copy { top: 6px; right: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
+#work-editor .cm-codeblock-copy { top: 8px; right: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
 #work-editor .cm-codeblock-copy:hover { background: var(--hover); }
+/* 块级公式 widget（editor/cm-math.js）：与正文同一边线，KaTeX 显示模式在该栏内居中 */
+#work-editor .cm-math-block { margin: 12px var(--wk-ed-pad-x); }
 /* Live Preview（vendor 库 live-markdown.js）主题兜底（2026-10-09 根修）：库内置主题的颜色一律写
    hsl(var(--x, <浅色回落>))，而本项目从不定义 --muted/--foreground/--primary/--background/--md-*
    （令牌全为十六进制、名字也不同）⇒ 库的**浅色回落值全部生效** = 硬编码浅色主题 ⇒ 黑夜模式白底白字 /
    深底深字不可读（实报：md 预览行内代码 = 浅灰底白字）。与上方表格/代码块 widget 的兜底同源，
    此处集中一层按项目令牌覆写库类、日夜随动——勿再分散到各处。 */
-#work-editor .cm-content { caretColor: var(--blue); }
+#work-editor .cm-content { caretColor: var(--blue); padding: 22px 0 72px; }
+/* 正文左右留白（覆盖库默认 `0 16px`）：宽窗下正文不再抱边，与下方块级 widget 同一边线 */
+#work-editor .cm-line { padding: 0 var(--wk-ed-pad-x); }
 #work-editor .cm-placeholder { color: var(--text-3); }
 #work-editor .cm-strong, #work-editor .cm-emphasis { color: var(--text); }
 #work-editor .cm-strikethrough { color: var(--text-3); }

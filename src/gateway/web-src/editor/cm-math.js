@@ -68,6 +68,8 @@ import { edCmg } from './cm-global.js'
   }
   // 块级公式落成 block widget 需行对齐：整行只含该公式（首行前缀 / 末行后缀皆空白）→ 吃掉整行；
   // 否则按行内 widget 渲染（displayMode 数学仍按 KaTeX 显示模式排版，不吞同行文字）。
+  // 跨行且前后有文字 → 返回 null（不装饰、原样显源码）：replace 装饰禁止跨行，硬做会被 CM6 拒绝
+  // （RangeError「Decorations that replace line breaks may not be specified via plugins」）。
   function cmMathRange(state, item) {
     if (item.cls !== 'block') return { from: item.from, to: item.to, block: false }
     const d = state.doc
@@ -76,6 +78,7 @@ import { edCmg } from './cm-global.js'
     const pre = d.sliceString(l0.from, item.from)
     const post = d.sliceString(item.to, l1.to)
     if (!pre.trim() && !post.trim()) return { from: l0.from, to: l1.to, block: true }
+    if (l0.number !== l1.number) return null
     return { from: item.from, to: item.to, block: false }
   }
   // 扩展工厂（两宿主各传自己的 CM 全局；同一实现，禁各写一套）。
@@ -86,29 +89,44 @@ import { edCmg } from './cm-global.js'
       constructor(src, block, display) { super(); this.src = src; this.block = block; this.display = display }
       eq(o) { return o.src === this.src && o.block === this.block && o.display === this.display }
       ignoreEvent() { return false }
-      toDOM() {
+      toDOM(view) {
         const el = document.createElement(this.block ? 'div' : 'span')
         el.className = this.block ? 'cm-math-block cm-mspec-math' : 'cm-math-inline cm-mspec-math'
         // KaTeX 输出自身安全（trust 默认 false + 内部转义），与消息流 mdHtml 同口径直接进 DOM。
         el.innerHTML = renderMath(this.src, this.display)
+        // KaTeX 字体/度量异步到位后高度可能变（块公式尤甚）；CM 不会收到通知，高度图陈旧会让
+        // 下方点击位置与光标偏移（2026-10-21 待办）。下一帧求一次重量，按真实盒高修正高度图。
+        requestAnimationFrame(() => { if (view && view.dom.isConnected) view.requestMeasure() })
         return el
       }
     }
-    const build = (view) => {
+    const build = (state) => {
       const deco = []
-      for (const item of cmMathScan(view.state, C)) {
-        const r = cmMathRange(view.state, item)
-        if (cmMathSelectionHit(view.state, C, r.from, r.to)) continue // 选区内 = 显源码
+      for (const item of cmMathScan(state, C)) {
+        const r = cmMathRange(state, item)
+        if (!r) continue // 跨行块级公式（前后有文字）→ 显源码
+        if (cmMathSelectionHit(state, C, r.from, r.to)) continue // 选区内 = 显源码
         deco.push(C.Decoration.replace({ widget: new CM_MathWidget(item.src, r.block, item.cls === 'block'), block: r.block }).range(r.from, r.to))
       }
       return C.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
     }
-    return C.ViewPlugin.fromClass(class {
-      constructor(view) { this.decorations = build(view) }
-      update(u) {
-        if (u.docChanged || u.viewportChanged || u.selectionSet || u.reconfigured) this.decorations = build(u.view)
-      }
-    }, { decorations: (v) => v.decorations })
+    // 必须走 StateField provide：CM6 硬性限制「ViewPlugin 不得提供 block 装饰 / 跨行 replace」
+    // （RangeError: Block decorations may not be specified via plugins）——块级 `$$…$$` 一旦闭合
+    // 就会整行替换，放 ViewPlugin 里必抛错，DOM 更新中断表现为输入/光标错位。vendor 的
+    // blockMathField 同构（StateField），此处对齐。selection 变（撤/挂源码态）与拖选收尾需重建；
+    // 拖选期间沿用旧装饰（vendor 同口径，避免拖曳沿途闪烁）。
+    return C.StateField.define({
+      create: (state) => build(state),
+      update: (deco, tr) => {
+        if (tr.docChanged || tr.reconfigured) return build(tr.state)
+        const dragging = tr.state.field(C.mouseSelectingField, false)
+        if (tr.startState.field(C.mouseSelectingField, false) && !dragging) return build(tr.state)
+        if (dragging) return deco
+        if (tr.selection) return build(tr.state)
+        return deco
+      },
+      provide: (f) => C.EditorView.decorations.from(f),
+    })
   }
 
 export { cmMathExt }

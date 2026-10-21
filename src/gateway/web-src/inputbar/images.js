@@ -106,20 +106,27 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
     const tgtEd = target || 'composer'
+    const toComposer = tgtEd === 'composer'
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
-      if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
+      // 张数上限只约束底栏发送链（pendingImages 是发送态）；编辑卡正文引用不占名额
+      if (toComposer && pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
       let enc
       try { enc = await encodeImg(f) } catch { toast('图片读取失败'); continue }
       const att = await uploadAttachment(f)
+      // 模块化分流（2026-10-21 待办）：work 编辑卡 = 只落盘 + 写正文引用，**不写底栏 pending/胶囊**。
+      // 旧实现无论 target 都 push pendingImages + renderImgPills，导致编辑卡粘贴的图串进底栏胶囊行。
+      if (!toComposer) {
+        if (att) insertAttachmentMarkdown(tgtEd, att)
+        continue
+      }
       if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
       // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
-      // 「不要自动在正文渲染，被图片胶囊劫持」）；work 编辑卡粘贴仍插正文并内联渲染（待办 1）。
-      if (att && tgtEd !== 'composer') insertAttachmentMarkdown(tgtEd, att)
+      // 「不要自动在正文渲染，被图片胶囊劫持」）。
       renderImgPills()
     }
-    syncGwSend()
+    if (toComposer) syncGwSend()
   }
   // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
   // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
@@ -127,16 +134,17 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
   // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
   async function addUploadFiles(files, target) {
     const tgtEd = target || 'composer'
+    const toComposer = tgtEd === 'composer'
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
       const att = await uploadAttachment(f)
       if (!att) continue
-      pendingFiles.push(att)
+      // 同 addImageFiles：底栏才入 pendingFiles 胶囊行；编辑卡只写正文链接（不串底栏）
+      if (toComposer) { pendingFiles.push(att); renderImgPills() }
       toast('已上传 ' + att.name)
       insertAttachmentMarkdown(tgtEd, att)
-      renderImgPills()
     }
-    syncGwSend()
+    if (toComposer) syncGwSend()
   }
 
 // ---------- 剪贴板取图（2026-10-16：复制→粘到底栏成胶囊）----------

@@ -369,9 +369,17 @@
   // work 模式状态持久化（2026-09-25）：刷新后恢复模式 + 当前项目 + **全部项目槽**（每项目各自的
   // 顶栏开放集 / 侧栏页 / 开关 / 打开的文件）。落盘时机 = applyPanes（布局落地唯一口，见 work-layout.js）。
   // 全局量（模式、当前项目、预览列宽）与槽同一次 patch，绝不各自分写。
+  // 注意：wkPins **不在这里写**（2026-10-21 待办「置顶状态没有持久化」根治）。布局保存是高频动作
+  // （applyPanes / 切项目 / 开关面板全走本函数），而置顶集只由 togglePin 一处改；若跟着整包写，
+  // 另开着的标签页用自己内存里的旧 wkPins 保存一次布局就把别处刚置顶的结果覆盖回空——置顶看起来
+  // 「没持久化」。置顶因此独立写口 savePins()，布局保存不再携带它。
   function saveWork() {
     stashWorkSlot() // 当前 live 视图先归入自己项目的槽（唯一写口），与下面同一次 patch
-    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, wkPins: state.wkPins, workSlots: state.workSlots })
+    patchUI({ sbMode: state.sbMode, workProj: state.workProj, wkPrevW: state.wkPrevW, workSlots: state.workSlots })
+  }
+  // 置顶集唯一写口（togglePin 调用；read-modify-write 由 patchUI 保证不碰其它段）。
+  function savePins() {
+    patchUI({ wkPins: state.wkPins })
   }
   // 旧形态（扁平字段 + wkPanes）→ 槽形态的一次性迁移：把扁平量折进当时的 workProj 槽。
   // 只在读不到 workSlots 时执行（此后存档恒为新形态，迁移条件不再成立）。
@@ -3103,8 +3111,8 @@ function setLastNavHash(v) { lastNavHash = v }
     txt = txt.replace(/\s*\[Image #\d+\]/g, '')
     // 文件占位（2026-09-12 文件上传）：[文件:<绝对路径>] 剥出渲染成文件卡片（userFilesHtml）
     txt = txt.replace(/\s*\[文件:[^\]]*\]/g, '')
-    // 回复引用的原文块只给模型看，气泡里剥掉只留锚点胶囊（2026-09-28）
-    txt = stripQuoteBodies(txt)
+    // 引用原文块 → 锚点胶囊 + 原文引用块（2026-10-21：原文照样显示，不再剥掉）
+    txt = quoteBodiesAsMarkdown(txt)
     const hasImg = m.blocks.some((b) => b.kind === 'image')
     return mdHtml(hasImg && !ids.length && !txt.trim() ? '[图片]' : txt)
   }
@@ -3677,7 +3685,7 @@ function setLastNavHash(v) { lastNavHash = v }
     // 展开/折叠侧栏时关闭相关弹层
     bubblePop.classList.remove('show')
     $('organize-pop').classList.remove('show')
-    if (!open) closeRowMenu() // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗一并收（宿主见 openRowMenu）
+    if (!open) { closeRowMenu(); peekClear() } // 不变量：侧栏收起 ⇒ 挂在它里面的行浮窗/延展层一并收
     // （2026-10-14 待办 5：视图浮层退役，原 syncPaneRows 行状态链删除）
   }
   // 悬停预览的收口：鼠标离开侧栏且未钉住 → 收起。钉住态（汉堡打开）鼠标怎么走都不收；
@@ -3720,7 +3728,8 @@ function setLastNavHash(v) { lastNavHash = v }
   }
 
   // ---------- work 侧栏会话置顶（2026-10-18）----------
-  // 状态源 = state.wkPins（core/ui-state.js，随 saveWork 持久化）。**只在 work 侧栏渲染**：
+  // 状态源 = state.wkPins（core/ui-state.js，经独立写口 savePins 持久化——不进 saveWork 整包，
+  // 免得别的标签页保存布局时用旧内存态把新置顶覆盖回去）。**只在 work 侧栏渲染**：
   // 排序与行内图钉标记都由 work 列表出口（work-files.js wkBodyHtml）消费；chat 侧栏列表不读、
   // 菜单项也只对 #wk-body 内的行出现。置顶/取消置顶的唯一写口 = togglePin。
   function isPinned(hash) {
@@ -3731,7 +3740,7 @@ function setLastNavHash(v) { lastNavHash = v }
     state.wkPins = isPinned(hash)
       ? state.wkPins.filter((h) => h !== hash)
       : state.wkPins.concat(hash)
-    saveWork()
+    savePins()
     renderWorkBody() // 列表唯一渲染出口（work-files.js）：重排 + 图钉标记一次落地
     toast(isPinned(hash) ? '已置顶' : '已取消置顶')
   }
@@ -3755,120 +3764,126 @@ function setLastNavHash(v) { lastNavHash = v }
   // 全同），CSS @media 骗不过 → 「hover 才显」规则（folder-add 等）在 iPad 上生效，
   // 触发 iOS「hover 改变布局 → 首击只应用 hover 吞 click」双击（笔按钮实测首击选中二击才跳转）。
   // 判定 = hover:none（手机）或 MacIntel+多点触控（iPad，与 deviceHint 同式）→ body.touch，
-  // CSS 对触屏恒显这些元素（见 styles.css body.touch 段），liftStart 同步禁用。
+  // CSS 对触屏恒显这些元素（见 styles.css body.touch 段），hover 展开同步禁用。
   const IS_TOUCH_DEVICE =
     matchMedia('(hover: none)').matches ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   if (IS_TOUCH_DEVICE) document.body.classList.add('touch')
 
-  // ---------- 会话 tab 悬停扶起（2026-09-05）：fixed 浮起 + 宽度拉伸显示完整标题 ----------
-  // #recent-body / #wk-body 都是 overflow 裁剪容器，行内加宽必被裁剪；hover 时把该行临时
-  // position:fixed 浮到原位（fixed 不受祖先 overflow 裁剪），原位插同高占位防行高塌陷，背景/
-  // 阴影/上移/宽度四路同步过渡到「扶起」终态；离开/列表滚动/窗口 resize/SSE 重建立即还原。
-  // 触摸设备不启用。两处列表（chat 侧栏 / work 下沉区）共用本实现，靠 opts.root 区分滚动容器。
-  let liftEl = null
-  let liftSpacer = null
-  // 扶起的滚动/滚轮拍回监听按**行所在滚动容器**挂（chat = #recent-body；work 下沉区 = #wk-body）：
-  // 每容器只挂一次（重复挂 = 同一次滚动触发多遍拍回）。窗口 resize 与容器无关，只挂一次。
-  const liftBoundRoots = new WeakSet()
-  let liftWinBound = false
-  function liftBindRoot(root) {
-    if (!liftWinBound) { liftWinBound = true; window.addEventListener('resize', liftClear) }
-    if (!root || liftBoundRoots.has(root)) return
-    liftBoundRoots.add(root)
-    root.addEventListener('scroll', () => { liftCool = Date.now() + 150; liftClear() }, { passive: true })
-    // 滚轮拍回（2026-09-10 侧栏滚轮无响应根修）：Chromium 滚动链走包含块链，fixed 浮起行直连
-    // viewport、把 DOM 祖先从滚动链上摘除——列表被行铺满、光标恒停浮起行（滚动后 Chrome 还会按
-    // 静止光标重扶）→ 滚轮 target 恒为 fixed 行 = 全死区（CDP 探针实测：wheel 到达 +0 scroll，
-    // v274 liftCool 门拦的是「滚动中重扶」，管不到这条）。滚轮到达列表 = 滚动意图：同步拍回 +
-    // 强制 layout，让默认滚动动作在干净布局上把滚动链重新解析回本容器（探针复验通过）。
-    // non-passive 保证监听先于默认滚动动作执行。浮窗开着 = 一并关闭（滚轮 = 菜单外交互）。
-    // liftCool 与 scroll 门同参续期：滚轮持续 = 非静止态，防边界拍回/重扶循环。
-    root.addEventListener('wheel', () => {
-      liftCool = Date.now() + 150
-      if (rowMenuPop) closeRowMenu()
-      if (liftEl) { liftClear(true); void root.offsetHeight }
-    }, { passive: false })
+  // ---------- 行标题展开：桌面横向延展 / 触屏长按换行（2026-10-21）----------
+  // 桌面 hover = body 下挂一份 fixed 克隆（.row-peek，pointer-events:none）：真实行始终留在列表流中，
+  // 滚动链不被破坏（2026-10-19 fixed 真行导致 iPad 侧栏滑不动的根因）；克隆按 max-content 向右延展，
+  // 长标题/长路径不再是「向下换行把后面的行推走」（用户待办：水平延展，而不是向下拓宽）。
+  // 触屏长按仍用 .expanded 换行（无 hover，浮窗与展开同生同灭）；会话行与文件树行（.wk-row）共用本层。
+  // 判据按**事件指针类型**而非设备（2026-10-21 返修）：iPad 桌面模式谎报 hover:hover，但接了触控板/鼠标时
+  // pointerType='mouse' 真实有悬停，旧 IS_TOUCH_DEVICE 一刀切会让这类设备退回垂直换行（实报截图正是它）；
+  // 手指触控（'touch'）没有 hover：**点击/长按该行时也横向延展**（2026-10-21 用户定案：
+  // iPad 点 tab 拓宽、电脑鼠标悬浮拓宽），同样只出克隆、行高不变。
+  let lastPointerType = 'mouse'
+  const canPeek = () => lastPointerType !== 'touch'
+  // 触屏点击后的延展锚：行点击常触发导航/列表重建（克隆随旧节点清掉），重建后按 (sel,dataset 键,值) 找回并重开。
+  let peekPin = null
+  let peekEl = null
+  let peekSrc = null
+  function peekClear() {
+    if (peekEl) { peekEl.remove(); peekEl = null }
+    peekSrc = null
   }
-  // 滚动静默期（2026-09-08 侧栏滚轮失效根修）：scroll 后 150ms 内 hover 不扶起。
-  // 不变量：扶起（fixed 化+插占位符=布局重排）只发生在列表静止态——滚动中扶起与滚动互搏：
-  // 每格滚动触发「拍回删占位符（内容缩一行高）→ hover 重算重扶插占位符（内容长回）」，
-  // 占位符插删的净位移抵消滚动量 = 观感滚轮失效（wheel 到达+无 preventDefault，target 恒为
-  // 行——列表被行铺满无空白落点）；偶发正常=鼠标落点（白边/滚动条不触发）+主线程忙闲时序竞争。
-  // 连续滚动每次 scroll 续期；菜单/重建重扶走 liftStart 直调不受冷却约束（点击语义，非 hover）。
-  let liftCool = 0
-  let reLiftHash = null // 行点击触发的导航：renderRecent 重建后按 hash 重扶被点行（用后即清）
-  let mouseXY = null // 最近光标落点：renderRecent 重建后按落点重扶 hover 行（页面加载前 null 不误扶）
-  function liftClear(force) {
-    // 操作浮窗开着：滚动/窗口变化这类非 force 还原先冻结（浮窗 fixed 于 body，与行的在流态互不依赖，
-    // 只是不该由背景事件把用户正在操作的行拍下去）；浮窗收口时由 closeRowMenu 统一还原。
-    if (!force && rowMenuPop) return
-    if (liftEl) {
-      liftEl.classList.remove('lift', 'lift-anim')
-      liftEl.style.position = ''; liftEl.style.left = ''; liftEl.style.top = ''
-      liftEl.style.width = ''; liftEl.style.zIndex = ''
-      liftEl.style.background = ''; liftEl.style.boxShadow = ''; liftEl.style.transform = ''
-      liftEl = null
-    }
-    if (liftSpacer) { liftSpacer.remove(); liftSpacer = null }
-  }
-  document.addEventListener('mousemove', (e) => { mouseXY = [e.clientX, e.clientY] }, { passive: true, capture: true })
-  function liftStart(el, opts = {}) {
-    // hover 扶起仅桌面指针设备绑定（bindSessLift）；触屏长按扶起由 openRowMenu 直调，不经 hover 路径
-    if (liftEl === el) return // 幂等：已浮起（重扶/mouseenter 不重播扶起动画）
-    // 切换浮起目标必须无条件清旧（长按换行 / hover 换行）：否则旧浮起行的 fixed 态+占位 spacer 成孤儿
-    liftClear(true)
+  function peekStart(el) {
+    // 高度不变量：克隆按原行矩形落位、标题恒单行（.row-peek .title nowrap），行高与列表流都不变。
+    // 是否允许由调用方决定（hover 绑 pointerType；长按菜单直调 force）。
+    if (!el || peekSrc === el) return
+    peekClear()
     const r = el.getBoundingClientRect()
-    if (!r.height) return
-    liftEl = el
-    liftSpacer = document.createElement('div')
-    liftSpacer.style.height = r.height + 'px'
-    el.parentNode.insertBefore(liftSpacer, el)
-    el.style.position = 'fixed'; el.style.left = r.left + 'px'; el.style.top = r.top + 'px'
-    el.style.zIndex = '60'; el.style.width = r.width + 'px'
-    // 目标宽 = 完整标题实测宽，上限 = 视口剩余空间。测量须在 .lift 已挂（无过渡、同一任务内无绘制，
-    // 先挂后摘视觉零影响）的状态下做，测得的即浮起终态宽度。
-    el.classList.add('lift')
-    el.style.width = 'max-content'
-    const target = Math.min(el.getBoundingClientRect().width, window.innerWidth - r.left - 12)
-    el.style.width = r.width + 'px'
-    if (opts.anim === false) {
-      // 恢复路径（重建后重扶）：.lift 已挂（测量顺带），直接终态不播过渡——活动流驱动的重建随时插入，
-      // 每次重播「起步 hover 外观→扶起终态」拉伸动画=视觉脉冲（2026-09-05 根修 hover 重建拍回配套）
-      if (target > r.width + 1) el.style.width = target + 'px'
-    } else {
-      // 起步态 = 当前 hover 外观（内联）：先摘 .lift 再锚定起步态，随后挂终态类触发平滑过渡
-      el.classList.remove('lift')
-      el.style.background = 'var(--hover)'
-      el.style.boxShadow = '0 0 0 1px rgba(0,0,0,0), 0 0 0 rgba(0,0,0,0)'
-      el.style.transform = 'translateY(0)'
-      void el.offsetWidth // 强制 layout：让起步内联态成为已计算样式，随后挂终态类触发平滑过渡
-      el.classList.add('lift', 'lift-anim')
-      el.style.background = ''; el.style.boxShadow = ''; el.style.transform = ''
-      if (target > r.width + 1) el.style.width = target + 'px'
-    }
-    liftBindRoot(opts.root || bodyEl)
+    if (!r.width || !r.height) return
+    const c = el.cloneNode(true)
+    c.classList.add('row-peek')
+    c.removeAttribute('id')
+    c.setAttribute('aria-hidden', 'true')
+    c.style.left = Math.round(r.left) + 'px'
+    c.style.top = Math.round(r.top) + 'px'
+    c.style.height = Math.round(r.height) + 'px'
+    c.style.minWidth = Math.round(r.width) + 'px'
+    c.style.maxWidth = Math.max(120, window.innerWidth - r.left - 8) + 'px'
+    document.body.appendChild(c)
+    peekEl = c
+    peekSrc = el
   }
-  // liftRoot = 行所在的滚动容器：扶起的滚动 / 滚轮拍回监听挂它（见 liftBindRoot）。
-  function bindSessLift(root, liftRoot) {
-    // hover 扶起仅桌面指针设备绑定；触屏不启用（iPad 桌面模式 matchMedia 伪装 hover:hover
-    // 骗过媒体查询，IS_TOUCH_DEVICE 才是真触屏）——触屏长按扶起走 openRowMenu 直调，不经此处
-    if (IS_TOUCH_DEVICE || !matchMedia('(hover: hover) and (pointer: fine)').matches) return
-    const lr = liftRoot || bodyEl
-    root.querySelectorAll('.sess-item').forEach((el) => {
-      el.addEventListener('mouseenter', () => { if (Date.now() >= liftCool) liftStart(el, { root: lr }) })
-      el.addEventListener('mouseleave', liftClear)
+  // 行的稳定标识（触屏重开后认回同一行）：会话 hash / 文件 wkfile / 目录 wkdir。
+  function peekPinOf(el, sel) {
+    for (const k of ['hash', 'wkfile', 'wkdir']) {
+      if (typeof el.dataset[k] === 'string' && el.dataset[k]) return { sel, k, v: el.dataset[k] }
+    }
+    return null
+  }
+  function peekPinRestore(root) {
+    if (!peekPin || !root) return false
+    const el = [...root.querySelectorAll(peekPin.sel)].find((x) => x.dataset[peekPin.k] === peekPin.v)
+    if (!el) return false
+    peekStart(el)
+    return true
+  }
+  function bindRowPeek(root, sel) {
+    if (!root || !sel) return
+    root.querySelectorAll(sel).forEach((el) => {
+      el.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') peekStart(el) })
+      el.addEventListener('pointerleave', peekClear)
+      // 触屏点击/长按：按下即拓宽（click 在导航重建之后才到，那时旧节点已脱离文档，故落在 pointerdown）。
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch') return
+        lastPointerType = 'touch'
+        peekPin = peekPinOf(el, sel)
+        peekStart(el)
+      })
     })
+  }
+  let expandedEl = null
+  let reLiftHash = null // 行点击触发的导航：renderRecent 重建后按 hash 重新展开被点行（用后即清）
+  let mouseXY = null // 最近光标落点：列表重建后按落点恢复 hover 展开（页面加载前 null 不误开）
+  function expandClear() {
+    if (expandedEl) { expandedEl.classList.remove('expanded'); expandedEl = null }
+  }
+  function expandStart(el) {
+    if (!el || !el.classList.contains('sess-item') || expandedEl === el) return
+    expandClear()
+    el.classList.add('expanded')
+    expandedEl = el
+  }
+  document.addEventListener('pointermove', (e) => {
+    mouseXY = [e.clientX, e.clientY]
+    lastPointerType = e.pointerType || 'mouse'
+  }, { passive: true, capture: true })
+  // 触屏点空白/点别的行 = 收起上一枚延展（无 pointerleave 可依赖）；点在当前行上则保留给行自己的 pointerdown。
+  document.addEventListener('pointerdown', (e) => {
+    lastPointerType = e.pointerType || 'mouse'
+    if (e.pointerType !== 'touch') { peekPin = null; return }
+    if (peekPin && e.target.closest && e.target.closest(peekPin.sel)) return
+    peekPin = null
+    peekClear()
+  }, { capture: true })
+  // 滚轮到达列表 = 菜单外交互（浮窗 fixed 会漂离锚点），一并收口；展开态本身不随滚动还原。
+  // 监听按行所在滚动容器挂，每容器只挂一次（重复挂 = 同一次滚轮触发多遍）。
+  const expandBoundRoots = new WeakSet()
+  function expandBindRoot(root) {
+    if (!root || expandBoundRoots.has(root)) return
+    expandBoundRoots.add(root)
+    root.addEventListener('wheel', () => { peekClear(); if (rowMenuPop) closeRowMenu() }, { passive: false })
+  }
+  // expandRoot = 行所在的滚动容器（chat = #recent-body；work 下沉区 = #wk-body）。
+  function bindSessExpand(root, expandRoot) {
+    // 逐事件按 pointerType 分流（见上）：触控板/鼠标 → peek，手指长按 → openRowMenu 直调 expandStart。
+    bindRowPeek(root, '.sess-item')
+    expandBindRoot(expandRoot || bodyEl)
   }
 
   // ---------- 会话行协议（2026-10-15 统一 Chat/Work 会话行生命周期）----------
   // `.sess-item` 在 chat 侧栏（#recent-body / 项目管理卡列表）与 work 下沉区（#wk-body 里的 .wk-chats）
   // 各渲一份，**行 HTML 本来就是同一份实现（itemHtml）**——行为也必须同源。回归根因：work 侧只在
   // #wk-body 容器上委托了一段「改 wkMainTab/wkAssist + navigate」，既没接本文件的点击语义（reLiftHash
-  // 重扶 / 移动端收侧栏），也没接 hover 扶起 ⇒ 同一行两模式表现分叉（浮起不一致 / 选中滞后 / 点了
+  // 恢复展开 / 移动端收侧栏），也没接 hover 展开 ⇒ 同一行两模式表现分叉（展开不一致 / 选中滞后 / 点了
   // 像没反应）。协议两个出口，谁拥有行谁接线：
   //   activateSession(hash, { source })  —— 会话激活唯一口
-  //   bindSessionRows(root, { source })  —— 行行为唯一接线口（点击 → activateSession + hover 扶起）
+  //   bindSessionRows(root, { source })  —— 行行为唯一接线口（点击 → activateSession + hover 展开）
   // 接线点 = 行节点**新建后**（innerHTML 重写分支里）：chat 侧 renderList/renderProject（mgr.js）/
   // work 侧 renderWorkBody（work-files.js）。
 
@@ -3883,33 +3898,32 @@ function setLastNavHash(v) { lastNavHash = v }
       state.wkAssist = true
       state.wkAssistMode = 'side'
     }
-    // 已在该会话内：不 navigate（route→ 重建整列换节点，浮起行随之消亡重扶，闪一次扶起动画）
+    // 已在该会话内：不 navigate（route→ 重建整列换节点，展开态随旧节点消亡，需按 hash 恢复）
     if (hash !== state.currentHash) {
-      reLiftHash = hash // 2026-09-05 重建后重扶被点行（新节点 :hover 不恢复，不重扶=点击即拍回）
+      reLiftHash = hash // 重建后恢复被点行展开（新节点 :hover 不恢复）
       navigate('#/' + encodeURIComponent(hash))
     }
     if (opts.source === 'work') { applyPanes(); saveWork() } // 新胶囊 + active 落地
     if (isMobile()) setPanel(false)
   }
 
-  // 行行为接线（点击 + hover 扶起）。**只在行节点新建后调用**：节点未变时重复调用会让同一节点累积
-  // 多份监听。opts.root = 行所在滚动容器（扶起的滚动拍回挂它）；缺省 #recent-body。
+  // 行行为接线（点击 + hover 展开）。**只在行节点新建后调用**：节点未变时重复调用会让同一节点累积
+  // 多份监听。opts.root = 行所在滚动容器（滚轮关闭行浮窗的监听挂它）；缺省 #recent-body。
   function bindSessionRows(root, opts = {}) {
     if (!root) return
-    const liftRoot = opts.root || bodyEl
     root.querySelectorAll('.sess-item').forEach((b) =>
       b.addEventListener('click', () => activateSession(b.dataset.hash, opts)))
-    bindSessLift(root, liftRoot)
+    bindSessExpand(root, opts.root || bodyEl)
   }
 
   // ---------- 行操作浮窗（2026-09-26：三点按钮删除，改右键 / 长按唤出；2026-09-27 泛化为注册式）----------
   // 两个入口：桌面右键（contextmenu）、触屏长按（pointerdown 计时 480ms）。浮窗是 document.body 下
   // 独立 fixed 卡片（脱出 #recent-body / #wk-body 这类 overflow 裁剪容器），落位在被操作行近旁
-  // （长按：行左下）/ 指针处（右键），越界翻折 + clamp 回视口。长按同时扶起该行（触屏不绑 hover 扶起，
-  // 故 liftStart 直调）——浮起与浮窗同生同灭：点两者之外任意空白（mousedown / pointerdown）→
+  // （长按：行左下）/ 指针处（右键），越界翻折 + clamp 回视口。长按同时展开该行标题（触屏不绑
+  // hover，故 expandStart 直调）——展开与浮窗同生同灭：点两者之外任意空白（mousedown / pointerdown）→
   // closeRowMenu 一并还原。菜单不切换当前选中项：操作对象由行的 dataset 显式携带。
   //
-  // 泛化（2026-09-27）：本模块只负责「唤出手势 + 浮窗 DOM + 浮起联动」，不认具体是哪种行。
+  // 泛化（2026-09-27）：本模块只负责「唤出手势 + 浮窗 DOM + 会话行展开联动」，不认具体是哪种行。
   // 谁拥有行谁注册：registerRowMenu({ sel, key, items, pick })，items(el) 返回菜单项
   // [{a,icon,label,danger?}]（空数组 = 该行无菜单，右键保留浏览器默认），pick(a, el) 执行动作。
   const rowMenuSources = []
@@ -3922,12 +3936,13 @@ function setLastNavHash(v) { lastNavHash = v }
     return null
   }
   let rowMenuPop = null
-  let rowMenuTouch = false // 长按开启：浮起由本浮窗负责，关闭时必须显式拍回（触屏无 mouseleave 自然回位）
+  let rowMenuTouch = false // 长按开启：展开由本浮窗负责，关闭时必须显式收起（触屏无 mouseleave 自然回位）
   let rowMenuGuard = 0 // 长按抬手会补发 mousedown，短时守卫防「刚弹出就被自己关掉」
-  let rowMenuSrc = null // 当前浮窗的行源 + 行标识：列表重建后按此重扶（见 reliftRowMenu）
+  let rowMenuSrc = null // 当前浮窗的行源 + 行标识：列表重建后按此恢复展开（见 reliftRowMenu）
   let rowMenuKey = null
   function openRowMenu(hit, x, y, rowEl) {
     closeRowMenu()
+    peekClear() // 延展克隆与浮窗同锚点，先收 clone 再弹菜单
     if (!hit) return
     const items = hit.src.items(hit.el)
     if (!items || !items.length) return
@@ -3969,23 +3984,26 @@ function setLastNavHash(v) { lastNavHash = v }
     rowMenuPop = pop
     rowMenuSrc = hit.src
     rowMenuKey = hit.src.key(hit.el)
-    if (rowEl) liftStart(rowEl, { anim: false })
+    // 长按同样只做横向延展（高度不变）：expandStart 只留底色高亮，标题不换行（CSS 已改），
+    // 完整标题由 peek 克隆单行展示；菜单关闭时一并收。
+    if (rowEl) { expandStart(rowEl); peekStart(rowEl) }
   }
   function closeRowMenu() {
     if (rowMenuPop) { rowMenuPop.remove(); rowMenuPop = null }
-    // 浮起还原：桌面右键场景鼠标仍在该行则不拍回（几何判定而非 :hover——鼠标未动时 :hover 判定不稳）。
-    if (!rowMenuTouch && liftEl && mouseXY) {
-      const r = liftEl.getBoundingClientRect()
+    // 展开还原：桌面右键场景鼠标仍在该行则保留展开（几何判定而非 :hover——鼠标未动时 :hover 判定不稳）。
+    if (!rowMenuTouch && expandedEl && mouseXY) {
+      const r = expandedEl.getBoundingClientRect()
       if (mouseXY[0] >= r.left && mouseXY[0] <= r.right && mouseXY[1] >= r.top && mouseXY[1] <= r.bottom) return
     }
-    liftClear(true)
+    expandClear()
+    if (rowMenuTouch) peekClear() // 长按的延展与浮窗同生同灭（桌面 hover 克隆仍由 mouseleave 管理）
   }
-  // 列表重建后重扶：浮窗锚定的旧节点已被换掉（innerHTML 重渲），按 (行源, 行标识) 找新节点补浮起。
+  // 列表重建后恢复：浮窗锚定的旧节点已被换掉（innerHTML 重渲），按 (行源, 行标识) 找新节点补展开。
   // 由各列表的渲染出口在重渲后调用（recent.js renderRecent / work.js renderWorkBody）。
   function reliftRowMenu() {
     if (!rowMenuPop || !rowMenuTouch || !rowMenuSrc || rowMenuKey == null) return
     const el = [...document.querySelectorAll(rowMenuSrc.sel)].find((x) => rowMenuSrc.key(x) === rowMenuKey)
-    if (el) liftStart(el, { anim: false })
+    if (el) { expandStart(el); peekStart(el) }
   }
   // 桌面右键：只认已注册的行（其它区域保留浏览器默认菜单）
   document.addEventListener('contextmenu', (e) => {
@@ -3994,7 +4012,7 @@ function setLastNavHash(v) { lastNavHash = v }
     e.preventDefault()
     openRowMenu(hit, e.clientX, e.clientY)
   })
-  // 触屏长按：480ms 未移动即触发（浮起 + 浮窗）；移动 >8px / 抬手 / 取消即作废。长按后抬手若
+  // 触屏长按：480ms 未移动即触发（展开 + 浮窗）；移动 >8px / 抬手 / 取消即作废。长按后抬手若
   // 补发 click（误导航），在 capture 阶段吞掉——它先于元素自身的 click 处理器到达。
   let lpTimer = 0
   let lpFired = false
@@ -4019,7 +4037,7 @@ function setLastNavHash(v) { lastNavHash = v }
       lpFired = true
       // 480ms 悬停期内列表可能整列重建（refreshList 按活动流签名随时重渲，处理中 2-3 次/秒），
       // 此时捕获的节点已成孤儿：getBoundingClientRect 归零 ⇒ 落点被 clamp 到视口左上角。
-      // 不变量「浮窗与浮起锚定现役节点」——按 (行源, 行标识) 重解析；行已消失（删除/换视图）则放弃。
+      // 不变量「浮窗与展开锚定现役节点」——按 (行源, 行标识) 重解析；行已消失（删除/换视图）则放弃。
       let el = h.el
       if (!el.isConnected) {
         const key = h.src.key(el)
@@ -4046,14 +4064,14 @@ function setLastNavHash(v) { lastNavHash = v }
     e.stopPropagation()
     e.preventDefault()
   }, true)
-  // 点空白（浮窗 / 行之外）→ 浮窗与浮起一并消失
+  // 点空白（浮窗 / 行之外）→ 浮窗与展开一并消失
   document.addEventListener('mousedown', (e) => {
     if (!rowMenuPop || Date.now() < rowMenuGuard) return
     if (!rowMenuPop.contains(e.target)) closeRowMenu()
   })
-  // 列表滚动 / 窗口尺寸变化：浮窗 fixed 会漂离锚点，直接收（与浮起还原同一时机）
-  window.addEventListener('scroll', () => { if (rowMenuPop) closeRowMenu() }, { passive: true, capture: true })
-  window.addEventListener('resize', () => { if (rowMenuPop) closeRowMenu() })
+  // 列表滚动 / 窗口尺寸变化：浮窗 fixed 会漂离锚点，直接收（与展开收起同一时机）
+  window.addEventListener('scroll', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() }, { passive: true, capture: true })
+  window.addEventListener('resize', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() })
 
   // 会话行源：操作对象 = dataset.hash；已从列表消失的会话不弹菜单（items 返回空）。
   registerRowMenu({
@@ -4258,13 +4276,14 @@ function setLastNavHash(v) { lastNavHash = v }
   }
 
   function renderRecent() {
-    // 重建前快照浮起行（hash + 终态视口矩形）：elementFromPoint 只认拍回后的列表行，
-    // 鼠标悬在浮起拉宽区（超出行列表宽）/上移 2px 顶边缝时落空 → 鼠标未动 tab 无故下沉
-    // （2026-09-06 用户实测根因），末尾 mouseXY 分支按矩形兜底重扶。
-    const prevLift = liftEl && liftEl.dataset.hash
+    // 重建前快照展开行（hash + 当前视口矩形）：重建后新节点没有 .expanded，鼠标未动不会重触发
+    // mouseenter；且收起后列表变短，光标可能落到相邻行。按下标矩形认回原行（行菜单开着则按 hash 重开）。
+    const liftEl = peekSrc || expandedEl
+    const prevExpand = liftEl && liftEl.dataset.hash
       ? { hash: liftEl.dataset.hash, rect: liftEl.getBoundingClientRect() }
       : null
-    liftClear(true) // SSE/导航重建列表：浮起中的 tab 随旧节点消亡，强制还原防孤儿浮卡（行菜单开着则末尾按 hash 重扶）
+    expandClear() // SSE/导航重建列表：展开态随旧节点消亡，先清引用（末尾按线索恢复）
+    peekClear()
     // 记录刷新前的会话条目 key（会话哈希 / 项目文件夹名），仅给「新增条目」播放入场动画，
     // 已有条目静默保留，避免每次 SSE 刷新整列重播淡入
     const prevKeys = new Set()
@@ -4291,43 +4310,41 @@ function setLastNavHash(v) { lastNavHash = v }
       }
     }
     if (prevTop) bodyEl.scrollTop = prevTop
-    reliftAfterRebuild(bodyEl, prevLift)
+    reliftAfterRebuild(bodyEl, prevExpand)
     renderBubble()
     renderSearch()
   }
 
-  // 列表重建后的统一重扶出口（chat 侧栏 renderRecent / work 下沉区 renderWorkBody 共用；root = 该列表
-  // 的滚动容器，prevLift = 重建前的浮起快照，仅 chat 侧提供）。2026-09-05 起的三条线索：
-  // ① 触屏长按菜单开着 → 按菜单行标识重扶（浮窗挂 body 下不受重建影响，浮起须随新节点重建）；
-  // ② 行点击触发的导航（reLiftHash）→ 重扶被点行——重建后新节点 :hover 不恢复（Chrome 实测），
-  //    不重扶则鼠标所在行拍回、样式丢失，直到再次移动鼠标；
-  // ③ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
-  //    光标所在行同样拍回，按最近光标落点重扶。
-  //    恢复路径一律 anim:false 直接终态（高频重建下重播拉伸动画=脉冲）。
-  function reliftAfterRebuild(root, prevLift) {
+  // 列表重建后的统一恢复出口（chat 侧栏 renderRecent / work 下沉区 renderWorkBody 共用；root = 该列表
+  // 的滚动容器，prevExpand = 重建前的展开快照，仅 chat 侧提供）。四条线索：
+  // ① 触屏长按菜单开着 → 按菜单行标识重新展开（浮窗挂 body 下不受重建影响，行节点需重挂）；
+  // ② 触屏点击钉住的延展（peekPin）→ 按 (sel, dataset 键, 值) 找回新节点重开克隆（点击先于 click 导航，
+  //    旧节点在重建时已脱离文档，不能在 click 里补）；
+  // ③ 行点击触发的导航（reLiftHash）→ 展开被点行——重建后新节点 :hover 不恢复（Chrome 实测）；
+  // ④ 纯 hover 重建（无线索）：refreshList 按活动流签名随时整列重建（会话处理中=高频），
+  //    光标所在行同样收起了，按最近光标落点恢复。恢复一律直接终态（无动画）。
+  function reliftAfterRebuild(root, prevExpand) {
     if (rowMenuPop && rowMenuTouch) { reliftRowMenu(); return }
+    if (peekPin && peekPinRestore(root)) return
     if (reLiftHash) {
       const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === reLiftHash)
       reLiftHash = null
-      if (el) liftStart(el, { anim: false, root })
+      if (el) peekFocus(el)
       return
     }
-    if (!mouseXY || Date.now() < liftCool) return
-    // ③④纯 hover 重扶同受滚动静默期约束（2026-09-09「侧栏滚轮失效」根修）：不变量
-    // 「扶起只发生在列表静止态」——滚动中 refreshList 高频整列重建（活跃回合 2-3 次/秒）
-    // 若按旧光标落点直调 liftStart，滚轮每一步都被拍回/重扶互搏；liftCool 门与
-    // mouseenter 路径（上方监听）对齐。①②点击语义不在其列（点击即用户主动，保持直调）。
-    const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
-    if (hit && hit.dataset.hash && root.contains(hit)) { liftStart(hit, { anim: false, root }); return }
-    if (prevLift &&
-      mouseXY[0] >= prevLift.rect.left && mouseXY[0] <= prevLift.rect.right &&
-      mouseXY[1] >= prevLift.rect.top && mouseXY[1] <= prevLift.rect.bottom) {
-      // elementFromPoint 落空但鼠标仍在重建前浮起矩形内（拉宽区/顶边缝）→ 按 hash 重扶同会话行；
-      // 行已不存在（删除/换视图）→ find 不到自然下沉。折叠 folder 内行 height=0，liftStart 自拒。
-      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevLift.hash)
-      if (el) liftStart(el, { anim: false, root })
+    if (!mouseXY) return
+    // 先按重建前展开矩形认原行：重建后行已收起、列表变短，elementFromPoint 可能落到相邻行。
+    if (prevExpand &&
+      mouseXY[0] >= prevExpand.rect.left && mouseXY[0] <= prevExpand.rect.right &&
+      mouseXY[1] >= prevExpand.rect.top && mouseXY[1] <= prevExpand.rect.bottom) {
+      const el = [...root.querySelectorAll('.sess-item')].find((x) => x.dataset.hash === prevExpand.hash)
+      if (el) { peekFocus(el); return }
     }
+    const hit = document.elementFromPoint(mouseXY[0], mouseXY[1])?.closest('.sess-item')
+    if (hit && hit.dataset.hash && root.contains(hit)) peekFocus(hit)
   }
+  // 恢复出口：指针型操作走横向延展 clone（与 hover 同一终态）；手指触控只补底色高亮（行高不动）
+  function peekFocus(el) { if (canPeek()) peekStart(el); else expandStart(el) }
 
   // 管理视图（插件/技能预览，Codex 风格）：渲染到主聊天区（侧栏会话列表保持不变）。
   // 插件与技能预览都从「插件」入口进入，顶部插件/技能切换；数据源 = 网关 /gateway/plugins 实时扫描。
@@ -5650,7 +5667,8 @@ function edCmg() {
     return id ? ED_EDITORS.get(id) || null : (edActiveId ? ED_EDITORS.get(edActiveId) || null : null)
   }
   // 命令调度（方案「所有 Markdown 按钮经 editor-command 调度」唯一入口）：
-  //   editorCommand('wrap', {before, after}) / ('insert', {text}) / ('toggleTask', {line, checked}) / ('focus')
+  //   editorCommand('wrap', {before, after}) / ('insert', {text}) / ('toggleTask', {line, checked})
+  //   / ('replaceRange', {from, to, text}) / ('focus')
   // target 缺省 = 活跃编辑器；返回是否命中注册面（调用方据此给 toast）。
   function editorCommand(name, payload, target) {
     const ed = editorApiGet(target)
@@ -5658,6 +5676,7 @@ function edCmg() {
     if (name === 'wrap') { wrapSelectionCM(ed.view, String(payload.before || ''), payload.after === undefined ? undefined : String(payload.after)); return true }
     if (name === 'insert') { insertAtCursorCM(ed.view, String(payload.text || '')); return true }
     if (name === 'toggleTask') { return toggleTaskLineCM(ed.view, payload.line, !!payload.checked) }
+    if (name === 'replaceRange') { return ed.replaceRange(payload.from, payload.to, payload.text) }
     if (name === 'focus') { ed.focus(); return true }
     throw new Error('editorCommand: 未知命令 ' + name)
   }
@@ -5677,6 +5696,17 @@ function edCmg() {
       blur() { view.contentDOM.blur() },
       wrapSelection(before, after) { wrapSelectionCM(view, before, after) },
       insertText(text) { insertAtCursorCM(view, text) },
+      // 区间替换（统一调度 primitives：宿主自有的「设值 / 末尾追加 / @ 令牌落地」都经此落地，
+      // 光标恒落插入文本末尾；范围自动 clamp 到文档内，越界不抛错）。
+      replaceRange(from, to, text) {
+        const len = view.state.doc.length
+        const f = Math.min(Math.max(0, Number.isFinite(Number(from)) ? Number(from) : 0), len)
+        const rawTo = Number.isFinite(Number(to)) ? Number(to) : f
+        const t = Math.min(Math.max(f, rawTo), len)
+        const ins = String(text == null ? '' : text)
+        view.dispatch({ changes: { from: f, to: t, insert: ins }, selection: { anchor: f + ins.length } })
+        return true
+      },
       toggleTask(line, checked) { return toggleTaskLineCM(view, line, checked) },
       copyMarkdownSelection() { return view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to) },
       destroy() {
@@ -5779,13 +5809,18 @@ function edCmg() {
     constructor(url, alt) { super(); this.url = url; this.alt = alt }
     eq(o) { return o.url === this.url && o.alt === this.alt }
     ignoreEvent() { return true }
-    toDOM() {
+    // 图字节异步到位 ⇒ 行高在 CM 量过之后才变；高度图陈旧会让**下方**的点击/光标映射整体偏移
+    // （2026-10-21 待办「概率出现点击位置与光标偏移」）。加载完/失败都求一次重量，把行高落回高度图。
+    toDOM(view) {
       const wrap = document.createElement('span')
       wrap.className = 'cm-att-img'
       const img = document.createElement('img')
       img.src = this.url
       img.alt = this.alt
       img.loading = 'lazy'
+      const remeasure = () => { if (view && view.dom.isConnected) view.requestMeasure() }
+      img.addEventListener('load', remeasure, { once: true })
+      img.addEventListener('error', remeasure, { once: true })
       wrap.appendChild(img)
       return wrap
     }
@@ -5909,6 +5944,8 @@ function edCmg() {
   }
   // 块级公式落成 block widget 需行对齐：整行只含该公式（首行前缀 / 末行后缀皆空白）→ 吃掉整行；
   // 否则按行内 widget 渲染（displayMode 数学仍按 KaTeX 显示模式排版，不吞同行文字）。
+  // 跨行且前后有文字 → 返回 null（不装饰、原样显源码）：replace 装饰禁止跨行，硬做会被 CM6 拒绝
+  // （RangeError「Decorations that replace line breaks may not be specified via plugins」）。
   function cmMathRange(state, item) {
     if (item.cls !== 'block') return { from: item.from, to: item.to, block: false }
     const d = state.doc
@@ -5917,6 +5954,7 @@ function edCmg() {
     const pre = d.sliceString(l0.from, item.from)
     const post = d.sliceString(item.to, l1.to)
     if (!pre.trim() && !post.trim()) return { from: l0.from, to: l1.to, block: true }
+    if (l0.number !== l1.number) return null
     return { from: item.from, to: item.to, block: false }
   }
   // 扩展工厂（两宿主各传自己的 CM 全局；同一实现，禁各写一套）。
@@ -5927,29 +5965,44 @@ function edCmg() {
       constructor(src, block, display) { super(); this.src = src; this.block = block; this.display = display }
       eq(o) { return o.src === this.src && o.block === this.block && o.display === this.display }
       ignoreEvent() { return false }
-      toDOM() {
+      toDOM(view) {
         const el = document.createElement(this.block ? 'div' : 'span')
         el.className = this.block ? 'cm-math-block cm-mspec-math' : 'cm-math-inline cm-mspec-math'
         // KaTeX 输出自身安全（trust 默认 false + 内部转义），与消息流 mdHtml 同口径直接进 DOM。
         el.innerHTML = renderMath(this.src, this.display)
+        // KaTeX 字体/度量异步到位后高度可能变（块公式尤甚）；CM 不会收到通知，高度图陈旧会让
+        // 下方点击位置与光标偏移（2026-10-21 待办）。下一帧求一次重量，按真实盒高修正高度图。
+        requestAnimationFrame(() => { if (view && view.dom.isConnected) view.requestMeasure() })
         return el
       }
     }
-    const build = (view) => {
+    const build = (state) => {
       const deco = []
-      for (const item of cmMathScan(view.state, C)) {
-        const r = cmMathRange(view.state, item)
-        if (cmMathSelectionHit(view.state, C, r.from, r.to)) continue // 选区内 = 显源码
+      for (const item of cmMathScan(state, C)) {
+        const r = cmMathRange(state, item)
+        if (!r) continue // 跨行块级公式（前后有文字）→ 显源码
+        if (cmMathSelectionHit(state, C, r.from, r.to)) continue // 选区内 = 显源码
         deco.push(C.Decoration.replace({ widget: new CM_MathWidget(item.src, r.block, item.cls === 'block'), block: r.block }).range(r.from, r.to))
       }
       return C.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
     }
-    return C.ViewPlugin.fromClass(class {
-      constructor(view) { this.decorations = build(view) }
-      update(u) {
-        if (u.docChanged || u.viewportChanged || u.selectionSet || u.reconfigured) this.decorations = build(u.view)
-      }
-    }, { decorations: (v) => v.decorations })
+    // 必须走 StateField provide：CM6 硬性限制「ViewPlugin 不得提供 block 装饰 / 跨行 replace」
+    // （RangeError: Block decorations may not be specified via plugins）——块级 `$$…$$` 一旦闭合
+    // 就会整行替换，放 ViewPlugin 里必抛错，DOM 更新中断表现为输入/光标错位。vendor 的
+    // blockMathField 同构（StateField），此处对齐。selection 变（撤/挂源码态）与拖选收尾需重建；
+    // 拖选期间沿用旧装饰（vendor 同口径，避免拖曳沿途闪烁）。
+    return C.StateField.define({
+      create: (state) => build(state),
+      update: (deco, tr) => {
+        if (tr.docChanged || tr.reconfigured) return build(tr.state)
+        const dragging = tr.state.field(C.mouseSelectingField, false)
+        if (tr.startState.field(C.mouseSelectingField, false) && !dragging) return build(tr.state)
+        if (dragging) return deco
+        if (tr.selection) return build(tr.state)
+        return deco
+      },
+      provide: (f) => C.EditorView.decorations.from(f),
+    })
   }
 
 
@@ -6749,6 +6802,9 @@ function edCmg() {
   // tab 行工具区：加号只在聊天 tab 出现（新建聊天）；文件 tab 的加号（新建文件/文件夹）待新建写接口
   // 定案后接入，届时同一按钮按 tab 分派。（原就地过滤 🔍 + #wk-find-row 已并入顶栏统一搜索，2026-10-08）
   function updateWkTools() {
+    // tab 高亮唯一同步点（2026-10-21 待办）：state.wkTab 还会被切项目/启动恢复经 loadWorkSlot 改写，
+    // 只在点击处理器里同步 class，恢复出来的「文件亮、内容却是聊天」就会错位。renderWorkBody 每次必经此处。
+    document.querySelectorAll('.wk-tab').forEach((b) => b.classList.toggle('on', b.dataset.wktab === state.wkTab))
     const nb = $('wk-new')
     const isChat = state.wkTab === 'chat'
     if (nb) nb.title = isChat ? '新建聊天' : '新建文件'
@@ -6764,13 +6820,15 @@ function edCmg() {
     updateWkTools()
     const html = wkBodyHtml()
     if (body.innerHTML !== html) {
-      // 重建前先还原浮起：旧行节点随 innerHTML 消亡，浮起态必须强制拍回防孤儿浮卡（与 renderRecent 同口径）
-      liftClear(true)
+      // 重建前先收起展开态：旧行节点随 innerHTML 消亡，引用必须清掉（与 renderRecent 同口径）
+      expandClear()
+      peekClear()
       body.innerHTML = html
-      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 扶起），
+      // 新建的会话行接入统一行协议（点击 → activateSession({source:'work'}) + hover 横向延展），
       // 实现在 recent.js；**只在重建分支接线**——未重写时节点未变，重复接线会让同一节点累积多份监听。
-      // 滚动容器 #wk-body 一并传入（扶起的滚动/滚轮拍回挂它）。随后按重建前线索重扶（点击导航/悬停）。
+      // 滚动容器 #wk-body 一并传入（滚轮关闭行浮窗的监听挂它）。文件树行同绑延展（同一层，不另起一套）。
       bindSessionRows(body, { source: 'work', root: body })
+      bindRowPeek(body, '.wk-row')
       reliftAfterRebuild(body)
     }
   }
@@ -8597,8 +8655,7 @@ function edCmg() {
     document.querySelectorAll('.wk-tab').forEach((b) =>
       b.addEventListener('click', () => {
         state.wkTab = b.dataset.wktab
-        document.querySelectorAll('.wk-tab').forEach((x) => x.classList.toggle('on', x === b))
-        renderWorkBody()
+        renderWorkBody() // 高亮同步在 updateWkTools（唯一口，覆盖点击外的恢复路径）
       }),
     )
     // 文件树整块由 innerHTML 重渲 → 事件必须委托在容器上（逐行绑定会被下次重渲抹掉）
@@ -9538,8 +9595,9 @@ function edCmg() {
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
   // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
-  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n[\s\S]*?\n\[\/引用回复\]/g
-  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n[\s\S]*?\n\[\/引用PDF\]/g
+  // 原文块捕获（2026-10-21）：$3/$2 = 令牌与收尾令牌之间的原文，气泡里要原样渲染（见 quoteBodiesAsMarkdown）
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n([\s\S]*?)\n\[\/引用回复\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n([\s\S]*?)\n\[\/引用PDF\]/g
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
   // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
@@ -9750,14 +9808,15 @@ function edCmg() {
     return proj ? proj + '/' + file : file
   }
 
-  // 引用**原文块**在气泡里必须消失：整块压回单一锚点令牌，再由 QUOTE_REPLY_RE / QUOTE_PDF_RE 出胶囊。
-  // 原文只是给模型看的 payload（模型侧原文不动），气泡里只留胶囊。三个渲染入口
-  // （messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）在渲染前先过这里。
-  // 回复块与 PDF 块共用这一个收口（两族形态不同，但不该有第三个剥块入口）。
-  function stripQuoteBodies(text) {
+  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：锚点令牌照旧渲染成胶囊，原文**原样显示**在
+  // 胶囊下方，不再整块剥掉（「只要是引用都渲染原本的文本」）。落地形态 = markdown 引用块（每行前缀 `> `），
+  // 由 core/markdown.js 的 blockquote 分支渲染。模型侧原文不动（令牌块原样上行）。
+  // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
+  function quoteBodiesAsMarkdown(text) {
+    const quote = (body) => String(body).split('\n').map((l) => '> ' + l).join('\n')
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, '[@引用回复:$1|$2]')
-      .replace(QUOTE_PDF_BODY_RE, '$1')
+      .replace(QUOTE_REPLY_BODY_RE, (_, idx, title, body) => `[@引用回复:${idx}|${title}]\n${quote(body)}`)
+      .replace(QUOTE_PDF_BODY_RE, (_, token, body) => `${token}\n${quote(body)}`)
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -10225,15 +10284,14 @@ function edCmg() {
     const cur = cmView.state.doc.toString()
     const next = String(text || '')
     if (cur === next) return
-    cmView.dispatch({ changes: { from: 0, to: cur.length, insert: next }, selection: { anchor: next.length } })
+    editorCommand('replaceRange', { from: 0, to: cur.length, text: next }, 'composer')
   }
   // 令牌/文本追加到输入栏末尾（旧 appendMentionChip / insertRefChip 尾随落点同语义），光标到末尾
   function composerAppendToken(text) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
     const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
-    const ins = sep + text + ' '
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text + ' ' }, 'composer')
     cmView.focus()
   }
   // 引用令牌追加（quote.js）：块形态（含原文）单独起行，单行文件引用以空格衔接；光标落块尾 = 接着打字就是给引用的说明
@@ -10242,22 +10300,20 @@ function edCmg() {
     const doc = cmView.state.doc
     const block = String(token).indexOf('\n') >= 0
     const sep = doc.length ? (block ? '\n' : ' ') : ''
-    const ins = sep + token
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + token }, 'composer')
     cmView.focus()
   }
   function composerAppendText(text) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
     const sep = doc.length && !/\s$/.test(doc.toString()) ? ' ' : ''
-    const ins = sep + text
-    cmView.dispatch({ changes: { from: doc.length, insert: ins }, selection: { anchor: doc.length + ins.length } })
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text }, 'composer')
     cmView.focus()
   }
   // 区间替换（@ 提及落地：@查询区间 → 令牌 + 空格），光标落 ins 尾
   function composerReplaceRange(from, to, ins) {
     if (!cmView || cmView.state.readOnly) return
-    cmView.dispatch({ changes: { from, to, insert: ins }, selection: { anchor: from + ins.length } })
+    editorCommand('replaceRange', { from, to, text: ins }, 'composer')
     cmView.focus()
   }
   function composerFocus() { if (cmView) cmView.focus() }
@@ -11232,7 +11288,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
         // 文件卡片（2026-09-12）：乐观气泡与落盘气泡同构——[文件:<路径>] 占位剥出渲染卡片
         const files = Array.isArray(p.files) && p.files.length ? p.files.map((f) => f.abs).filter(Boolean) : []
         const filesHtml = files.length ? fileCardsHtml(files) : ''
-        const bodyText = stripQuoteBodies(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
+        const bodyText = quoteBodiesAsMarkdown(String(p.text).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
         // 正文渲染与落盘气泡同源（messages.js userBodyHtml → mdHtml）：此前乐观侧走 renderUserText
         // （esc 裸文本、无块级包裹），落盘侧出 <p>（styles.css `.msg .body p { margin: 3px 0 }` 上下各 3px）
         // ⇒ 接管帧气泡高度跳 6px、多行文本还从「空白折叠」变 <br>（2026-09-15 用户实测「气泡大小有微小差异」）。
@@ -11249,7 +11305,7 @@ function setPendingUserMsgs(v) { pendingUserMsgs = v }
             const imgs = Array.isArray(q.imgs) && q.imgs.length
               ? '<div class="q-imgs">' + q.imgs.map((im) => '<img class="q-img" src="' + (im.dataUrl || '') + '" alt="">').join('') + '</div>'
               : ''
-            const txt = stripQuoteBodies(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
+            const txt = quoteBodiesAsMarkdown(String(q.content).replace(/\s*\[Image #\d+\]/g, '').replace(/\s*\[文件:[^\]]*\]/g, ''))
             // 来源行在 q-body 首行（排队项是单行 flex；行内首行即视觉上方）
             const who = q.from && q.from.title ? '<div class="q-who">来自 会话：' + esc(String(q.from.title)) + '</div>' : ''
             // 纯图排队项（[Image #N] 剥出后无文本）不渲染空气泡段 <p>，否则图片上方凭空多一行高
@@ -12343,20 +12399,27 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
     const tgtEd = target || 'composer'
+    const toComposer = tgtEd === 'composer'
     for (const f of files) {
       if (!/^image\//.test(f.type)) continue
-      if (pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
+      // 张数上限只约束底栏发送链（pendingImages 是发送态）；编辑卡正文引用不占名额
+      if (toComposer && pendingImages.length >= 9) { toast('一次最多 9 张图片'); break }
       let enc
       try { enc = await encodeImg(f) } catch { toast('图片读取失败'); continue }
       const att = await uploadAttachment(f)
+      // 模块化分流（2026-10-21 待办）：work 编辑卡 = 只落盘 + 写正文引用，**不写底栏 pending/胶囊**。
+      // 旧实现无论 target 都 push pendingImages + renderImgPills，导致编辑卡粘贴的图串进底栏胶囊行。
+      if (!toComposer) {
+        if (att) insertAttachmentMarkdown(tgtEd, att)
+        continue
+      }
       if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
       // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
-      // 「不要自动在正文渲染，被图片胶囊劫持」）；work 编辑卡粘贴仍插正文并内联渲染（待办 1）。
-      if (att && tgtEd !== 'composer') insertAttachmentMarkdown(tgtEd, att)
+      // 「不要自动在正文渲染，被图片胶囊劫持」）。
       renderImgPills()
     }
-    syncGwSend()
+    if (toComposer) syncGwSend()
   }
   // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
   // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
@@ -12364,16 +12427,17 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
   async function addUploadFiles(files, target) {
     const tgtEd = target || 'composer'
+    const toComposer = tgtEd === 'composer'
     for (const f of files) {
       toast('正在上传 ' + (f.name || '文件') + '…')
       const att = await uploadAttachment(f)
       if (!att) continue
-      pendingFiles.push(att)
+      // 同 addImageFiles：底栏才入 pendingFiles 胶囊行；编辑卡只写正文链接（不串底栏）
+      if (toComposer) { pendingFiles.push(att); renderImgPills() }
       toast('已上传 ' + att.name)
       insertAttachmentMarkdown(tgtEd, att)
-      renderImgPills()
     }
-    syncGwSend()
+    if (toComposer) syncGwSend()
   }
 
 // ---------- 剪贴板取图（2026-10-16：复制→粘到底栏成胶囊）----------

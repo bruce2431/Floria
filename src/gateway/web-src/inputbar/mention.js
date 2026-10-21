@@ -4,7 +4,7 @@ import { messagesHtml, addUser } from '../chat/messages.js'
 import { GATEWAY, gateAwait, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
-import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken } from '../core/mention-syntax.js'
+import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, encodeQuoteBody, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken } from '../core/mention-syntax.js'
 import { findSession, sessionCwd } from '../engine/sessions.js'
 import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
@@ -237,15 +237,21 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return proj ? proj + '/' + file : file
   }
 
-  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：锚点令牌照旧渲染成胶囊，原文**原样显示**在
-  // 胶囊下方，不再整块剥掉（「只要是引用都渲染原本的文本」）。落地形态 = markdown 引用块（每行前缀 `> `），
-  // 由 core/markdown.js 的 blockquote 分支渲染。模型侧原文不动（令牌块原样上行）。
+  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：原文并进锚点令牌的第三个字段（百分号编码），
+  // 由 core/mention-syntax.js 的 chip 构造器渲染成「图标 + 原文」的蓝色引用胶囊（不再有 blockquote 的
+  // margin/padding = 与正文上下对齐，也不再显示「引用自…第 N 条回复」标签）。模型侧原文不动（令牌块原样上行）。
+  // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
+  // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
   function quoteBodiesAsMarkdown(text) {
-    const quote = (body) => String(body).split('\n').map((l) => '> ' + l).join('\n')
+    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(body) + ']')
+    const tailBreak = (whole, offset, match) => {
+      const rest = String(whole).slice(offset + match.length)
+      return rest && !rest.startsWith('\n') ? '\n' : ''
+    }
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (_, idx, title, body) => `[@引用回复:${idx}|${title}]\n${quote(body)}`)
-      .replace(QUOTE_PDF_BODY_RE, (_, token, body) => `${token}\n${quote(body)}`)
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -255,8 +261,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
       .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
-      .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
-      .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
+      .replace(QUOTE_REPLY_RE, (_, i, t, b) => quoteReplyChipHtml(i, t, b))
+      .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
   }
 
   // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，

@@ -4,6 +4,7 @@
 // 纯函数、无状态、无连接、无订阅（§12 core 叶子准入）：可被任意层依赖。唯一手改处，web/app.js 为生成物。
 
 import { I } from './icons.js'
+import { esc } from './util.js'
 /* @module core/mention-syntax.js */
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
   const MENTION_SESSION_RE = /\[会话:([^\]]+)\]/g
@@ -20,13 +21,18 @@ import { I } from './icons.js'
   // 不会抢「引用」。
   const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
   // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
-  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
-  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
-  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
+  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只是**锚点行**——`[@引用回复:<第N条>|<标题>]`。
+  // 2026-10-21 起渲染侧（inputbar/mention.js quoteBodiesAsMarkdown）把原文块折成令牌的**第三个字段**
+  // `[@引用回复:<第N条>|<标题>|<百分号编码原文>]`：气泡里「图标 + 原文」合成一枚蓝色引用胶囊（用户定案：
+  // 不要「引用自…」字样，用引用的真实文本替换）。百分号编码是必需的——mdInline 在令牌替换之前先跑
+  // 粗体/斜体/代码/链接/裸 URL，原文若原样夹带这些记号会被就地改写（*、~、反引号、括号等）。
+  // 第三段省略 = 旧消息/纯锚点，退回来源标签形态。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
+  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]|]*)(?:\|([^\]]*))?\]/g
   // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
   // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
   // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。
-  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
+  // 第三段同回复引用 = 渲染侧折进来的百分号编码原文（2026-10-21）；省略 = 纯锚点。
+  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#|]+?)(?:#p(\d+)(?:-p?(\d+))?)?(?:\|([^\]]*))?\]/g
   const MENTION_FILE_ICON = I.dshFile
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
@@ -48,26 +54,52 @@ import { I } from './icons.js'
     return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
+  // 引用原文编码（2026-10-21）：原文要挤进令牌的一行字段，必须先抹掉会被 mdInline 预处理的记号
+  // （粗体/斜体 `*`、删除线 `~`、行内代码反引号、图片/链接括号、裸 URL 的 `:/`、以及会被 esc 改写的 `'`）。
+  // encodeURIComponent 本身不含 `'()*!~`，逐个补编码；解码失败（旧令牌/手改文本）原样返回，不丢内容。
+  const quoteEscChars = /['()*!~]/g
+  function encodeQuoteBody(s) {
+    return encodeURIComponent(String(s == null ? '' : s))
+      .replace(quoteEscChars, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+  }
+  function decodeQuoteBody(s) {
+    const raw = String(s == null ? '' : s)
+    if (!raw) return ''
+    try { return decodeURIComponent(raw) } catch (_) { return raw }
+  }
+
   // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
   // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
+  // data-qjump/q* = 点击跳转凭据（chat/messages/msg-actions.js 委托 → 卡片公开 API）。
   function quoteRefChipHtml(path, l0, l1) {
     const name = String(path).split('/').pop()
     const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
   }
-  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
-  function quoteReplyChipHtml(idx, title) {
+  // 回复引用的消息内形态（2026-10-21 用户定案）：**图标跟随引用的真实文本**，不再显示「引用自…第 N 条回复」；
+  // 文本沿用 .m-ref 的蓝色，data-qidx = 第 N 条（1-based .msg 文档序，与令牌同源），点击经 chat 卡片 scroll 跳转。
+  // 原文来自编码字段 → 此处解码后必须 esc 一次（其余 chip 入参已由渲染入口整段转义，唯此段是解码产物）。
+  function quoteReplyChipHtml(idx, title, bodyEnc) {
     const t = String(title || '').trim() || '本会话'
-    const label = `引用自「${t}」· 第 ${idx} 条回复`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
+    const where = `引用自「${t}」· 第 ${idx} 条回复`
+    const n = Number(idx) || 0
+    const body = decodeQuoteBody(bodyEnc)
+    if (body) {
+      return `<span class="mention-chip m-ref m-quote" data-qjump="reply" data-qidx="${n}" title="${where}（点击跳转）"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+    }
+    return `<span class="mention-chip m-ref" data-qjump="reply" data-qidx="${n}" title="${where}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${where}</span></span>`
   }
-  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
+  // PDF 引用的消息内形态：同样「图标 + 真实原文」（蓝色）；位置（文件/页码）退到 title 提示，不再占正文。
   // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
-  function quotePdfChipHtml(path, p0, p1) {
+  function quotePdfChipHtml(path, p0, p1, bodyEnc) {
     const name = String(path).split('/').pop()
     const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
-    const label = `引用自 ${name}${pages}`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
+    const where = `引用自 ${name}${pages}`
+    const body = decodeQuoteBody(bodyEnc)
+    if (body) {
+      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+    }
+    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${where}</span></span>`
   }
 
 export {
@@ -79,6 +111,8 @@ export {
   QUOTE_PDF_RE,
   QUOTE_REF_RE,
   QUOTE_REPLY_RE,
+  decodeQuoteBody,
+  encodeQuoteBody,
   mentionChipHtml,
   quotePdfChipHtml,
   quoteRefChipHtml,

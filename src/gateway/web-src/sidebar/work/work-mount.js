@@ -16,6 +16,29 @@
         if (line) wkEdScrollToLine(line)
       },
     })
+    // work 编辑区对宿主/其它卡的公开动词（2026-10-21）：scroll{path,line} = 打开文件并滚到行。
+    // 门禁与 src-open 同口径（只在 work 模式、只认当前工作项目）——「文件内引用跳转仅在 work 模式下」。
+    // 路径口径 = 项目根相对 POSIX（与 src-open 一致）；令牌跨项目时带 `<项目 label>/` 前缀，剥掉再用。
+    cardBus.registerInlineCard({
+      instanceId: 'floria-work',
+      ns: 'floria-work',
+      cmds: ['scroll', 'locate', 'state'],
+      handlers: {
+        scroll: async (a) => {
+          if (state.sbMode !== 'work' || !state.workProj) throw new Error('仅在 work 模式下可跳转到文件')
+          const raw = String((a && a.path) || '').replace(/\\/g, '/')
+          if (!raw) throw new Error('缺少文件路径')
+          const pre = state.workProj + '/'
+          const path = raw.startsWith(pre) ? raw.slice(pre.length) : raw
+          const line = Number(a && a.line) || 0
+          await openWorkFile(path)
+          if (line) wkEdScrollToLine(line)
+          return { path, line }
+        },
+        locate: () => ({ file: state.workFile || '', project: state.workProj || '' }),
+        state: () => ({ mode: state.sbMode, project: state.workProj || '', file: state.workFile || '' }),
+      },
+    })
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
     document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区一条分界条（下沉区 ↔ 预览）
     // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。

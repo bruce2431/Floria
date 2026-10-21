@@ -3,6 +3,7 @@ import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
 import { I } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live } from '../../engine/state.js'
+import { cardBus } from '../../engine/card-bus.js'
 import { quoteBodiesAsMarkdown } from '../../inputbar/mention.js'
 import { ICON_COPY, writeClipboard } from './usage.js'
 /* @module chat/messages/msg-actions.js */
@@ -34,6 +35,24 @@ import { ICON_COPY, writeClipboard } from './usage.js'
         btn.setAttribute('aria-label', '复制')
       }, 1000)
     })
+  })
+
+  // 引用胶囊点击跳转（2026-10-21）：一律经**卡片公开 API**（engine/card-bus.js）驱动目标卡，不直取他模块内部状态——
+  //   · 回复引用 → chat 卡 `scroll{line}`（第 N 条 = .msg 文档序，与引用令牌「第 N 条回复」同源）
+  //   · 文件引用 → work 卡 `scroll{path,line}`（卡内自带「仅 work 模式」门禁；非 work 回 ok:false → toast）
+  // 目标卡不在场（如 work 卡尚未初始化）时总线显式报错，这里同样走 toast，不静默。
+  document.addEventListener('click', (e) => {
+    const chip = e.target && e.target.closest ? e.target.closest('.mention-chip[data-qjump]') : null
+    if (!chip || !messagesEl.contains(chip)) return
+    const kind = chip.dataset.qjump
+    const p = kind === 'reply'
+      ? cardBus.callCard({ instanceId: 'floria-chat' }, 'scroll', { line: Number(chip.dataset.qidx) || 0 })
+      : kind === 'file'
+        ? cardBus.callCard({ instanceId: 'floria-work' }, 'scroll', { path: chip.dataset.qpath || '', line: Number(chip.dataset.ql0) || 0 }, { timeoutMs: 15000 })
+        : null
+    if (!p) return
+    e.stopPropagation()
+    p.then((ack) => { if (ack && ack.ok === false) toast(ack.error || '跳转失败') }).catch(() => {})
   })
 
   // 围栏代码块头栏按钮（2026-10-10；同 msg-copy 的委托+反馈模式）：复制 = 读本块 pre>code.textContent

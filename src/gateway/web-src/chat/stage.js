@@ -2,7 +2,8 @@
 
 import { absorbPending } from './messages.js'
 import { renderHome, renderSession } from './route.js'
-import { messagesEl, live } from '../engine/state.js'
+import { messagesEl, live, state } from '../engine/state.js'
+import { cardBus } from '../engine/card-bus.js'
 import { renderTransient } from '../inputbar/approval.js'
 /* @module chat/stage.js */
   function scrollBottom() {
@@ -54,6 +55,31 @@ import { renderTransient } from '../inputbar/approval.js'
     const padTop = parseFloat(getComputedStyle(sc).paddingTop) || 0
     return Math.max(0, el.offsetTop - sc.offsetTop - padTop)
   }
+
+  // ---------- chat 卡片公开 API（2026-10-21）----------
+  // 消息流对宿主/其它卡只暴露标准动词：scroll{line} = 滚到第 line 条消息（1-based `.msg` 文档序，
+  // 与引用令牌「第 N 条回复」同源）；locate/state 只读。引用胶囊点击一律经 cardBus.callCard 驱动
+  // （chat/messages/msg-actions.js 的委托），不直取本模块内部滚动状态——跨卡只走公开信道。
+  function scrollToMsgLine(n) {
+    const list = [...messagesEl.querySelectorAll('.msg')]
+    const i = Math.floor(Number(n) || 0) - 1
+    const el = list[i]
+    if (!el) throw new Error(`没有第 ${n} 条消息（共 ${list.length} 条）`)
+    stage.yielded = true // 用户主动跳转 = 接管视口：进行中的回合跟随让位（同 turn-rail 导航语义）
+    progScroll()
+    $('chat-scroll').scrollTo({ top: topInScroll(el), behavior: 'smooth' })
+    return { line: i + 1, total: list.length }
+  }
+  cardBus.registerInlineCard({
+    instanceId: 'floria-chat',
+    ns: 'floria-chat',
+    cmds: ['scroll', 'locate', 'state'],
+    handlers: {
+      scroll: (a) => scrollToMsgLine(a && a.line),
+      locate: () => ({ messages: messagesEl.querySelectorAll('.msg').length }),
+      state: () => ({ mode: state.sbMode || 'chat', messages: messagesEl.querySelectorAll('.msg').length }),
+    },
+  })
 
   // 拆收：撤占位块+清状态。仅视图级退出触发（切会话 renderSession/回首页 renderHome/
   // 管理视图 renderMgr/项目预览 openProjectPreview）——用户滚动输入不进入此函数（2026-09-09

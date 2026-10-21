@@ -1362,6 +1362,22 @@ body.kb-open #input-wrap { transition: none; }
 .mention-chip.m-ref .mc-ic { display: flex; align-items: center; flex: none; color: var(--blue); }
 .mention-chip.m-ref .mc-ic svg { width: 1em; height: 1em; }
 .mention-chip.m-ref .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 引用原文胶囊（2026-10-21 用户定案）：「图标 + 引用的真实文本」，蓝字，不再显示「引用自…」标签。
+   原文原先落在 blockquote 里（margin 4px / padding 2px ⇒ 与正文上下错位、且与来源标签分两行）；
+   现改为行内文本：display:inline（**不是** inline-flex）⇒ 基线天然与正文一致、长引用随气泡宽度换行；
+   图标 inline-block 与首行文字同基线（vertical-align 微调），padding/margin 归零。 */
+.mention-chip.m-ref.m-quote {
+  display: inline; vertical-align: baseline; padding: 0; margin: 0;
+  max-width: none; white-space: normal;
+}
+.mention-chip.m-ref.m-quote .mc-ic { display: inline-block; vertical-align: -0.12em; margin-right: .3em; }
+.mention-chip.m-ref.m-quote .mc-t {
+  display: inline; overflow: visible; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+/* 引用胶囊可点击跳转（回复 → chat 卡片 scroll{line}；文件 → work 卡片 scroll{path,line}，仅 work 模式）。
+   可点性给一条 hover 下划线，不另加按钮/图标。 */
+.mention-chip[data-qjump] { cursor: pointer; }
+.mention-chip[data-qjump]:hover .mc-t { text-decoration: underline; text-underline-offset: 2px; }
 
 /* 消息气泡里渲染的 @ chip（2026-08-15 19:2x 透明胶囊：去图标/背景/阴影，仅细边圆角轮廓 + 名称文本） */
 .mention-chip {

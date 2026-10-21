@@ -156,8 +156,8 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
          .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
-         .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
-         .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
+         .replace(QUOTE_REPLY_RE, (_, i, t, b) => quoteReplyChipHtml(i, t, b))
+         .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return restoreMath(s)
   }

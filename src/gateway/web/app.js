@@ -480,13 +480,18 @@ function setConnUp(v) { connUp = v }
   // 不会抢「引用」。
   const QUOTE_REF_RE = /\[@引用:([^\]#]+?)(?:#L(\d+)-L?(\d+))?\]/g
   // 回复引用令牌（2026-09-28，同由 inputbar/quote.js 产出）：回复不属于任何文件、没有位置可查 ⇒
-  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只有**锚点行**——`[@引用回复:<第N条>|<标题>]`
-  // 在消息/输入栏里渲染成一枚胶囊（与文件引用同族观感）。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
-  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]/g
+  // **原文必须进消息**（模型直接读到，以普通正文给出），进令牌的只是**锚点行**——`[@引用回复:<第N条>|<标题>]`。
+  // 2026-10-21 起渲染侧（inputbar/mention.js quoteBodiesAsMarkdown）把原文块折成令牌的**第三个字段**
+  // `[@引用回复:<第N条>|<标题>|<百分号编码原文>]`：气泡里「图标 + 原文」合成一枚蓝色引用胶囊（用户定案：
+  // 不要「引用自…」字样，用引用的真实文本替换）。百分号编码是必需的——mdInline 在令牌替换之前先跑
+  // 粗体/斜体/代码/链接/裸 URL，原文若原样夹带这些记号会被就地改写（*、~、反引号、括号等）。
+  // 第三段省略 = 旧消息/纯锚点，退回来源标签形态。形态与 `[@引用:]`、`[@目录|文件:]` 互不吞。
+  const QUOTE_REPLY_RE = /\[@引用回复:(\d+)\|([^\]|]*)(?:\|([^\]]*))?\]/g
   // PDF 引用令牌（2026-09-28，同由 inputbar/quote.js 经 floria-quote-open 产出）：`[@引用PDF:<路径>#p7]`。
   // PDF **没有行号**（Read 工具用 pages 参数，>10 页必须传），故位置粒度 = **路径 + 页码**（跨页 `#p7-9`，
   // 无页码退化纯路径）——与 `[@引用:]`（行号语义）刻意分家，混用会误导模型。
-  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g
+  // 第三段同回复引用 = 渲染侧折进来的百分号编码原文（2026-10-21）；省略 = 纯锚点。
+  const QUOTE_PDF_RE = /\[@引用PDF:([^\]#|]+?)(?:#p(\d+)(?:-p?(\d+))?)?(?:\|([^\]]*))?\]/g
   const MENTION_FILE_ICON = I.dshFile
 
   // 令牌形态解析（会话令牌可带 sid：`标题|sid`，@ 提及 chip 序列化产出，CLI 侧按它精确寻址——
@@ -508,26 +513,52 @@ function setConnUp(v) { connUp = v }
     return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
   }
 
+  // 引用原文编码（2026-10-21）：原文要挤进令牌的一行字段，必须先抹掉会被 mdInline 预处理的记号
+  // （粗体/斜体 `*`、删除线 `~`、行内代码反引号、图片/链接括号、裸 URL 的 `:/`、以及会被 esc 改写的 `'`）。
+  // encodeURIComponent 本身不含 `'()*!~`，逐个补编码；解码失败（旧令牌/手改文本）原样返回，不丢内容。
+  const quoteEscChars = /['()*!~]/g
+  function encodeQuoteBody(s) {
+    return encodeURIComponent(String(s == null ? '' : s))
+      .replace(quoteEscChars, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+  }
+  function decodeQuoteBody(s) {
+    const raw = String(s == null ? '' : s)
+    if (!raw) return ''
+    try { return decodeURIComponent(raw) } catch (_) { return raw }
+  }
+
   // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
   // path 来自已 esc 的文本（mdInline/renderUserText 入口已整体转义），此处不再二次转义。
+  // data-qjump/q* = 点击跳转凭据（chat/messages/msg-actions.js 委托 → 卡片公开 API）。
   function quoteRefChipHtml(path, l0, l1) {
     const name = String(path).split('/').pop()
     const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" title="${path}${range}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
   }
-  // 回复引用的锚点胶囊（与输入栏内 .mention.ref 的回复态同一句话：label 两处必须一致）
-  function quoteReplyChipHtml(idx, title) {
+  // 回复引用的消息内形态（2026-10-21 用户定案）：**图标跟随引用的真实文本**，不再显示「引用自…第 N 条回复」；
+  // 文本沿用 .m-ref 的蓝色，data-qidx = 第 N 条（1-based .msg 文档序，与令牌同源），点击经 chat 卡片 scroll 跳转。
+  // 原文来自编码字段 → 此处解码后必须 esc 一次（其余 chip 入参已由渲染入口整段转义，唯此段是解码产物）。
+  function quoteReplyChipHtml(idx, title, bodyEnc) {
     const t = String(title || '').trim() || '本会话'
-    const label = `引用自「${t}」· 第 ${idx} 条回复`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${label}</span></span>`
+    const where = `引用自「${t}」· 第 ${idx} 条回复`
+    const n = Number(idx) || 0
+    const body = decodeQuoteBody(bodyEnc)
+    if (body) {
+      return `<span class="mention-chip m-ref m-quote" data-qjump="reply" data-qidx="${n}" title="${where}（点击跳转）"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+    }
+    return `<span class="mention-chip m-ref" data-qjump="reply" data-qidx="${n}" title="${where}"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${where}</span></span>`
   }
-  // PDF 引用的锚点胶囊（与输入栏内 .mention.ref 的 pdf 态同一句话：label 两处必须一致）；
+  // PDF 引用的消息内形态：同样「图标 + 真实原文」（蓝色）；位置（文件/页码）退到 title 提示，不再占正文。
   // 位置粒度 = 路径 + 页码（跨页「第 s-e 页」，无页码退化为仅文件名）。
-  function quotePdfChipHtml(path, p0, p1) {
+  function quotePdfChipHtml(path, p0, p1, bodyEnc) {
     const name = String(path).split('/').pop()
     const pages = p0 ? ' · 第 ' + p0 + (p1 && p1 !== p0 ? '-' + p1 : '') + ' 页' : ''
-    const label = `引用自 ${name}${pages}`
-    return `<span class="mention-chip m-ref" title="${label}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${label}</span></span>`
+    const where = `引用自 ${name}${pages}`
+    const body = decodeQuoteBody(bodyEnc)
+    if (body) {
+      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+    }
+    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${where}</span></span>`
   }
 
   // 源串（不带 flag）：消费方各自 new RegExp(src, 'g') —— 共享同一个 RegExp 对象会踩 lastIndex 状态。
@@ -693,8 +724,8 @@ function setConnUp(v) { connUp = v }
          .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
          .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
          .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
-         .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
-         .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
+         .replace(QUOTE_REPLY_RE, (_, i, t, b) => quoteReplyChipHtml(i, t, b))
+         .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
     s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`)
     return restoreMath(s)
   }
@@ -2979,6 +3010,24 @@ function setLastNavHash(v) { lastNavHash = v }
         btn.setAttribute('aria-label', '复制')
       }, 1000)
     })
+  })
+
+  // 引用胶囊点击跳转（2026-10-21）：一律经**卡片公开 API**（engine/card-bus.js）驱动目标卡，不直取他模块内部状态——
+  //   · 回复引用 → chat 卡 `scroll{line}`（第 N 条 = .msg 文档序，与引用令牌「第 N 条回复」同源）
+  //   · 文件引用 → work 卡 `scroll{path,line}`（卡内自带「仅 work 模式」门禁；非 work 回 ok:false → toast）
+  // 目标卡不在场（如 work 卡尚未初始化）时总线显式报错，这里同样走 toast，不静默。
+  document.addEventListener('click', (e) => {
+    const chip = e.target && e.target.closest ? e.target.closest('.mention-chip[data-qjump]') : null
+    if (!chip || !messagesEl.contains(chip)) return
+    const kind = chip.dataset.qjump
+    const p = kind === 'reply'
+      ? cardBus.callCard({ instanceId: 'floria-chat' }, 'scroll', { line: Number(chip.dataset.qidx) || 0 })
+      : kind === 'file'
+        ? cardBus.callCard({ instanceId: 'floria-work' }, 'scroll', { path: chip.dataset.qpath || '', line: Number(chip.dataset.ql0) || 0 }, { timeoutMs: 15000 })
+        : null
+    if (!p) return
+    e.stopPropagation()
+    p.then((ack) => { if (ack && ack.ok === false) toast(ack.error || '跳转失败') }).catch(() => {})
   })
 
   // 围栏代码块头栏按钮（2026-10-10；同 msg-copy 的委托+反馈模式）：复制 = 读本块 pre>code.textContent
@@ -8486,6 +8535,29 @@ function edCmg() {
         if (line) wkEdScrollToLine(line)
       },
     })
+    // work 编辑区对宿主/其它卡的公开动词（2026-10-21）：scroll{path,line} = 打开文件并滚到行。
+    // 门禁与 src-open 同口径（只在 work 模式、只认当前工作项目）——「文件内引用跳转仅在 work 模式下」。
+    // 路径口径 = 项目根相对 POSIX（与 src-open 一致）；令牌跨项目时带 `<项目 label>/` 前缀，剥掉再用。
+    cardBus.registerInlineCard({
+      instanceId: 'floria-work',
+      ns: 'floria-work',
+      cmds: ['scroll', 'locate', 'state'],
+      handlers: {
+        scroll: async (a) => {
+          if (state.sbMode !== 'work' || !state.workProj) throw new Error('仅在 work 模式下可跳转到文件')
+          const raw = String((a && a.path) || '').replace(/\\/g, '/')
+          if (!raw) throw new Error('缺少文件路径')
+          const pre = state.workProj + '/'
+          const path = raw.startsWith(pre) ? raw.slice(pre.length) : raw
+          const line = Number(a && a.line) || 0
+          await openWorkFile(path)
+          if (line) wkEdScrollToLine(line)
+          return { path, line }
+        },
+        locate: () => ({ file: state.workFile || '', project: state.workProj || '' }),
+        state: () => ({ mode: state.sbMode, project: state.workProj || '', file: state.workFile || '' }),
+      },
+    })
     registerWorkRows() // 文件树行的右键 / 长按浮窗（与会话行共用 recent.js 的手势委托）
     document.querySelectorAll('#chat-area > .work-gutter').forEach(bindGutter) // 主区一条分界条（下沉区 ↔ 预览）
     // 助手三态：头部工具条的四个图标 + 收敛输入栏的 pill；形态切换统一走 setAssistMode / setPane。
@@ -9808,15 +9880,21 @@ function edCmg() {
     return proj ? proj + '/' + file : file
   }
 
-  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：锚点令牌照旧渲染成胶囊，原文**原样显示**在
-  // 胶囊下方，不再整块剥掉（「只要是引用都渲染原本的文本」）。落地形态 = markdown 引用块（每行前缀 `> `），
-  // 由 core/markdown.js 的 blockquote 分支渲染。模型侧原文不动（令牌块原样上行）。
+  // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：原文并进锚点令牌的第三个字段（百分号编码），
+  // 由 core/mention-syntax.js 的 chip 构造器渲染成「图标 + 原文」的蓝色引用胶囊（不再有 blockquote 的
+  // margin/padding = 与正文上下对齐，也不再显示「引用自…第 N 条回复」标签）。模型侧原文不动（令牌块原样上行）。
+  // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
+  // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
   function quoteBodiesAsMarkdown(text) {
-    const quote = (body) => String(body).split('\n').map((l) => '> ' + l).join('\n')
+    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(body) + ']')
+    const tailBreak = (whole, offset, match) => {
+      const rest = String(whole).slice(offset + match.length)
+      return rest && !rest.startsWith('\n') ? '\n' : ''
+    }
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (_, idx, title, body) => `[@引用回复:${idx}|${title}]\n${quote(body)}`)
-      .replace(QUOTE_PDF_BODY_RE, (_, token, body) => `${token}\n${quote(body)}`)
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
   }
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
@@ -9826,8 +9904,8 @@ function edCmg() {
       .replace(MENTION_SESSION_RE, (_, n) => mentionChipHtml('session', n))
       .replace(MENTION_PATH_RE, (_, t, p) => mentionChipHtml('path', p, t === '目录' ? 'dir' : 'file'))
       .replace(QUOTE_REF_RE, (_, p, a, b) => quoteRefChipHtml(p, a, b))
-      .replace(QUOTE_REPLY_RE, (_, i, t) => quoteReplyChipHtml(i, t))
-      .replace(QUOTE_PDF_RE, (_, p, a, b) => quotePdfChipHtml(p, a, b))
+      .replace(QUOTE_REPLY_RE, (_, i, t, b) => quoteReplyChipHtml(i, t, b))
+      .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
   }
 
   // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，
@@ -10989,6 +11067,31 @@ function setModelUserPicked(v) { modelUserPicked = v }
     const padTop = parseFloat(getComputedStyle(sc).paddingTop) || 0
     return Math.max(0, el.offsetTop - sc.offsetTop - padTop)
   }
+
+  // ---------- chat 卡片公开 API（2026-10-21）----------
+  // 消息流对宿主/其它卡只暴露标准动词：scroll{line} = 滚到第 line 条消息（1-based `.msg` 文档序，
+  // 与引用令牌「第 N 条回复」同源）；locate/state 只读。引用胶囊点击一律经 cardBus.callCard 驱动
+  // （chat/messages/msg-actions.js 的委托），不直取本模块内部滚动状态——跨卡只走公开信道。
+  function scrollToMsgLine(n) {
+    const list = [...messagesEl.querySelectorAll('.msg')]
+    const i = Math.floor(Number(n) || 0) - 1
+    const el = list[i]
+    if (!el) throw new Error(`没有第 ${n} 条消息（共 ${list.length} 条）`)
+    stage.yielded = true // 用户主动跳转 = 接管视口：进行中的回合跟随让位（同 turn-rail 导航语义）
+    progScroll()
+    $('chat-scroll').scrollTo({ top: topInScroll(el), behavior: 'smooth' })
+    return { line: i + 1, total: list.length }
+  }
+  cardBus.registerInlineCard({
+    instanceId: 'floria-chat',
+    ns: 'floria-chat',
+    cmds: ['scroll', 'locate', 'state'],
+    handlers: {
+      scroll: (a) => scrollToMsgLine(a && a.line),
+      locate: () => ({ messages: messagesEl.querySelectorAll('.msg').length }),
+      state: () => ({ mode: state.sbMode || 'chat', messages: messagesEl.querySelectorAll('.msg').length }),
+    },
+  })
 
   // 拆收：撤占位块+清状态。仅视图级退出触发（切会话 renderSession/回首页 renderHome/
   // 管理视图 renderMgr/项目预览 openProjectPreview）——用户滚动输入不进入此函数（2026-09-09

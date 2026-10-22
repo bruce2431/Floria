@@ -1,6 +1,6 @@
 // 消息区交互与用户气泡内容：复制/用量弹层/图表/大图 lightbox + userBodyHtml/图片/文件卡片 + 时长与旁白渲染
 import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
-import { I } from '../../core/icons.js'
+import { I, fileIcon } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live } from '../../engine/state.js'
 import { cardBus } from '../../engine/card-bus.js'
@@ -221,7 +221,7 @@ import { ICON_COPY, writeClipboard } from './usage.js'
   function fileCardsHtml(paths) {
     const cards = paths.map((p) => {
       const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
-      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${I.dshFile}<span class="mf-name">${esc(name)}</span></span>`
+      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${fileIcon(name)}<span class="mf-name">${esc(name)}</span></span>`
     }).join('')
     return `<div class="msg-files">${cards}</div>`
   }

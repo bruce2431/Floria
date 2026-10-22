@@ -3,7 +3,7 @@ import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js
 import { surroundExt, wrapKeymap } from '../../editor/editor-transactions.js'
 import { cmMathExt } from '../../editor/cm-math.js'
 import { edTaskPlugin } from '../../editor/task-list.js'
-import { edAttImgPlugin } from '../../editor/editor-attachments.js'
+import { edAttImgPlugin, edAttFilePlugin } from '../../editor/editor-attachments.js'
 import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from '../../inputbar/images.js'
 /* @module sidebar/work/work-cm.js */
   // ---------- 编辑区（主区左栏） ----------
@@ -170,11 +170,22 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
         CM.blockMathField,
         cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
         CM.tableField,
-        CM.linkPlugin(),
+        // uploads/ 附件引用由 edAttFilePlugin 独占渲染（类型徽标 chip），vendor 链接装饰让出该区间
+        CM.linkPlugin({ skipLink: (u) => /^(?:\.{1,2}\/)*uploads\//.test(u) }),
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
         edAttImgPlugin, // 附件行内图片：`![](uploads/x.png)` 原子渲成 <img>（与底栏同件；补「编辑卡片缺图片渲染」）
+        edAttFilePlugin, // 附件行内文件引用：`[名](uploads/x)` 渲成「类型徽标 + 文件名」
+        // 与底栏同一删除规则：附件引用/图片是整体——游标进不去，退格/Delete 整块删，不逐字露源码
+        CM.EditorView.atomicRanges.of((view) => {
+          const sets = []
+          for (const pl of [edAttImgPlugin, edAttFilePlugin]) {
+            const p = view.plugin(pl)
+            if (p) sets.push(...p.decorations.iter())
+          }
+          return sets.length ? CM.Decoration.set(sets, true) : CM.Decoration.none
+        }),
       ]
     }
     const L = wkEdLangFor(CM, e)

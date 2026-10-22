@@ -8,7 +8,7 @@
 // 发送链不变量原样保留：pendingImages/pendingFiles 仍是发送链内部态（send.js 消费：[Image #N] 占位 +
 // images base64 视觉上行 / [文件:占位] 相对化上行），与正文是否插引用无关。
 import { toast, esc } from '../core/util.js'
-import { I } from '../core/icons.js'
+import { I, fileIcon } from '../core/icons.js'
 import { syncGwSend } from './send.js'
 import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-attachments.js'
 /* @module inputbar/images.js */
@@ -56,7 +56,7 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
         .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${esc(p.filename)}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('') +
       pendingFiles
-        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
+        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${fileIcon(f.name)}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
   }
   // @ 浮窗「上传」组的数据源（mention.js 消费）：本次上传、可被正文引用的附件。
@@ -139,10 +139,11 @@ import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-att
       toast('正在上传 ' + (f.name || '文件') + '…')
       const att = await uploadAttachment(f)
       if (!att) continue
-      // 同 addImageFiles：底栏才入 pendingFiles 胶囊行；编辑卡只写正文链接（不串底栏）
+      // 同 addImageFiles：底栏 = 只进附件胶囊行（不插正文，正文引用仅 @ 上传组显式选择时才写）；
+      // 编辑卡 = 只写正文链接（不串底栏胶囊）。
       if (toComposer) { pendingFiles.push(att); renderImgPills() }
+      else insertAttachmentMarkdown(tgtEd, att)
       toast('已上传 ' + att.name)
-      insertAttachmentMarkdown(tgtEd, att)
     }
     if (toComposer) syncGwSend()
   }

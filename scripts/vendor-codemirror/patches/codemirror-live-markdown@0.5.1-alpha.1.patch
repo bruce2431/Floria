@@ -2,7 +2,7 @@ diff --git a/node_modules/codemirror-live-markdown/.bun-tag-235c53d0571682f6 b/.
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/index.js b/dist/index.js
-index dd3f7600d65bbffea50899577da3d982a165ef3c..4c490e4adfc15032e5b74829953cff18a9642e8d 100644
+index dd3f760..4f25740 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -52133,6 +52133,9 @@ function checkUpdateAction(update) {
@@ -61,7 +61,94 @@ index dd3f7600d65bbffea50899577da3d982a165ef3c..4c490e4adfc15032e5b74829953cff18
          if (this.data.alignments[idx]) {
            td.style.textAlign = this.data.alignments[idx];
          }
-@@ -54295,6 +54310,6 @@ var editorTheme = EditorView.theme({
+@@ -53143,26 +53158,28 @@ var CodeBlockWidget = class extends WidgetType {
+       container.className += " cm-codeblock-line-numbers";
+     }
+     if (showCopyButton) {
++      // [floria patch] 按钮即语言标签（Obsidian 式：左上角显示 txt / js / …），点击复制整块代码。
++      const langLabel = language || "text";
+       const copyBtn = document.createElement("button");
+       copyBtn.type = "button";
+-      copyBtn.className = "cm-codeblock-copy";
+-      copyBtn.textContent = "Copy";
+-      copyBtn.setAttribute("aria-label", "Copy code");
++      copyBtn.className = "cm-codeblock-copy cm-codeblock-lang";
++      copyBtn.textContent = langLabel;
++      copyBtn.setAttribute("aria-label", "复制代码");
+       copyBtn.addEventListener("click", async (e) => {
+         e.preventDefault();
+         e.stopPropagation();
+         try {
+           await navigator.clipboard.writeText(code);
+-          copyBtn.textContent = "Copied!";
++          copyBtn.textContent = "已复制";
+           copyBtn.classList.add("cm-codeblock-copy-success");
+           setTimeout(() => {
+-            copyBtn.textContent = "Copy";
++            copyBtn.textContent = langLabel;
+             copyBtn.classList.remove("cm-codeblock-copy-success");
+           }, 2e3);
+         } catch {
+-          copyBtn.textContent = "Failed";
++          copyBtn.textContent = "复制失败";
+           setTimeout(() => {
+-            copyBtn.textContent = "Copy";
++            copyBtn.textContent = langLabel;
+           }, 2e3);
+         }
+       });
+@@ -53170,7 +53187,6 @@ var CodeBlockWidget = class extends WidgetType {
+     }
+     const pre = document.createElement("pre");
+     const codeEl = document.createElement("code");
+-    const openFence = `\`\`\`${language || ""}`;
+     const originalLines = code.split("\n");
+     const result = highlightCode(code, language || void 0);
+     const highlightedHtml = result.html;
+@@ -53181,19 +53197,14 @@ var CodeBlockWidget = class extends WidgetType {
+         return lineResult.html || this.escapeHtml(line) || " ";
+       });
+     }
++    // [floria patch] 阅读态不渲染围栏行（``` / ```）：语言名已展示在左上角按钮上。
+     const allLines = [];
+-    allLines.push(
+-      `<span class="cm-codeblock-line cm-codeblock-fence" data-line-index="-1">${this.escapeHtml(openFence)}</span>`
+-    );
+     originalLines.forEach((_, index) => {
+       const lineHtml = highlightedLines[index] || " ";
+       allLines.push(
+         `<span class="cm-codeblock-line" data-line-index="${index}">${lineHtml}</span>`
+       );
+     });
+-    allLines.push(
+-      `<span class="cm-codeblock-line cm-codeblock-fence" data-line-index="-2">\`\`\`</span>`
+-    );
+     codeEl.innerHTML = allLines.join("");
+     pre.appendChild(codeEl);
+     container.appendChild(pre);
+@@ -53766,7 +53777,8 @@ var WIKI_LINK_REGEX = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+ var defaultOptions3 = {
+   openInNewTab: true,
+   onWikiLinkClick: void 0,
+-  showPreview: false
++  showPreview: false,
++  skipLink: void 0
+ };
+ var SKIP_PARENT_TYPES3 = /* @__PURE__ */ new Set(["FencedCode", "CodeBlock", "InlineCode"]);
+ function buildLinkDecorations(view, options) {
+@@ -53797,6 +53809,11 @@ function buildLinkDecorations(view, options) {
+         if (!linkData) {
+           return;
+         }
++        // [floria patch] skipLink：宿主自己接管某类链接（如 uploads/ 附件引用渲染成类型徽标 chip），
++        // 本插件让出该区间，避免两套 replace 装饰互相覆盖。
++        if (options.skipLink && options.skipLink(linkData.url)) {
++          return;
++        }
+         const isTouched = shouldShowSource(state, from, to);
+         if (!isTouched && !isDrag) {
+           const widget = createLinkWidget(linkData, options);
+@@ -54295,6 +54312,6 @@ var editorTheme = EditorView.theme({
    ".hljs-name": { color: "#22863a" }
  });
  

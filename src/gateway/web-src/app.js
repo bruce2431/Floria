@@ -61,7 +61,7 @@ import { renderCtxMeter } from './inputbar/ctx-meter.js'
     btn.innerHTML = dark ? I.sun : I.moon
     btn.title = dark ? '切换到浅色' : '切换到夜晚模式'
     const m = document.querySelector('meta[name="theme-color"]')
-    if (m) m.setAttribute('content', dark ? '#000000' : '#ececf1')
+    if (m) m.setAttribute('content', dark ? '#141414' : '#ececf1')
   }
   $('panel-theme').addEventListener('click', () => {
     const dark = !themeDark()

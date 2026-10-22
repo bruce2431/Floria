@@ -18,18 +18,15 @@
   // 创建文件（isDir=false）/ 文件夹（true）：复用 openRenameDialog 一件两用弹窗（与重命名同模式：
   // onSubmit 抛错 = 错误留在弹窗内、不关窗，可改名重试）。成功后展开落点目录、刷新树；新建文件
   // 直接 openWorkFile（进编辑器 + 顶栏 pill + cardBus 广播，与侧栏点击同一唯一口）。
-  // 新建文件常用格式清单（2026-10-14 待办#1）：名称未自带扩展名时拼入所选格式；自带 .xx 尊重原样。
-  const WK_NEW_EXTS = ['.md', '.txt', '.json', '.canvas', '.ts', '.js', '.py', '.html', '.css', '.yaml', '']
+  // 新建文件不再提供格式下拉：扩展名直接由用户在名称里写（如 `note.md`），无后缀即纯文本文件。
   function wkNewCreate(isDir) {
     if (!state.workProj) return toast('先在上方选择一个项目')
     const dir = wkNewContextDir()
     openRenameDialog({
       heading: isDir ? '新建文件夹' : '新建文件',
-      placeholder: '输入名称',
+      placeholder: '输入名称（可带扩展名，如 note.md）',
       okText: '创建',
       value: '',
-      exts: isDir ? undefined : WK_NEW_EXTS,
-      defaultExt: '.md',
       onSubmit: async (name) => {
         const res = await fetch(apiUrl('/gateway/file/create'), {
           method: 'POST',

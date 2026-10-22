@@ -191,7 +191,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (!cmd.open) return
     // dsh confirmation gate：确认态下命令卡隐藏，改由全屏 RiskConfirmation 模态接管
     if (cmd.confirming) { cmdPop.hidden = true; renderRiskModal(); return }
-    // 2026-09-09 二轮：单页分组渲染（无 tab）——已选图片缩略图 + 四组行列表。
+    // 单页分组渲染（无 tab）：四组行列表；已选附件缩略图不在本浮窗重复显示（见下）。
     // 独立搜索框已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框（barQuery），列表随底栏
     // 打字自动变化（ctx-meter 在底栏 input 事件里调 renderCmdPop）。
     cmd.items = cmdEntries()
@@ -199,10 +199,8 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (cmd.error !== null) {
       html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
-      if (pendingImages.length) {
-        // 已选图片缩略图（可移除）：粘贴/拖拽/未发送遗留，同旧图片 tab
-        html += `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
-      }
+      // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
+      // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       let lastGrp = ''
       // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
       if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
@@ -222,11 +220,6 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     cmdPop.innerHTML = html
     cmdPop.hidden = false
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
-    cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
-      pendingImages.splice(+x.dataset.i, 1)
-      syncGwSend()
-      renderCmdPop()
-    }))
     cmdPop.querySelector('.retry')?.addEventListener('click', () => { cmd.error = null; cmd.status = 'ready'; renderCmdPop() })
     const on = cmdPop.querySelector('.row.rowActive')
     if (on) on.scrollIntoView({ block: 'nearest' })

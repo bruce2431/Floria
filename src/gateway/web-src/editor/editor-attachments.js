@@ -4,6 +4,7 @@
 // 内部态保留——发送链 [Image #N]/[文件:占位] 不变量原样）。渲染：图片按扩展名行内直渲（CM6 widget
 // 插件，vendor live preview 无 image 渲染，此处补缺）；文件为文件名链接（live preview 链接样式）。
 import { toast, newSessionProject } from '../core/util.js'
+import { fileIcon } from '../core/icons.js'
 import { apiUrl } from '../engine/gateway.js'
 import { live, state } from '../engine/state.js'
 import { findSession } from '../engine/sessions.js'
@@ -15,13 +16,18 @@ import { edCmg } from './cm-global.js'
   function isImageAttachment(name) { return ATT_IMG_RE.test(String(name || '')) }
   function isDocumentAttachment(name) { return !isImageAttachment(name) }
 
-  // 落盘名 = 时间戳 `YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名——取代客户端原名（image.png/image-3.png）
-  // 与服务端 `-1/-2` 自然数去重（2026-10-16 待办）。同一秒内多张极端情形仍由网关去重兜底。
+  // 落盘名 = 原名主体 + `-YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名，如 `报告-20261022183608.docx`。
+  // 保留原名（用户要求：已有名字的文件不得被纯时间戳顶替），时间戳只作同名防覆盖；
+  // 同一秒内同名的极端情形仍由网关 `-1/-2` 去重兜底。
   function uploadStampName(file) {
-    const ext = (/(\.[A-Za-z0-9]+)$/.exec(file.name || '') || [, ''])[1]
+    const raw = String(file.name || '').split(/[\\/]/).pop() || 'file'
+    const m = /^(.*?)(\.[A-Za-z0-9]+)?$/.exec(raw)
+    const base = (m[1] || 'file').trim() || 'file'
+    const ext = m[2] || ''
     const d = new Date()
     const p = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ext}`
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    return `${base}-${stamp}${ext}`
   }
 
   // ---------- 上传（与 + 浮窗「上传文件」同一端点/落点/认证链） ----------
@@ -124,4 +130,55 @@ import { edCmg } from './cm-global.js'
     }
   }, { decorations: (v) => v.decorations })
 
-export { attachmentUrl, insertAttachmentMarkdown, isDocumentAttachment, isImageAttachment, uploadAttachment, edAttImgPlugin }
+  // ---------- 行内文件引用 widget（2026-10-22） ----------
+  // `[名](uploads/x.pdf)`：@ 上传组插入的引用形态。渲染 = 类型徽标 + 文件名（与输入栏 @ chip 同族），
+  // 光标/选区落入区间显源码（口径同图片 widget）。非 uploads 链接不接管（普通外链仍走 vendor）。
+  const edFileWidgetBase = class extends edCmg().WidgetType {
+    constructor(name, path) { super(); this.name = name; this.path = path }
+    eq(o) { return o.name === this.name && o.path === this.path }
+    ignoreEvent() { return true }
+    toDOM() {
+      const el = document.createElement('span')
+      el.className = 'cm-att-file mention'
+      el.title = this.path
+      el.innerHTML = `<span class="m-ic">${fileIcon(this.name)}</span>`
+      const nm = document.createElement('span')
+      nm.className = 'm-nm'
+      nm.textContent = this.name
+      el.appendChild(nm)
+      return el
+    }
+  }
+  const edAttFilePlugin = edCmg().ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view) }
+    update(u) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view) }
+    build(view) {
+      const CM = edCmg()
+      const deco = []
+      const isDrag = view.state.field(CM.mouseSelectingField, false)
+      let active = null
+      if (!isDrag) {
+        for (const r of view.state.selection.ranges) {
+          if (!r.empty) { active = { from: r.from, to: r.to }; break }
+        }
+      }
+      CM.syntaxTree(view.state).iterate({
+        enter: (node) => {
+          if (node.name !== 'Link') return
+          const text = view.state.sliceDoc(node.from, node.to)
+          const m = /^\[([^\]]*)\]\((uploads\/[^)\s]+)\)$/.exec(text)
+          if (!m) return
+          if (active && node.from < active.to && node.to > active.from) return // 选区内 = 显源码
+          let name = m[1]
+          if (!name) {
+            name = m[2].split('/').pop()
+            try { name = decodeURIComponent(name) } catch (_) { /* 非法编码 → 原样显示 */ }
+          }
+          deco.push(CM.Decoration.replace({ widget: new edFileWidgetBase(name, m[2]) }).range(node.from, node.to))
+        },
+      })
+      return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+  }, { decorations: (v) => v.decorations })
+
+export { attachmentUrl, insertAttachmentMarkdown, isDocumentAttachment, isImageAttachment, uploadAttachment, edAttImgPlugin, edAttFilePlugin }

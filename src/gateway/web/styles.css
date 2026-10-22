@@ -79,57 +79,62 @@
    document.documentElement[data-theme]（缺省跟随系统 prefers-color-scheme），故首帧即正确、无闪帧。 */
 html[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #161616;
-  --chat-bg: #161616;
-  --rail-bg: #161616;
-  --plane: #000000;
-  --border: #2a2a2a;
-  --border-soft: #1f1f1f;
-  --text: #e8e8e8;
-  --text-2: #9a9a9a;
-  --text-3: #6a6a6a;
-  --hover: #242424;
-  --active: #2a2a2a;
-  --selected: #303030;
-  --float-bg: #2e2e2e;                            /* 抬升面：明显高于底板 #000 的浮卡底 */
-  --float-line: rgba(255, 255, 255, 0.18);        /* 亮描边圈出浮卡轮廓（黑底上 --border 不可辨） */
-  --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.8); /* 加厚投影，黑底上仍读得出「浮起来」 */
+  /* 暗色取 Obsidian 默认主题的基色阶：背景 #1e1e1e 起、底板 #141414，正文 #dadada——
+     **不纯黑不纯白**（纯 #000 卡片缝不可辨、纯 #fff 正文刺眼）。层级由 base 阶拉开：
+     底板 14 < rail 19 < bg 1e < field-2 26 < active 30 < border 36。 */
+  --bg: #1e1e1e;                                  /* primary background（base-00） */
+  --chat-bg: #1e1e1e;
+  --rail-bg: #191919;                             /* secondary background（比卡片低一档） */
+  --plane: #141414;                               /* 底板：卡与卡之间露出的缝，不再纯黑 */
+  --border: #363636;                              /* base-30 */
+  --border-soft: #2a2a2a;                         /* base-25 */
+  --text: #dadada;                                /* base-100 */
+  --text-2: #b3b3b3;                              /* base-70 */
+  --text-3: #7a7a7a;                              /* base-50/60 之间：faint 但不隐形 */
+  --hover: #2a2a2a;
+  --active: #333333;
+  --selected: #3a3a3a;
+  --float-bg: #262626;                            /* 抬升面：高于卡片底的浮卡底 */
+  --float-line: rgba(255, 255, 255, 0.16);
+  --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
   --blue: #4d6bfe;
   --blue-hover: #3b5bfd;
   --sb-thumb: rgba(255, 255, 255, 0.18);
   --sb-thumb-hover: rgba(255, 255, 255, 0.34);
-  --shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
-  --ink: #e8e8e8;
-  --ink-hover: #d0d0d0;
-  --ink-2: #9a9a9a;
-  --ink-3: #8a8a8a;
-  --ink-4: #6a6a6a;
-  --field-2: #1e1e1e;
-  --field-3: #242424;
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.32);
+  --ink: #dadada;
+  --ink-hover: #e6e6e6;
+  --ink-2: #b3b3b3;
+  --ink-3: #999999;
+  --ink-4: #6f6f6f;
+  --field-2: #262626;
+  --field-3: #2a2a2a;
   --hairline: rgba(255, 255, 255, 0.14);
   --hairline-2: rgba(255, 255, 255, 0.1);
   --hairline-strong: rgba(255, 255, 255, 0.22);
   --hover-ink: rgba(255, 255, 255, 0.06);
-  --knob: #e8e8e8;
-  --inset-bg: rgba(0, 0, 0, 0.45);
-  --inset-shadow: rgba(0, 0, 0, 0.55);
+  --knob: #dadada;
+  --inset-bg: rgba(0, 0, 0, 0.35);
+  --inset-shadow: rgba(0, 0, 0, 0.45);
   --warn-bg: #3a2c0c;    --warn-fg: #fbbf24;    --warn-line: #6b5410;
   --danger-soft: #341a1a; --danger-fg: #f87171;
   --ok-soft: #14261a;    --ok-fg: #4ade80;
   --accent-hover: #17233c; --accent-sel: #1c2a48;
-  /* 暗底上重调高亮——提亮低对比的绿/橙/蓝，紫/粉/青保持同一色相家族 */
-  --hl-kw: #a78bfa;
-  --hl-str: #4ade80;
-  --hl-num: #fbbf24;
-  --hl-h: #60a5fa;
-  --hl-b: #f472b6;
-  --hl-i: #22d3ee;
-  --hl-link: #60a5fa;
-  --hl-code: #fb923c;
-  --hl-type: #2dd4bf;
-  --hl-fn: #c4b5fd;
-  --hl-attr: #fcd34d;
+  /* 代码语法高亮：换成 Obsidian/One Dark 一族的低饱和色（原 #4ade80/#fbbf24 在 #1e1e1e 上偏刺眼），
+     色相不变、只降亮度与饱和度，暗底久看不累。 */
+  --hl-kw: #c678dd;
+  --hl-str: #98c379;
+  --hl-num: #d19a66;
+  --hl-h: #61afef;
+  --hl-b: #e06c75;
+  --hl-i: #56b6c2;
+  --hl-link: #61afef;
+  --hl-code: #98c379;
+  --hl-type: #e5c07b;
+  --hl-fn: #61afef;
+  --hl-attr: #d19a66;
+  --hl-op: #abb2bf;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1328,13 +1333,16 @@ body.kb-open #input-wrap { transition: none; }
 /* 输入栏内的 @ chip（contenteditable 内联，整体可删除，尾随一个空格）
    2026-10-09 用户定案：去灰色胶囊底、蓝字、字号随输入文本（inherit = #input-bar 16px），图标同蓝同尺寸 */
 .mention {
-  display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
-  background: transparent; border-radius: 999px; padding: 1px 4px 1px 2px;
+  /* 基线对齐（2026-10-22）：vertical-align:middle 对 CJK 正文会整体下沉 2~3px（用户实测「引用文本和正文上下没对齐」）。
+     inline-flex 的基线默认取首个 flex 项，而首项是图标（无文本基线）⇒ 改 align-items:baseline + 图标 align-self:center，
+     容器基线就落在 .m-nm 文本基线上，与周围正文同基线；padding 上下归 0（否则文本再被下推 padding-top）。 */
+  display: inline-flex; align-items: baseline; gap: 4px; vertical-align: baseline;
+  background: transparent; border-radius: 999px; padding: 0 4px 0 2px;
   font-size: inherit; line-height: inherit; color: var(--blue); white-space: nowrap;
   user-select: none; cursor: default;
 }
 .mention .m-ic {
-  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  width: 16px; height: 16px; border-radius: 50%; flex: none; align-self: center;
   display: flex; align-items: center; justify-content: center;
   color: var(--blue); font-size: 0;
 }
@@ -1342,12 +1350,17 @@ body.kb-open #input-wrap { transition: none; }
 .mention .m-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .mention .m-x { color: var(--text-3); font-size: 13px; line-height: 1; padding: 0 2px; cursor: pointer; border-radius: 50%; }
 .mention .m-x:hover { color: var(--text); background: var(--active); }
+/* 附件文件引用 chip（2026-10-22）：消息气泡内 `.mention-chip.m-att`、编辑器内 `.cm-att-file.mention`
+   —— 形 = 类型徽标 + 文件名（与 @ 文件 chip 同族），文件名用正文字体（覆盖 .m-path 的等宽）。 */
+.mention-chip .mc-ic { display: inline-flex; align-items: center; flex: none; margin-right: 5px; }
+.mention-chip .mc-ic svg { width: 13px; height: 13px; display: block; }
+.mention-chip.m-att { font-family: inherit; }
 
 /* 选中引用 chip（2026-09-28）：输入栏内 .mention.ref 与消息内 .mention-chip.m-ref 同族观感——
    文件图标 + 「引用自 <文件名>」（用户定案：第一个是文件 icon）。
    2026-10-09 用户定案：同 .mention 走「隐藏胶囊」——去描边底、蓝字、图标同蓝同尺寸、字号随周边文本。
    路径/会话名过长时内层 .mc-t 省略号收口（inline-flex 直挂文本无法 text-overflow）。 */
-.mention.ref { background: transparent; border: none; padding: 1px 4px 1px 2px; gap: 4px; color: var(--blue); }
+.mention.ref { background: transparent; border: none; padding: 0 4px 0 2px; gap: 4px; color: var(--blue); }
 .mention.ref .m-ic { width: 16px; height: 16px; color: var(--blue); }
 .mention.ref .m-ic svg { width: 16px; height: 16px; }
 .mention.ref .m-nm { max-width: 220px; }
@@ -1486,16 +1499,6 @@ body.kb-open #input-wrap { transition: none; }
 #cmd-pop .detail { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cmd-pop .check { display: inline-flex; flex: none; color: var(--ink); }
 #cmd-pop .check svg { width: 16px; height: 16px; }
-/* 图片组：已选缩略图（可移除），在搜索框下 viewport 上固定区（2026-09-09 单页分组） */
-#cmd-pop .imggrid { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 2px; }
-#cmd-pop .imgpill { position: relative; width: 44px; height: 44px; flex: none; }
-#cmd-pop .imgpill img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--hairline-2); }
-#cmd-pop .imgpill .img-x {
-  position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; padding: 0;
-  border: none; border-radius: 999px; background: var(--ink); color: var(--bg);
-  font-size: 11px; line-height: 16px; text-align: center; cursor: pointer;
-}
-#cmd-pop .imgpill .img-x:hover { background: var(--ink-hover); }
 
 /* 风险确认门（dsh RiskConfirmation + Modal 完全移植：全屏遮罩 + 居中 r24 对话框，
    warning 行 + checkbox 认可 + footer[outline 取消 / primary 确认]） */
@@ -2292,21 +2295,6 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   font-size: 14px; line-height: 22px; color: var(--ink);
 }
 #rename-modal .rename-input:focus { border-color: var(--ink-3); }
-/* 新建文件格式行（2026-10-14 待办#1）：格式标签 + 扩展名下拉，仅 exts 传入时显示 */
-#rename-modal .rename-ext-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-#rename-modal .rename-ext-row[hidden] { display: none; }
-#rename-modal .rename-ext-label { flex: none; font-size: 12px; color: var(--ink-3); }
-#rename-modal .rename-ext-row .rename-input { height: 38px; border-radius: 19px; }
-/* 原生 <select> 下拉（2026-10-21 待办「没有兼容黑夜模式」）：透明底只管控件本体，弹出列表由
-   UA 按 color-scheme 画——深色下仍出白底浅字。显式给控件与 <option> 上色：Chromium/Windows
-   的 listbox 弹层会消费 option 的 background/color，与站点主题同源（--bg/--ink）。 */
-#rename-modal select.rename-input {
-  color-scheme: inherit;
-  background-color: var(--bg); color: var(--ink);
-}
-#rename-modal select.rename-input option {
-  background-color: var(--bg); color: var(--ink);
-}
 #rename-modal .rename-error {
   margin-top: 8px; font-size: 12px; line-height: 18px; color: #ec1313;
 }
@@ -2597,12 +2585,13 @@ body.kb-open #chat-area.work.wk-show-file > .wk-topbar { margin-top: calc(var(--
 .wk-tb-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; min-width: 96px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-3); font-size: 13px; max-width: 220px; flex: none; }
 .wk-tb-pill:hover { background: var(--hover); color: var(--text-2); }
 .wk-tb-pill.on { background: var(--chat-bg); border-color: var(--border); color: var(--text); }
-/* 顶栏工具栏胶囊 #wk-tb-tool（待办18）：全部胶囊里唯一带色的一枚——半透明蓝底 = 「这是开关」。
-   取色只走 --blue 令牌（无硬编码色），日夜随动；文字/图标色仍归上面的 .wk-tb-pill 族，只换底与描边，
-   故除本胶囊外无其它像素变化。作用域 = 本 id（聊天/文件 pill 无色底照旧）；在场态（.on）加深一档。 */
-#wk-tb-tool { background: color-mix(in srgb, var(--blue) 12%, transparent); border-color: color-mix(in srgb, var(--blue) 28%, transparent); }
-#wk-tb-tool:hover { background: color-mix(in srgb, var(--blue) 20%, transparent); }
-#wk-tb-tool.on { background: color-mix(in srgb, var(--blue) 26%, transparent); border-color: color-mix(in srgb, var(--blue) 52%, transparent); }
+/* 顶栏工具栏胶囊 #wk-tb-tool：形制对齐 Prism 的「工具」胶囊——**中性抬升面 + 细描边 + 常规文字色**，
+   不是主色实心块（蓝底白字过艳、与 Prism 深色胶囊不符）。取色只走语义令牌，日夜随动：
+   暗色 = --field-2 面 / --border 线 / --text 字（≈ Prism #1f1f1f 胶囊浮在 #141414 底板上）；
+   浅色 = 灰白面 + 深字。全圆角（999px）与 Prism 同形；作用域 = 本 id，聊天/文件 pill 规则不动。 */
+#wk-tb-tool { background: var(--field-2); border-color: var(--border); color: var(--text); border-radius: 999px; }
+#wk-tb-tool:hover { background: var(--active); border-color: var(--border); color: var(--text); }
+#wk-tb-tool.on { background: var(--active); border-color: var(--border); color: var(--text); }
 .wk-tb-ico { display: flex; flex: none; }
 .wk-tb-ico svg { width: 14px; height: 14px; display: block; }
 .wk-tb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2752,7 +2741,14 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wk-assist-pill:hover .wap-arrow { background: #679efe; }
 
 .wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
-.wk-ed-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
+/* 文件名 = 按钮（点击重命名）：盒模型与旧 span 完全一致，只补「可点」的 hover 反馈。 */
+.wk-ed-path {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0; border: none; border-radius: 5px; background: transparent;
+  font: inherit; font-size: 12.5px; color: var(--text-2); text-align: left; cursor: pointer;
+}
+.wk-ed-path:hover { color: var(--text); background: var(--hover); }
+.wk-ed-path:empty { pointer-events: none; }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 /* 编辑区（CodeMirror 6，2026-10-07）：所有可编辑文本文件挂 .wk-ed-cm 宿主，md 走 Live Preview、
    代码按扩展名高亮。字号/配色与本项目 .msg .body 同源（库自带 editorTheme 用 em/hsl 变量，
@@ -2790,12 +2786,17 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   margin: 14px var(--wk-ed-pad-x); border: 1px solid var(--border); border-radius: 10px;
   background: var(--field-2); overflow: hidden;
 }
-#work-editor .cm-codeblock-widget pre { padding: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#work-editor .cm-codeblock-widget pre { padding: 28px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 #work-editor .cm-codeblock-line {
   padding: 0 16px; min-height: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.65; color: var(--text);
 }
-#work-editor .cm-codeblock-copy { top: 8px; right: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--text-2); }
-#work-editor .cm-codeblock-copy:hover { background: var(--hover); }
+/* 左上角语言标签（`cm-codeblock-lang`，点击复制整块）：平时隐去底色只留小字，悬停才浮出可点反馈 */
+#work-editor .cm-codeblock-copy {
+  top: 6px; left: 10px; right: auto; padding: 2px 6px;
+  background: transparent; border: none; border-radius: 5px;
+  color: var(--text-3); font-family: var(--mono); font-size: 11px; line-height: 1.5;
+}
+#work-editor .cm-codeblock-copy:hover { background: var(--hover); color: var(--text-2); }
 /* 块级公式 widget（editor/cm-math.js）：与正文同一边线，KaTeX 显示模式在该栏内居中 */
 #work-editor .cm-math-block { margin: 12px var(--wk-ed-pad-x); }
 /* Live Preview（vendor 库 live-markdown.js）主题兜底（2026-10-09 根修）：库内置主题的颜色一律写
@@ -2843,10 +2844,10 @@ body.wk-assist-dragging iframe { pointer-events: none; }
   --background: 0 0% 100%;        /* = --bg #ffffff（表格 toggle / 链接悬浮卡 / 复制钮）*/
 }
 html[data-theme="dark"] {
-  --foreground: 0 0% 91%;         /* = --text #e8e8e8 */
-  --muted: 0 0% 12%;              /* = --border-soft #1f1f1f */
-  --muted-foreground: 0 0% 60%;   /* = --text-2 #9a9a9a */
-  --background: 0 0% 9%;          /* = --bg #161616 */
+  --foreground: 0 0% 86%;         /* = --text #dadada */
+  --muted: 0 0% 15%;              /* = --border-soft #2a2a2a */
+  --muted-foreground: 0 0% 70%;   /* = --text-2 #b3b3b3 */
+  --background: 0 0% 12%;         /* = --bg #1e1e1e */
 }
 /* 底栏 #cm-host 读 --border 的库类（取项目令牌，与 #work-editor 同源取值，不引新色）*/
 #cm-host .cm-math-preview-panel { border-color: var(--border); }

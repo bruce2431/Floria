@@ -185,7 +185,7 @@
     for (const p of state.wkFiles) {
       const on = shown === 'file' && p === state.workFile ? ' on' : ''
       const full = esc(p)
-      parts.push(`<button class="wk-tb-pill${on}" data-wkftab="${full}" title="${full}"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name" dir="rtl"><span dir="ltr">${full}</span></span><span class="wk-tb-x" title="关闭">×</span></button>`)
+      parts.push(`<button class="wk-tb-pill${on}" data-wkftab="${full}" title="${full}"><span class="wk-tb-ico">${fileIcon(p)}</span><span class="wk-tb-name" dir="rtl"><span dir="ltr">${full}</span></span><span class="wk-tb-x" title="关闭">×</span></button>`)
     }
     const html = parts.join('')
     if (box.innerHTML !== html) box.innerHTML = html

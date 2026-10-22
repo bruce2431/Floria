@@ -276,6 +276,10 @@
       wkTreeMove(from, dir)
     })
     body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
+    // 编辑卡左上角文件名 = 重命名入口（与文件树行「重命名」同一函数 openFileRename）。
+    $('wk-ed-path').addEventListener('click', () => {
+      if (state.workFile) openFileRename(state.workFile)
+    })
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return

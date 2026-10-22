@@ -134,9 +134,10 @@ import { setPanel } from '../sidebar/recent.js'
   // （renderImgPills 自绑），本模块不挂胶囊事件。正文引用仍是唯一内容真相（editor-attachments）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
-  // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
-  // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
-  // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
+  // 2026-09-06 拖拽上传：文件拖进页面任意处 → 全屏浮层提示，松手入列。只拦 dataTransfer 含 Files 的
+  // 拖拽（页面内拖选文字/链接原样不受影响）；dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none
+  // 事件全落 document。2026-10-22：按类型分流——图片走 addImageFiles（缩略图胶囊 + 视觉上行），
+  // 其余文件走 addUploadFiles（上传落盘 + 文件胶囊 + 正文链接），此前 filter 只留 image/* 导致非图片拖拽无反应。
   const dropOverlay = $('drop-overlay')
   let dragDepth = 0
   document.addEventListener('dragenter', (e) => {
@@ -144,24 +145,27 @@ import { setPanel } from '../sidebar/recent.js'
     e.preventDefault()
     dragDepth++
     dropOverlay.hidden = false
-  })
+  }, true)
   document.addEventListener('dragover', (e) => {
     if (!dragDepth) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
-  })
+  }, true)
   document.addEventListener('dragleave', () => {
     if (!dragDepth) return
     if (--dragDepth === 0) dropOverlay.hidden = true
-  })
+  }, true)
   document.addEventListener('drop', (e) => {
     if (!dragDepth) return
     e.preventDefault()
     dragDepth = 0
     dropOverlay.hidden = true
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) addImageFiles(files)
-  })
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
+    const imgs = files.filter((f) => /^image\//.test(f.type))
+    const others = files.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) addImageFiles(imgs)
+    if (others.length) addUploadFiles(others)
+  }, true)
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
   // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
   // 2026-10-09 扩展：消息区选区先还原**原始 md 源码**；2026-10-15 任务D 收口为

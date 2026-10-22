@@ -3,7 +3,7 @@
 // 需此层——原先直连 inputbar/mention.js 使 core→feature 成环（SCC 27 模块），本层断开该边。
 // 纯函数、无状态、无连接、无订阅（§12 core 叶子准入）：可被任意层依赖。唯一手改处，web/app.js 为生成物。
 
-import { I } from './icons.js'
+import { I, fileIcon } from './icons.js'
 import { esc } from './util.js'
 /* @module core/mention-syntax.js */
   const MENTION_PLUGIN_RE = /\[插件:([^\]]+)\]/g
@@ -74,7 +74,7 @@ import { esc } from './util.js'
   function quoteRefChipHtml(path, l0, l1) {
     const name = String(path).split('/').pop()
     const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
   }
   // 回复引用的消息内形态（2026-10-21 用户定案）：**图标跟随引用的真实文本**，不再显示「引用自…第 N 条回复」；
   // 文本沿用 .m-ref 的蓝色，data-qidx = 第 N 条（1-based .msg 文档序，与令牌同源），点击经 chat 卡片 scroll 跳转。
@@ -97,9 +97,9 @@ import { esc } from './util.js'
     const where = `引用自 ${name}${pages}`
     const body = decodeQuoteBody(bodyEnc)
     if (body) {
-      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">${esc(body)}</span></span>`
     }
-    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${where}</span></span>`
+    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">${where}</span></span>`
   }
 
 export {

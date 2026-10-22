@@ -3,7 +3,8 @@
 // 在 core/markdown.js（mdHtml 产出 disabled input），本件是**编辑面**的补缺——两处口径一致（真 input）。
 // vendor 的 markdown 语法（GFM）已产出 `TaskMarker` 节点（恰 3 字符 `[ ]`/`[x]`/`[X]`），livePreview 与
 // markdownStylePlugin 都不处理它 ⇒ 原样显文本；本插件只补这层渲染，不与既有装饰相交（ListMark 装饰
-// 覆盖 `- `，本件覆盖 `[ ]`，区间不重叠 → replace 装饰无冲突）。光标/拖选在该行时显源码（同 wkEdHrPlugin）。
+// 覆盖 `- `，本件覆盖 `[ ]`，区间不重叠 → replace 装饰无冲突）。光标/选区与 `[ ]` 相邻时显源码，
+// 落在行内其它位置仍渲 checkbox（不因改行内文字就把标记退化）。
 import { edCmg } from './cm-global.js'
 import { toggleTaskLineCM } from './editor-transactions.js'
 /* @module editor/task-list.js */
@@ -33,19 +34,16 @@ import { toggleTaskLineCM } from './editor-transactions.js'
     build(view) {
       const CM = edCmg()
       const st = view.state
-      const activeLines = new Set()
-      for (const r of st.selection.ranges) {
-        const a = st.doc.lineAt(r.from).number
-        const b = st.doc.lineAt(r.to).number
-        for (let l = a; l <= b; l++) activeLines.add(l)
-      }
       const isDrag = st.field(CM.mouseSelectingField, false)
       const deco = []
       CM.syntaxTree(st).iterate({
         enter: (node) => {
           if (node.name !== 'TaskMarker') return
           const line = st.doc.lineAt(node.from)
-          if (activeLines.has(line.number) && !isDrag) return // 本行激活 = 显源码
+          // 显隐判据 = 选区与 `[ ]` 节点相邻/相交（光标贴在方括号内或两侧），**不是整行**：
+          // 在行内改字（光标远离方括号）时仍渲成 checkbox，只有真要编辑标记才退化为源码。
+          const touched = st.selection.ranges.some((r) => r.from <= node.to && r.to >= node.from)
+          if (touched && !isDrag) return
           const checked = /^\[[xX]\]$/.test(st.sliceDoc(node.from, node.to))
           deco.push(CM.Decoration.replace({ widget: new edTaskBoxWidget(view, line.number, checked) }).range(node.from, node.to))
         },

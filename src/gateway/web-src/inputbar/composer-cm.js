@@ -30,6 +30,10 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
   ]
   // 引用块收口令牌（回复/PDF 原文块结束行）：渲染为空（隐藏），同样原子——原文块在消息里本就整块剥掉只留锚点胶囊
   const CM_TOKEN_CLOSE = /\[\/(引用回复|引用PDF)\]/g
+  // 上传附件正文引用 `[名](uploads/x)`：@ 浮窗「上传」组选中后写进底栏的形态。
+  // 它必须是 chip 体系的**成员**（有 ×、原子化），否则退格逐字符删、把整串 md 源码翻出来。
+  // 前导 `!` 的是图片（`![名](uploads/x)`），由 edAttImgPlugin 渲成 <img>，此处跳过。
+  const CM_ATT_LINK = /\[([^\]\n]+)\]\(uploads\/([^)\s]+)\)/g
 
   function cmTokenRanges(doc) {
     const text = doc.toString()
@@ -39,10 +43,34 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
       let m
       while ((m = t.re.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: t.spec(m), close: false })
     }
+    CM_ATT_LINK.lastIndex = 0
+    let am
+    while ((am = CM_ATT_LINK.exec(text))) {
+      if (text[am.index - 1] === '!') continue
+      out.push({ from: am.index, to: am.index + am[0].length, spec: { kind: 'att', name: am[1], url: am[2] }, close: false })
+    }
     CM_TOKEN_CLOSE.lastIndex = 0
     let m
-    while ((m = CM_TOKEN_CLOSE.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: null, close: true })
-    return out.sort((a, b) => a.from - b.from)
+    while ((m = CM_TOKEN_CLOSE.exec(text))) {
+      out.push({ from: m.index, to: m.index + m[0].length, spec: null, close: true, rkind: m[1] === '引用PDF' ? 'pdf' : 'reply' })
+    }
+    out.sort((a, b) => a.from - b.from)
+    // 引用块配对（锚点令牌 ↔ 收口令牌）：取消引用 / 退格删 chip 时整块删，
+    // 否则只删锚点会留下「原文正文 + [/引用回复]」一大片源码（用户实测）。
+    let open = null
+    for (const it of out) {
+      if (it.close) {
+        if (open && open.spec.rkind === it.rkind) { open.blockTo = it.to; it.blockFrom = open.from; open = null }
+      } else if (it.spec && it.spec.kind === 'ref' && (it.spec.rkind === 'reply' || it.spec.rkind === 'pdf')) {
+        open = it
+      }
+    }
+    return out
+  }
+
+  // 一个令牌的可删区间：引用块 = 锚点起至收口止；其余 = 令牌自身
+  function cmTokenSpan(hit) {
+    return { from: hit.blockFrom != null ? hit.blockFrom : hit.from, to: hit.blockTo != null ? hit.blockTo : hit.to }
   }
 
   function cmRefLabel(spec) {
@@ -53,10 +81,19 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
   }
   // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label+×）
   function cmChipDom(spec) {
+    if (spec.kind === 'att') {
+      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名 + ×（点 × 整块删）
+      const chip = document.createElement('span')
+      chip.className = 'mention ref'
+      let url = spec.url
+      try { url = decodeURIComponent(url) } catch {}
+      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span><span class="m-x" title="删除">×</span>`
+      return chip
+    }
     if (spec.kind === 'ref') {
       const chip = document.createElement('span')
       chip.className = 'mention ref'
-      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : I.dshFile}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
+      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
       return chip
     }
     if (spec.kind === 'session') {
@@ -85,12 +122,14 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
 
   function cmRemoveTokenAt(pos) {
     if (!cmView || cmView.state.readOnly) return
-    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from === pos)
+    // × 落在 chip 的某个 DOM 位置上，向前找包含它的令牌（不再要求恰好 from === pos）
+    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from <= pos && pos < it.to)
     if (!hit) return
     const text = cmView.state.doc.toString()
-    let to = hit.to
+    let from = cmTokenSpan(hit).from
+    let to = cmTokenSpan(hit).to
     if (text[to] === ' ') to++ // 连同尾随分隔空格一起删（旧 removeChip 同语义）
-    cmView.dispatch({ changes: { from: hit.from, to } })
+    cmView.dispatch({ changes: { from, to } })
   }
 
   // 令牌扫描插件 + 原子化：chip 区间游标进不去、退格整块删（CM atomicRanges 语义）
@@ -121,9 +160,14 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     }
     return CMG.Decoration.set(arr, true)
   }
+  // 所有引用件（令牌 chip + 附件行内图片）同一删除规则：游标进不去、退格/删除整块带走，不留源码。
   const cmAtomic = CMG.EditorView.atomicRanges.of((view) => {
+    const sets = []
     const p = view.plugin(cmChipPlugin)
-    return p ? p.decorations : CMG.Decoration.none
+    if (p) sets.push(...p.decorations.iter())
+    const img = view.plugin(edAttImgPlugin)
+    if (img) sets.push(...img.decorations.iter())
+    return sets.length ? CMG.Decoration.set(sets, true) : CMG.Decoration.none
   })
 
   // ---------- 键程/粘贴（自 ctx-meter.js 的 #input 监听原样迁入，不改判定次序） ----------
@@ -179,9 +223,12 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
       if (it.to <= pos && /^\s*$/.test(text.slice(it.to, pos))) hit = it
     }
     if (!hit) return false
+    const span = cmTokenSpan(hit)
+    const from = span.from
     let to = pos
-    if (hit.to === pos && text[pos] === ' ') to = pos + 1
-    view.dispatch({ changes: { from: hit.from, to } })
+    if (hit.blockTo != null) to = hit.blockTo // 引用块：连同原文正文与收口令牌整块删
+    else if (hit.to === pos && text[pos] === ' ') to = pos + 1
+    view.dispatch({ changes: { from, to } })
     return true
   }
 
@@ -245,11 +292,14 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
         cmCM.blockMathField,
         cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
         cmCM.tableField,
-        cmCM.linkPlugin(),
+        // uploads/ 附件引用由 cmChipPlugin 当令牌渲染（带 × 的 chip），vendor 链接装饰让出该区间
+        cmCM.linkPlugin({ skipLink: (u) => /^(?:\.{1,2}\/)*uploads\//.test(u) }),
         ...cmCM.codeBlockField(),
         cmChipPlugin,
         cmAtomic,
         edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
+        // 注意：不上 edAttFilePlugin——底栏的 `[名](uploads/x)` 由 cmChipPlugin 当令牌渲染
+        // （带 ×、进 atomicRanges，整块删），两套 replace 装饰同区间会互相覆盖。
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox
         cmCM.editorTheme,
         cmThemeSpec(),

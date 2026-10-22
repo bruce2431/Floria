@@ -1,6 +1,7 @@
 // Markdown 渲染 + relTime（2026-09-10 web-src 模块化切割自 app.js v287；唯一手改处，web/app.js 为生成物）
 
 import { esc } from './util.js'
+import { fileIcon } from './icons.js'
 import { MATH_SRC_BLOCK_BRACKET, MATH_SRC_BLOCK_DOLLAR, MATH_SRC_INLINE_DOLLAR, MATH_SRC_INLINE_PAREN, mathInlineOk } from './math-spec.js'
 import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml } from './mention-syntax.js'
 /* @module core/markdown.js */
@@ -147,7 +148,14 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (!url) return `![${alt}](${code})`
       return `<img class="msg-img md-img" loading="lazy" alt="${alt}" src="${esc(url)}">`
     })
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => (MD_LINK_OK(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t))
+    // 附件文件引用（uploads/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](uploads/x)`）；
+    // 非 uploads 链接仍走普通外链。
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
+      if (MD_ATT_CODE.test(u)) {
+        return `<span class="mention-chip m-path m-att" title="${u}"><span class="mc-ic">${fileIcon(u)}</span><span class="mc-t">${t}</span></span>`
+      }
+      return MD_LINK_OK(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t
+    })
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, p, u) => p + `<a href="${u}" target="_blank" rel="noopener">${u}</a>`)
     // @ 提及令牌 → chip（[插件:名称] / [会话:名称]，名称已转义）。
     // ⚠️ 必须在行内代码还原（下一行）之前替换：行内代码 `[插件:X]` 已抽成占位符 \u0000N\u0000，

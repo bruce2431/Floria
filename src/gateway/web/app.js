@@ -100,6 +100,46 @@
     web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
   }
 
+  // ---------- 文件类型徽标（2026-10-22） ----------
+  // 用途：附件胶囊（#img-pills .file-pill）、消息文件卡片（.msg-file）、引用胶囊（.mc-ic）、
+  // work 工具栏文件胶囊（.wk-tb-ico）。形 = 16 视框圆角方块 + 白色类型缩写，色取该格式的
+  // 通用联想色（PDF 红 / Word 蓝 / Excel 绿 / PPT 橙），小尺寸（12–20px）下仍可辨。
+  // 未知扩展名回落中性文档页形（currentColor，随主题明暗）。
+  const FILE_BADGE = {
+    pdf: ['PDF', '#e5484d'],
+    doc: ['W', '#2b6cb0'], docx: ['W', '#2b6cb0'], rtf: ['W', '#2b6cb0'], odt: ['W', '#2b6cb0'],
+    xls: ['X', '#2f855a'], xlsx: ['X', '#2f855a'], csv: ['X', '#2f855a'], ods: ['X', '#2f855a'],
+    ppt: ['P', '#dd6b20'], pptx: ['P', '#dd6b20'], odp: ['P', '#dd6b20'],
+    md: ['M', '#64748b'], markdown: ['M', '#64748b'],
+    txt: ['T', '#64748b'], log: ['T', '#64748b'],
+    js: ['{}', '#7c5cff'], mjs: ['{}', '#7c5cff'], cjs: ['{}', '#7c5cff'], ts: ['{}', '#7c5cff'],
+    tsx: ['{}', '#7c5cff'], jsx: ['{}', '#7c5cff'], py: ['{}', '#7c5cff'], go: ['{}', '#7c5cff'],
+    rs: ['{}', '#7c5cff'], java: ['{}', '#7c5cff'], c: ['{}', '#7c5cff'], h: ['{}', '#7c5cff'],
+    cpp: ['{}', '#7c5cff'], sh: ['{}', '#7c5cff'], bash: ['{}', '#7c5cff'], html: ['{}', '#7c5cff'],
+    css: ['{}', '#7c5cff'], json: ['{}', '#7c5cff'], yml: ['{}', '#7c5cff'], yaml: ['{}', '#7c5cff'],
+    toml: ['{}', '#7c5cff'],
+    png: ['IMG', '#0e7490'], jpg: ['IMG', '#0e7490'], jpeg: ['IMG', '#0e7490'], webp: ['IMG', '#0e7490'],
+    gif: ['IMG', '#0e7490'], svg: ['IMG', '#0e7490'],
+    zip: ['Z', '#a16207'], rar: ['Z', '#a16207'], '7z': ['Z', '#a16207'], tar: ['Z', '#a16207'],
+    gz: ['Z', '#a16207'],
+    mp3: ['♪', '#be185d'], wav: ['♪', '#be185d'], m4a: ['♪', '#be185d'], flac: ['♪', '#be185d'],
+    mp4: ['▶', '#9333ea'], mov: ['▶', '#9333ea'], mkv: ['▶', '#9333ea'], webm: ['▶', '#9333ea'],
+  }
+  const FILE_UNKNOWN_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M4.5 1.5h4.6L13 5.4v9.1a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke-linejoin="round"/><path d="M9 1.7v3.7h3.8"/></svg>'
+  function fileExt(name) {
+    const base = String(name == null ? '' : name).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
+    const i = base.lastIndexOf('.')
+    return i > 0 ? base.slice(i + 1).toLowerCase() : ''
+  }
+  // name 只用于取扩展名查表，不参与拼接（无注入面）；label/color 均来自常量表。
+  function fileIcon(name) {
+    const hit = FILE_BADGE[fileExt(name)]
+    if (!hit) return FILE_UNKNOWN_ICON
+    const [label, color] = hit
+    const size = label.length > 2 ? 4.4 : label.length > 1 ? 5.6 : 7.6
+    return `<svg class="file-ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3.2" fill="${color}"/><text x="8" y="11.35" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="${size}" font-weight="700" fill="#fff">${label}</text></svg>`
+  }
+
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
   // 首次进入管理视图 fetch，刷新按钮 force 重新拉取；失败显示错误 + 重试（不回落假数据）。
@@ -533,7 +573,7 @@ function setConnUp(v) { connUp = v }
   function quoteRefChipHtml(path, l0, l1) {
     const name = String(path).split('/').pop()
     const range = l0 ? ':' + l0 + (l1 && l1 !== l0 ? '-' + l1 : '') : ''
-    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
+    return `<span class="mention-chip m-ref" data-qjump="file" data-qpath="${path}" data-ql0="${l0 || ''}" title="${path}${range}（work 模式下点击打开）"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">引用自 ${name}${range}</span></span>`
   }
   // 回复引用的消息内形态（2026-10-21 用户定案）：**图标跟随引用的真实文本**，不再显示「引用自…第 N 条回复」；
   // 文本沿用 .m-ref 的蓝色，data-qidx = 第 N 条（1-based .msg 文档序，与令牌同源），点击经 chat 卡片 scroll 跳转。
@@ -556,9 +596,9 @@ function setConnUp(v) { connUp = v }
     const where = `引用自 ${name}${pages}`
     const body = decodeQuoteBody(bodyEnc)
     if (body) {
-      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${esc(body)}</span></span>`
+      return `<span class="mention-chip m-ref m-quote" title="${where}"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">${esc(body)}</span></span>`
     }
-    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${MENTION_FILE_ICON}</span><span class="mc-t">${where}</span></span>`
+    return `<span class="mention-chip m-ref" title="${where}"><span class="mc-ic">${fileIcon(path)}</span><span class="mc-t">${where}</span></span>`
   }
 
   // 源串（不带 flag）：消费方各自 new RegExp(src, 'g') —— 共享同一个 RegExp 对象会踩 lastIndex 状态。
@@ -715,7 +755,14 @@ function setConnUp(v) { connUp = v }
       if (!url) return `![${alt}](${code})`
       return `<img class="msg-img md-img" loading="lazy" alt="${alt}" src="${esc(url)}">`
     })
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => (MD_LINK_OK(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t))
+    // 附件文件引用（uploads/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](uploads/x)`）；
+    // 非 uploads 链接仍走普通外链。
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
+      if (MD_ATT_CODE.test(u)) {
+        return `<span class="mention-chip m-path m-att" title="${u}"><span class="mc-ic">${fileIcon(u)}</span><span class="mc-t">${t}</span></span>`
+      }
+      return MD_LINK_OK(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t
+    })
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, p, u) => p + `<a href="${u}" target="_blank" rel="noopener">${u}</a>`)
     // @ 提及令牌 → chip（[插件:名称] / [会话:名称]，名称已转义）。
     // ⚠️ 必须在行内代码还原（下一行）之前替换：行内代码 `[插件:X]` 已抽成占位符 \u0000N\u0000，
@@ -3196,7 +3243,7 @@ function setLastNavHash(v) { lastNavHash = v }
   function fileCardsHtml(paths) {
     const cards = paths.map((p) => {
       const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
-      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${I.dshFile}<span class="mf-name">${esc(name)}</span></span>`
+      return `<span class="msg-file" role="button" data-path="${esc(p)}" title="${esc(p)}">${fileIcon(name)}<span class="mf-name">${esc(name)}</span></span>`
     }).join('')
     return `<div class="msg-files">${cards}</div>`
   }
@@ -4184,16 +4231,12 @@ function setLastNavHash(v) { lastNavHash = v }
   // 表单壳（标题/占位/初值/校验/错误回显），提交语义由调用方以 onSubmit 注入——会话重命名走
   // POST /gateway/session/rename（网关 append custom-title，已停止会话同样生效），文件重命名走
   // POST /gateway/file/rename（work.js 注册），两者共用同一对话框实例，不各建一套弹窗。
-  let renameTarget = null // { heading, placeholder, okText, onSubmit, exts?, defaultExt? }
+  let renameTarget = null // { heading, placeholder, okText, onSubmit }
   const renameModal = $('rename-modal')
   const renameInput = $('rename-input')
   const renameErr = $('rename-error')
   const renameTitle = renameModal.querySelector('.title')
   const renameOk = $('rename-ok')
-  // 新建文件格式行（2026-10-14 待办#1）：opt.exts 提供扩展名清单才显示；确认时未自带扩展名的名字
-  // 拼入选中扩展名（自带 .xx 的名字尊重用户原样，不再追加）。onSubmit 收 (name, ext)。
-  const renameExtRow = $('rename-ext-row')
-  const renameExtSel = $('rename-ext')
   function openRenameDialog(opt) {
     renameTarget = opt
     renameTitle.textContent = opt.heading || '重命名'
@@ -4201,13 +4244,6 @@ function setLastNavHash(v) { lastNavHash = v }
     renameOk.textContent = opt.okText || '重命名'
     renameInput.value = opt.value || ''
     renameErr.hidden = true
-    if (Array.isArray(opt.exts) && opt.exts.length) {
-      renameExtSel.innerHTML = opt.exts.map((e) => `<option value="${esc(e)}"${e === opt.defaultExt ? ' selected' : ''}>${esc(e || '（无扩展名）')}</option>`).join('')
-      renameExtRow.hidden = false
-    } else {
-      renameExtSel.innerHTML = ''
-      renameExtRow.hidden = true
-    }
     renameModal.hidden = false
     renameInput.focus()
     renameInput.select()
@@ -4224,13 +4260,8 @@ function setLastNavHash(v) { lastNavHash = v }
       renameErr.hidden = false
       return
     }
-    let ext = ''
-    if (!renameExtRow.hidden) {
-      ext = renameExtSel.value
-      if (ext && !/\.[A-Za-z0-9]+$/.test(value)) value += ext
-    }
     try {
-      await renameTarget.onSubmit(value, ext)
+      await renameTarget.onSubmit(value)
       closeRenameDialog()
     } catch (e) {
       renameErr.textContent = e.message || String(e)
@@ -5795,13 +5826,18 @@ function edCmg() {
   function isImageAttachment(name) { return ATT_IMG_RE.test(String(name || '')) }
   function isDocumentAttachment(name) { return !isImageAttachment(name) }
 
-  // 落盘名 = 时间戳 `YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名——取代客户端原名（image.png/image-3.png）
-  // 与服务端 `-1/-2` 自然数去重（2026-10-16 待办）。同一秒内多张极端情形仍由网关去重兜底。
+  // 落盘名 = 原名主体 + `-YYYYMMDDHHMMSS`（精确到秒）+ 原扩展名，如 `报告-20261022183608.docx`。
+  // 保留原名（用户要求：已有名字的文件不得被纯时间戳顶替），时间戳只作同名防覆盖；
+  // 同一秒内同名的极端情形仍由网关 `-1/-2` 去重兜底。
   function uploadStampName(file) {
-    const ext = (/(\.[A-Za-z0-9]+)$/.exec(file.name || '') || [, ''])[1]
+    const raw = String(file.name || '').split(/[\\/]/).pop() || 'file'
+    const m = /^(.*?)(\.[A-Za-z0-9]+)?$/.exec(raw)
+    const base = (m[1] || 'file').trim() || 'file'
+    const ext = m[2] || ''
     const d = new Date()
     const p = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${ext}`
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    return `${base}-${stamp}${ext}`
   }
 
   // ---------- 上传（与 + 浮窗「上传文件」同一端点/落点/认证链） ----------
@@ -5898,6 +5934,57 @@ function edCmg() {
           if (!url) return
           if (active && node.from < active.to && node.to > active.from) return // 选区内 = 显源码
           deco.push(CM.Decoration.replace({ widget: new edImgWidgetBase(url, m[1]) }).range(node.from, node.to))
+        },
+      })
+      return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+  }, { decorations: (v) => v.decorations })
+
+  // ---------- 行内文件引用 widget（2026-10-22） ----------
+  // `[名](uploads/x.pdf)`：@ 上传组插入的引用形态。渲染 = 类型徽标 + 文件名（与输入栏 @ chip 同族），
+  // 光标/选区落入区间显源码（口径同图片 widget）。非 uploads 链接不接管（普通外链仍走 vendor）。
+  const edFileWidgetBase = class extends edCmg().WidgetType {
+    constructor(name, path) { super(); this.name = name; this.path = path }
+    eq(o) { return o.name === this.name && o.path === this.path }
+    ignoreEvent() { return true }
+    toDOM() {
+      const el = document.createElement('span')
+      el.className = 'cm-att-file mention'
+      el.title = this.path
+      el.innerHTML = `<span class="m-ic">${fileIcon(this.name)}</span>`
+      const nm = document.createElement('span')
+      nm.className = 'm-nm'
+      nm.textContent = this.name
+      el.appendChild(nm)
+      return el
+    }
+  }
+  const edAttFilePlugin = edCmg().ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view) }
+    update(u) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view) }
+    build(view) {
+      const CM = edCmg()
+      const deco = []
+      const isDrag = view.state.field(CM.mouseSelectingField, false)
+      let active = null
+      if (!isDrag) {
+        for (const r of view.state.selection.ranges) {
+          if (!r.empty) { active = { from: r.from, to: r.to }; break }
+        }
+      }
+      CM.syntaxTree(view.state).iterate({
+        enter: (node) => {
+          if (node.name !== 'Link') return
+          const text = view.state.sliceDoc(node.from, node.to)
+          const m = /^\[([^\]]*)\]\((uploads\/[^)\s]+)\)$/.exec(text)
+          if (!m) return
+          if (active && node.from < active.to && node.to > active.from) return // 选区内 = 显源码
+          let name = m[1]
+          if (!name) {
+            name = m[2].split('/').pop()
+            try { name = decodeURIComponent(name) } catch (_) { /* 非法编码 → 原样显示 */ }
+          }
+          deco.push(CM.Decoration.replace({ widget: new edFileWidgetBase(name, m[2]) }).range(node.from, node.to))
         },
       })
       return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
@@ -6080,19 +6167,16 @@ function edCmg() {
     build(view) {
       const CM = edCmg()
       const st = view.state
-      const activeLines = new Set()
-      for (const r of st.selection.ranges) {
-        const a = st.doc.lineAt(r.from).number
-        const b = st.doc.lineAt(r.to).number
-        for (let l = a; l <= b; l++) activeLines.add(l)
-      }
       const isDrag = st.field(CM.mouseSelectingField, false)
       const deco = []
       CM.syntaxTree(st).iterate({
         enter: (node) => {
           if (node.name !== 'TaskMarker') return
           const line = st.doc.lineAt(node.from)
-          if (activeLines.has(line.number) && !isDrag) return // 本行激活 = 显源码
+          // 显隐判据 = 选区与 `[ ]` 节点相邻/相交（光标贴在方括号内或两侧），**不是整行**：
+          // 在行内改字（光标远离方括号）时仍渲成 checkbox，只有真要编辑标记才退化为源码。
+          const touched = st.selection.ranges.some((r) => r.from <= node.to && r.to >= node.from)
+          if (touched && !isDrag) return
           const checked = /^\[[xX]\]$/.test(st.sliceDoc(node.from, node.to))
           deco.push(CM.Decoration.replace({ widget: new edTaskBoxWidget(view, line.number, checked) }).range(node.from, node.to))
         },
@@ -6537,7 +6621,7 @@ function edCmg() {
     for (const p of state.wkFiles) {
       const on = shown === 'file' && p === state.workFile ? ' on' : ''
       const full = esc(p)
-      parts.push(`<button class="wk-tb-pill${on}" data-wkftab="${full}" title="${full}"><span class="wk-tb-ico">${I.dshFile}</span><span class="wk-tb-name" dir="rtl"><span dir="ltr">${full}</span></span><span class="wk-tb-x" title="关闭">×</span></button>`)
+      parts.push(`<button class="wk-tb-pill${on}" data-wkftab="${full}" title="${full}"><span class="wk-tb-ico">${fileIcon(p)}</span><span class="wk-tb-name" dir="rtl"><span dir="ltr">${full}</span></span><span class="wk-tb-x" title="关闭">×</span></button>`)
     }
     const html = parts.join('')
     if (box.innerHTML !== html) box.innerHTML = html
@@ -7252,11 +7336,22 @@ function edCmg() {
         CM.blockMathField,
         cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
         CM.tableField,
-        CM.linkPlugin(),
+        // uploads/ 附件引用由 edAttFilePlugin 独占渲染（类型徽标 chip），vendor 链接装饰让出该区间
+        CM.linkPlugin({ skipLink: (u) => /^(?:\.{1,2}\/)*uploads\//.test(u) }),
         ...CM.codeBlockField(),
         wkEdHrPlugin(CM),
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
         edAttImgPlugin, // 附件行内图片：`![](uploads/x.png)` 原子渲成 <img>（与底栏同件；补「编辑卡片缺图片渲染」）
+        edAttFilePlugin, // 附件行内文件引用：`[名](uploads/x)` 渲成「类型徽标 + 文件名」
+        // 与底栏同一删除规则：附件引用/图片是整体——游标进不去，退格/Delete 整块删，不逐字露源码
+        CM.EditorView.atomicRanges.of((view) => {
+          const sets = []
+          for (const pl of [edAttImgPlugin, edAttFilePlugin]) {
+            const p = view.plugin(pl)
+            if (p) sets.push(...p.decorations.iter())
+          }
+          return sets.length ? CM.Decoration.set(sets, true) : CM.Decoration.none
+        }),
       ]
     }
     const L = wkEdLangFor(CM, e)
@@ -8405,18 +8500,15 @@ function edCmg() {
   // 创建文件（isDir=false）/ 文件夹（true）：复用 openRenameDialog 一件两用弹窗（与重命名同模式：
   // onSubmit 抛错 = 错误留在弹窗内、不关窗，可改名重试）。成功后展开落点目录、刷新树；新建文件
   // 直接 openWorkFile（进编辑器 + 顶栏 pill + cardBus 广播，与侧栏点击同一唯一口）。
-  // 新建文件常用格式清单（2026-10-14 待办#1）：名称未自带扩展名时拼入所选格式；自带 .xx 尊重原样。
-  const WK_NEW_EXTS = ['.md', '.txt', '.json', '.canvas', '.ts', '.js', '.py', '.html', '.css', '.yaml', '']
+  // 新建文件不再提供格式下拉：扩展名直接由用户在名称里写（如 `note.md`），无后缀即纯文本文件。
   function wkNewCreate(isDir) {
     if (!state.workProj) return toast('先在上方选择一个项目')
     const dir = wkNewContextDir()
     openRenameDialog({
       heading: isDir ? '新建文件夹' : '新建文件',
-      placeholder: '输入名称',
+      placeholder: '输入名称（可带扩展名，如 note.md）',
       okText: '创建',
       value: '',
-      exts: isDir ? undefined : WK_NEW_EXTS,
-      defaultExt: '.md',
       onSubmit: async (name) => {
         const res = await fetch(apiUrl('/gateway/file/create'), {
           method: 'POST',
@@ -8795,6 +8887,10 @@ function edCmg() {
       wkTreeMove(from, dir)
     })
     body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
+    // 编辑卡左上角文件名 = 重命名入口（与文件树行「重命名」同一函数 openFileRename）。
+    $('wk-ed-path').addEventListener('click', () => {
+      if (state.workFile) openFileRename(state.workFile)
+    })
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
@@ -9150,7 +9246,7 @@ function edCmg() {
     btn.innerHTML = dark ? I.sun : I.moon
     btn.title = dark ? '切换到浅色' : '切换到夜晚模式'
     const m = document.querySelector('meta[name="theme-color"]')
-    if (m) m.setAttribute('content', dark ? '#000000' : '#ececf1')
+    if (m) m.setAttribute('content', dark ? '#141414' : '#ececf1')
   }
   $('panel-theme').addEventListener('click', () => {
     const dark = !themeDark()
@@ -9334,9 +9430,10 @@ function edCmg() {
   // （renderImgPills 自绑），本模块不挂胶囊事件。正文引用仍是唯一内容真相（editor-attachments）。
   // 底栏 input/paste/keydown 监听已随 CM6 接管（2026-10-14 #17 B 口径）迁入 composer-cm.js 的
   // updateListener / domEventHandlers——#input contenteditable 退役，本模块不再挂输入区事件。
-  // 2026-09-06 拖拽上传：图片拖进页面任意处 → 全屏浮层提示，松手入列（与选图/粘贴同链 addImageFiles，
-  // 9 张上限/编码/胶囊复用）。只拦 dataTransfer 含 Files 的拖拽（页面内拖选文字/链接原样不受影响）；
-  // dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none 事件全落 document。
+  // 2026-09-06 拖拽上传：文件拖进页面任意处 → 全屏浮层提示，松手入列。只拦 dataTransfer 含 Files 的
+  // 拖拽（页面内拖选文字/链接原样不受影响）；dragenter/leave 计数对抗子元素穿越，浮层 pointer-events:none
+  // 事件全落 document。2026-10-22：按类型分流——图片走 addImageFiles（缩略图胶囊 + 视觉上行），
+  // 其余文件走 addUploadFiles（上传落盘 + 文件胶囊 + 正文链接），此前 filter 只留 image/* 导致非图片拖拽无反应。
   const dropOverlay = $('drop-overlay')
   let dragDepth = 0
   document.addEventListener('dragenter', (e) => {
@@ -9344,24 +9441,27 @@ function edCmg() {
     e.preventDefault()
     dragDepth++
     dropOverlay.hidden = false
-  })
+  }, true)
   document.addEventListener('dragover', (e) => {
     if (!dragDepth) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
-  })
+  }, true)
   document.addEventListener('dragleave', () => {
     if (!dragDepth) return
     if (--dragDepth === 0) dropOverlay.hidden = true
-  })
+  }, true)
   document.addEventListener('drop', (e) => {
     if (!dragDepth) return
     e.preventDefault()
     dragDepth = 0
     dropOverlay.hidden = true
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []).filter(f => /^image\//.test(f.type))
-    if (files.length) addImageFiles(files)
-  })
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || [])
+    const imgs = files.filter((f) => /^image\//.test(f.type))
+    const others = files.filter((f) => !/^image\//.test(f.type))
+    if (imgs.length) addImageFiles(imgs)
+    if (others.length) addUploadFiles(others)
+  }, true)
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
   // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
   // 2026-10-09 扩展：消息区选区先还原**原始 md 源码**；2026-10-15 任务D 收口为
@@ -10101,6 +10201,10 @@ function edCmg() {
   ]
   // 引用块收口令牌（回复/PDF 原文块结束行）：渲染为空（隐藏），同样原子——原文块在消息里本就整块剥掉只留锚点胶囊
   const CM_TOKEN_CLOSE = /\[\/(引用回复|引用PDF)\]/g
+  // 上传附件正文引用 `[名](uploads/x)`：@ 浮窗「上传」组选中后写进底栏的形态。
+  // 它必须是 chip 体系的**成员**（有 ×、原子化），否则退格逐字符删、把整串 md 源码翻出来。
+  // 前导 `!` 的是图片（`![名](uploads/x)`），由 edAttImgPlugin 渲成 <img>，此处跳过。
+  const CM_ATT_LINK = /\[([^\]\n]+)\]\(uploads\/([^)\s]+)\)/g
 
   function cmTokenRanges(doc) {
     const text = doc.toString()
@@ -10110,10 +10214,34 @@ function edCmg() {
       let m
       while ((m = t.re.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: t.spec(m), close: false })
     }
+    CM_ATT_LINK.lastIndex = 0
+    let am
+    while ((am = CM_ATT_LINK.exec(text))) {
+      if (text[am.index - 1] === '!') continue
+      out.push({ from: am.index, to: am.index + am[0].length, spec: { kind: 'att', name: am[1], url: am[2] }, close: false })
+    }
     CM_TOKEN_CLOSE.lastIndex = 0
     let m
-    while ((m = CM_TOKEN_CLOSE.exec(text))) out.push({ from: m.index, to: m.index + m[0].length, spec: null, close: true })
-    return out.sort((a, b) => a.from - b.from)
+    while ((m = CM_TOKEN_CLOSE.exec(text))) {
+      out.push({ from: m.index, to: m.index + m[0].length, spec: null, close: true, rkind: m[1] === '引用PDF' ? 'pdf' : 'reply' })
+    }
+    out.sort((a, b) => a.from - b.from)
+    // 引用块配对（锚点令牌 ↔ 收口令牌）：取消引用 / 退格删 chip 时整块删，
+    // 否则只删锚点会留下「原文正文 + [/引用回复]」一大片源码（用户实测）。
+    let open = null
+    for (const it of out) {
+      if (it.close) {
+        if (open && open.spec.rkind === it.rkind) { open.blockTo = it.to; it.blockFrom = open.from; open = null }
+      } else if (it.spec && it.spec.kind === 'ref' && (it.spec.rkind === 'reply' || it.spec.rkind === 'pdf')) {
+        open = it
+      }
+    }
+    return out
+  }
+
+  // 一个令牌的可删区间：引用块 = 锚点起至收口止；其余 = 令牌自身
+  function cmTokenSpan(hit) {
+    return { from: hit.blockFrom != null ? hit.blockFrom : hit.from, to: hit.blockTo != null ? hit.blockTo : hit.to }
   }
 
   function cmRefLabel(spec) {
@@ -10124,10 +10252,19 @@ function edCmg() {
   }
   // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label+×）
   function cmChipDom(spec) {
+    if (spec.kind === 'att') {
+      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名 + ×（点 × 整块删）
+      const chip = document.createElement('span')
+      chip.className = 'mention ref'
+      let url = spec.url
+      try { url = decodeURIComponent(url) } catch {}
+      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span><span class="m-x" title="删除">×</span>`
+      return chip
+    }
     if (spec.kind === 'ref') {
       const chip = document.createElement('span')
       chip.className = 'mention ref'
-      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : I.dshFile}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
+      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
       return chip
     }
     if (spec.kind === 'session') {
@@ -10156,12 +10293,14 @@ function edCmg() {
 
   function cmRemoveTokenAt(pos) {
     if (!cmView || cmView.state.readOnly) return
-    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from === pos)
+    // × 落在 chip 的某个 DOM 位置上，向前找包含它的令牌（不再要求恰好 from === pos）
+    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from <= pos && pos < it.to)
     if (!hit) return
     const text = cmView.state.doc.toString()
-    let to = hit.to
+    let from = cmTokenSpan(hit).from
+    let to = cmTokenSpan(hit).to
     if (text[to] === ' ') to++ // 连同尾随分隔空格一起删（旧 removeChip 同语义）
-    cmView.dispatch({ changes: { from: hit.from, to } })
+    cmView.dispatch({ changes: { from, to } })
   }
 
   // 令牌扫描插件 + 原子化：chip 区间游标进不去、退格整块删（CM atomicRanges 语义）
@@ -10192,9 +10331,14 @@ function edCmg() {
     }
     return CMG.Decoration.set(arr, true)
   }
+  // 所有引用件（令牌 chip + 附件行内图片）同一删除规则：游标进不去、退格/删除整块带走，不留源码。
   const cmAtomic = CMG.EditorView.atomicRanges.of((view) => {
+    const sets = []
     const p = view.plugin(cmChipPlugin)
-    return p ? p.decorations : CMG.Decoration.none
+    if (p) sets.push(...p.decorations.iter())
+    const img = view.plugin(edAttImgPlugin)
+    if (img) sets.push(...img.decorations.iter())
+    return sets.length ? CMG.Decoration.set(sets, true) : CMG.Decoration.none
   })
 
   // ---------- 键程/粘贴（自 ctx-meter.js 的 #input 监听原样迁入，不改判定次序） ----------
@@ -10250,9 +10394,12 @@ function edCmg() {
       if (it.to <= pos && /^\s*$/.test(text.slice(it.to, pos))) hit = it
     }
     if (!hit) return false
+    const span = cmTokenSpan(hit)
+    const from = span.from
     let to = pos
-    if (hit.to === pos && text[pos] === ' ') to = pos + 1
-    view.dispatch({ changes: { from: hit.from, to } })
+    if (hit.blockTo != null) to = hit.blockTo // 引用块：连同原文正文与收口令牌整块删
+    else if (hit.to === pos && text[pos] === ' ') to = pos + 1
+    view.dispatch({ changes: { from, to } })
     return true
   }
 
@@ -10316,11 +10463,14 @@ function edCmg() {
         cmCM.blockMathField,
         cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
         cmCM.tableField,
-        cmCM.linkPlugin(),
+        // uploads/ 附件引用由 cmChipPlugin 当令牌渲染（带 × 的 chip），vendor 链接装饰让出该区间
+        cmCM.linkPlugin({ skipLink: (u) => /^(?:\.{1,2}\/)*uploads\//.test(u) }),
         ...cmCM.codeBlockField(),
         cmChipPlugin,
         cmAtomic,
         edAttImgPlugin, // 附件行内图片（editor/editor-attachments：uploads/ 引用原子渲成 <img>，选区内显源码）
+        // 注意：不上 edAttFilePlugin——底栏的 `[名](uploads/x)` 由 cmChipPlugin 当令牌渲染
+        // （带 ×、进 atomicRanges，整块删），两套 replace 装饰同区间会互相覆盖。
         edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox
         cmCM.editorTheme,
         cmThemeSpec(),
@@ -10661,7 +10811,7 @@ function edCmg() {
     if (!cmd.open) return
     // dsh confirmation gate：确认态下命令卡隐藏，改由全屏 RiskConfirmation 模态接管
     if (cmd.confirming) { cmdPop.hidden = true; renderRiskModal(); return }
-    // 2026-09-09 二轮：单页分组渲染（无 tab）——已选图片缩略图 + 四组行列表。
+    // 单页分组渲染（无 tab）：四组行列表；已选附件缩略图不在本浮窗重复显示（见下）。
     // 独立搜索框已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框（barQuery），列表随底栏
     // 打字自动变化（ctx-meter 在底栏 input 事件里调 renderCmdPop）。
     cmd.items = cmdEntries()
@@ -10669,10 +10819,8 @@ function edCmg() {
     if (cmd.error !== null) {
       html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
-      if (pendingImages.length) {
-        // 已选图片缩略图（可移除）：粘贴/拖拽/未发送遗留，同旧图片 tab
-        html += `<div class="imggrid">${pendingImages.map((p, i) => `<span class="imgpill"><img src="${p.dataUrl}" alt=""/><button type="button" class="img-x" data-i="${i}" title="移除">×</button></span>`).join('')}</div>`
-      }
+      // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
+      // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       let lastGrp = ''
       // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
       if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
@@ -10692,11 +10840,6 @@ function edCmg() {
     cmdPop.innerHTML = html
     cmdPop.hidden = false
     cmdPop.querySelectorAll('.row').forEach(b => b.addEventListener('click', () => { cmd.active = +b.dataset.idx; cmdSelect() }))
-    cmdPop.querySelectorAll('.img-x').forEach(x => x.addEventListener('click', () => {
-      pendingImages.splice(+x.dataset.i, 1)
-      syncGwSend()
-      renderCmdPop()
-    }))
     cmdPop.querySelector('.retry')?.addEventListener('click', () => { cmd.error = null; cmd.status = 'ready'; renderCmdPop() })
     const on = cmdPop.querySelector('.row.rowActive')
     if (on) on.scrollIntoView({ block: 'nearest' })
@@ -12452,7 +12595,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
         .map((p, i) => `<span class="img-pill"><img src="${p.dataUrl}" alt="${esc(p.filename)}"/><button class="img-x" data-i="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('') +
       pendingFiles
-        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${I.dshFile}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
+        .map((f, i) => `<span class="file-pill" title="${esc(f.abs)}"><span class="fp-ico">${fileIcon(f.name)}</span><span class="fp-name">${esc(f.name)}</span><button class="img-x" data-f="${i}" type="button" aria-label="移除">×</button></span>`)
         .join('')
   }
   // @ 浮窗「上传」组的数据源（mention.js 消费）：本次上传、可被正文引用的附件。
@@ -12535,10 +12678,11 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
       toast('正在上传 ' + (f.name || '文件') + '…')
       const att = await uploadAttachment(f)
       if (!att) continue
-      // 同 addImageFiles：底栏才入 pendingFiles 胶囊行；编辑卡只写正文链接（不串底栏）
+      // 同 addImageFiles：底栏 = 只进附件胶囊行（不插正文，正文引用仅 @ 上传组显式选择时才写）；
+      // 编辑卡 = 只写正文链接（不串底栏胶囊）。
       if (toComposer) { pendingFiles.push(att); renderImgPills() }
+      else insertAttachmentMarkdown(tgtEd, att)
       toast('已上传 ' + att.name)
-      insertAttachmentMarkdown(tgtEd, att)
     }
     if (toComposer) syncGwSend()
   }

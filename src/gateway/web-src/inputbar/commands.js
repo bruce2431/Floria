@@ -6,7 +6,7 @@ import { findSession, hashOf } from '../engine/sessions.js'
 import { inputEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isTouch, newSessionProject } from '../core/util.js'
 import { pendingImages } from './images.js'
-import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, loadPickPath, mention, mentionChipIcon, pick, pickAll, pickItems, pickLabel, pickSearchKick, refreshPick, serializeInput } from './mention.js'
+import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, mention, mentionChipIcon, pick, pickAll, pickEnter, pickItems, pickLabel, pickSearchKick, refreshPick, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
@@ -153,8 +153,15 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
-    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
-    items.push(...pickItems(barQuery()))
+    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）。
+    // q 必须是**已剥掉前导 / 的查询词**——传 barQuery() 全文会把 "/" 带进过滤词，全局搜索恒不命中。
+    items.push(...pickItems(q))
+    // 清单在建/根层失败：给文件组一行占位（否则整个浮窗只剩上传两行，看起来像搜索坏了）
+    if (q && !pick.searchOff && !pickAll.items) {
+      items.push(pickAll.err
+        ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
+        : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
+    }
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
     const arranged = arrangeItems(items)
     pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
@@ -202,16 +209,13 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
       // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       let lastGrp = ''
-      // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
-      if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
-        html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
-      } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
+      html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
         const grp = g === '文件' ? '文件 · ' + pickLabel() : g
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : (CMD_ICON[it.name] || I.dshPlus)
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : it.kind === 'pathwait' ? mentionChipIcon('path', 'file') : (CMD_ICON[it.name] || I.dshPlus)
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         const detail = it.kind === 'path' ? it.path : it.desc
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
@@ -276,8 +280,11 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
+    if (it.kind === 'pathwait') return // 占位行不可选（清单未就绪）
+    // 下钻/返回必须走 pickEnter：它同时把 searchOff 翻回层内浏览模式；只调 loadPickPath 会让
+    // pickItems 继续按全局搜索分支渲染，点目录看起来「没反应」。
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
-      loadPickPath(it.path).then(() => { if (cmd.open) renderCmdPop() })
+      pickEnter(it).then(() => { if (cmd.open) renderCmdPop() })
       return
     }
     if (it.kind === 'path') { appendMentionChip('path', it.path, '', 'file'); closeCmdPop(); return }

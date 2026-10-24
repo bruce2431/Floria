@@ -4,7 +4,7 @@ import { messagesHtml, addUser } from '../chat/messages.js'
 import { GATEWAY, gateAwait, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
-import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, encodeQuoteBody, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken } from '../core/mention-syntax.js'
+import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, foldQuoteBodies, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken, unfoldQuoteBodies } from '../core/mention-syntax.js'
 import { findSession, sessionCwd } from '../engine/sessions.js'
 import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
@@ -24,9 +24,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
   // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
-  // 原文块捕获（2026-10-21）：$3/$2 = 令牌与收尾令牌之间的原文，气泡里要原样渲染（见 quoteBodiesAsMarkdown）
-  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n([\s\S]*?)\n\[\/引用回复\]/g
-  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n([\s\S]*?)\n\[\/引用PDF\]/g
+  // 引用原文块 ⇄ 折叠令牌的解析与编码统一在 core/mention-syntax.js（唯一真源：气泡/底栏共用）。
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
   // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
@@ -38,14 +36,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层并发），层间 await。
   // 上限：目录 ≤250 / 条目 ≤2000 / 深度 ≤4——够覆盖散件与项目浅层，防全库深扫拖垮浮窗。
   // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
-  const pickAll = { items: null, busy: false, seq: 0 }
+  const pickAll = { items: null, busy: false, seq: 0, err: '' }
 
   // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
   // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
   // 新增条目只声明 kind、不各自排位（否则两处排位迟早分叉）。
   const GROUP_ORDER = ['上传', '聊天', '文件', '技能', '指令']
   const GROUP_MAX = 3
-  const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件' }
+  const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件', pathwait: '文件' }
   function groupOf(it) {
     return GROUP_OF[it.kind] || '指令'
   }
@@ -95,6 +93,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const out = []
     let layer = [{ p: '', d: 0 }]
     const seen = new Set()
+    let rootErr = ''
     try {
       while (layer.length && seen.size < 250 && out.length < 2000) {
         const next = []
@@ -103,7 +102,11 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
             try {
               const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
               const data = await r.json()
-              if (!r.ok || !data || !Array.isArray(data.entries)) return
+              if (!r.ok || !data || !Array.isArray(data.entries)) {
+                // 根层失败 = 整份清单不可信（空结果会谎报「无匹配」）：记错并作废本轮，浮窗重开再试。
+                if (!p) rootErr = (data && data.error) || '工作区索引失败'
+                return
+              }
               for (const e of data.entries) {
                 const cp = p ? `${p}/${e.name}` : e.name
                 out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp })
@@ -112,7 +115,10 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
                   next.push({ p: cp, d: d + 1 })
                 }
               }
-            } catch { /* 单层失败跳过，不拖垮整轮 */ }
+            } catch (e) {
+              /* 子层失败跳过，不拖垮整轮（根层失败另记） */
+              if (!p) rootErr = e.message || '工作区索引失败'
+            }
           }),
         )
         if (seq !== pickAll.seq) return
@@ -120,15 +126,17 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       }
     } finally {
       if (seq === pickAll.seq) {
-        pickAll.items = out
         pickAll.busy = false
+        if (rootErr) { pickAll.items = null; pickAll.err = rootErr }
+        else { pickAll.items = out; pickAll.err = '' }
       }
     }
   }
   // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
   // 建清单，完成后浮窗仍开着才重渲。
   function pickSearchKick(re) {
-    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy) ensurePickAll().then(re).catch(() => {})
+    // pickAll.err 非空 = 上一轮根层失败：不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
+    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy && !pickAll.err) ensurePickAll().then(re).catch(() => {})
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -194,7 +202,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
   function mentionChipInner(kind, name, ptype) {
     const label = kind === 'path' ? '@' + name : name
-    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span><span class="m-x" title="删除">×</span>`
+    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span>`
   }
   function buildMentionChip(kind, name, sid, ptype) {
     const chip = document.createElement('span')
@@ -243,16 +251,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
   // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
-  function quoteBodiesAsMarkdown(text) {
-    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(body) + ']')
-    const tailBreak = (whole, offset, match) => {
-      const rest = String(whole).slice(offset + match.length)
-      return rest && !rest.startsWith('\n') ? '\n' : ''
-    }
-    return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
-      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
-  }
+  const quoteBodiesAsMarkdown = foldQuoteBodies
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
   function renderUserText(text) {
@@ -265,10 +264,11 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
   }
 
-  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，
-  // doc 单真源 ⇒ serializeInput 退化为 doc.toString()。签名与语义冻结（接缝不变量）。
+  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图。
+  // 例外（2026-10-24）：引用原文在底栏 doc 里是折叠单行令牌（chip 即所见），发送时还原成
+  // 「锚点行 + 原文 + 收尾行」的块形态——模型读到的必须是原文，不是百分号编码。
   function serializeInput() {
-    return composerDocText()
+    return unfoldQuoteBodies(composerDocText())
   }
 
   function closeMentionPop() {
@@ -299,8 +299,11 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   function refreshPick(after) {
     pick.entries = null // 立刻清旧层：否则换项目后先闪一帧上一个项目的条目（在途请求由 loadPickPath 的 seq 作废）
     pick.err = ''
+    pick.q = '' // 查询/层级同属上一轮手势：不复位会先渲一帧旧查询结果（两个浮窗共用本状态）
+    pick.path = ''
     pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
     pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.err = ''
     pickAll.seq++
     // 作废在途轮时必须同步释放 busy：旧轮 finally 见 seq 不符只跳过写回、不会复位 busy，
     // 否则下一次输入永远起不了新轮（文件搜索整组空白）
@@ -337,8 +340,10 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const searching = pick.q && !pick.searchOff && !pickAll.items
     pickSearchKick(() => { if (mention.open) renderMentionPop() }) // 搜索清单未就绪 → 建完补渲（待办 20）
     if (!items.length && searching) {
-      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果
-      pop.innerHTML = '<div class="mp-sec">文件 · 全局搜索…</div>'
+      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果。
+      // 必须清空 mention.items：回车选择走 mention.items[sel]，留着上一轮条目会插错东西。
+      mention.items = []
+      pop.innerHTML = `<div class="mp-sec">${esc(pickAll.err ? '文件 · 索引失败：' + pickAll.err : '文件 · 全局搜索…')}</div>`
       pop.hidden = false
       return
     }
@@ -424,9 +429,10 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     // IME 组合期（中文键盘敲字母即进入组合）：组合中的 doc 文本是**临时拼音/候选**，
     // 选区也不可信——拿它过滤会把浮窗筛空并按「无结果」关掉，或按选区判定误杀。
     // 组合期一律不判不动（不开、不更新查询、不关），等 compositionend 上屏后的 doc 事务
-    // 走正常判定。compositionStarted（composing>=0）而非 composing（>0）：compositionstart
-    // 先把状态置 0，首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
-    if (cmView.compositionStarted) return
+    // 走正常判定。`composing` 是 CM6 EditorView 的真实组合态字段（旧写法 compositionStarted
+    // 根本不存在 ⇒ 守卫恒为假，查询词跟着组合中的临时文本乱跳）。组合结束由 onCompositionEnd
+    // 再按最终 doc 判定一次，避免末次事务缺失时浮窗停在空查询的旧结果上。
+    if (cmView.composing) return
     if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
     if (mention.open) {
       const between = st.doc.sliceString(mention.anchor, pos)
@@ -438,6 +444,12 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     if (pos > 0 && st.doc.sliceString(pos - 1, pos) === '@') openMentionPopAtCaret()
   }
   function onInputChange() { syncGwSend(); onInputMention() }
+  // IME 组合结束：CM 在 compositionend 后可能不再派发 doc/selection 事务（组合文本已在组合期
+  // 进 doc），此时 @ 查询词仍是组合期旧值 ⇒ 浮窗停在空查询的全量列表。延后一拍按最终 doc 重判。
+  function onCompositionEnd() {
+    if (!cmView) return
+    setTimeout(() => { if (cmView) onInputMention() }, 0)
+  }
 
 export {
   GROUP_MAX,
@@ -463,6 +475,7 @@ export {
   mentionChipIcon,
   mentionItems,
   moveMentionSel,
+  onCompositionEnd,
   onInputChange,
   onInputMention,
   openMentionPopAtCaret,

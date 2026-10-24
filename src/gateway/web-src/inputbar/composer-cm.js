@@ -8,8 +8,11 @@ import { editorApiSetActive, editorCommand, makeEditorFacade } from '../editor/e
 import { surroundExt, wrapKeymap } from '../editor/editor-transactions.js'
 import { edAttImgPlugin } from '../editor/editor-attachments.js'
 import { edTaskPlugin } from '../editor/task-list.js'
+import { edBlockMarkPlugin } from '../editor/block-mark.js'
 import { cmMathExt } from '../editor/cm-math.js'
 import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from './images.js'
+import { decodeQuoteBody, foldQuoteBodies } from '../core/mention-syntax.js'
+import { onCompositionEnd } from './mention.js'
 /* @module inputbar/composer-cm.js */
   // vendor 全局（index.html 先于 app.js 载入，eval 期取值安全；work-cm.js 同款别名）
   const CMG = window.CMLiveMarkdown
@@ -25,13 +28,15 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     { re: /\[插件:([^\]\n]+)\]/g, spec: (m) => ({ kind: 'plugin', name: m[1] }) },
     { re: /\[@(目录|文件):([^\]\n]+)\]/g, spec: (m) => ({ kind: 'path', ptype: m[1] === '目录' ? 'dir' : 'file', name: m[2] }) },
     { re: /\[@引用:([^\]#\n]+?)(?:#L(\d+)-L?(\d+))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'file', file: m[1], l0: m[2], l1: m[3] }) },
-    { re: /\[@引用PDF:([^\]#\n]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'pdf', file: m[1], p0: m[2], p1: m[3] }) },
-    { re: /\[@引用回复:(\d+)\|([^\]\n]*)\]/g, spec: (m) => ({ kind: 'ref', rkind: 'reply', idx: m[1], title: m[2] }) },
+    { re: /\[@引用PDF:([^\]|\n]+?)(?:#p(\d+)(?:-p?(\d+))?)?(?:\|([^\]\n]*))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'pdf', file: m[1], p0: m[2], p1: m[3], bodyEnc: m[4] || '' }) },
+    // 第三段 = 引用原文（百分号编码，折叠形态；见 core/mention-syntax.js foldQuoteBodies）——底栏 doc 存折叠
+    // 形态，chip 里直接渲染原文（用户口径：蓝紫=引用内容，不再显示「引用自…」标签）。
+    { re: /\[@引用回复:(\d+)\|([^\]|\n]*)(?:\|([^\]\n]*))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'reply', idx: m[1], title: m[2], bodyEnc: m[3] || '' }) },
   ]
   // 引用块收口令牌（回复/PDF 原文块结束行）：渲染为空（隐藏），同样原子——原文块在消息里本就整块剥掉只留锚点胶囊
   const CM_TOKEN_CLOSE = /\[\/(引用回复|引用PDF)\]/g
   // 上传附件正文引用 `[名](uploads/x)`：@ 浮窗「上传」组选中后写进底栏的形态。
-  // 它必须是 chip 体系的**成员**（有 ×、原子化），否则退格逐字符删、把整串 md 源码翻出来。
+  // 它必须是 chip 体系的**成员**（原子化），否则退格逐字符删、把整串 md 源码翻出来。
   // 前导 `!` 的是图片（`![名](uploads/x)`），由 edAttImgPlugin 渲成 <img>，此处跳过。
   const CM_ATT_LINK = /\[([^\]\n]+)\]\(uploads\/([^)\s]+)\)/g
 
@@ -79,21 +84,25 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     if (spec.rkind === 'pdf') return `引用自 ${name}${spec.p0 ? ' · 第 ' + spec.p0 + (spec.p1 && spec.p1 !== spec.p0 ? '-' + spec.p1 : '') + ' 页' : ''}`
     return `引用自 ${name}`
   }
-  // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label+×）
+  // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label）。
+  // 2026-10-24 定案：引用件一律无 ×，删除只走「原子跳过 + 退格整块删」（cmAtomic / cmBackspaceChip）。
   function cmChipDom(spec) {
     if (spec.kind === 'att') {
-      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名 + ×（点 × 整块删）
+      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名
       const chip = document.createElement('span')
       chip.className = 'mention ref'
       let url = spec.url
       try { url = decodeURIComponent(url) } catch {}
-      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span><span class="m-x" title="删除">×</span>`
+      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span>`
       return chip
     }
     if (spec.kind === 'ref') {
       const chip = document.createElement('span')
-      chip.className = 'mention ref'
-      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
+      // 有原文 = 折叠形态：蓝紫内容本体（与消息气泡 .mention-chip.m-ref.m-quote 同构）；
+      // 无原文 = 旧/纯锚点令牌：退回来源标签。两者都不再有 ×（删除走原子跳过 + 退格整块删）。
+      const body = decodeQuoteBody(spec.bodyEnc)
+      chip.className = 'mention ref' + (body ? ' m-quote' : '')
+      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(body || cmRefLabel(spec))}</span>`
       return chip
     }
     if (spec.kind === 'session') {
@@ -106,30 +115,9 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
   class CmChipWidget extends CMG.WidgetType {
     constructor(spec, len) { super(); this.spec = spec; this.len = len }
     eq(o) { return o.len === this.len && JSON.stringify(o.spec) === JSON.stringify(this.spec) }
-    // ignoreEvent true：事件交给 widget 自有监听（× 删除），其余冒泡回 CM
+    // ignoreEvent true：点按不触发 CM 的文本选择（删除只走键程的整块退格，chip 内无可点件）
     ignoreEvent() { return true }
-    toDOM() {
-      const chip = cmChipDom(this.spec)
-      chip.addEventListener('mousedown', (e) => {
-        if (!e.target.closest('.m-x')) return
-        e.preventDefault()
-        e.stopPropagation()
-        cmRemoveTokenAt(cmView.posAtDOM(chip))
-      })
-      return chip
-    }
-  }
-
-  function cmRemoveTokenAt(pos) {
-    if (!cmView || cmView.state.readOnly) return
-    // × 落在 chip 的某个 DOM 位置上，向前找包含它的令牌（不再要求恰好 from === pos）
-    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from <= pos && pos < it.to)
-    if (!hit) return
-    const text = cmView.state.doc.toString()
-    let from = cmTokenSpan(hit).from
-    let to = cmTokenSpan(hit).to
-    if (text[to] === ' ') to++ // 连同尾随分隔空格一起删（旧 removeChip 同语义）
-    cmView.dispatch({ changes: { from, to } })
+    toDOM() { return cmChipDom(this.spec) }
   }
 
   // 令牌扫描插件 + 原子化：chip 区间游标进不去、退格整块删（CM atomicRanges 语义）
@@ -140,20 +128,9 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
 
   function cmBuildDeco(view) {
     const doc = view.state.doc
-    const text = doc.toString()
     const items = cmTokenRanges(doc)
     const arr = []
-    // 引用块（回复/PDF）正文行标：锚点令牌行与收口令牌行之间加 .cm-quote-body（正文可见可编辑，
-    // 与旧「原文只在 dataset 里不可见」不同——真所见即所得：用户消息将包含他在编辑器里看到的每一行）
-    for (const it of items) {
-      if (it.close || !it.spec || it.spec.kind !== 'ref' || it.spec.rkind === 'file') continue
-      const closeRe = it.spec.rkind === 'pdf' ? '[/引用PDF]' : '[/引用回复]'
-      const ci = text.indexOf(closeRe, it.to)
-      if (ci < 0) continue
-      for (let n = doc.lineAt(it.to).number + 1; n <= doc.lineAt(ci).number - 1; n++) {
-        arr.push(CMG.Decoration.line({ class: 'cm-quote-body' }).range(doc.line(n).from))
-      }
-    }
+    // 引用原文已在折叠令牌的第三字段里（chip 内渲染），doc 里不再有独立的原文行/收尾行。
     for (const it of items) {
       if (it.close) arr.push(CMG.Decoration.replace({}).range(it.from, it.to))
       else arr.push(CMG.Decoration.replace({ widget: new CmChipWidget(it.spec, it.to - it.from) }).range(it.from, it.to))
@@ -288,6 +265,7 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
         cmCM.mouseSelectingField,
         cmCM.livePreviewPlugin,
         cmCM.markdownStylePlugin,
+        edBlockMarkPlugin, // 块级标记按「标记节点相邻」退化（不整行；列表渲圆点/序号）
         cmCM.mathPlugin,
         cmCM.blockMathField,
         cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
@@ -311,6 +289,8 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     // 聚焦时上报活跃面（work 编辑区同款；活跃面 = 最后聚焦者）。既有 chip/令牌/补全链原样不动。
     makeEditorFacade({ id: 'composer', view: cmView })
     cmView.contentDOM.addEventListener('focus', () => editorApiSetActive('composer'))
+    // IME 组合结束 → 按最终 doc 重判 @ 查询（见 mention.js onCompositionEnd）
+    cmView.contentDOM.addEventListener('compositionend', () => onCompositionEnd())
     // 键/粘贴走 contentDOM **捕获阶段**直挂（不 domEventHandlers）：本 vendor 实测 keymap.of(defaultKeymap)
     // 的 Enter 绑定先于 domEventHandlers 吞键（探针 2026-10-14，np=false 且键程分支未触）——捕获监听先于
     // CM 自身气泡链，true = preventDefault+stopPropagation 阻断 keymap 默认行为。
@@ -339,7 +319,8 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
   function composerSetText(text) {
     if (!cmView || cmView.state.readOnly) return
     const cur = cmView.state.doc.toString()
-    const next = String(text || '')
+    // 恢复草稿/外部注入可能是块形态：底栏 doc 统一为折叠形态（与 composerAppendRef 同口径）
+    const next = foldQuoteBodies(String(text || ''))
     if (cur === next) return
     editorCommand('replaceRange', { from: 0, to: cur.length, text: next }, 'composer')
   }
@@ -351,13 +332,16 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
     editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text + ' ' }, 'composer')
     cmView.focus()
   }
-  // 引用令牌追加（quote.js）：块形态（含原文）单独起行，单行文件引用以空格衔接；光标落块尾 = 接着打字就是给引用的说明
+  // 引用令牌追加（quote.js）：quote.js 产出的是**块形态**（锚点行 + 原文 + 收尾行），底栏 doc 统一存
+  // **折叠形态**（单行、chip 即所见）——落盘/发送时由 serializeInput 还原块形态（见 mention.js）。
+  // 单行文件引用本就是单行令牌，原样以空格衔接。光标落 chip 之后 = 接着打字就是给这条引用的说明。
   function composerAppendRef(token) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
-    const block = String(token).indexOf('\n') >= 0
+    const folded = foldQuoteBodies(String(token))
+    const block = folded.indexOf('\n') >= 0
     const sep = doc.length ? (block ? '\n' : ' ') : ''
-    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + token }, 'composer')
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + folded }, 'composer')
     cmView.focus()
   }
   function composerAppendText(text) {

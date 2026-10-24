@@ -60,7 +60,10 @@ import { refreshCard } from '../engine/registry.js'
         model: inSession
           ? MODEL_CUR.model || data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || ''
           : data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || MODEL_CUR.model,
-        effortLevel: data.effortLevel != null ? String(data.effortLevel) : (saved && saved.effortLevel !== undefined ? saved.effortLevel : undefined),
+        // effortLevel 只认网关真值（settings.json 落盘态）：网关返回 null/缺省 = 未设置 →
+        // undefined（CLI 同源显示默认）。**不回落 localStorage**——陈旧 saved 会让座显报低档
+        // 而 CLI 实际跑默认档（2026-10-24 用户实报「web 显示 low、CLI 是 high」的根因）。
+        effortLevel: data.effortLevel != null ? String(data.effortLevel) : undefined,
       })
       saveModelCur()
     } catch (e) {

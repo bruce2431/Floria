@@ -99,6 +99,9 @@ const PIECES: { file: string; part: number }[] = [
   // CM6 任务列表复选框（2026-10-16 待办 2）：任务行 `- [ ]` 的 TaskMarker 三字符渲成真 <input>，
   // 点击写回源码（toggleTaskLineCM）。依赖 cm-global + editor-transactions（均在上）。
   { file: 'editor/task-list.js', part: 1 },
+  // 块级标记相邻退化（2026-10-24 待办 3）：HeaderMark/ListMark/QuoteMark 按「标记节点」闭区间判定，
+  // 只有相邻才露原文、其余按块隐藏；列表项渲染圆点/序号。两宿主（work-cm / composer-cm）共用本件。
+  { file: 'editor/block-mark.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。
@@ -111,6 +114,12 @@ const PIECES: { file: string; part: number }[] = [
   // JSON Canvas 图形预览（2026-10-13）：wkCvExt 由 work-cm.js 的 wkEdLangExt 在扩展名为 .canvas 时调用，
   // 故须排在 work-cm.js 之后（函数声明提升，序位按依赖就近）。
   { file: 'sidebar/work/work-canvas.js', part: 1 },
+  // Office 只读预览（2026-10-24 待办 4）：xlsx/docx 解包渲染，wkDocRender 由 work-editor.readFile 调用
+  // （函数声明提升，序位按依赖就近；解压依赖页面先加载的 vendor/fflate.js）。
+  { file: 'sidebar/work/work-doc.js', part: 1 },
+  // PDF 预览（2026-10-24）：wkPdfRender/wkPdfClose 由 work-editor.readFile 调用；引擎 vendor
+  // 经动态 import 懒加载（/vendor/pdfjs/），本件只承载工具条/页栈/懒渲染逻辑。
+  { file: 'sidebar/work/work-pdf.js', part: 1 },
   { file: 'sidebar/work/work-editor.js', part: 1 },
   { file: 'sidebar/work/work-rows.js', part: 1 },
   // work「+」新建菜单接入（创建文件/文件夹 + 上传文件/文件夹）+ 行「下载」（2026-10-13）：

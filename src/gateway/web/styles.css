@@ -1081,7 +1081,6 @@ body.kb-open #input-wrap { transition: none; }
 #input-wrap.docked #input-bar { padding-top: 14px; gap: 24px; }
 #input-wrap.docked #cm-host .cm-content { padding-top: 0; }
 /* 引用块正文行（回复/PDF 引用的锚点令牌与收尾令牌之间的可见文本行）：blockquote 同族观感 */
-#cm-host .cm-quote-body { color: var(--text-2); border-left: 2px solid var(--border); padding-left: 6px; margin-left: 10px; }
 /* 底部工具行（dsh .row）：textarea 与工具行 gap 12px；左 .tools / 右 .trailing。
    flex-wrap: nowrap（2026-09-25 根修）：工具行与右侧发送组恒为一行。此前 wrap 让「分行」先于
    「收缩」发生——分行判据是未收缩的 hypothetical main size（basis），min-width:0 那套收缩链
@@ -1348,8 +1347,7 @@ body.kb-open #input-wrap { transition: none; }
 }
 .mention .m-ic svg { width: 16px; height: 16px; }
 .mention .m-nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-.mention .m-x { color: var(--text-3); font-size: 13px; line-height: 1; padding: 0 2px; cursor: pointer; border-radius: 50%; }
-.mention .m-x:hover { color: var(--text); background: var(--active); }
+/* 2026-10-24 定案：引用件不再有 ×（删除统一走原子跳过 + 退格整块删）——.m-x 样式随之退役。 */
 /* 附件文件引用 chip（2026-10-22）：消息气泡内 `.mention-chip.m-att`、编辑器内 `.cm-att-file.mention`
    —— 形 = 类型徽标 + 文件名（与 @ 文件 chip 同族），文件名用正文字体（覆盖 .m-path 的等宽）。 */
 .mention-chip .mc-ic { display: inline-flex; align-items: center; flex: none; margin-right: 5px; }
@@ -1364,6 +1362,12 @@ body.kb-open #input-wrap { transition: none; }
 .mention.ref .m-ic { width: 16px; height: 16px; color: var(--blue); }
 .mention.ref .m-ic svg { width: 16px; height: 16px; }
 .mention.ref .m-nm { max-width: 220px; }
+/* 底栏引用原文（2026-10-24）：chip 内直接是引用的真实文本（蓝紫），与消息气泡 .m-quote 同口径。
+   长引用随输入栏宽度换行（.mention 默认 nowrap/省略号只适合文件名类短标签）。 */
+.mention.ref.m-quote { white-space: normal; }
+.mention.ref.m-quote .m-nm {
+  max-width: none; white-space: pre-wrap; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+}
 /* 2026-10-14 待办 21 根修：chip 族样式去 `.msg` 祖先绑定——mdHtml 渲染器有两个宿主（消息气泡
    .msg 与底栏 md 渲染层 #input-md），样式归渲染器所有而非消息层；绑死 .msg 时渲染层里的
    .mc-ic svg 无任何尺寸约束 → 默认 300×150 放大成巨型黑色星弧盖屏（用户截图实锤）。 */
@@ -1400,8 +1404,30 @@ body.kb-open #input-wrap { transition: none; }
   white-space: nowrap; max-width: 100%;
 }
 /* 目录 / 文件 chip（@ 路径可长）：内层 .mc-t 承担省略号（inline-flex 直挂文本无法 text-overflow） */
-.mention-chip.m-path { max-width: min(100%, 320px); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.mention-chip.m-path .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 会话 chip（2026-10-24）：消息气泡侧与输入栏 `.mention` 同观感——会话图标 + 蓝字、无边框胶囊。
+   发送前后形态一致（此前气泡侧只有裸文本 ⇒ 实报「icon 和蓝色字体都缺失」）。 */
+.mention-chip.m-session {
+  background: transparent; border: none; padding: 0;
+  font-size: inherit; line-height: inherit;
+  color: var(--blue); gap: 4px; max-width: min(100%, 320px);
+}
+.mention-chip.m-session .mc-ic { color: var(--blue); }
+.mention-chip.m-session .mc-ic svg { width: 1em; height: 1em; }
+.mention-chip.m-session .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 路径 / 插件 chip 同步（2026-10-24）：与底栏 `.mention` 完全同口径 = 图标 + 蓝字、无边框、
+   字号随正文（此前气泡侧是等宽灰字裸文本，发送前后 UI 不一致）。 */
+.mention-chip.m-path,
+.mention-chip.m-plugin {
+  background: transparent; border: none; padding: 0;
+  font-family: inherit; font-size: inherit; line-height: inherit;
+  color: var(--blue); gap: 4px; max-width: min(100%, 320px);
+}
+.mention-chip.m-path .mc-ic,
+.mention-chip.m-plugin .mc-ic { color: var(--blue); }
+.mention-chip.m-path .mc-ic svg,
+.mention-chip.m-plugin .mc-ic svg { width: 1em; height: 1em; }
+.mention-chip.m-path .mc-t,
+.mention-chip.m-plugin .mc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ===== 项目选择器 #proj-root（2026-09-02）：初始界面工具行 + 右侧目标项目切换 =====
    外观=dsh .trigger 同族（28px chip）；弹层=cmd-pop 同表面（r12 白底 shadow-lv3，向上弹出）。
@@ -2828,6 +2854,53 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 #work-editor .cm-link-preview { background: var(--float-bg); border-color: var(--border); }
 #work-editor .cm-math-preview-panel { border: 1px solid var(--border); }
 #work-editor .cm-math-source { color: var(--text); }
+/* 源码态底色一律透明（2026-10-24 定案「所有源码态底色都去掉」）：库给每种块/内联源码态配了半透明
+   色底（codeblock 紫 / math 绿 / table·link 蓝 / wikilink 紫 / image 粉），本项目编辑器不需要这类
+   提示色，两个 CM6 宿主统一抹掉。`.cm-math-source-block` 是公式源码的**行装饰**（另一条规则）。 */
+#work-editor .cm-codeblock-source,
+#work-editor .cm-math-source,
+#work-editor .cm-math-source-block,
+#work-editor .cm-table-source,
+#work-editor .cm-link-source,
+#work-editor .cm-wikilink-source,
+#work-editor .cm-image-source,
+#cm-host .cm-codeblock-source,
+#cm-host .cm-math-source,
+#cm-host .cm-math-source-block,
+#cm-host .cm-table-source,
+#cm-host .cm-link-source,
+#cm-host .cm-wikilink-source,
+#cm-host .cm-image-source { background-color: transparent; }
+/* 块级格式标记的**相邻退化**（web-src/editor/block-mark.js）：vendor 按「行内有无光标」显隐
+   （同行落光标就把 `#`/`>`/`-` 全露出来，远离时又把 ListMark 全藏掉），本项目改为按**标记节点**
+   与选区的闭区间相邻判定——只退化标记本身，不整行。
+   `.cm-md-far` = 未相邻（保持预览态）；`.cm-md-src` = 相邻（只露这一段源码）。
+   列表标记再 UI 化：无序 → 原文透明、原位叠圆点（字符宽度与缩进不变）；有序 → 原样露出序号。
+
+   2026-10-24 根因修正：CM6 对**同区间**的 mark 装饰是**嵌套 span**（@codemirror/view
+   `ensureMarks`），vendor 的 `cm-formatting-block` 与本插件的 `cm-md-*` 永远落在两个元素上，
+   因此原`.cm-formatting-block.cm-md-*` 复合选择器一条都不命中——列表点不渲染、同行露 `-`、
+   离开行才整体消失。正确做法：先把 vendor 的按行显隐整类**中和**（恢复普通文本），
+   可见性/UI 只由本插件自己的 class 决定。 */
+#work-editor .cm-formatting-block,
+#work-editor .cm-formatting-block-visible,
+#cm-host .cm-formatting-block,
+#cm-host .cm-formatting-block-visible {
+  font-size: inherit; opacity: 1; color: inherit; font-family: inherit; transition: none;
+}
+#work-editor .cm-md-far,
+#cm-host .cm-md-far { font-size: 0.01em; opacity: 0; }
+#work-editor .cm-md-src,
+#cm-host .cm-md-src { font-size: 1em; opacity: 0.6; }
+#work-editor .cm-list-dot,
+#cm-host .cm-list-dot { position: relative; font-size: 1em; opacity: 1; color: transparent; }
+#work-editor .cm-list-dot::before,
+#cm-host .cm-list-dot::before {
+  content: '•'; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  color: var(--text-2); font-size: 1em; line-height: 1;
+}
+#work-editor .cm-list-num,
+#cm-host .cm-list-num { font-size: 1em; opacity: 1; color: var(--text-2); }
 /* ---------- vendor 令牌桥（2026-10-15，待办4 根治：底栏 #cm-host 的实时预览暗色）----------
    库主题的颜色一律写成 `hsl(var(--muted, 220 14% 96%))` 这种 shadcn 命名，本项目一个都不定义 ⇒
    **浅色回落值在暗色下全数生效**。work 编辑区靠上面那一段逐类覆写挡住了，底栏（#cm-host，2026-10-14
@@ -2941,7 +3014,7 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-ed-body:has(> .wk-ed-cm) { overflow: hidden; }
 
 /* ---------- .canvas 图形预览（2026-10-13，WS2 待办 7；work-canvas.js 渲染） ----------
-   .wk-cv 是 CM6 block replace 装饰的宿主：顶栏（摘要 + 切源码钮）+ SVG 画布。画布手势（单指 pan /
+   .wk-cv 是 CM6 block replace 装饰的宿主：顶栏（摘要 + 切源码钮）+ canvas 画布。画布手势（单指 pan /
    双指捏合 / Ctrl+滚轮缩放）由模块内 JS 处理并 stopPropagation，touch-action: none 让浏览器不抢手势、
    也不让触摸落进 contenteditable。颜色：canvas 自定色走内联 rgba（模块内算），令牌色走本表 class。 */
 .wk-cv { display: flex; flex-direction: column; min-height: 200px; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -2951,21 +3024,43 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-cv-btn { flex: none; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; color: var(--text-2); background: var(--bg); }
 .wk-cv-btn:hover { color: var(--text); background: var(--hover); }
 .wk-cv-open { margin: 0 0 0 8px; padding: 1px 8px; font-size: 11px; vertical-align: middle; } /* 源码态首行行前的小钮 */
-.wk-cv-svg { flex: 1; min-height: 0; width: 100%; display: block; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; }
-.wk-cv-dot { fill: var(--border); opacity: 0.55; }
-.wk-cv-arrow { fill: var(--text-3); }
-.wk-cv-edge { stroke: var(--text-3); stroke-width: 1.5; }
-.wk-cv-elabel { font-size: 11px; fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.wk-cv-glabel { font-size: 12px; font-weight: 600; fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.wk-cv-box { fill: transparent; stroke: var(--border); }
-/* 图形编辑（2026-10-14 待办#2）：节点/组可拖动（grab），拖动中 grabbing；文本框禁原生选择防与拖动抢手势 */
-.wk-cv-drag-node, .wk-cv-drag-grp { cursor: grab; }
-.wk-cv-drag-node .wk-cv-text, .wk-cv-drag-grp .wk-cv-text { user-select: none; -webkit-user-select: none; }
-.wk-cv-dragging, .wk-cv-dragging .wk-cv-drag-node, .wk-cv-dragging .wk-cv-drag-grp { cursor: grabbing; }
-/* PDF 预览（2026-10-14 待办#15）：编辑区内嵌浏览器自带 viewer，撑满编辑区 */
-.wk-ed-pdf { width: 100%; height: 100%; min-height: 320px; display: flex; }
-.wk-ed-pdf iframe { flex: 1; width: 100%; height: 100%; border: 0; border-radius: 10px; background: var(--bg); }
-.wk-cv-text { color: var(--text); font-size: 12px; line-height: 1.5; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* ComfyUI 同构：stage 是画布定位锚，canvas 画全部图形，overlay 为**兄弟**层（只放编辑控件）。
+   手势只绑 canvas，DOM 覆盖层不在捕获路径上（这就是「编辑源码」按钮此前被吞 click 的结构解）。 */
+.wk-cv-stage { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; }
+.wk-cv-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.wk-cv-dragging .wk-cv-canvas { cursor: grabbing; }
+.wk-cv-overlay { position: absolute; inset: 0; pointer-events: none; }
+.wk-cv-overlay > * { pointer-events: auto; }
+.wk-cv-editing .wk-cv-canvas { pointer-events: none; cursor: default; }
+.wk-cv-edit { position: absolute; box-sizing: border-box; margin: 0; padding: 8px 10px; border: 2px solid var(--blue); border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.5 var(--mono, ui-monospace, monospace); resize: none; outline: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+/* PDF 预览（2026-10-24，pdf.js 真实渲染，work-pdf.js）：38px 工具条 + 竖向页栈；
+   结构与 dsh `ui-sidebar-documentpreview/pdf` 同口径（懒渲染 / 文本层 / 适宽与固定缩放）。 */
+.wk-ed-body:has(> .wk-pdf) { overflow: hidden; }
+.wk-pdf { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+.wk-pdf-bar { flex: none; display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 10px; border-bottom: 0.5px solid var(--border); background: var(--bg); font-size: 12px; color: var(--text-2); }
+.wk-pdf-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
+.wk-pdf-total { flex: none; color: var(--text-2); }
+.wk-pdf-grow { flex: 1; }
+.wk-pdf-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; line-height: 1; cursor: pointer; }
+.wk-pdf-btn:hover { background: var(--hover); color: var(--text); }
+.wk-pdf-btn.on { background: var(--active); color: var(--text); }
+.wk-pdf-num { flex: none; width: 46px; height: 24px; padding: 0 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; text-align: center; }
+.wk-pdf-of { flex: none; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.wk-pdf-sep { flex: none; width: 1px; height: 16px; margin: 0 4px; background: var(--border); }
+.wk-pdf-pct { flex: none; min-width: 38px; color: var(--text-2); font-variant-numeric: tabular-nums; text-align: right; }
+.wk-pdf-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px; background: var(--field-2); touch-action: pan-x pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.wk-pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.wk-pdf-page { position: relative; flex: none; max-width: 100%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
+.wk-pdf-ph { width: 100%; min-width: 240px; min-height: 320px; }
+.wk-pdf-surface { position: relative; line-height: 0; }
+.wk-pdf-canvas { display: block; max-width: 100%; height: auto; }
+/* pdf.js 文本层（可选择文本）：span 位置由引擎写入，--total-scale-factor 由 work-pdf.js 逐页设置 */
+.wk-pdf-text { --scale-round-x: 1px; --scale-round-y: 1px; position: absolute; inset: 0; overflow: hidden; line-height: 1; opacity: 1; text-align: initial; text-size-adjust: none; -webkit-text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 2; }
+.wk-pdf-text :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.wk-pdf-text span.markedContent { top: 0; height: 0; }
+.wk-pdf-text span[role="img"] { user-select: none; }
+.wk-pdf-text ::selection { background: rgba(77, 107, 254, 0.28); }
+.wk-pdf-text .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: -1; cursor: default; user-select: none; }
 .wk-cv-empty { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 12.5px; color: var(--text-3); text-align: center; background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; }
 .wk-cv-bad { color: var(--danger-fg); }
 
@@ -2982,3 +3077,42 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-ed-cm .cm-tooltip-autocomplete ul li[aria-selected] { background: var(--hover-ink, var(--hover)); color: var(--text); }
 .wk-ed-cm .cm-completionLabel { color: var(--text); }
 .wk-ed-cm .cm-completionDetail { color: var(--text-3); font-style: normal; }
+
+/* ===== work 文档预览（2026-10-24 待办 4：xlsx/docx 只读）=====
+   UI 口径对齐 dsh（packages/client/ui-sidebar-documentpreview）：Excel = 顶部文件条 + 行列表头网格 +
+   底部工作表标签；Word = 居中纸张页。配色全走项目令牌，日夜随动。 */
+.wk-ed-body:has(> .wk-doc) { overflow: hidden; }
+.wk-doc { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
+.wk-doc-bar { flex: none; display: flex; align-items: baseline; gap: 8px; padding: 2px 2px 0; font-size: 12px; color: var(--text-3); }
+.wk-doc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-weight: 500; }
+.wk-doc-meta { flex: none; }
+.wk-doc-note { padding: 6px 10px; font-size: 11.5px; color: var(--text-3); background: var(--hover); border-radius: 6px; }
+.wk-doc-grid { flex: 1; min-height: 0; overflow: auto; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; }
+.wk-doc-table { border-collapse: separate; border-spacing: 0; font-size: 12px; color: var(--text); }
+.wk-doc-table th, .wk-doc-table td { border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); padding: 3px 8px; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: middle; }
+.wk-doc-ch, .wk-doc-rh, .wk-doc-corner { position: sticky; z-index: 1; background: var(--hover); color: var(--text-3); font-weight: 500; text-align: center; font-size: 11px; }
+.wk-doc-ch, .wk-doc-corner { top: 0; }
+.wk-doc-ch { min-width: 46px; }
+.wk-doc-rh, .wk-doc-corner { left: 0; }
+.wk-doc-corner { z-index: 2; }
+.wk-doc-merged { background: var(--hover); font-weight: 500; }
+.wk-doc-tabs { flex: none; display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
+.wk-doc-tab { flex: none; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text-2); font-size: 12px; }
+.wk-doc-tab:hover { background: var(--hover); color: var(--text); }
+.wk-doc-tab.on { background: var(--hover-ink, var(--hover)); color: var(--text); border-color: var(--text-3); }
+.wk-doc-docx { align-items: center; }
+.wk-doc-page { flex: 1; min-height: 0; overflow: auto; width: 100%; max-width: 760px; padding: 40px 48px; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; color: var(--text); font-size: 14px; line-height: 1.75; }
+.wk-doc-page p { margin: 0 0 0.6em; }
+.wk-doc-page p:last-child { margin-bottom: 0; }
+.wk-doc-li { position: relative; padding-left: 1.2em; margin: 0 0 0.4em; }
+.wk-doc-li::before { content: '•'; position: absolute; left: 0.3em; color: var(--text-3); }
+.wk-doc-h1 { font-size: 1.7em; font-weight: 600; margin: 0.9em 0 0.4em; }
+.wk-doc-h2 { font-size: 1.45em; font-weight: 600; margin: 0.85em 0 0.35em; }
+.wk-doc-h3 { font-size: 1.25em; font-weight: 600; margin: 0.8em 0 0.3em; }
+.wk-doc-h4 { font-size: 1.1em; font-weight: 600; margin: 0.75em 0 0.3em; }
+.wk-doc-h5 { font-size: 1em; font-weight: 600; margin: 0.7em 0 0.25em; }
+.wk-doc-h6 { font-size: 0.95em; font-weight: 600; margin: 0.7em 0 0.25em; color: var(--text-2); }
+.wk-doc-page > :first-child { margin-top: 0; }
+.wk-doc-dtable { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 13px; }
+.wk-doc-dtable td { border: 1px solid var(--border); padding: 4px 8px; vertical-align: top; }
+.wk-doc-dtable p { margin: 0; }

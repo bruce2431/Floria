@@ -27,6 +27,7 @@ async function segmentedCommandPermissionResult(
     input: z.infer<typeof BashTool.inputSchema>,
   ) => Promise<PermissionResult>,
   checkers: CommandIdentityCheckers,
+  allowAllBash: boolean,
 ): Promise<PermissionResult> {
   // Check for multiple cd commands across all segments
   const cdCommands = segments.filter(segment => {
@@ -67,7 +68,8 @@ async function segmentedCommandPermissionResult(
         }
       }
     }
-    if (hasCd && hasGit) {
+    // allowAllBash = settings 显式 `Bash(*)`：全量放行已覆盖本守卫，不再额外询问（同 bashPermissions）。
+    if (hasCd && hasGit && !allowAllBash) {
       const decisionReason = {
         type: 'other' as const,
         reason:
@@ -185,6 +187,7 @@ export async function checkCommandOperatorPermissions(
   ) => Promise<PermissionResult>,
   checkers: CommandIdentityCheckers,
   astRoot: Node | null | typeof PARSE_ABORTED,
+  allowAllBash: boolean,
 ): Promise<PermissionResult> {
   const parsed =
     astRoot && astRoot !== PARSE_ABORTED
@@ -198,6 +201,7 @@ export async function checkCommandOperatorPermissions(
     bashToolHasPermissionFn,
     checkers,
     parsed,
+    allowAllBash,
   )
 }
 
@@ -212,6 +216,7 @@ async function bashToolCheckCommandOperatorPermissions(
   ) => Promise<PermissionResult>,
   checkers: CommandIdentityCheckers,
   parsed: IParsedCommand,
+  allowAllBash: boolean,
 ): Promise<PermissionResult> {
   // 1. Check for unsafe compound commands (subshells, command groups).
   const tsAnalysis = parsed.getTreeSitterAnalysis()

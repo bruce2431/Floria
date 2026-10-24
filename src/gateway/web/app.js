@@ -140,6 +140,68 @@
     return `<svg class="file-ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3.2" fill="${color}"/><text x="8" y="11.35" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="${size}" font-weight="700" fill="#fff">${label}</text></svg>`
   }
 
+  // ---------- dsh FileTypeIcon 移植（2026-10-24）：文件树/文档预览的分类字形 ----------
+  // 抄自 dsh ui-primitives `FileTypeIcon.tsx`（28 视框、彩色文件页 + 白色分类标记），色值取
+  // design-platform.css 的 static 色板；分类判据同样先「文件名」再「扩展名」，未识别归 other。
+  // 与上方 fileIcon（胶囊用的字母徽标）并存：前者=文件树/预览头，后者=消息内联 chip。
+  const WK_FT_COLOR = {
+    code: 'rgb(65,118,230)', html: 'rgb(65,118,230)', markdown: 'rgb(65,118,230)',
+    excel: 'rgb(34,197,94)', folder: 'rgb(247,173,49)',
+    image: 'rgb(139,118,246)', video: 'rgb(139,118,246)',
+    other: 'rgb(207,211,214)', pdf: 'rgb(236,19,19)',
+    ppt: 'rgb(245,158,11)', word: 'rgb(86,134,254)',
+  }
+  const WK_FT_EXT = {
+    csv: 'excel', tsv: 'excel', xls: 'excel', xlsx: 'excel', xlsm: 'excel', xlsb: 'excel', ods: 'excel', numbers: 'excel',
+    html: 'html', htm: 'html',
+    png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', svg: 'image', webp: 'image', avif: 'image', bmp: 'image', ico: 'image', tif: 'image', tiff: 'image', heic: 'image', heif: 'image',
+    md: 'markdown', mdx: 'markdown', markdown: 'markdown',
+    pdf: 'pdf',
+    ppt: 'ppt', pptx: 'ppt', key: 'ppt',
+    mp4: 'video', mov: 'video', m4v: 'video', webm: 'video', mkv: 'video', avi: 'video', mpg: 'video', mpeg: 'video',
+    doc: 'word', docx: 'word', rtf: 'word', odt: 'word', pages: 'word',
+    js: 'code', mjs: 'code', cjs: 'code', ts: 'code', tsx: 'code', jsx: 'code', py: 'code', go: 'code', rs: 'code', java: 'code',
+    c: 'code', h: 'code', cpp: 'code', cc: 'code', hpp: 'code', cs: 'code', rb: 'code', php: 'code', swift: 'code', kt: 'code',
+    sh: 'code', bash: 'code', zsh: 'code', ps1: 'code', lua: 'code', sql: 'code', r: 'code', vue: 'code', svelte: 'code', astro: 'code',
+    css: 'code', scss: 'code', sass: 'code', less: 'code', json: 'code', jsonc: 'code', yml: 'code', yaml: 'code', toml: 'code', xml: 'code',
+    tex: 'code', bib: 'code', canvas: 'code',
+  }
+  const WK_FT_NAME = { readme: 'markdown', changelog: 'markdown', contributing: 'markdown' }
+  const WK_FT_BODY = 'M8.48924 28H19.5108C21.6479 28 22.7165 28 23.5594 27.6509C24.6833 27.1853 25.5762 26.2924 26.0417 25.1685C26.3909 24.3256 26.3909 23.257 26.3909 21.1199V8.79443C26.3909 8.32877 26.3909 8.09593 26.3471 7.87507C26.2887 7.58058 26.173 7.30042 26.0067 7.05048C25.882 6.86303 25.7177 6.69799 25.3893 6.36792L20.0611 1.01354C19.7304 0.681235 19.5651 0.515081 19.3769 0.38885C19.126 0.220541 18.8443 0.103463 18.5481 0.0443412C18.3259 0 18.0915 0 17.6226 0H8.48924C6.35209 0 5.28351 0 4.4406 0.349145C3.31672 0.814671 2.4238 1.70759 1.95828 2.83147C1.60913 3.67438 1.60913 4.74296 1.60913 6.88011V21.1199C1.60913 23.257 1.60913 24.3256 1.95828 25.1685C2.4238 26.2924 3.31672 27.1853 4.4406 27.6509C5.28351 28 6.35209 28 8.48924 28Z'
+  const WK_FT_FOLD = 'M26.3909 7.37445L19.0525 0V3.77445C19.0525 4.89271 19.0525 5.45184 19.2352 5.89289C19.4788 6.48096 19.946 6.94818 20.5341 7.19176C20.9751 7.37445 21.5342 7.37445 22.6525 7.37445H26.3909Z'
+  const WK_FT_FOLDER = 'M2.80078 10.2112C2.80078 9.52802 2.80078 9.18642 2.85314 8.866C2.98648 8.05 3.36942 7.29538 3.94925 6.70595C4.17694 6.4745 4.45264 6.2728 5.00404 5.86939C5.29197 5.65874 5.43594 5.55342 5.58711 5.46632C5.97089 5.24521 6.39638 5.10618 6.83667 5.05803C7.01011 5.03906 7.18849 5.03906 7.54524 5.03906H11.6543C12.4669 5.03906 12.8732 5.03906 13.2599 5.13697C13.3882 5.16945 13.5143 5.20986 13.6375 5.25795C14.0091 5.40294 14.3398 5.63902 15.0012 6.1112L16.2632 7.01224C16.5526 7.21881 16.6972 7.3221 16.8598 7.38553C16.9137 7.40657 16.9689 7.42425 17.025 7.43846C17.1942 7.4813 17.372 7.4813 17.7275 7.4813H19.8008C22.0506 7.4813 23.1755 7.4813 23.9641 8.05425C24.2188 8.23928 24.4428 8.46326 24.6278 8.71794C25.2008 9.50654 25.2008 10.6315 25.2008 12.8813V18.7283C25.2008 20.9781 25.2008 22.1031 24.6278 22.8917C24.4428 23.1463 24.2188 23.3703 23.9641 23.5554C23.1755 24.1283 22.0506 24.1283 19.8008 24.1283H8.20077C5.95094 24.1283 4.82602 24.1283 4.03743 23.5554C3.78274 23.3703 3.55877 23.1463 3.37373 22.8917C2.80078 22.1031 2.80078 20.9781 2.80078 18.7283V10.2112Z'
+  const WK_FT_MARKS = {
+    code: '<path d="M10.0053 13.126L7.0236 16.3788C6.96052 16.4476 6.96052 16.5532 7.0236 16.622L10.0053 19.8748" stroke="currentColor" stroke-width="1.35"/><path d="M17.9941 13.126L20.9759 16.3788C21.039 16.4476 21.039 16.5532 20.9759 16.622L17.9941 19.8748" stroke="currentColor" stroke-width="1.35"/><path d="M15.2652 12.957L12.7344 20.0433" stroke="currentColor" stroke-width="1.35"/>',
+    excel: '<path d="M14 11.5H11.4C10.5599 11.5 10.1399 11.5 9.81901 11.6635C9.53677 11.8073 9.3073 12.0368 9.16349 12.319C9 12.6399 9 13.0599 9 13.9V16.5M14 11.5H16.6C17.4401 11.5 17.8601 11.5 18.181 11.6635C18.4632 11.8073 18.6927 12.0368 18.8365 12.319C19 12.6399 19 13.0599 19 13.9V16.5M14 11.5V21.5M14 21.5H16.6C17.4401 21.5 17.8601 21.5 18.181 21.3365C18.4632 21.1927 18.6927 20.9632 18.8365 20.681C19 20.3601 19 19.9401 19 19.1V16.5M14 21.5H11.4C10.5599 21.5 10.1399 21.5 9.81901 21.3365C9.53677 21.1927 9.3073 20.9632 9.16349 20.681C9 20.3601 9 19.9401 9 19.1V16.5M19 16.5H9" stroke="currentColor" stroke-width="1.2"/>',
+    html: '<path fill-rule="evenodd" clip-rule="evenodd" d="M13.9994 9.68298C17.212 9.68298 19.8167 12.2872 19.8168 15.4997C19.8168 18.7123 17.2121 21.3171 13.9994 21.3171C10.7869 21.3169 8.18274 18.7122 8.18274 15.4997C8.1829 12.2873 10.787 9.68315 13.9994 9.68298ZM9.26213 16.0247C9.47025 17.9241 10.7936 19.4876 12.5639 20.0463C12.42 19.7977 12.2952 19.5152 12.1879 19.2116C11.885 18.3541 11.693 17.2434 11.6424 16.0247H9.26213ZM16.3565 16.0247C16.3059 17.2434 16.1145 18.3542 15.8116 19.2116C15.7044 19.5151 15.5788 19.7971 15.435 20.0456C17.2054 19.487 18.5293 17.9242 18.7374 16.0247H16.3565ZM12.6938 16.0247C12.7439 17.1459 12.9212 18.1334 13.1784 18.8616C13.332 19.2962 13.503 19.61 13.6686 19.805C13.834 19.9996 13.9473 20.0256 13.9994 20.0258C14.0514 20.0258 14.1651 20.0002 14.331 19.805C14.4966 19.61 14.6676 19.2962 14.8211 18.8616C15.0784 18.1334 15.2557 17.1459 15.3058 16.0247H12.6938ZM13.9994 10.733C13.9473 10.7331 13.834 10.7598 13.6686 10.9545C13.503 11.1494 13.3319 11.4633 13.1784 11.8978C12.903 12.6777 12.7188 13.7545 12.6849 14.9747H15.3147C15.2808 13.7545 15.0966 12.6777 14.8211 11.8978C14.6676 11.4633 14.4965 11.1494 14.331 10.9545C14.1651 10.7593 14.0514 10.733 13.9994 10.733ZM15.5888 11.0051C15.6701 11.1756 15.7444 11.3576 15.8116 11.5478C16.1343 12.4613 16.3308 13.6619 16.3647 14.9747H18.7374C18.5352 13.1307 17.2817 11.6036 15.5888 11.0051ZM12.4101 11.0051C10.7174 11.6037 9.46428 13.1308 9.26213 14.9747H11.6349C11.6688 13.6619 11.8652 12.4613 12.1879 11.5478C12.2551 11.3577 12.3288 11.1756 12.4101 11.0051Z" fill="currentColor"/>',
+    image: '<path d="M10.4212 15.9204C10.5756 15.6558 10.9579 15.6558 11.1123 15.9204L13.6493 20.2696C13.8048 20.5362 13.6125 20.8711 13.3037 20.8711H8.22974C7.92102 20.8711 7.72868 20.5362 7.88423 20.2696L10.4212 15.9204Z" fill="currentColor"/><path d="M15.4981 13.186C15.6505 12.9117 16.0451 12.9117 16.1975 13.186L20.1368 20.2769C20.2849 20.5435 20.0922 20.8711 19.7872 20.8711H11.9084C11.6034 20.8711 11.4107 20.5435 11.5588 20.2769L15.4981 13.186Z" fill="currentColor"/><path d="M11.8603 11.3997C11.8603 12.286 11.1418 13.0045 10.2555 13.0045C9.36924 13.0045 8.65076 12.286 8.65076 11.3997C8.65076 10.5134 9.36924 9.79492 10.2555 9.79492C11.1418 9.79492 11.8603 10.5134 11.8603 11.3997Z" fill="currentColor"/>',
+    markdown: '<path d="M8.7588 19.5V14.6H9.8998L11.9298 17.932H11.3278L13.3018 14.6H14.4428L14.4568 19.5H13.1828L13.1688 16.539H13.3858L11.9088 19.017H11.2928L9.7738 16.539H10.0398V19.5H8.7588ZM15.4375 19.5V14.6H17.7545C18.2958 14.6 18.7718 14.7003 19.1825 14.901C19.5932 15.1017 19.9128 15.384 20.1415 15.748C20.3748 16.112 20.4915 16.546 20.4915 17.05C20.4915 17.5493 20.3748 17.9833 20.1415 18.352C19.9128 18.716 19.5932 18.9983 19.1825 19.199C18.7718 19.3997 18.2958 19.5 17.7545 19.5H15.4375ZM16.8235 18.394H17.6985C17.9785 18.394 18.2212 18.3427 18.4265 18.24C18.6365 18.1327 18.7998 17.9787 18.9165 17.778C19.0332 17.5727 19.0915 17.33 19.0915 17.05C19.0915 16.7653 19.0332 16.5227 18.9165 16.322C18.7998 16.1213 18.6365 15.9697 18.4265 15.867C18.2212 15.7597 17.9785 15.706 17.6985 15.706H16.8235V18.394Z" fill="currentColor"/>',
+    pdf: '<path d="M6.80616 19.5V14.6H9.04616C9.49416 14.6 9.87916 14.6723 10.2012 14.817C10.5278 14.9617 10.7798 15.1717 10.9572 15.447C11.1345 15.7177 11.2232 16.0397 11.2232 16.413C11.2232 16.7817 11.1345 17.1013 10.9572 17.372C10.7798 17.6427 10.5278 17.8527 10.2012 18.002C9.87916 18.1467 9.49416 18.219 9.04616 18.219H7.57616L8.19216 17.617V19.5H6.80616ZM8.19216 17.764L7.57616 17.127H8.96216C9.2515 17.127 9.46616 17.064 9.60616 16.938C9.75083 16.812 9.82316 16.637 9.82316 16.413C9.82316 16.1843 9.75083 16.007 9.60616 15.881C9.46616 15.755 9.2515 15.692 8.96216 15.692H7.57616L8.19216 15.055V17.764ZM11.8989 19.5V14.6H14.2159C14.7573 14.6 15.2333 14.7003 15.6439 14.901C16.0546 15.1017 16.3743 15.384 16.6029 15.748C16.8363 16.112 16.9529 16.546 16.9529 17.05C16.9529 17.5493 16.8363 17.9833 16.6029 18.352C16.3743 18.716 16.0546 18.9983 15.6439 19.199C15.2333 19.3997 14.7573 19.5 14.2159 19.5H11.8989ZM13.2849 18.394H14.1599C14.4399 18.394 14.6826 18.3427 14.8879 18.24C15.0979 18.1327 15.2613 17.9787 15.3779 17.778C15.4946 17.5727 15.5529 17.33 15.5529 17.05C15.5529 16.7653 15.4946 16.5227 15.3779 16.322C15.2613 16.1213 15.0979 15.9697 14.8879 15.867C14.6826 15.7597 14.4399 15.706 14.1599 15.706H13.2849V18.394ZM17.6821 19.5V14.6H21.5251V15.671H19.0681V19.5H17.6821ZM18.9701 17.82V16.749H21.2311V17.82H18.9701Z" fill="currentColor"/>',
+    ppt: '<path d="M11.0132 20.5V13.5H14.2132C14.8532 13.5 15.4032 13.6033 15.8632 13.81C16.3299 14.0167 16.6899 14.3167 16.9432 14.71C17.1966 15.0967 17.3232 15.5567 17.3232 16.09C17.3232 16.6167 17.1966 17.0733 16.9432 17.46C16.6899 17.8467 16.3299 18.1467 15.8632 18.36C15.4032 18.5667 14.8532 18.67 14.2132 18.67H12.1132L12.9932 17.81V20.5H11.0132ZM12.9932 18.02L12.1132 17.11H14.0932C14.5066 17.11 14.8132 17.02 15.0132 16.84C15.2199 16.66 15.3232 16.41 15.3232 16.09C15.3232 15.7633 15.2199 15.51 15.0132 15.33C14.8132 15.15 14.5066 15.06 14.0932 15.06H12.1132L12.9932 14.15V18.02Z" fill="currentColor"/>',
+    video: '<path d="M17.5 14.634C18.1667 15.0189 18.1667 15.9811 17.5 16.366L11.5 19.8301C10.8333 20.215 10 19.7339 10 18.9641L10 12.0359C10 11.2661 10.8333 10.785 11.5 11.1699L17.5 14.634Z" fill="currentColor"/>',
+    word: '<path d="M10.5118 20.5L8.24179 13.5H10.2818L12.1918 19.56H11.1618L13.1718 13.5H14.9918L16.8918 19.56H15.9018L17.8718 13.5H19.7618L17.4918 20.5H15.3718L13.7518 15.35H14.3218L12.6318 20.5H10.5118Z" fill="currentColor"/>',
+  }
+  function wkFileType(name) {
+    const base = String(name == null ? '' : name).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
+    const ext = fileExt(base)
+    return WK_FT_NAME[base.toLowerCase()] || WK_FT_EXT[ext] || 'other'
+  }
+  // size 缺省 16（文件树/预览头行高）；folder=true 时用 dsh 的文件夹字形（同色板 amber）。
+  function fileTypeIcon(name, size, folder) {
+    const px = size || 16
+    const t = folder ? 'folder' : wkFileType(name)
+    const color = WK_FT_COLOR[t] || WK_FT_COLOR.other
+    if (t === 'folder') {
+      return `<svg class="file-type-ic" width="${px}" height="${px}" viewBox="0 0 28 28" fill="none" aria-hidden="true" style="color:${color}"><path d="${WK_FT_FOLDER}" fill="currentColor"/><g color="rgb(255,255,255)" transform="translate(14 13.0693) scale(1.12) translate(-14 -13.0693)"><path d="M6.31445 13.0693H21.6893" stroke="currentColor" stroke-width="2.38"/></g></svg>`
+    }
+    const mark = WK_FT_MARKS[t] || ''
+    const scale = t === 'markdown' || t === 'pdf' || t === 'ppt' || t === 'word'
+      ? 'translate(14 16) scale(1.22) translate(-14 -16)'
+      : 'translate(14 16) scale(1.12) translate(-14 -16)'
+    const fold = t === 'other' ? 'rgb(178,183,188)' : 'rgba(255,255,255,.7)'
+    return `<svg class="file-type-ic" width="${px}" height="${px}" viewBox="0 0 28 28" fill="none" aria-hidden="true" style="color:${color}"><path d="${WK_FT_BODY}" fill="currentColor"/><path d="${WK_FT_FOLD}" fill="${fold}"/>${mark ? `<g color="rgb(255,255,255)" transform="${scale}">${mark}</g>` : ''}</svg>`
+  }
+
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
   // 首次进入管理视图 fetch，刷新按钮 force 重新拉取；失败显示错误 + 重试（不回落假数据）。
@@ -192,7 +254,10 @@
         model: inSession
           ? MODEL_CUR.model || data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || ''
           : data.activeModel || (data.model ? String(data.model) : '') || (saved && saved.model) || MODEL_CUR.model,
-        effortLevel: data.effortLevel != null ? String(data.effortLevel) : (saved && saved.effortLevel !== undefined ? saved.effortLevel : undefined),
+        // effortLevel 只认网关真值（settings.json 落盘态）：网关返回 null/缺省 = 未设置 →
+        // undefined（CLI 同源显示默认）。**不回落 localStorage**——陈旧 saved 会让座显报低档
+        // 而 CLI 实际跑默认档（2026-10-24 用户实报「web 显示 low、CLI 是 high」的根因）。
+        effortLevel: data.effortLevel != null ? String(data.effortLevel) : undefined,
       })
       saveModelCur()
     } catch (e) {
@@ -544,13 +609,19 @@ function setConnUp(v) { connUp = v }
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
   // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
+  // 2026-10-24 用户定案「发送后的引用 UI 要与底栏一致」：气泡侧三种 chip（路径/会话/插件）
+  // 一律 = 图标 + 蓝字（与底栏 .mention 同构），不再有边框胶囊/等宽灰字/无图标形态。
   function mentionChipHtml(kind, name, ptype) {
     if (kind === 'path') {
       const label = '@' + name
-      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
+      const icon = ptype === 'dir' ? I.dshFolder : fileIcon(name)
+      return `<span class="mention-chip m-path" title="${label}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
     }
-    const label = kind === 'session' ? splitSessionToken(name).title : name
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
+    if (kind === 'session') {
+      const title = splitSessionToken(name).title
+      return `<span class="mention-chip m-session"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${title}</span></span>`
+    }
+    return `<span class="mention-chip m-plugin"><span class="mc-ic">${I.dshPlugin}</span><span class="mc-t">${name}</span></span>`
   }
 
   // 引用原文编码（2026-10-21）：原文要挤进令牌的一行字段，必须先抹掉会被 mdInline 预处理的记号
@@ -565,6 +636,40 @@ function setConnUp(v) { connUp = v }
     const raw = String(s == null ? '' : s)
     if (!raw) return ''
     try { return decodeURIComponent(raw) } catch (_) { return raw }
+  }
+
+  // ---------- 引用原文块 ⇄ 折叠令牌（唯一真源）----------
+  // 块形态（模型侧/旧消息）：`[@引用回复:idx|标题]\n原文\n[/引用回复]`。
+  // 折叠形态（渲染侧/底栏 doc）：`[@引用回复:idx|标题|<百分号编码原文>]`——单行，可整体装饰成一枚胶囊。
+  // 底栏 doc 存折叠形态（chip 即所见），**发送时 unfoldQuoteBodies 还原块形态**，模型读到的仍是原文。
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]([\s\S]*?)\[\/引用回复\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])([\s\S]*?)\[\/引用PDF\]/g
+  const QUOTE_REPLY_FOLDED_RE = /\[@引用回复:(\d+)\|([^\]|\n]*)\|([^\]\n]*)\]/g
+  const QUOTE_PDF_FOLDED_RE = /\[@引用PDF:([^\]|]+)\|([^\]\n]*)\]/g
+  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获；
+  // 收尾之后的用户话术若与收尾同行，补一个换行避免与胶囊黏在同一行。
+  function foldQuoteBodies(text) {
+    const clean = (body) => String(body == null ? '' : body).replace(/^\s+|\s+$/g, '')
+    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(clean(body)) + ']')
+    const tailBreak = (whole, offset, match) => {
+      const rest = String(whole).slice(offset + match.length)
+      return rest && !rest.startsWith('\n') ? '\n' : ''
+    }
+    return String(text || '')
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
+  }
+  // 折叠 → 块（发送口）：底栏 doc 的折叠胶囊在这里还原成模型可读的原文块。
+  function unfoldQuoteBodies(text) {
+    return String(text || '')
+      .replace(QUOTE_REPLY_FOLDED_RE, (m, idx, title, bodyEnc) => {
+        const body = decodeQuoteBody(bodyEnc)
+        return body ? `[@引用回复:${idx}|${title}]\n${body}\n[/引用回复]` : m
+      })
+      .replace(QUOTE_PDF_FOLDED_RE, (m, token, bodyEnc) => {
+        const body = decodeQuoteBody(bodyEnc)
+        return body ? `${token}\n${body}\n[/引用PDF]` : m
+      })
   }
 
   // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
@@ -6185,6 +6290,40 @@ function edCmg() {
     }
   }, { decorations: (v) => v.decorations })
 
+
+  const BLOCK_MARKS = new Set(['ListMark', 'HeaderMark', 'QuoteMark'])
+
+  const edBlockMarkPlugin = edCmg().ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view) }
+    update(u) { if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view) }
+    build(view) {
+      const CM = edCmg()
+      const st = view.state
+      const isDrag = st.field(CM.mouseSelectingField, false)
+      const deco = []
+      CM.syntaxTree(st).iterate({
+        enter: (node) => {
+          if (!BLOCK_MARKS.has(node.name)) return
+          // 退化判据 = 选区闭区间与标记节点相交（光标贴标记两侧/选中它），**不是整行**：
+          // 行内其它位置落光标时，标记仍按预览形态渲染（同 task-list 的 `[ ]` 口径）。
+          const touched = st.selection.ranges.some((r) => r.from <= node.to && r.to >= node.from)
+          if (touched && !isDrag) {
+            deco.push(CM.Decoration.mark({ class: 'cm-md-src' }).range(node.from, node.to))
+            return
+          }
+          if (node.name === 'ListMark') {
+            // 无序标记渲圆点；有序标记（`1.` / `1)`）原文即序号，直接以序号形态露出
+            const dot = /^[-*+]$/.test(st.sliceDoc(node.from, node.to))
+            deco.push(CM.Decoration.mark({ class: dot ? 'cm-md-far cm-list-dot' : 'cm-md-far cm-list-num' }).range(node.from, node.to))
+            return
+          }
+          deco.push(CM.Decoration.mark({ class: 'cm-md-far' }).range(node.from, node.to))
+        },
+      })
+      return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
+    }
+  }, { decorations: (v) => v.decorations })
+
   // ---------- work 模式侧栏（Prism 式） ----------
   // 状态源 = engine/state.js 的 sbMode / projects / workspace / workProj / workFile / wkMainTab / wkAssist /
   // wkPreview / wkPvTab / wkPrevW（localStorage floria-ui-v1 持久化，见 saveWork/loadWork）。视图浮层开关
@@ -6998,13 +7137,13 @@ function edCmg() {
         const open = wkOpen.has(p)
         h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
-        h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
+        h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${fileTypeIcon(n.name, 16, true)}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
         if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
         h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
+        h += `<span class="wk-chec"></span><span class="wk-fic">${fileTypeIcon(n.name)}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
       }
     }
@@ -7332,6 +7471,7 @@ function edCmg() {
         CM.mouseSelectingField,
         CM.livePreviewPlugin,
         CM.markdownStylePlugin,
+        edBlockMarkPlugin, // 块级标记按「标记节点相邻」退化（不整行；列表渲圆点/序号）
         CM.mathPlugin,
         CM.blockMathField,
         cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
@@ -7645,7 +7785,6 @@ function edCmg() {
   // ---------- 相机（平移/缩放；模块级单份：docChanged 重建 widget 时保留视口，换文件重 fit） ----------
   let wkCvCam = { k: 1, tx: 0, ty: 0, fit: false }
   let wkCvLastFile = ''
-  let wkCvSeq = 0 // defs id 去重后缀（换装饰的瞬间新旧 widget 短暂共存）
   // 包围盒适配：k 帽 [0.05, 4]，内容居中。cw/ch = 可用视口尺寸。
   function wkCvFit(nodes, cw, ch) {
     if (!nodes.length) return { k: 1, tx: 0, ty: 0, fit: true }
@@ -7657,10 +7796,9 @@ function edCmg() {
     const k = Math.max(0.05, Math.min(4, Math.min((cw - 40) / Math.max(1, x1 - x0), (ch - 40) / Math.max(1, y1 - y0), 1.5)))
     return { k, tx: (cw - (x1 - x0) * k) / 2 - x0 * k, ty: (ch - (y1 - y0) * k) / 2 - y0 * k, fit: true }
   }
-  function wkCvApply(svg, cam) {
-    const g = svg && svg.querySelector('g.wk-cv-world')
-    if (g) g.setAttribute('transform', `translate(${cam.tx},${cam.ty}) scale(${cam.k})`)
-  }
+  // 世界 ⇄ 屏幕（画布内坐标，不含 canvas 的页面偏移）：screen = world * k + t。
+  function wkCvToScreen(cam, x, y) { return [x * cam.k + cam.tx, y * cam.k + cam.ty] }
+  function wkCvToWorld(cam, sx, sy) { return [(sx - cam.tx) / cam.k, (sy - cam.ty) / cam.k] }
   // 节点某侧的锚点（世界坐标）；side 缺省返回 null，由调用方按相对方位就近取。
   function wkCvAnchor(n, side) {
     if (side === 'left') return [n.x, n.y + n.h / 2]
@@ -7671,8 +7809,7 @@ function edCmg() {
   }
   // 连线几何：端点锚 + 出线方向法线。显式 fromSide/toSide 按声明取锚与法线；缺省按两节点中心
   // 连线的主轴取最近侧（水平位移为主取左/右、竖直为主取上/下）。贝塞尔控制点 = 各自锚点沿该侧
-  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入（旧实现控制点按整体主轴生成，
-  // 声明侧向与实际走向冲突时出线方向观感即「起点终点不对」，此为返修根因）。
+  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入。
   const WKCV_SIDE_DIRS = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }
   function wkCvAnchorDir(n, side, tx, ty) {
     if (side && WKCV_SIDE_DIRS[side]) {
@@ -7693,24 +7830,236 @@ function edCmg() {
     const kB = Math.max(24, Math.abs((b[0] - a[0]) * B.n[0] + (b[1] - a[1]) * B.n[1]) / 2)
     const c1 = [a[0] + A.n[0] * kA, a[1] + A.n[1] * kA]
     const c2 = [b[0] + B.n[0] * kB, b[1] + B.n[1] * kB]
-    const d = `M ${a[0]} ${a[1]} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${b[0]} ${b[1]}`
     // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8（放 label）
     const mx = (a[0] + 3 * c1[0] + 3 * c2[0] + b[0]) / 8
     const my = (a[1] + 3 * c1[1] + 3 * c2[1] + b[1]) / 8
-    return { d, mx, my }
+    return { a, c1, c2, b, mx, my }
   }
 
-  // ---------- SVG 工具 ----------
-  function wkCvEl(tag, attrs) {
-    const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
-    for (const k in attrs) el.setAttribute(k, attrs[k])
-    return el
+  // ---------- 画布绘制（2D context；世界坐标 → 屏幕统一乘相机） ----------
+  const WKCV_FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif'
+  // 主题色快照（每次重绘读一次；canvas 不认 CSS 变量）
+  function wkCvTheme() {
+    const cs = getComputedStyle(document.documentElement)
+    const g = (n, d) => (cs.getPropertyValue(n) || '').trim() || d
+    return {
+      bg: g('--bg', '#fff'), text: g('--text', '#222'), text2: g('--text-2', '#555'),
+      text3: g('--text-3', '#888'), border: g('--border', '#ddd'), blue: g('--blue', '#4d6bfe'),
+    }
+  }
+  // 文本按像素宽度折行（CJK 可逐字断、拉丁词优先整词）。返回行数组，最多 maxLines 行。
+  function wkCvWrap(ctx, text, maxW, maxLines) {
+    const out = []
+    for (const para of String(text == null ? '' : text).split('\n')) {
+      if (out.length >= maxLines) return out
+      let line = ''
+      let word = ''
+      const flushWord = () => { line += word; word = '' }
+      for (const ch of para) {
+        if (ch === ' ') { flushWord(); line += ch; continue }
+        // 拉丁字母数字成词，其它（CJK/标点）逐字
+        if (/[A-Za-z0-9_@#$%&*+\-/\\=.:;'"!?()\[\]{}<>]/.test(ch)) { word += ch; continue }
+        flushWord()
+        if (line && ctx.measureText(line + ch).width > maxW) { out.push(line); line = ''; if (out.length >= maxLines) return out }
+        line += ch
+      }
+      flushWord()
+      if (line && ctx.measureText(line).width > maxW) {
+        // 整词超宽：逐字硬断
+        let cur = ''
+        for (const ch of line) {
+          if (cur && ctx.measureText(cur + ch).width > maxW) { out.push(cur); cur = ''; if (out.length >= maxLines) return out }
+          cur += ch
+        }
+        line = cur
+      }
+      if (line || !para) out.push(line)
+    }
+    return out
+  }
+  function wkCvRoundRect(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2))
+    ctx.beginPath()
+    ctx.moveTo(x + rr, y)
+    ctx.lineTo(x + w - rr, y)
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr)
+    ctx.lineTo(x + w, y + h - rr)
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h)
+    ctx.lineTo(x + rr, y + h)
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr)
+    ctx.lineTo(x, y + rr)
+    ctx.quadraticCurveTo(x, y, x + rr, y)
+    ctx.closePath()
+  }
+  // 主绘制：只画、不带状态。opts.active = 正在拖动的节点集合（画高亮 + 偏移已并进坐标）。
+  function wkCvPaint(canvas, data, cam, theme, opts) {
+    const stage = canvas.parentElement
+    const dpr = window.devicePixelRatio || 1
+    const cw = Math.max(1, stage ? stage.clientWidth : 0)
+    const ch = Math.max(1, stage ? stage.clientHeight : 0)
+    const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr)
+    if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cw, ch)
+    ctx.fillStyle = theme.bg
+    ctx.fillRect(0, 0, cw, ch)
+    const k = cam.k
+    const dragSet = (opts && opts.drag) || null
+    const off = (n) => (dragSet && dragSet.byId.get(n.id)) || [0, 0]
+
+    // 点阵网格：世界 24 单位格；缩得太小时逐级加倍，屏上点距不小于 12px，总点数封顶。
+    let step = 24
+    while (step * k < 12) step *= 2
+    const [wx0, wy0] = wkCvToWorld(cam, 0, 0)
+    const [wx1, wy1] = wkCvToWorld(cam, cw, ch)
+    const gx0 = Math.floor(wx0 / step) * step, gy0 = Math.floor(wy0 / step) * step
+    const nx = Math.floor((wx1 - gx0) / step) + 1, ny = Math.floor((wy1 - gy0) / step) + 1
+    const every = Math.max(1, Math.ceil((nx * ny) / 4000))
+    ctx.fillStyle = theme.border
+    ctx.globalAlpha = 0.55
+    let ci = 0
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        if ((ci++ % every) !== 0) continue
+        const [sx, sy] = wkCvToScreen(cam, gx0 + ix * step, gy0 + iy * step)
+        ctx.beginPath()
+        ctx.arc(sx, sy, 1.2, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    ctx.globalAlpha = 1
+
+    // 边（世界坐标直接经 ctx 变换绘制：曲线 + 箭头 + 标签）
+    ctx.save()
+    ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+    ctx.lineWidth = 1.5 / k
+    ctx.strokeStyle = theme.text3
+    ctx.fillStyle = theme.text3
+    for (const e of data.edges) {
+      const oa = off(e.from), ob = off(e.to)
+      const A = { ...e.from, x: e.from.x + oa[0], y: e.from.y + oa[1] }
+      const B = { ...e.to, x: e.to.x + ob[0], y: e.to.y + ob[1] }
+      const g = wkCvEdgeGeom({ ...e, from: A, to: B })
+      const col = e.color || theme.text3
+      ctx.strokeStyle = col
+      ctx.fillStyle = col
+      ctx.beginPath()
+      ctx.moveTo(g.a[0], g.a[1])
+      ctx.bezierCurveTo(g.c1[0], g.c1[1], g.c2[0], g.c2[1], g.b[0], g.b[1])
+      ctx.stroke()
+      if (e.arrow) {
+        // 箭头方向 = 曲线在终点的切线（控制点 c2 → b）
+        const ang = Math.atan2(g.b[1] - g.c2[1], g.b[0] - g.c2[0])
+        const al = 9 / k, aw = 4.5 / k
+        ctx.beginPath()
+        ctx.moveTo(g.b[0], g.b[1])
+        ctx.lineTo(g.b[0] - al * Math.cos(ang) + aw * Math.sin(ang), g.b[1] - al * Math.sin(ang) - aw * Math.cos(ang))
+        ctx.lineTo(g.b[0] - al * Math.cos(ang) - aw * Math.sin(ang), g.b[1] - al * Math.sin(ang) + aw * Math.cos(ang))
+        ctx.closePath()
+        ctx.fill()
+      }
+      if (e.label) {
+        ctx.font = `${11 / k}px ${WKCV_FONT}`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.lineWidth = 3 / k
+        ctx.strokeStyle = theme.bg
+        ctx.strokeText(e.label, g.mx, g.my)
+        ctx.fillStyle = e.color || theme.text2
+        ctx.fillText(e.label, g.mx, g.my)
+      }
+    }
+    ctx.restore()
+
+    // 节点（群组先画、垫底；其余按数组序 = 命中测试的 z 序）
+    const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
+    for (const n of ordered) {
+      const [dx, dy] = off(n)
+      const x = n.x + dx, y = n.y + dy
+      ctx.save()
+      ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+      const isDrag = !!(dragSet && dragSet.byId.has(n.id))
+      const col = n.color || ''
+      wkCvRoundRect(ctx, x, y, n.w, n.h, n.type === 'group' ? 10 : 8)
+      ctx.fillStyle = col ? wkCvRgba(col, n.type === 'group' ? 0.08 : 0.16) : (isDrag ? wkCvRgba(theme.blue, 0.06) : 'rgba(0,0,0,0)')
+      ctx.fill()
+      ctx.lineWidth = (isDrag ? 2 : 1) / k
+      ctx.strokeStyle = isDrag ? theme.blue : col ? wkCvRgba(col, 0.65) : theme.border
+      if (n.type === 'group') ctx.setLineDash([5 / k, 4 / k])
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      if (n.type === 'group') {
+        if (n.label) {
+          ctx.save()
+          ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+          ctx.font = `600 ${12 / k}px ${WKCV_FONT}`
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'alphabetic'
+          ctx.lineWidth = 3 / k
+          ctx.strokeStyle = theme.bg
+          ctx.strokeText(n.label, x + 2, y - 8 / k)
+          ctx.fillStyle = col ? wkCvRgba(col, 0.95) : theme.text2
+          ctx.fillText(n.label, x + 2, y - 8 / k)
+          ctx.restore()
+        }
+        continue
+      }
+      // 节点正文：按节点宽度折行，超出高度裁掉
+      const padX = 8, padY = 6
+      const maxW = Math.max(10, n.w - padX * 2)
+      const fs = 12 / k
+      ctx.save()
+      ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+      ctx.beginPath()
+      ctx.rect(x + padX, y + padY, maxW, Math.max(10, n.h - padY * 2))
+      ctx.clip()
+      ctx.font = `${fs}px ${WKCV_FONT}`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillStyle = theme.text
+      const lh = 18 / k
+      const lines = wkCvWrap(ctx, n.text, maxW, Math.max(1, Math.ceil((n.h - padY * 2) / lh)))
+      for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], x + padX, y + padY + i * lh)
+      ctx.restore()
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
-  // ---------- 图形编辑（节点/组拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回
-  // 编辑器文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
-  // dispatch 触发 widget 重建不丢视口。拖动过程只做视觉位移，pointerup 才一次性写文档（一次手势 =
-  // 一次编辑 = 一条撤销步）。连线端点随拖动的跟随要等重建（重建后按新坐标重画），拖动中不实时跟。 ----------
+  // 命中测试：屏幕点 → 节点（节点在群组之上 ⇒ 逆序找非组，再找组）。返回 {node, dx, dy} 或 null。
+  function wkCvHit(ordered, cam, sx, sy) {
+    const [wx, wy] = wkCvToWorld(cam, sx, sy)
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const n = ordered[i]
+      if (wx >= n.x && wx <= n.x + n.w && wy >= n.y && wy <= n.y + n.h) return n
+    }
+    return null
+  }
+  // 拖动集合：组 = 组框 + 中心落在组框内的节点（Obsidian 语义）
+  function wkCvDragGroup(data, n) {
+    const moved = [n]
+    if (n.type === 'group') {
+      for (const m of data.nodes) {
+        if (m === n || m.type === 'group') continue
+        const cx = m.x + m.w / 2, cy = m.y + m.h / 2
+        if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
+      }
+    }
+    return moved
+  }
+  // 屏幕矩形（给行内编辑器定位）
+  function wkCvScreenRect(cam, n) {
+    const [sx, sy] = wkCvToScreen(cam, n.x, n.y)
+    return { x: sx, y: sy, w: n.w * cam.k, h: n.h * cam.k }
+  }
+
+  // ---------- 图形编辑（拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回编辑器
+  // 文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
+  // dispatch 触发 widget 重建不丢视口。拖动过程只画位移，pointerup 才一次性写文档（一次手势 =
+  // 一次编辑 = 一条撤销步）。 ----------
   function wkCvWriteDoc(view, j) {
     try {
       const text = JSON.stringify(j, null, 2) + '\n'
@@ -7720,90 +8069,50 @@ function edCmg() {
   function wkCvRawNode(raw, id) {
     return (Array.isArray(raw && raw.nodes) ? raw.nodes : []).find((x) => x && x.id === id) || null
   }
-  function wkCvBindEdit(view, root, data, raw, gElById) {
-    for (const n of data.nodes) {
-      const gEl = gElById.get(n.id)
-      if (!gEl) continue
-      gEl.classList.add(n.type === 'group' ? 'wk-cv-drag-grp' : 'wk-cv-drag-node')
-      // 拖动（左键/单指）：拖组 = 组框 + 组内节点（中心落在组框内）一起平移，对齐 Obsidian 语义。
-      gEl.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) return
-        e.stopPropagation() // 不进 pan
-        const moved = [n]
-        if (n.type === 'group') {
-          for (const m of data.nodes) {
-            if (m === n || m.type === 'group') continue
-            const cx = m.x + m.w / 2, cy = m.y + m.h / 2
-            if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
-          }
-        }
-        const sx = e.clientX, sy = e.clientY
-        let dx = 0, dy = 0
-        root.classList.add('wk-cv-dragging')
-        try { gEl.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
-        const move = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          dx = (ev.clientX - sx) / wkCvCam.k
-          dy = (ev.clientY - sy) / wkCvCam.k
-          for (const m of moved) {
-            const el = gElById.get(m.id)
-            if (el) el.setAttribute('transform', `translate(${dx},${dy})`)
-          }
-        }
-        const finish = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          gEl.removeEventListener('pointermove', move)
-          gEl.removeEventListener('pointerup', finish)
-          gEl.removeEventListener('pointercancel', cancel)
-          root.classList.remove('wk-cv-dragging')
-          if (!dx && !dy) return
-          for (const m of moved) {
-            const r = wkCvRawNode(raw, m.id)
-            if (!r) continue
-            r.x = Math.round((Number(r.x) || 0) + dx)
-            r.y = Math.round((Number(r.y) || 0) + dy)
-            m.x += dx
-            m.y += dy
-            const el = gElById.get(m.id)
-            if (el) el.removeAttribute('transform')
-          }
-          wkCvWriteDoc(view, raw)
-        }
-        const cancel = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          gEl.removeEventListener('pointermove', move)
-          gEl.removeEventListener('pointerup', finish)
-          gEl.removeEventListener('pointercancel', cancel)
-          root.classList.remove('wk-cv-dragging')
-          for (const m of moved) {
-            const el = gElById.get(m.id)
-            if (el) el.removeAttribute('transform')
-          }
-        }
-        gEl.addEventListener('pointermove', move)
-        gEl.addEventListener('pointerup', finish)
-        gEl.addEventListener('pointercancel', cancel)
-      })
-      // 双击改文字：节点改 text/file/url（按源里已有的字段写回，不新增键）；组改 label。
-      gEl.addEventListener('dblclick', (e) => {
-        e.stopPropagation()
-        const r = wkCvRawNode(raw, n.id)
-        if (!r) return
-        if (n.type === 'group') {
-          const v = window.prompt('组名称', n.label || '')
-          if (v === null) return
-          r.label = v
-          n.label = v
-        } else {
-          const key = typeof r.text === 'string' ? 'text' : typeof r.file === 'string' ? 'file' : typeof r.url === 'string' ? 'url' : 'text'
-          const v = window.prompt('节点文字', n.text || '')
-          if (v === null) return
-          r[key] = v
-          n.text = v
-        }
-        wkCvWriteDoc(view, raw)
-      })
+  // 行内编辑（ComfyUI 同构：编辑态 = DOM 覆盖层里的 textarea，画布手势整体关闭）：
+  // Enter / blur 提交，Escape 取消，Shift+Enter 换行。写入 = 源 JSON 上已有的那个字段（不新增键）。
+  function wkCvOpenEditor(view, root, overlay, data, raw, cam, n) {
+    if (root.classList.contains('wk-cv-editing')) return
+    root.classList.add('wk-cv-editing')
+    const r = wkCvScreenRect(cam, n)
+    const ta = document.createElement('textarea')
+    ta.className = 'wk-cv-edit'
+    ta.style.left = Math.max(0, r.x) + 'px'
+    ta.style.top = Math.max(0, r.y) + 'px'
+    ta.style.width = Math.max(80, r.w) + 'px'
+    ta.style.height = Math.max(48, r.h) + 'px'
+    const rn = wkCvRawNode(raw, n.id)
+    ta.value = n.type === 'group'
+      ? String((rn && rn.label) || '')
+      : String((rn && (rn.text ?? rn.file ?? rn.url)) || '')
+    overlay.appendChild(ta)
+    let done = false
+    const close = () => {
+      if (done) return
+      done = true
+      root.classList.remove('wk-cv-editing')
+      if (ta.parentElement) ta.parentElement.removeChild(ta)
     }
+    const commit = () => {
+      if (done) return
+      const val = ta.value
+      close()
+      const target = wkCvRawNode(raw, n.id)
+      if (!target) return
+      if (n.type === 'group') target.label = val
+      else if ('text' in target) target.text = val
+      else if ('file' in target) target.file = val
+      else if ('url' in target) target.url = val
+      wkCvWriteDoc(view, raw)
+    }
+    ta.addEventListener('pointerdown', (e) => e.stopPropagation())
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close() }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() }
+    })
+    ta.addEventListener('blur', commit)
+    ta.focus()
+    ta.select()
   }
 
   // ---------- 画布 widget（decoField 的 block replace 宿主；跨行 replace 只允许走 StateField） ----------
@@ -7836,8 +8145,7 @@ function edCmg() {
         view.dispatch({ effects: wkCvToggle.of() })
       })
       bar.appendChild(cnt)
-      // 编辑手段提示（2026-10-14 返修）：拖动/双击无任何可见 affordance，「无法编辑」的反馈里有
-      // 一部分是能力存在但不可发现——顶栏常驻一行操作提示，源码态同隐藏。
+      // 编辑手段提示：拖动/双击无任何可见 affordance——顶栏常驻一行操作提示，源码态同隐藏。
       const hint = document.createElement('span')
       hint.className = 'wk-cv-hint'
       hint.textContent = '拖动移动 · 双击改文字 · 拖组带成员 · 捏合/滚轮缩放'
@@ -7845,153 +8153,134 @@ function edCmg() {
       bar.appendChild(srcBtn)
       root.appendChild(bar)
       if (data.err) {
-        const hint = document.createElement('div')
-        hint.className = 'wk-cv-empty wk-cv-bad'
-        hint.textContent = data.err + ' — 点右上「编辑源码」修复'
-        root.appendChild(hint)
+        const bad = document.createElement('div')
+        bad.className = 'wk-cv-empty wk-cv-bad'
+        bad.textContent = data.err + ' — 点右上「编辑源码」修复'
+        root.appendChild(bad)
         return root
       }
       if (!data.nodes.length) {
-        const hint = document.createElement('div')
-        hint.className = 'wk-cv-empty'
-        hint.textContent = '空画布 — 点右上「编辑源码」写入 JSON Canvas（nodes/edges）'
-        root.appendChild(hint)
+        const empty = document.createElement('div')
+        empty.className = 'wk-cv-empty'
+        empty.textContent = '空画布 — 点右上「编辑源码」写入 JSON Canvas（nodes/edges）'
+        root.appendChild(empty)
         return root
       }
-      const seq = ++wkCvSeq
-      const svg = wkCvEl('svg', { class: 'wk-cv-svg' })
-      const defs = wkCvEl('defs', {})
-      // 点阵网格（pattern 在世界坐标系里随相机变换，24px 格距）
-      const pat = wkCvEl('pattern', { id: `wkcvg${seq}`, width: 24, height: 24, patternUnits: 'userSpaceOnUse' })
-      pat.appendChild(wkCvEl('circle', { cx: 1.2, cy: 1.2, r: 1.2, class: 'wk-cv-dot' }))
-      defs.appendChild(pat)
-      // 边箭头 marker（按色注册，id 带色值去重）
-      const mk = (color) => {
-        const id = `wkcvk${seq}${color ? color.slice(1) : 'n'}`
-        if (!defs.querySelector(`#${id}`)) {
-          const marker = wkCvEl('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' })
-          const tri = wkCvEl('path', { d: 'M 0 1 L 9 5 L 0 9 z' })
-          if (color) tri.style.fill = color
-          else tri.setAttribute('class', 'wk-cv-arrow')
-          marker.appendChild(tri)
-          defs.appendChild(marker)
-        }
-        return id
-      }
-      svg.appendChild(defs)
-      const world = wkCvEl('g', { class: 'wk-cv-world' })
-      svg.appendChild(world)
-      const cover = 200000 // 网格铺底的世界域（pan 到 ±10 万单位内不露底）
-      world.appendChild(wkCvEl('rect', { x: -cover / 2, y: -cover / 2, width: cover, height: cover, fill: `url(#wkcvg${seq})` }))
-      const edgesG = wkCvEl('g', { class: 'wk-cv-edges' })
-      const nodesG = wkCvEl('g', { class: 'wk-cv-nodes' })
-      world.appendChild(edgesG)
-      world.appendChild(nodesG)
-      // 边
-      for (const e of data.edges) {
-        const g = wkCvEdgeGeom(e)
-        const path = wkCvEl('path', { d: g.d, class: 'wk-cv-edge', fill: 'none' })
-        if (e.color) path.style.stroke = e.color
-        if (e.arrow) path.setAttribute('marker-end', `url(#${mk(e.color)})`)
-        edgesG.appendChild(path)
-        if (e.label) {
-          const t = wkCvEl('text', { x: g.mx, y: g.my, class: 'wk-cv-elabel', 'text-anchor': 'middle' })
-          t.textContent = e.label
-          edgesG.appendChild(t)
-        }
-      }
-      // 节点：群组先画（z 序垫底），其余按数组序。图形编辑（2026-10-14 待办#2 补缺）：节点/组可拖动
-      // 改坐标、双击改文字，落点 = 原样改写源 JSON（保留未识别字段）并 dispatch 回编辑器文档
-      // （走既有自动保存链落盘）。raw = JSON.parse 原文（渲染用 normalized 副本，写入用 raw 保字段）；
-      // 能走到此处 = wkCvParse 已验证 JSON 合法（坏 JSON 在 err 分支早退），此处解析不设防。
-      const raw = JSON.parse(this.text)
-      const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
-      const XHTML = 'http://www.w3.org/1999/xhtml'
-      const gElById = new Map()
-      for (const n of ordered) {
-        const gEl = wkCvEl('g', { class: 'wk-cv-node' + (n.type === 'group' ? ' wk-cv-group' : '') })
-        gElById.set(n.id, gEl)
-        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: n.type === 'group' ? 10 : 8, class: 'wk-cv-box' })
-        if (n.color) {
-          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.08 : 0.16)
-          rect.style.stroke = wkCvRgba(n.color, 0.65)
-        }
-        if (n.type === 'group') rect.setAttribute('stroke-dasharray', '5 4')
-        gEl.appendChild(rect)
-        if (n.type === 'group') {
-          if (n.label) {
-            // 组名按 Obsidian 惯例放框外顶上（旧实现塞框内第一行，与节点正文争空间 =「组的 UI 不好」）
-            const t = wkCvEl('text', { x: n.x + 2, y: n.y - 8, class: 'wk-cv-glabel' })
-            t.textContent = n.label
-            if (n.color) t.style.fill = wkCvRgba(n.color, 0.95)
-            gEl.appendChild(t)
-          }
-        } else {
-          const fo = wkCvEl('foreignObject', { x: n.x + 8, y: n.y + 6, width: Math.max(10, n.w - 16), height: Math.max(10, n.h - 12) })
-          const box = document.createElementNS(XHTML, 'div')
-          box.className = 'wk-cv-text'
-          box.textContent = n.text
-          fo.appendChild(box)
-          gEl.appendChild(fo)
-        }
-        nodesG.appendChild(gEl)
-      }
-      if (raw) wkCvBindEdit(view, root, data, raw, gElById)
+      // ComfyUI 结构：stage（定位锚）里 canvas 画一切图形，overlay 是**兄弟**层（只放编辑控件）。
+      const stage = document.createElement('div')
+      stage.className = 'wk-cv-stage'
+      const canvas = document.createElement('canvas')
+      canvas.className = 'wk-cv-canvas'
+      const overlay = document.createElement('div')
+      overlay.className = 'wk-cv-overlay'
+      stage.appendChild(canvas)
+      stage.appendChild(overlay)
+      root.appendChild(stage)
+      const theme = wkCvTheme()
+
       // 相机：未 fit 过（新文件）→ 包围盒适配；否则保留上次的平移缩放
-      if (!wkCvCam.fit) {
-        const sc = view.dom.querySelector('.cm-scroller')
-        wkCvCam = wkCvFit(data.nodes, sc ? sc.clientWidth : 600, sc ? sc.clientHeight : 400)
-      }
-      wkCvApply(svg, wkCvCam)
-      root.appendChild(svg)
-      // 高度跟随滚动容器（.cm-content 内百分比高度链不通，JS 实测）
-      const sc2 = view.dom.querySelector('.cm-scroller')
-      const setH = () => { if (sc2 && sc2.clientHeight) root.style.height = Math.max(200, sc2.clientHeight - 24) + 'px' }
-      setH()
-      this._ro = new ResizeObserver(setH)
-      if (sc2) this._ro.observe(sc2)
-      // 平移 / 缩放：单指拖 = pan；双指 = 捏合缩放（锚中点）+ 中点位移 pan；Ctrl+滚轮（Safari 触控板
-      // 捏合的手势编码）= 指针锚定缩放；普通滚轮 = 平移。事件截断在画布容器，不漏给编辑器光标。
-      const active = new Map()
+      if (!wkCvCam.fit) wkCvCam = wkCvFit(data.nodes, stage.clientWidth || 600, stage.clientHeight || 400)
+      const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
+      let dragPaint = null // {byId: Map<id,[dx,dy]>}
+      const repaint = () => wkCvPaint(canvas, data, wkCvCam, theme, { drag: dragPaint })
+      repaint()
+
+      // 尺寸变化：canvas 像素尺寸跟随 stage（ResizeObserver 也负责首帧后的布局稳定）
+      const ro = new ResizeObserver(() => { repaint() })
+      ro.observe(stage)
+      this._ro = ro
+
+      // ---- 手势（只绑 canvas；overlay/顶栏不在捕获路径上） ----
+      const active = new Map() // pointerId → [clientX, clientY]
+      let pend = null          // {id, x, y} 未越过阈值的按下
+      let drag = null          // {id, nodes:[...], sx, sy, dx, dy, moved}
       let pinch = null
-      root.addEventListener('pointerdown', (e) => {
+      const PAN_SLOP = 6
+      const localXY = (e) => {
+        const r = canvas.getBoundingClientRect()
+        return [e.clientX - r.left, e.clientY - r.top]
+      }
+      const releaseCap = (id) => { try { if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id) } catch { /* 已释放 */ } }
+      const endDrag = () => { drag = null; dragPaint = null; root.classList.remove('wk-cv-dragging') }
+
+      canvas.addEventListener('pointerdown', (e) => {
+        if (root.classList.contains('wk-cv-editing')) return
+        if (e.pointerType === 'mouse' && e.button !== 0) return
         active.set(e.pointerId, [e.clientX, e.clientY])
         if (active.size === 2) {
+          // 双指：进入捏合，取消可能的节点拖动
+          endDrag()
           const [a, b] = [...active.values()]
           pinch = { d: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), k: wkCvCam.k, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
+          pend = null
+        } else if (active.size === 1) {
+          pend = { id: e.pointerId, x: e.clientX, y: e.clientY }
+          const [lx, ly] = localXY(e)
+          const hit = wkCvHit(ordered, wkCvCam, lx, ly)
+          if (hit) drag = { id: e.pointerId, node: hit, nodes: wkCvDragGroup(data, hit), sx: e.clientX, sy: e.clientY, dx: 0, dy: 0 }
         }
-        root.setPointerCapture(e.pointerId)
         e.stopPropagation()
       })
-      root.addEventListener('pointermove', (e) => {
+
+      canvas.addEventListener('pointermove', (e) => {
         if (!active.has(e.pointerId)) return
         const prev = active.get(e.pointerId)
         active.set(e.pointerId, [e.clientX, e.clientY])
+        // 阈值前不抢指针（click 语义保持原生）；越过 6px 才捕获
+        if (pend && pend.id === e.pointerId && active.size === 1) {
+          if (Math.hypot(e.clientX - pend.x, e.clientY - pend.y) < PAN_SLOP) { e.stopPropagation(); return }
+          pend = null
+          try { canvas.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
+        }
         if (active.size === 2 && pinch) {
           const [a, b] = [...active.values()]
           const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2
           const d = Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1]))
-          // 缩放锚定双指中点 + 中点位移平移
           wkCvCam.k = Math.max(0.05, Math.min(4, pinch.k * (d / pinch.d)))
           wkCvCam.tx += cx - pinch.mid[0]
           wkCvCam.ty += cy - pinch.mid[1]
           pinch.mid = [cx, cy]
+        } else if (active.size === 1 && drag && drag.id === e.pointerId) {
+          drag.dx = (e.clientX - drag.sx) / wkCvCam.k
+          drag.dy = (e.clientY - drag.sy) / wkCvCam.k
+          if (drag.dx || drag.dy) root.classList.add('wk-cv-dragging')
+          const byId = new Map()
+          for (const m of drag.nodes) byId.set(m.id, [drag.dx, drag.dy])
+          dragPaint = { byId }
         } else if (active.size === 1) {
           wkCvCam.tx += e.clientX - prev[0]
           wkCvCam.ty += e.clientY - prev[1]
         }
-        wkCvApply(svg, wkCvCam)
+        repaint()
         e.stopPropagation()
       })
-      const up = (e) => { active.delete(e.pointerId); if (active.size < 2) pinch = null; e.stopPropagation() }
-      root.addEventListener('pointerup', up)
-      root.addEventListener('pointercancel', up)
-      root.addEventListener('wheel', (e) => {
+
+      const up = (e) => {
+        active.delete(e.pointerId)
+        if (pend && pend.id === e.pointerId) pend = null
+        releaseCap(e.pointerId)
+        if (active.size < 2) pinch = null
+        if (drag && drag.id === e.pointerId) {
+          const { nodes, dx, dy } = drag
+          endDrag()
+          if (dx || dy) wkCvWriteRaw(view, JSON.parse(this.text), nodes, dx, dy)
+          repaint()
+        }
+        e.stopPropagation()
+      }
+      canvas.addEventListener('pointerup', up)
+      canvas.addEventListener('pointercancel', up)
+      canvas.addEventListener('lostpointercapture', (e) => {
+        active.delete(e.pointerId)
+        if (pend && pend.id === e.pointerId) pend = null
+        if (drag && drag.id === e.pointerId) { endDrag(); repaint() }
+      })
+
+      canvas.addEventListener('wheel', (e) => {
         e.preventDefault()
         e.stopPropagation()
+        const [cx, cy] = localXY(e)
         if (e.ctrlKey) {
-          const rect = svg.getBoundingClientRect()
-          const cx = e.clientX - rect.left, cy = e.clientY - rect.top
           const k0 = wkCvCam.k
           wkCvCam.k = Math.max(0.05, Math.min(4, k0 * Math.exp(-e.deltaY * 0.002)))
           // 缩放锚定指针：指针下的世界点不动
@@ -8001,13 +8290,35 @@ function edCmg() {
           wkCvCam.tx -= e.deltaX
           wkCvCam.ty -= e.deltaY
         }
-        wkCvApply(svg, wkCvCam)
+        repaint()
       }, { passive: false })
+
+      // 双击 = 进入该节点/组的行内编辑（ComfyUI：编辑控件落在 DOM 覆盖层，画布手势关闭）
+      canvas.addEventListener('dblclick', (e) => {
+        if (root.classList.contains('wk-cv-editing')) return
+        const [lx, ly] = localXY(e)
+        const hit = wkCvHit(ordered, wkCvCam, lx, ly)
+        if (!hit) return
+        e.stopPropagation()
+        const raw = JSON.parse(this.text)
+        wkCvOpenEditor(view, root, overlay, data, raw, wkCvCam, hit)
+      })
       return root
     }
     destroy() {
       if (this._ro) { this._ro.disconnect(); this._ro = null }
     }
+  }
+
+  // 拖动落盘：按 id 在原样 JSON 上改坐标（保留未识别字段），整篇 dispatch 回编辑区。
+  function wkCvWriteRaw(view, raw, nodes, dx, dy) {
+    for (const m of nodes) {
+      const r = wkCvRawNode(raw, m.id)
+      if (!r) continue
+      r.x = Math.round((Number(r.x) || 0) + dx)
+      r.y = Math.round((Number(r.y) || 0) + dy)
+    }
+    wkCvWriteDoc(view, raw)
   }
 
   // ---------- 源码态的回流入口（首行行前小按钮「图形预览」） ----------
@@ -8057,6 +8368,776 @@ function edCmg() {
     // 源码态 JSON 高亮
     return [onField, decoField, CM.json(), CM.syntaxHighlighting(wkEdHlStyle)]
   }
+
+  const WK_DOC_MAX_ROWS = 300
+  const WK_DOC_MAX_COLS = 60
+
+  function wkDocKind(path) {
+    if (/\.xlsx$/i.test(path)) return 'xlsx'
+    if (/\.docx$/i.test(path)) return 'docx'
+    return ''
+  }
+
+  function wkDocUnzip(buf) {
+    const F = window.fflate
+    if (!F || !F.unzipSync) throw new Error('解压组件未加载（vendor/fflate.js）')
+    return F.unzipSync(new Uint8Array(buf))
+  }
+
+  function wkDocText(files, name) {
+    const b = files[name]
+    return b ? new TextDecoder('utf-8').decode(b) : ''
+  }
+
+  function wkDocXml(files, name) {
+    const s = wkDocText(files, name)
+    if (!s) return null
+    const d = new DOMParser().parseFromString(s, 'application/xml')
+    return d.getElementsByTagName('parsererror').length ? null : d
+  }
+
+  function wkDocAll(root, tag) { return root ? Array.from(root.getElementsByTagNameNS('*', tag)) : [] }
+  function wkDocKids(el, tag) { return el ? Array.from(el.children).filter((c) => c.localName === tag) : [] }
+  function wkDocAttr(el, name) {
+    if (!el) return ''
+    for (const a of el.attributes) if (a.localName === name || a.name === name) return a.value
+    return ''
+  }
+  // OOXML 开关：元素在场 = 开，val="0/false/off" = 关
+  function wkDocOn(el) { return !!el && !/^(0|false|off)$/i.test(wkDocAttr(el, 'val')) }
+  // ARGB / RRGGBB → #rrggbb（非法返回空）
+  function wkDocRgb(v) {
+    const s = String(v || '').replace(/^#/, '')
+    const h = s.length === 8 ? s.slice(2) : s
+    return /^[0-9a-f]{6}$/i.test(h) ? '#' + h.toLowerCase() : ''
+  }
+
+  // ---------- XLSX ----------
+  function wkDocNum(raw, xf, styles) {
+    const n = Number(raw)
+    if (raw === '' || !Number.isFinite(n)) return raw
+    const code = (styles.numFmts[xf.numFmtId] || '').replace(/\[[^\]]*\]/g, '').replace(/"[^"]*"/g, '')
+    if (/%/.test(code)) {
+      const d = (code.split('.')[1] || '').replace(/[^0#]/g, '').length
+      return (n * 100).toFixed(d) + '%'
+    }
+    // 纯日期/时间格式（含 y/m/d/h/s，且不含数字占位符）→ 按 1900 日期系统换算
+    if (/[ymdhs]/i.test(code) && !/[#0]/.test(code)) {
+      const ms = Math.round((n - 25569) * 86400000)
+      const d = new Date(ms)
+      const p2 = (x) => String(x).padStart(2, '0')
+      const date = d.getUTCFullYear() + '-' + p2(d.getUTCMonth() + 1) + '-' + p2(d.getUTCDate())
+      return /[hs]/i.test(code) ? date + ' ' + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) : date
+    }
+    const dec = /\.(0+)/.exec(code)
+    if (dec) return n.toFixed(dec[1].length)
+    if (/#,##0/.test(code)) return Math.round(n).toLocaleString('en-US')
+    return String(n)
+  }
+
+  function wkDocParseStyles(files) {
+    const doc = wkDocXml(files, 'xl/styles.xml')
+    const st = { fonts: [], fills: [], borders: [], xfs: [], numFmts: {} }
+    if (!doc) return st
+    for (const nf of wkDocAll(doc, 'numFmt')) st.numFmts[wkDocAttr(nf, 'numFmtId')] = wkDocAttr(nf, 'formatCode')
+    for (const f of wkDocKids(wkDocAll(doc, 'fonts')[0], 'font')) {
+      const color = wkDocKids(f, 'color')[0]
+      st.fonts.push({
+        b: wkDocKids(f, 'b').some(wkDocOn),
+        i: wkDocKids(f, 'i').some(wkDocOn),
+        u: wkDocKids(f, 'u').length > 0,
+        s: wkDocKids(f, 'strike').length > 0,
+        color: wkDocRgb(wkDocAttr(color, 'rgb')),
+        sz: Number(wkDocAttr(wkDocKids(f, 'sz')[0], 'val')) || 0,
+      })
+    }
+    for (const f of wkDocKids(wkDocAll(doc, 'fills')[0], 'fill')) {
+      const pf = wkDocKids(f, 'patternFill')[0]
+      const fg = wkDocKids(pf, 'fgColor')[0]
+      st.fills.push(pf && /solid/i.test(wkDocAttr(pf, 'patternType')) && fg ? wkDocRgb(wkDocAttr(fg, 'rgb')) : '')
+    }
+    for (const b of wkDocKids(wkDocAll(doc, 'borders')[0], 'border')) {
+      st.borders.push(['left', 'right', 'top', 'bottom'].some((side) => {
+        const e = wkDocKids(b, side)[0]
+        const style = wkDocAttr(e, 'style')
+        return !!style && style !== 'none'
+      }))
+    }
+    for (const x of wkDocKids(wkDocAll(doc, 'cellXfs')[0], 'xf')) {
+      const al = wkDocKids(x, 'alignment')[0]
+      st.xfs.push({
+        numFmtId: wkDocAttr(x, 'numFmtId') || '0',
+        fontId: Number(wkDocAttr(x, 'fontId')) || 0,
+        fillId: Number(wkDocAttr(x, 'fillId')) || 0,
+        borderId: Number(wkDocAttr(x, 'borderId')) || 0,
+        h: wkDocAttr(al, 'horizontal'),
+        v: wkDocAttr(al, 'vertical'),
+        wrap: /^(1|true)$/i.test(wkDocAttr(al, 'wrapText')),
+      })
+    }
+    return st
+  }
+
+  function wkDocShared(files) {
+    const doc = wkDocXml(files, 'xl/sharedStrings.xml')
+    return wkDocAll(doc, 'si').map((si) => wkDocAll(si, 't').map((t) => t.textContent || '').join(''))
+  }
+
+  function wkDocResolve(target) {
+    const t = String(target || '').replace(/\\/g, '/')
+    const parts = (t.startsWith('/') ? t.slice(1) : 'xl/' + t).split('/')
+    const out = []
+    for (const p of parts) {
+      if (!p || p === '.') continue
+      if (p === '..') out.pop()
+      else out.push(p)
+    }
+    return out.join('/')
+  }
+
+  function wkDocSheets(files) {
+    const wb = wkDocXml(files, 'xl/workbook.xml')
+    const rels = wkDocXml(files, 'xl/_rels/workbook.xml.rels')
+    const map = {}
+    for (const r of wkDocAll(rels, 'Relationship')) map[wkDocAttr(r, 'Id')] = wkDocResolve(wkDocAttr(r, 'Target'))
+    return wkDocAll(wb, 'sheet')
+      .map((s) => ({ name: wkDocAttr(s, 'name') || 'Sheet', state: wkDocAttr(s, 'state') || 'visible', file: map[wkDocAttr(s, 'id')] || '' }))
+      .filter((s) => s.state !== 'hidden' && s.file)
+  }
+
+  function wkDocColIndex(ref) {
+    let n = 0
+    for (const ch of String(ref || '').replace(/\d+$/, '')) n = n * 26 + (ch.toUpperCase().charCodeAt(0) - 64)
+    return n - 1
+  }
+  function wkDocColName(i) {
+    let s = ''
+    for (i += 1; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s
+    return s
+  }
+
+  function wkDocParseSheet(files, sheet, shared, styles) {
+    const doc = wkDocXml(files, sheet.file)
+    const root = doc && wkDocAll(doc, 'worksheet')[0]
+    const out = { name: sheet.name, cells: {}, merges: {}, covered: new Set(), widths: {}, heights: {}, nrows: 0, ncols: 0, truncated: false }
+    if (!root) return out
+    // 列宽（Excel 字符宽 → 像素，与 dsh 同式）与隐藏列
+    for (const col of wkDocKids(wkDocKids(root, 'cols')[0], 'col')) {
+      if (/^(1|true)$/i.test(wkDocAttr(col, 'hidden'))) continue
+      const a = Number(wkDocAttr(col, 'min')) - 1
+      const b = Number(wkDocAttr(col, 'max')) - 1
+      const w = Number(wkDocAttr(col, 'width'))
+      if (!Number.isFinite(w) || w <= 0) continue
+      for (let i = a; i <= Math.min(b, WK_DOC_MAX_COLS - 1); i++) out.widths[i] = Math.max(18, Math.floor(w < 1 ? w * 12 : w * 7 + 5))
+    }
+    const rows = wkDocKids(wkDocKids(root, 'sheetData')[0], 'row')
+    rows.forEach((row, ri) => {
+      const r = Number(wkDocAttr(row, 'r')) - 1 || ri
+      const ht = Number(wkDocAttr(row, 'ht'))
+      if (Number.isFinite(ht) && ht > 0) out.heights[r] = Math.round(ht * 96 / 72)
+      let ci = -1
+      for (const c of wkDocKids(row, 'c')) {
+        const ref = wkDocAttr(c, 'r')
+        ci = ref ? wkDocColIndex(ref) : ci + 1
+        if (r >= WK_DOC_MAX_ROWS || ci >= WK_DOC_MAX_COLS) { out.truncated = true; continue }
+        out.nrows = Math.max(out.nrows, r + 1)
+        out.ncols = Math.max(out.ncols, ci + 1)
+        const xi = Number(wkDocAttr(c, 's')) || 0
+        const xf = styles.xfs[xi] || { numFmtId: '0', fontId: 0, fillId: 0, borderId: 0 }
+        const type = wkDocAttr(c, 't')
+        const raw = (wkDocKids(c, 'v')[0] || {}).textContent || ''
+        let v = ''
+        if (type === 's') v = shared[Number(raw)] || ''
+        else if (type === 'inlineStr') v = wkDocAll(c, 't').map((t) => t.textContent || '').join('')
+        else if (type === 'b') v = raw === '1' ? 'TRUE' : 'FALSE'
+        else if (type === 'str' || type === 'e') v = raw
+        else v = wkDocNum(raw, xf, styles)
+        out.cells[r + '_' + ci] = { v, style: wkDocCellStyle(xf, styles, /^-?[\d.]+$/.test(v)), raw }
+      }
+    })
+    for (const m of wkDocAll(root, 'mergeCell')) {
+      const [a, b] = String(wkDocAttr(m, 'ref')).split(':')
+      if (!a || !b) continue
+      const r0 = Number(String(a).replace(/^[A-Z]+/i, '')) - 1
+      const c0 = wkDocColIndex(a)
+      const r1 = Number(String(b).replace(/^[A-Z]+/i, '')) - 1
+      const c1 = wkDocColIndex(b)
+      if ([r0, c0, r1, c1].some((x) => !Number.isFinite(x))) continue
+      out.merges[r0 + '_' + c0] = { rs: Math.max(1, r1 - r0 + 1), cs: Math.max(1, c1 - c0 + 1) }
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) if (r !== r0 || c !== c0) out.covered.add(r + '_' + c)
+      out.nrows = Math.max(out.nrows, r1 + 1)
+      out.ncols = Math.max(out.ncols, c1 + 1)
+    }
+    out.nrows = Math.min(out.nrows, WK_DOC_MAX_ROWS)
+    out.ncols = Math.min(out.ncols, WK_DOC_MAX_COLS)
+    return out
+  }
+
+  function wkDocCellStyle(xf, styles, numeric) {
+    const bits = []
+    const f = styles.fonts[xf.fontId] || {}
+    if (f.b) bits.push('font-weight:600')
+    if (f.i) bits.push('font-style:italic')
+    if (f.u || f.s) bits.push('text-decoration:' + [f.u ? 'underline' : '', f.s ? 'line-through' : ''].filter(Boolean).join(' '))
+    if (f.color) bits.push('color:' + f.color)
+    if (f.sz && f.sz >= 20) bits.push('font-size:' + Math.round(f.sz * 96 / 72) + 'px')
+    if (styles.fills[xf.fillId]) bits.push('background:' + styles.fills[xf.fillId])
+    if (styles.borders[xf.borderId]) bits.push('border:1px solid var(--border)')
+    if (xf.wrap) bits.push('white-space:pre-wrap')
+    if (xf.h === 'center') bits.push('text-align:center')
+    else if (xf.h === 'right') bits.push('text-align:right')
+    else if (numeric) bits.push('text-align:right')
+    if (xf.v === 'center') bits.push('vertical-align:middle')
+    else if (xf.v === 'top') bits.push('vertical-align:top')
+    return bits.join(';')
+  }
+
+  function wkDocRenderXlsx(body, path, buf) {
+    const files = wkDocUnzip(buf)
+    const styles = wkDocParseStyles(files)
+    const shared = wkDocShared(files)
+    const sheets = wkDocSheets(files)
+    if (!sheets.length) throw new Error('工作簿没有可预览的工作表')
+    const parsed = sheets.map((s) => wkDocParseSheet(files, s, shared, styles))
+    const wrap = document.createElement('div')
+    wrap.className = 'wk-doc wk-doc-xlsx'
+    const bar = document.createElement('div')
+    bar.className = 'wk-doc-bar'
+    const nm = document.createElement('span')
+    nm.className = 'wk-doc-name'
+    nm.textContent = String(path).split('/').pop()
+    const meta = document.createElement('span')
+    meta.className = 'wk-doc-meta'
+    meta.textContent = '只读预览 · ' + parsed.length + ' 个工作表'
+    bar.append(nm, meta)
+    const grid = document.createElement('div')
+    grid.className = 'wk-doc-grid'
+    const tabs = document.createElement('div')
+    tabs.className = 'wk-doc-tabs'
+    let active = 0
+    const draw = () => {
+      const sh = parsed[active]
+      grid.textContent = ''
+      if (sh.truncated) {
+        const note = document.createElement('div')
+        note.className = 'wk-doc-note'
+        note.textContent = `超出预览上限，仅显示前 ${WK_DOC_MAX_ROWS} 行 / ${WK_DOC_MAX_COLS} 列`
+        grid.appendChild(note)
+      }
+      const table = document.createElement('table')
+      table.className = 'wk-doc-table'
+      const thead = document.createElement('thead')
+      const hrow = document.createElement('tr')
+      const corner = document.createElement('th')
+      corner.className = 'wk-doc-corner'
+      hrow.appendChild(corner)
+      for (let c = 0; c < sh.ncols; c++) {
+        const th = document.createElement('th')
+        th.className = 'wk-doc-ch'
+        th.textContent = wkDocColName(c)
+        if (sh.widths[c]) th.style.minWidth = sh.widths[c] + 'px'
+        hrow.appendChild(th)
+      }
+      thead.appendChild(hrow)
+      table.appendChild(thead)
+      const tbody = document.createElement('tbody')
+      for (let r = 0; r < sh.nrows; r++) {
+        const tr = document.createElement('tr')
+        if (sh.heights[r]) tr.style.height = sh.heights[r] + 'px'
+        const rh = document.createElement('th')
+        rh.className = 'wk-doc-rh'
+        rh.textContent = String(r + 1)
+        tr.appendChild(rh)
+        for (let c = 0; c < sh.ncols; c++) {
+          if (sh.covered.has(r + '_' + c)) continue
+          const td = document.createElement('td')
+          const mg = sh.merges[r + '_' + c]
+          if (mg) {
+            if (mg.cs > 1) td.colSpan = mg.cs
+            if (mg.rs > 1) td.rowSpan = mg.rs
+            td.className = 'wk-doc-merged'
+          }
+          const cell = sh.cells[r + '_' + c]
+          if (cell) {
+            td.textContent = cell.v
+            if (cell.style) td.setAttribute('style', cell.style)
+          }
+          if (sh.widths[c]) td.style.minWidth = sh.widths[c] + 'px'
+          tr.appendChild(td)
+        }
+        tbody.appendChild(tr)
+      }
+      table.appendChild(tbody)
+      grid.appendChild(table)
+      for (const [i, b] of Array.from(tabs.children).entries()) b.classList.toggle('on', i === active)
+    }
+    parsed.forEach((sh, i) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'wk-doc-tab'
+      b.textContent = sh.name
+      b.addEventListener('click', () => { active = i; draw() })
+      tabs.appendChild(b)
+    })
+    wrap.append(bar, grid)
+    if (parsed.length > 1) wrap.appendChild(tabs)
+    body.textContent = ''
+    body.appendChild(wrap)
+    draw()
+  }
+
+  // ---------- DOCX ----------
+  function wkDocDocxStyles(files) {
+    const doc = wkDocXml(files, 'word/styles.xml')
+    const out = {}
+    for (const s of wkDocAll(doc, 'style')) {
+      const id = wkDocAttr(s, 'styleId')
+      if (id) out[id] = wkDocAttr(wkDocKids(s, 'name')[0], 'val')
+    }
+    return out
+  }
+
+  function wkDocDocxRun(r) {
+    const rPr = wkDocKids(r, 'rPr')[0]
+    const frag = document.createDocumentFragment()
+    const style = []
+    if (wkDocKids(rPr, 'b').some(wkDocOn)) style.push('font-weight:600')
+    if (wkDocKids(rPr, 'i').some(wkDocOn)) style.push('font-style:italic')
+    const u = wkDocKids(rPr, 'u')[0]
+    if (u && wkDocAttr(u, 'val') !== 'none') style.push('text-decoration:underline')
+    if (wkDocKids(rPr, 'strike').some(wkDocOn)) style.push('text-decoration:line-through')
+    const color = wkDocRgb(wkDocAttr(wkDocKids(rPr, 'color')[0], 'rgb'))
+    if (color) style.push('color:' + color)
+    const sz = Number(wkDocAttr(wkDocKids(rPr, 'sz')[0], 'val'))
+    if (Number.isFinite(sz) && sz > 0) style.push('font-size:' + (sz / 2) + 'pt')
+    for (const node of Array.from(r.children)) {
+      if (node.localName === 't') {
+        const span = document.createElement('span')
+        if (style.length) span.setAttribute('style', style.join(';'))
+        span.textContent = node.textContent || ''
+        frag.appendChild(span)
+      } else if (node.localName === 'tab') {
+        frag.appendChild(document.createTextNode('\u00a0\u00a0\u00a0\u00a0'))
+      } else if (node.localName === 'br' || node.localName === 'cr') {
+        frag.appendChild(document.createElement('br'))
+      }
+    }
+    return frag
+  }
+
+  function wkDocDocxP(p, styles) {
+    const pPr = wkDocKids(p, 'pPr')[0]
+    const sid = wkDocAttr(wkDocKids(pPr, 'pStyle')[0], 'val')
+    const name = String(styles[sid] || '').toLowerCase()
+    const h = /^heading\s*([1-6])$/.exec(name) || /^heading([1-6])$/.exec(String(sid).toLowerCase())
+    const numbered = !!wkDocKids(pPr, 'numPr')[0]
+    const el = document.createElement(h ? 'h' + h[1] : numbered ? 'div' : 'p')
+    if (h) el.className = 'wk-doc-h' + h[1]
+    else if (numbered) el.className = 'wk-doc-li'
+    const jc = wkDocAttr(wkDocKids(pPr, 'jc')[0], 'val')
+    if (jc) el.style.textAlign = jc === 'center' ? 'center' : jc === 'right' ? 'right' : jc === 'both' ? 'justify' : 'left'
+    for (const node of Array.from(p.children)) {
+      if (node.localName === 'r') el.appendChild(wkDocDocxRun(node))
+      else if (node.localName === 'hyperlink') for (const r of wkDocKids(node, 'r')) el.appendChild(wkDocDocxRun(r))
+    }
+    if (!el.textContent && !el.querySelector('br')) el.appendChild(document.createElement('br'))
+    return el
+  }
+
+  function wkDocDocxTbl(tbl, styles) {
+    const table = document.createElement('table')
+    table.className = 'wk-doc-dtable'
+    for (const tr of wkDocKids(tbl, 'tr')) {
+      const row = document.createElement('tr')
+      for (const tc of wkDocKids(tr, 'tc')) {
+        const td = document.createElement('td')
+        const tcPr = wkDocKids(tc, 'tcPr')[0]
+        const span = Number(wkDocAttr(wkDocKids(tcPr, 'gridSpan')[0], 'val')) || 1
+        if (span > 1) td.colSpan = span
+        const fill = wkDocRgb(wkDocAttr(wkDocKids(tcPr, 'shd')[0], 'fill'))
+        if (fill) td.style.background = fill
+        for (const p of wkDocKids(tc, 'p')) td.appendChild(wkDocDocxP(p, styles))
+        row.appendChild(td)
+      }
+      table.appendChild(row)
+    }
+    return table
+  }
+
+  function wkDocRenderDocx(body, path, buf) {
+    const files = wkDocUnzip(buf)
+    const doc = wkDocXml(files, 'word/document.xml')
+    const root = doc && wkDocAll(doc, 'body')[0]
+    if (!root) throw new Error('文档结构缺失（word/document.xml）')
+    const styles = wkDocDocxStyles(files)
+    const wrap = document.createElement('div')
+    wrap.className = 'wk-doc wk-doc-docx'
+    const bar = document.createElement('div')
+    bar.className = 'wk-doc-bar'
+    const nm = document.createElement('span')
+    nm.className = 'wk-doc-name'
+    nm.textContent = String(path).split('/').pop()
+    const meta = document.createElement('span')
+    meta.className = 'wk-doc-meta'
+    meta.textContent = '只读预览 · Word'
+    bar.append(nm, meta)
+    const page = document.createElement('div')
+    page.className = 'wk-doc-page'
+    for (const child of Array.from(root.children)) {
+      if (child.localName === 'p') page.appendChild(wkDocDocxP(child, styles))
+      else if (child.localName === 'tbl') page.appendChild(wkDocDocxTbl(child, styles))
+    }
+    wrap.append(bar, page)
+    body.textContent = ''
+    body.appendChild(wrap)
+  }
+
+  // 统一入口：work-editor.readFile 在 PDF/图片分支之后调用（抛错由调用方落「读取失败」）
+  function wkDocRender(body, path, buf) {
+    const kind = wkDocKind(path)
+    if (kind === 'xlsx') return wkDocRenderXlsx(body, path, buf)
+    if (kind === 'docx') return wkDocRenderDocx(body, path, buf)
+    throw new Error('不支持的文档类型')
+  }
+
+  // 渲染基准：pdf.js 视口 scale=1 是 72dpi，浏览器 CSS 像素按 96dpi —— 100% = scale 96/72。
+  const WK_PDF_BASE = 96 / 72
+  const WK_PDF_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
+  const WK_PDF_V = '593' // 与 index.html/sw.js 的 cache-bust 同值
+  let wkPdfLib = null
+  let wkPdfGen = 0 // 每次装载自增；迟到的解析结果据此作废
+  let wkPdfLive = null // 当前文档的释放函数
+
+  async function wkPdfLoadLib() {
+    if (!wkPdfLib) {
+      // vendor 文件按 .js 命名（不是 .mjs）：静态路由的 MIME 表只登记 .js = text/javascript，
+      // 动态 import 与 module worker 都要求 JS MIME，改扩展名即可避开后端 MIME 表改动。
+      const lib = await import('/vendor/pdfjs/pdf.min.js?v=' + WK_PDF_V)
+      lib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js?v=' + WK_PDF_V
+      wkPdfLib = lib
+    }
+    return wkPdfLib
+  }
+
+  // 切走/换文件时调用：作废在途装载并释放当前文档（worker + canvas + 文本层）。
+  function wkPdfClose() {
+    wkPdfGen++
+    if (wkPdfLive) {
+      const fn = wkPdfLive
+      wkPdfLive = null
+      try { fn() } catch { /* 释放失败不影响切文件 */ }
+    }
+  }
+
+  // 入口：body = #wk-ed-body，buf = ArrayBuffer（原样交给 pdf.js，worker 侧会转移）。
+  async function wkPdfRender(body, path, buf) {
+    wkPdfClose()
+    const gen = wkPdfGen
+    body.innerHTML = '<div class="wk-ed-empty">正在打开 PDF…</div>'
+    let lib
+    try {
+      lib = await wkPdfLoadLib()
+    } catch (e) {
+      if (gen === wkPdfGen) body.innerHTML = `<div class="wk-ed-empty">PDF 引擎不可用：${esc(e.message || e)}</div>`
+      return
+    }
+    if (gen !== wkPdfGen) return
+    const task = lib.getDocument({
+      data: new Uint8Array(buf),
+      cMapUrl: '/vendor/pdfjs/cmaps/',
+      cMapPacked: true,
+      standardFontDataUrl: '/vendor/pdfjs/standard_fonts/',
+      isEvalSupported: false,
+      useWorkerFetch: false,
+    })
+    let doc
+    try {
+      doc = await task.promise
+    } catch (e) {
+      if (gen !== wkPdfGen) return
+      body.innerHTML = `<div class="wk-ed-empty">PDF 解析失败：${esc(e.message || e)}</div>`
+      return
+    }
+    if (gen !== wkPdfGen) {
+      try { doc.destroy() } catch { /* 已作废 */ }
+      return
+    }
+    wkPdfMount(body, path, lib, doc)
+  }
+
+  function wkPdfMount(body, path, lib, doc) {
+    const scroll = document.createElement('div')
+    scroll.className = 'wk-pdf-scroll'
+    const pages = document.createElement('div')
+    pages.className = 'wk-pdf-pages'
+    scroll.appendChild(pages)
+    const name = String(path).split('/').pop()
+
+    const wrap = document.createElement('div')
+    wrap.className = 'wk-pdf'
+    wrap.innerHTML =
+      `<div class="wk-pdf-bar">` +
+      `<span class="wk-pdf-name" title="${esc(path)}">${esc(name)}</span>` +
+      `<span class="wk-pdf-total">${doc.numPages} 页</span>` +
+      `<span class="wk-pdf-grow"></span>` +
+      `<button type="button" class="wk-pdf-btn" data-pdf="prev" title="上一页">‹</button>` +
+      `<input class="wk-pdf-num" inputmode="numeric" value="1" aria-label="页码" />` +
+      `<span class="wk-pdf-of">/ ${doc.numPages}</span>` +
+      `<button type="button" class="wk-pdf-btn" data-pdf="next" title="下一页">›</button>` +
+      `<span class="wk-pdf-sep"></span>` +
+      `<button type="button" class="wk-pdf-btn" data-pdf="out" title="缩小">−</button>` +
+      `<button type="button" class="wk-pdf-btn wk-pdf-fit on" data-pdf="fit" title="适宽">适宽</button>` +
+      `<button type="button" class="wk-pdf-btn" data-pdf="in" title="放大">+</button>` +
+      `<span class="wk-pdf-pct">–</span>` +
+      `</div>`
+    wrap.appendChild(scroll)
+    body.textContent = ''
+    body.appendChild(wrap)
+
+    const q = (s) => wrap.querySelector(s)
+    const pageInput = q('.wk-pdf-num')
+    const pctEl = q('.wk-pdf-pct')
+    const fitBtn = q('[data-pdf="fit"]')
+
+    const st = {
+      zoom: 'fit', // 'fit' | number（1 = 96dpi 的 100%）
+      visible: new Set(),
+      epochs: 0,
+      queue: [],
+      queued: new Set(),
+      busy: false,
+      dead: false,
+      tasks: new Set(),
+      pages: [], // [{ el, canvas, text, base, state }]
+      obs: null,
+      obsResize: null,
+      cur: 1,
+      ready: false, // 首页尺寸到位前不渲染（否则先按 100% 渲一帧再重渲）
+    }
+
+    const dispose = () => {
+      if (st.dead) return
+      st.dead = true
+      st.obs?.disconnect()
+      st.obsResize?.disconnect()
+      st.obs = null
+      st.obsResize = null
+      for (const t of st.tasks) { try { t.cancel() } catch { /* 已结束 */ } }
+      st.tasks.clear()
+      st.queue.length = 0
+      st.queued.clear()
+      // 页面 canvas 主动缩零：iOS 上大画布不释放会随文档残留（dsh 同做法）
+      for (const p of st.pages) {
+        p.canvas.width = 0
+        p.canvas.height = 0
+      }
+      Promise.resolve().then(() => { try { doc.destroy() } catch { /* 已销毁 */ } })
+    }
+    wkPdfLive = dispose
+
+    for (let n = 1; n <= doc.numPages; n++) {
+      const el = document.createElement('div')
+      el.className = 'wk-pdf-page'
+      el.dataset.page = String(n)
+      el.innerHTML = '<div class="wk-pdf-ph" role="status" aria-label="加载第 ' + n + ' 页"></div>' +
+        '<div class="wk-pdf-surface" hidden><canvas class="wk-pdf-canvas" role="img" aria-label="第 ' + n + ' 页"></canvas><div class="textLayer wk-pdf-text"></div></div>'
+      pages.appendChild(el)
+      st.pages.push({
+        el,
+        canvas: el.querySelector('canvas'),
+        text: el.querySelector('.textLayer'),
+        surface: el.querySelector('.wk-pdf-surface'),
+        base: 0, // 页面在 scale=96/72 下的 CSS 宽
+        renderedZoom: 0,
+        epoch: -1,
+        n,
+      })
+    }
+
+    // ---- 缩放 ----
+    function fitZoom(p0) {
+      const avail = scroll.clientWidth - 24
+      return p0 && p0.base ? Math.max(0.1, avail / p0.base) : 1
+    }
+    function zoomValue() {
+      const p0 = st.pages[0]
+      return st.zoom === 'fit' ? fitZoom(p0) : st.zoom
+    }
+    function setZoom(z) {
+      st.zoom = z
+      st.epochs++
+      fitBtn.classList.toggle('on', z === 'fit')
+      pctEl.textContent = Math.round(zoomValue() * 100) + '%'
+      // 重渲可见页 + 当前页（其余页在滚入可视区时按新 epoch 渲染）
+      const want = new Set(st.visible)
+      want.add(st.cur)
+      for (const n of want) requestRender(n)
+    }
+    function stepZoom(dir) {
+      const cur = zoomValue()
+      if (dir > 0) {
+        const next = WK_PDF_STEPS.find((v) => v > cur + 0.001)
+        setZoom(next || WK_PDF_STEPS[WK_PDF_STEPS.length - 1])
+      } else {
+        const lower = WK_PDF_STEPS.filter((v) => v < cur - 0.001)
+        setZoom(lower.length ? lower[lower.length - 1] : WK_PDF_STEPS[0])
+      }
+    }
+
+    // ---- 渲染队列（串行，避免多页同时分配大画布）----
+    function requestRender(n) {
+      if (st.dead || !st.pages[n - 1]) return
+      if (st.queued.has(n)) return
+      st.queued.add(n)
+      st.queue.push(n)
+      void pump()
+    }
+    async function pump() {
+      if (st.busy || st.dead || !st.ready) return
+      const n = st.queue.shift()
+      if (n == null) return
+      st.busy = true
+      try { await renderPage(n) } catch { /* 单页失败保留占位（重渲会再试） */ }
+      st.busy = false
+      st.queued.delete(n)
+      if (!st.dead && st.queue.length) void pump()
+    }
+    async function renderPage(n) {
+      const p = st.pages[n - 1]
+      const epoch = st.epochs
+      st.queued.add(n)
+      const page = await doc.getPage(n)
+      if (st.dead || epoch !== st.epochs) return
+      const baseVp = page.getViewport({ scale: WK_PDF_BASE })
+      p.base = baseVp.width
+      const zoom = zoomValue()
+      if (p.epoch === epoch && Math.abs(p.renderedZoom - zoom) < 0.001) return
+      const vp = page.getViewport({ scale: WK_PDF_BASE * zoom })
+      const ratio = Math.min(window.devicePixelRatio || 1, Math.sqrt(16_777_216 / (vp.width * vp.height)))
+      p.canvas.width = Math.max(1, Math.floor(vp.width * ratio))
+      p.canvas.height = Math.max(1, Math.floor(vp.height * ratio))
+      p.canvas.style.width = vp.width + 'px'
+      p.canvas.style.height = vp.height + 'px'
+      p.surface.style.width = vp.width + 'px'
+      const task = page.render({ canvas: p.canvas, viewport: vp, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] })
+      st.tasks.add(task)
+      // 文本层（可选文本；容器尺寸与画布一致，CSS 变量告知 pdf.js 当前缩放）
+      let textLayer
+      try {
+        p.text.textContent = ''
+        p.text.style.setProperty('--total-scale-factor', String(vp.scale))
+        textLayer = new lib.TextLayer({ textContentSource: page.streamTextContent(), container: p.text, viewport: vp })
+      } catch { textLayer = null }
+      try {
+        await Promise.all([task.promise, textLayer ? textLayer.render() : Promise.resolve()])
+      } finally {
+        st.tasks.delete(task)
+        try { page.cleanup() } catch { /* 已销毁 */ }
+      }
+      if (st.dead || epoch !== st.epochs) return
+      p.renderedZoom = zoom
+      p.epoch = epoch
+      p.surface.hidden = false
+      const ph = p.el.querySelector('.wk-pdf-ph')
+      if (ph) ph.hidden = true
+      p.el.style.width = vp.width + 'px'
+      pctEl.textContent = Math.round(zoomValue() * 100) + '%'
+    }
+
+    // ---- 可视区懒渲染 + 当前页 ----
+    if (typeof IntersectionObserver === 'function') {
+      st.obs = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+          const n = Number(en.target.dataset.page)
+          if (en.isIntersecting) {
+            st.visible.add(n)
+            requestRender(n)
+          } else st.visible.delete(n)
+        }
+        syncCur()
+      }, { root: scroll, rootMargin: '100% 0px' })
+      for (const p of st.pages) st.obs.observe(p.el)
+    } else {
+      for (const p of st.pages) requestRender(p.n)
+    }
+    function syncCur() {
+      // 当前页 = 顶部越过滚动口顶沿的最后一页；全在下方则取第一页
+      let cur = 1
+      const top = scroll.getBoundingClientRect().top
+      for (const p of st.pages) {
+        if (p.el.getBoundingClientRect().top - top <= 24) cur = p.n
+        else break
+      }
+      if (cur !== st.cur) {
+        st.cur = cur
+        if (document.activeElement !== pageInput) pageInput.value = String(cur)
+      }
+    }
+    let raf = 0
+    scroll.addEventListener('scroll', () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => { raf = 0; if (!st.dead) syncCur() })
+    }, { passive: true })
+
+    function goPage(n) {
+      const target = Math.min(doc.numPages, Math.max(1, n | 0))
+      const p = st.pages[target - 1]
+      if (!p) return
+      st.cur = target
+      pageInput.value = String(target)
+      scroll.scrollTop = p.el.offsetTop - pages.offsetTop
+      requestRender(target)
+    }
+
+    // ---- 工具条 ----
+    wrap.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pdf]')
+      if (!b) return
+      const act = b.dataset.pdf
+      if (act === 'prev') goPage(st.cur - 1)
+      else if (act === 'next') goPage(st.cur + 1)
+      else if (act === 'out') stepZoom(-1)
+      else if (act === 'in') stepZoom(1)
+      else if (act === 'fit') setZoom('fit')
+    })
+    pageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { goPage(Number(pageInput.value)); pageInput.blur() }
+    })
+    pageInput.addEventListener('blur', () => {
+      const n = Number(pageInput.value)
+      if (Number.isFinite(n) && n >= 1 && n <= doc.numPages) goPage(n)
+      else pageInput.value = String(st.cur)
+    })
+    // 容器宽度变化（右栏拖宽 / 横竖屏）：适宽态重算；固定比例态也要重算当前页布局
+    if (typeof ResizeObserver === 'function') {
+      let lastW = scroll.clientWidth
+      const ro = new ResizeObserver(() => {
+        if (st.dead || scroll.clientWidth === lastW) return
+        lastW = scroll.clientWidth
+        if (st.zoom === 'fit') setZoom('fit')
+        else pctEl.textContent = Math.round(zoomValue() * 100) + '%'
+      })
+      ro.observe(scroll)
+      st.obsResize = ro
+    }
+
+    // 先取首页尺寸再落 fit 比例（numPages 为空时不崩）
+    void doc.getPage(1).then((p0) => {
+      if (st.dead) return
+      const vp = p0.getViewport({ scale: WK_PDF_BASE })
+      st.pages[0].base = vp.width
+      st.ready = true
+      setZoom('fit')
+      requestRender(1)
+      if (!st.dead && st.queue.length) void pump()
+    }).catch(() => {
+      if (st.dead) return
+      st.ready = true
+      setZoom('fit')
+      void pump()
+    })
+  }
+
   // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
   // 每条评论的行范围 l0..l1 落成 CodeMirror 行装饰：未解决 .cmt-mark-open / 已解决 .cmt-mark-res。
   function cmtApplyMarks() {
@@ -8118,7 +9199,7 @@ function edCmg() {
     wkEdPendingDoc = null
     wkEdCmtMarks = []
     wkEdProj = ''
-    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
+    wkPdfClose()
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
@@ -8153,7 +9234,6 @@ function edCmg() {
     wkEdState()
   }
 
-  let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
   let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
 
   // 死路径收口：读回 404 = 该路径在盘上已不存在（改名/删除后残留的开放集条目，含持久化恢复的）。
@@ -8180,7 +9260,7 @@ function edCmg() {
     wkEdProj = state.workProj
     wkEdFile = ''
     wkEdConflict = false
-    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
+    wkPdfClose()
     if (IMG_EXT.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: true, editable: false }
@@ -8189,9 +9269,9 @@ function edCmg() {
       renderEdBody()
       return
     }
-    // PDF（2026-10-14 待办#15）：纯前端预览——GET /gateway/file 读原始字节 blob 化，<iframe> 交给
-    // 浏览器自带 viewer（零外链、零后端改动）。网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
-    // 渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态。
+    // PDF（2026-10-24 改 pdf.js）：读原始字节交给 work-pdf.js 真实渲染（页导航/缩放/文本层，
+    // 对齐 dsh 文档预览）。渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态；
+    // 网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
     if (/\.pdf$/i.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: false, editable: false }
@@ -8209,11 +9289,37 @@ function edCmg() {
             '</div>'
           return
         }
-        const blob = await res.blob()
+        const buf = await res.arrayBuffer()
         if (seq !== edSeq) return
-        const url = URL.createObjectURL(blob)
-        wkEdPdfUrl = url
-        body.innerHTML = `<div class="wk-ed-pdf"><iframe src="${esc(url)}" title="${esc(p)}"></iframe></div>`
+        await wkPdfRender(body, p, buf)
+      } catch (e) {
+        if (seq !== edSeq) return
+        body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
+      }
+      return
+    }
+    // Office 只读预览（2026-10-24）：xlsx/docx 二进制包交给 work-doc.js 解包渲染（不走文本分支，
+    // 否则 content-type 判成二进制直接「不支持预览」）。网关读侧 4 MB 上限同样生效。
+    if (wkDocKind(p)) {
+      wkEdFile = p
+      wkEdMeta = { isImg: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
+      try {
+        const res = await fetch(fileUrl(p))
+        if (seq !== edSeq) return
+        if (!res.ok) {
+          if (res.status === 404) return wkDropDeadFile(p)
+          body.innerHTML =
+            '<div class="wk-ed-empty">' +
+            esc(res.status === 413 ? '文件超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
+            '</div>'
+          return
+        }
+        const buf = await res.arrayBuffer()
+        if (seq !== edSeq) return
+        wkDocRender(body, p, buf)
       } catch (e) {
         if (seq !== edSeq) return
         body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
@@ -9767,9 +10873,7 @@ function edCmg() {
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
   // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
   // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
-  // 原文块捕获（2026-10-21）：$3/$2 = 令牌与收尾令牌之间的原文，气泡里要原样渲染（见 quoteBodiesAsMarkdown）
-  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]\n([\s\S]*?)\n\[\/引用回复\]/g
-  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])\n([\s\S]*?)\n\[\/引用PDF\]/g
+  // 引用原文块 ⇄ 折叠令牌的解析与编码统一在 core/mention-syntax.js（唯一真源：气泡/底栏共用）。
   const MENTION_DIR_ICON = I.dshFolder
   const MENTION_UP_ICON = I.dshUp
   // CM6 接管后 sentinel（零宽 DOM 锚）退役：@ 查询锚点 = doc 位置 anchor（'@' 所在 pos）
@@ -9781,14 +10885,14 @@ function edCmg() {
   // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层并发），层间 await。
   // 上限：目录 ≤250 / 条目 ≤2000 / 深度 ≤4——够覆盖散件与项目浅层，防全库深扫拖垮浮窗。
   // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
-  const pickAll = { items: null, busy: false, seq: 0 }
+  const pickAll = { items: null, busy: false, seq: 0, err: '' }
 
   // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
   // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
   // 新增条目只声明 kind、不各自排位（否则两处排位迟早分叉）。
   const GROUP_ORDER = ['上传', '聊天', '文件', '技能', '指令']
   const GROUP_MAX = 3
-  const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件' }
+  const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件', pathwait: '文件' }
   function groupOf(it) {
     return GROUP_OF[it.kind] || '指令'
   }
@@ -9838,6 +10942,7 @@ function edCmg() {
     const out = []
     let layer = [{ p: '', d: 0 }]
     const seen = new Set()
+    let rootErr = ''
     try {
       while (layer.length && seen.size < 250 && out.length < 2000) {
         const next = []
@@ -9846,7 +10951,11 @@ function edCmg() {
             try {
               const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
               const data = await r.json()
-              if (!r.ok || !data || !Array.isArray(data.entries)) return
+              if (!r.ok || !data || !Array.isArray(data.entries)) {
+                // 根层失败 = 整份清单不可信（空结果会谎报「无匹配」）：记错并作废本轮，浮窗重开再试。
+                if (!p) rootErr = (data && data.error) || '工作区索引失败'
+                return
+              }
               for (const e of data.entries) {
                 const cp = p ? `${p}/${e.name}` : e.name
                 out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp })
@@ -9855,7 +10964,10 @@ function edCmg() {
                   next.push({ p: cp, d: d + 1 })
                 }
               }
-            } catch { /* 单层失败跳过，不拖垮整轮 */ }
+            } catch (e) {
+              /* 子层失败跳过，不拖垮整轮（根层失败另记） */
+              if (!p) rootErr = e.message || '工作区索引失败'
+            }
           }),
         )
         if (seq !== pickAll.seq) return
@@ -9863,15 +10975,17 @@ function edCmg() {
       }
     } finally {
       if (seq === pickAll.seq) {
-        pickAll.items = out
         pickAll.busy = false
+        if (rootErr) { pickAll.items = null; pickAll.err = rootErr }
+        else { pickAll.items = out; pickAll.err = '' }
       }
     }
   }
   // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
   // 建清单，完成后浮窗仍开着才重渲。
   function pickSearchKick(re) {
-    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy) ensurePickAll().then(re).catch(() => {})
+    // pickAll.err 非空 = 上一轮根层失败：不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
+    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy && !pickAll.err) ensurePickAll().then(re).catch(() => {})
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -9937,7 +11051,7 @@ function edCmg() {
   // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
   function mentionChipInner(kind, name, ptype) {
     const label = kind === 'path' ? '@' + name : name
-    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span><span class="m-x" title="删除">×</span>`
+    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span>`
   }
   function buildMentionChip(kind, name, sid, ptype) {
     const chip = document.createElement('span')
@@ -9986,16 +11100,7 @@ function edCmg() {
   // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
   // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
-  function quoteBodiesAsMarkdown(text) {
-    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(body) + ']')
-    const tailBreak = (whole, offset, match) => {
-      const rest = String(whole).slice(offset + match.length)
-      return rest && !rest.startsWith('\n') ? '\n' : ''
-    }
-    return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
-      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
-  }
+  const quoteBodiesAsMarkdown = foldQuoteBodies
 
   // 实时回显的用户消息：把令牌转 chip（与离线 messagesHtml 的 mdInline 一致）
   function renderUserText(text) {
@@ -10008,10 +11113,11 @@ function edCmg() {
       .replace(QUOTE_PDF_RE, (_, p, a, b, q) => quotePdfChipHtml(p, a, b, q))
   }
 
-  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图，
-  // doc 单真源 ⇒ serializeInput 退化为 doc.toString()。签名与语义冻结（接缝不变量）。
+  // 序列化 = CM doc 原文（2026-10-14 CM6 接管）：令牌文本本就是序列化形态、chip 是它的装饰视图。
+  // 例外（2026-10-24）：引用原文在底栏 doc 里是折叠单行令牌（chip 即所见），发送时还原成
+  // 「锚点行 + 原文 + 收尾行」的块形态——模型读到的必须是原文，不是百分号编码。
   function serializeInput() {
-    return composerDocText()
+    return unfoldQuoteBodies(composerDocText())
   }
 
   function closeMentionPop() {
@@ -10042,8 +11148,11 @@ function edCmg() {
   function refreshPick(after) {
     pick.entries = null // 立刻清旧层：否则换项目后先闪一帧上一个项目的条目（在途请求由 loadPickPath 的 seq 作废）
     pick.err = ''
+    pick.q = '' // 查询/层级同属上一轮手势：不复位会先渲一帧旧查询结果（两个浮窗共用本状态）
+    pick.path = ''
     pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
     pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.err = ''
     pickAll.seq++
     // 作废在途轮时必须同步释放 busy：旧轮 finally 见 seq 不符只跳过写回、不会复位 busy，
     // 否则下一次输入永远起不了新轮（文件搜索整组空白）
@@ -10080,8 +11189,10 @@ function edCmg() {
     const searching = pick.q && !pick.searchOff && !pickAll.items
     pickSearchKick(() => { if (mention.open) renderMentionPop() }) // 搜索清单未就绪 → 建完补渲（待办 20）
     if (!items.length && searching) {
-      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果
-      pop.innerHTML = '<div class="mp-sec">文件 · 全局搜索…</div>'
+      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果。
+      // 必须清空 mention.items：回车选择走 mention.items[sel]，留着上一轮条目会插错东西。
+      mention.items = []
+      pop.innerHTML = `<div class="mp-sec">${esc(pickAll.err ? '文件 · 索引失败：' + pickAll.err : '文件 · 全局搜索…')}</div>`
       pop.hidden = false
       return
     }
@@ -10167,9 +11278,10 @@ function edCmg() {
     // IME 组合期（中文键盘敲字母即进入组合）：组合中的 doc 文本是**临时拼音/候选**，
     // 选区也不可信——拿它过滤会把浮窗筛空并按「无结果」关掉，或按选区判定误杀。
     // 组合期一律不判不动（不开、不更新查询、不关），等 compositionend 上屏后的 doc 事务
-    // 走正常判定。compositionStarted（composing>=0）而非 composing（>0）：compositionstart
-    // 先把状态置 0，首个组合字符进 doc 才 ++，用 composing 会漏掉「刚开始组合」这一拍。
-    if (cmView.compositionStarted) return
+    // 走正常判定。`composing` 是 CM6 EditorView 的真实组合态字段（旧写法 compositionStarted
+    // 根本不存在 ⇒ 守卫恒为假，查询词跟着组合中的临时文本乱跳）。组合结束由 onCompositionEnd
+    // 再按最终 doc 判定一次，避免末次事务缺失时浮窗停在空查询的旧结果上。
+    if (cmView.composing) return
     if (st.selection.main.from !== st.selection.main.to || !st.selection.main.empty) { if (mention.open) closeMentionPop(); return }
     if (mention.open) {
       const between = st.doc.sliceString(mention.anchor, pos)
@@ -10181,6 +11293,12 @@ function edCmg() {
     if (pos > 0 && st.doc.sliceString(pos - 1, pos) === '@') openMentionPopAtCaret()
   }
   function onInputChange() { syncGwSend(); onInputMention() }
+  // IME 组合结束：CM 在 compositionend 后可能不再派发 doc/selection 事务（组合文本已在组合期
+  // 进 doc），此时 @ 查询词仍是组合期旧值 ⇒ 浮窗停在空查询的全量列表。延后一拍按最终 doc 重判。
+  function onCompositionEnd() {
+    if (!cmView) return
+    setTimeout(() => { if (cmView) onInputMention() }, 0)
+  }
 
   // vendor 全局（index.html 先于 app.js 载入，eval 期取值安全；work-cm.js 同款别名）
   const CMG = window.CMLiveMarkdown
@@ -10196,13 +11314,15 @@ function edCmg() {
     { re: /\[插件:([^\]\n]+)\]/g, spec: (m) => ({ kind: 'plugin', name: m[1] }) },
     { re: /\[@(目录|文件):([^\]\n]+)\]/g, spec: (m) => ({ kind: 'path', ptype: m[1] === '目录' ? 'dir' : 'file', name: m[2] }) },
     { re: /\[@引用:([^\]#\n]+?)(?:#L(\d+)-L?(\d+))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'file', file: m[1], l0: m[2], l1: m[3] }) },
-    { re: /\[@引用PDF:([^\]#\n]+?)(?:#p(\d+)(?:-p?(\d+))?)?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'pdf', file: m[1], p0: m[2], p1: m[3] }) },
-    { re: /\[@引用回复:(\d+)\|([^\]\n]*)\]/g, spec: (m) => ({ kind: 'ref', rkind: 'reply', idx: m[1], title: m[2] }) },
+    { re: /\[@引用PDF:([^\]|\n]+?)(?:#p(\d+)(?:-p?(\d+))?)?(?:\|([^\]\n]*))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'pdf', file: m[1], p0: m[2], p1: m[3], bodyEnc: m[4] || '' }) },
+    // 第三段 = 引用原文（百分号编码，折叠形态；见 core/mention-syntax.js foldQuoteBodies）——底栏 doc 存折叠
+    // 形态，chip 里直接渲染原文（用户口径：蓝紫=引用内容，不再显示「引用自…」标签）。
+    { re: /\[@引用回复:(\d+)\|([^\]|\n]*)(?:\|([^\]\n]*))?\]/g, spec: (m) => ({ kind: 'ref', rkind: 'reply', idx: m[1], title: m[2], bodyEnc: m[3] || '' }) },
   ]
   // 引用块收口令牌（回复/PDF 原文块结束行）：渲染为空（隐藏），同样原子——原文块在消息里本就整块剥掉只留锚点胶囊
   const CM_TOKEN_CLOSE = /\[\/(引用回复|引用PDF)\]/g
   // 上传附件正文引用 `[名](uploads/x)`：@ 浮窗「上传」组选中后写进底栏的形态。
-  // 它必须是 chip 体系的**成员**（有 ×、原子化），否则退格逐字符删、把整串 md 源码翻出来。
+  // 它必须是 chip 体系的**成员**（原子化），否则退格逐字符删、把整串 md 源码翻出来。
   // 前导 `!` 的是图片（`![名](uploads/x)`），由 edAttImgPlugin 渲成 <img>，此处跳过。
   const CM_ATT_LINK = /\[([^\]\n]+)\]\(uploads\/([^)\s]+)\)/g
 
@@ -10250,21 +11370,25 @@ function edCmg() {
     if (spec.rkind === 'pdf') return `引用自 ${name}${spec.p0 ? ' · 第 ' + spec.p0 + (spec.p1 && spec.p1 !== spec.p0 ? '-' + spec.p1 : '') + ' 页' : ''}`
     return `引用自 ${name}`
   }
-  // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label+×）
+  // chip DOM：@ 族复用 buildMentionChip（输入栏蓝字现行为）；引用族同 .mention.ref 结构（icon+label）。
+  // 2026-10-24 定案：引用件一律无 ×，删除只走「原子跳过 + 退格整块删」（cmAtomic / cmBackspaceChip）。
   function cmChipDom(spec) {
     if (spec.kind === 'att') {
-      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名 + ×（点 × 整块删）
+      // 上传附件引用：与消息气泡 `.mention-chip.m-att` 同观感——类型徽标 + 文件名
       const chip = document.createElement('span')
       chip.className = 'mention ref'
       let url = spec.url
       try { url = decodeURIComponent(url) } catch {}
-      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span><span class="m-x" title="删除">×</span>`
+      chip.innerHTML = `<span class="m-ic">${fileIcon(url)}</span><span class="m-nm">${esc(spec.name)}</span>`
       return chip
     }
     if (spec.kind === 'ref') {
       const chip = document.createElement('span')
-      chip.className = 'mention ref'
-      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(cmRefLabel(spec))}</span><span class="m-x" title="删除">×</span>`
+      // 有原文 = 折叠形态：蓝紫内容本体（与消息气泡 .mention-chip.m-ref.m-quote 同构）；
+      // 无原文 = 旧/纯锚点令牌：退回来源标签。两者都不再有 ×（删除走原子跳过 + 退格整块删）。
+      const body = decodeQuoteBody(spec.bodyEnc)
+      chip.className = 'mention ref' + (body ? ' m-quote' : '')
+      chip.innerHTML = `<span class="m-ic">${spec.rkind === 'reply' ? I.msg : fileIcon(spec.file)}</span><span class="m-nm">${esc(body || cmRefLabel(spec))}</span>`
       return chip
     }
     if (spec.kind === 'session') {
@@ -10277,30 +11401,9 @@ function edCmg() {
   class CmChipWidget extends CMG.WidgetType {
     constructor(spec, len) { super(); this.spec = spec; this.len = len }
     eq(o) { return o.len === this.len && JSON.stringify(o.spec) === JSON.stringify(this.spec) }
-    // ignoreEvent true：事件交给 widget 自有监听（× 删除），其余冒泡回 CM
+    // ignoreEvent true：点按不触发 CM 的文本选择（删除只走键程的整块退格，chip 内无可点件）
     ignoreEvent() { return true }
-    toDOM() {
-      const chip = cmChipDom(this.spec)
-      chip.addEventListener('mousedown', (e) => {
-        if (!e.target.closest('.m-x')) return
-        e.preventDefault()
-        e.stopPropagation()
-        cmRemoveTokenAt(cmView.posAtDOM(chip))
-      })
-      return chip
-    }
-  }
-
-  function cmRemoveTokenAt(pos) {
-    if (!cmView || cmView.state.readOnly) return
-    // × 落在 chip 的某个 DOM 位置上，向前找包含它的令牌（不再要求恰好 from === pos）
-    const hit = cmTokenRanges(cmView.state.doc).find((it) => it.from <= pos && pos < it.to)
-    if (!hit) return
-    const text = cmView.state.doc.toString()
-    let from = cmTokenSpan(hit).from
-    let to = cmTokenSpan(hit).to
-    if (text[to] === ' ') to++ // 连同尾随分隔空格一起删（旧 removeChip 同语义）
-    cmView.dispatch({ changes: { from, to } })
+    toDOM() { return cmChipDom(this.spec) }
   }
 
   // 令牌扫描插件 + 原子化：chip 区间游标进不去、退格整块删（CM atomicRanges 语义）
@@ -10311,20 +11414,9 @@ function edCmg() {
 
   function cmBuildDeco(view) {
     const doc = view.state.doc
-    const text = doc.toString()
     const items = cmTokenRanges(doc)
     const arr = []
-    // 引用块（回复/PDF）正文行标：锚点令牌行与收口令牌行之间加 .cm-quote-body（正文可见可编辑，
-    // 与旧「原文只在 dataset 里不可见」不同——真所见即所得：用户消息将包含他在编辑器里看到的每一行）
-    for (const it of items) {
-      if (it.close || !it.spec || it.spec.kind !== 'ref' || it.spec.rkind === 'file') continue
-      const closeRe = it.spec.rkind === 'pdf' ? '[/引用PDF]' : '[/引用回复]'
-      const ci = text.indexOf(closeRe, it.to)
-      if (ci < 0) continue
-      for (let n = doc.lineAt(it.to).number + 1; n <= doc.lineAt(ci).number - 1; n++) {
-        arr.push(CMG.Decoration.line({ class: 'cm-quote-body' }).range(doc.line(n).from))
-      }
-    }
+    // 引用原文已在折叠令牌的第三字段里（chip 内渲染），doc 里不再有独立的原文行/收尾行。
     for (const it of items) {
       if (it.close) arr.push(CMG.Decoration.replace({}).range(it.from, it.to))
       else arr.push(CMG.Decoration.replace({ widget: new CmChipWidget(it.spec, it.to - it.from) }).range(it.from, it.to))
@@ -10459,6 +11551,7 @@ function edCmg() {
         cmCM.mouseSelectingField,
         cmCM.livePreviewPlugin,
         cmCM.markdownStylePlugin,
+        edBlockMarkPlugin, // 块级标记按「标记节点相邻」退化（不整行；列表渲圆点/序号）
         cmCM.mathPlugin,
         cmCM.blockMathField,
         cmMathExt(cmCM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流同文法（core/math-spec）
@@ -10482,6 +11575,8 @@ function edCmg() {
     // 聚焦时上报活跃面（work 编辑区同款；活跃面 = 最后聚焦者）。既有 chip/令牌/补全链原样不动。
     makeEditorFacade({ id: 'composer', view: cmView })
     cmView.contentDOM.addEventListener('focus', () => editorApiSetActive('composer'))
+    // IME 组合结束 → 按最终 doc 重判 @ 查询（见 mention.js onCompositionEnd）
+    cmView.contentDOM.addEventListener('compositionend', () => onCompositionEnd())
     // 键/粘贴走 contentDOM **捕获阶段**直挂（不 domEventHandlers）：本 vendor 实测 keymap.of(defaultKeymap)
     // 的 Enter 绑定先于 domEventHandlers 吞键（探针 2026-10-14，np=false 且键程分支未触）——捕获监听先于
     // CM 自身气泡链，true = preventDefault+stopPropagation 阻断 keymap 默认行为。
@@ -10510,7 +11605,8 @@ function edCmg() {
   function composerSetText(text) {
     if (!cmView || cmView.state.readOnly) return
     const cur = cmView.state.doc.toString()
-    const next = String(text || '')
+    // 恢复草稿/外部注入可能是块形态：底栏 doc 统一为折叠形态（与 composerAppendRef 同口径）
+    const next = foldQuoteBodies(String(text || ''))
     if (cur === next) return
     editorCommand('replaceRange', { from: 0, to: cur.length, text: next }, 'composer')
   }
@@ -10522,13 +11618,16 @@ function edCmg() {
     editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + text + ' ' }, 'composer')
     cmView.focus()
   }
-  // 引用令牌追加（quote.js）：块形态（含原文）单独起行，单行文件引用以空格衔接；光标落块尾 = 接着打字就是给引用的说明
+  // 引用令牌追加（quote.js）：quote.js 产出的是**块形态**（锚点行 + 原文 + 收尾行），底栏 doc 统一存
+  // **折叠形态**（单行、chip 即所见）——落盘/发送时由 serializeInput 还原块形态（见 mention.js）。
+  // 单行文件引用本就是单行令牌，原样以空格衔接。光标落 chip 之后 = 接着打字就是给这条引用的说明。
   function composerAppendRef(token) {
     if (!cmView || cmView.state.readOnly) return
     const doc = cmView.state.doc
-    const block = String(token).indexOf('\n') >= 0
+    const folded = foldQuoteBodies(String(token))
+    const block = folded.indexOf('\n') >= 0
     const sep = doc.length ? (block ? '\n' : ' ') : ''
-    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + token }, 'composer')
+    editorCommand('replaceRange', { from: doc.length, to: doc.length, text: sep + folded }, 'composer')
     cmView.focus()
   }
   function composerAppendText(text) {
@@ -10773,8 +11872,15 @@ function edCmg() {
       if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
     }
     for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
-    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）
-    items.push(...pickItems(barQuery()))
+    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）。
+    // q 必须是**已剥掉前导 / 的查询词**——传 barQuery() 全文会把 "/" 带进过滤词，全局搜索恒不命中。
+    items.push(...pickItems(q))
+    // 清单在建/根层失败：给文件组一行占位（否则整个浮窗只剩上传两行，看起来像搜索坏了）
+    if (q && !pick.searchOff && !pickAll.items) {
+      items.push(pickAll.err
+        ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
+        : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
+    }
     // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
     const arranged = arrangeItems(items)
     pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
@@ -10822,16 +11928,13 @@ function edCmg() {
       // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
       // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       let lastGrp = ''
-      // 全局搜索清单在建占位（2026-10-14 待办 20）：条目还没来先给组头占位，到位由 pickSearchKick 补渲
-      if (!cmd.items.length && barQuery() && !pick.searchOff && !pickAll.items) {
-        html += `<div role="listbox" class="viewport"><div class="grp">文件 · ${esc(pickLabel())}</div></div>`
-      } else html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
+      html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = groupOf(it)
         const grp = g === '文件' ? '文件 · ' + pickLabel() : g
         const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : (CMD_ICON[it.name] || I.dshPlus)
+        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : it.kind === 'pathwait' ? mentionChipIcon('path', 'file') : (CMD_ICON[it.name] || I.dshPlus)
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         const detail = it.kind === 'path' ? it.path : it.desc
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
@@ -10896,8 +11999,11 @@ function edCmg() {
     if (!it || cmd.submitting) return
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
+    if (it.kind === 'pathwait') return // 占位行不可选（清单未就绪）
+    // 下钻/返回必须走 pickEnter：它同时把 searchOff 翻回层内浏览模式；只调 loadPickPath 会让
+    // pickItems 继续按全局搜索分支渲染，点目录看起来「没反应」。
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
-      loadPickPath(it.path).then(() => { if (cmd.open) renderCmdPop() })
+      pickEnter(it).then(() => { if (cmd.open) renderCmdPop() })
       return
     }
     if (it.kind === 'path') { appendMentionChip('path', it.path, '', 'file'); closeCmdPop(); return }

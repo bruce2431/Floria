@@ -1,4 +1,5 @@
 // 编辑区渲染与读写：原文评论标记 / renderEditor / 读文件 / 自动保存 / 冲突处置 / 开关文件。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
+import { wkPdfClose, wkPdfRender } from './work-pdf.js'
 /* @module sidebar/work/work-editor.js */
   // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
   // 每条评论的行范围 l0..l1 落成 CodeMirror 行装饰：未解决 .cmt-mark-open / 已解决 .cmt-mark-res。
@@ -61,7 +62,7 @@
     wkEdPendingDoc = null
     wkEdCmtMarks = []
     wkEdProj = ''
-    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
+    wkPdfClose()
     if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
@@ -96,7 +97,6 @@
     wkEdState()
   }
 
-  let wkEdPdfUrl = null // 当前 PDF 预览的 blob URL（换文件/重置时 revoke，防泄漏）
   let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
 
   // 死路径收口：读回 404 = 该路径在盘上已不存在（改名/删除后残留的开放集条目，含持久化恢复的）。
@@ -123,7 +123,7 @@
     wkEdProj = state.workProj
     wkEdFile = ''
     wkEdConflict = false
-    if (wkEdPdfUrl) { URL.revokeObjectURL(wkEdPdfUrl); wkEdPdfUrl = null }
+    wkPdfClose()
     if (IMG_EXT.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: true, editable: false }
@@ -132,9 +132,9 @@
       renderEdBody()
       return
     }
-    // PDF（2026-10-14 待办#15）：纯前端预览——GET /gateway/file 读原始字节 blob 化，<iframe> 交给
-    // 浏览器自带 viewer（零外链、零后端改动）。网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
-    // 渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态。
+    // PDF（2026-10-24 改 pdf.js）：读原始字节交给 work-pdf.js 真实渲染（页导航/缩放/文本层，
+    // 对齐 dsh 文档预览）。渲染自闭环在分支内（不进 renderEdBody），不占用 wkEdMeta 状态；
+    // 网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
     if (/\.pdf$/i.test(p)) {
       wkEdFile = p
       wkEdMeta = { isImg: false, editable: false }
@@ -152,11 +152,37 @@
             '</div>'
           return
         }
-        const blob = await res.blob()
+        const buf = await res.arrayBuffer()
         if (seq !== edSeq) return
-        const url = URL.createObjectURL(blob)
-        wkEdPdfUrl = url
-        body.innerHTML = `<div class="wk-ed-pdf"><iframe src="${esc(url)}" title="${esc(p)}"></iframe></div>`
+        await wkPdfRender(body, p, buf)
+      } catch (e) {
+        if (seq !== edSeq) return
+        body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
+      }
+      return
+    }
+    // Office 只读预览（2026-10-24）：xlsx/docx 二进制包交给 work-doc.js 解包渲染（不走文本分支，
+    // 否则 content-type 判成二进制直接「不支持预览」）。网关读侧 4 MB 上限同样生效。
+    if (wkDocKind(p)) {
+      wkEdFile = p
+      wkEdMeta = { isImg: false, editable: false }
+      wkEdText = ''
+      wkEdMtime = null
+      body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
+      try {
+        const res = await fetch(fileUrl(p))
+        if (seq !== edSeq) return
+        if (!res.ok) {
+          if (res.status === 404) return wkDropDeadFile(p)
+          body.innerHTML =
+            '<div class="wk-ed-empty">' +
+            esc(res.status === 413 ? '文件超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
+            '</div>'
+          return
+        }
+        const buf = await res.arrayBuffer()
+        if (seq !== edSeq) return
+        wkDocRender(body, p, buf)
       } catch (e) {
         if (seq !== edSeq) return
         body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`

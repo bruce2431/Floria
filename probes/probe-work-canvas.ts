@@ -130,9 +130,16 @@ if (/active\.size === 2/.test(cv) && /pinch\.k \* \(d \/ pinch\.d\)/.test(cv)) o
 else bad('缺双指捏合')
 if (/setPointerCapture/.test(cv)) ok('指针捕获（拖出画布仍跟手）')
 else bad('缺指针捕获')
+// ComfyUI 结构：canvas 与 DOM 覆盖层是 **兄弟节点**（overlay 不在 canvas 捕获路径上）
+if (/stage\.appendChild\(canvas\)/.test(cv) && /stage\.appendChild\(overlay\)/.test(cv)) ok('ComfyUI 结构：canvas + overlay 兄弟节点')
+else bad('缺 canvas/overlay 兄弟结构')
+if (/pointerdown[\s\S]*?active\.set\(e\.pointerId/.test(cv) && /canvas\.addEventListener\('pointerdown'/.test(cv)) ok('手势只绑 canvas（DOM 覆盖层不抢）')
+else bad('手势未限定在 canvas')
+if (/wkCvOpenEditor/.test(cv) && /'Escape'/.test(cv) && /addEventListener\('blur', commit\)/.test(cv)) ok('行内编辑：textarea + Escape 取消 / blur 提交')
+else bad('缺 overlay 行内编辑器')
 
 // ---- 5. styles.css ----
-for (const cls of ['.wk-cv {', '.wk-cv-bar', '.wk-cv-btn', '.wk-cv-svg', '.wk-cv-edge', '.wk-cv-box', '.wk-cv-text', '.wk-cv-empty', '.wk-cv-dot']) {
+for (const cls of ['.wk-cv {', '.wk-cv-bar', '.wk-cv-btn', '.wk-cv-stage', '.wk-cv-canvas', '.wk-cv-overlay', '.wk-cv-edit', '.wk-cv-empty']) {
   if (css.includes(cls)) ok(`styles.css 含 ${cls.replace(/[^a-z-].*/, '')}`)
   else bad(`styles.css 缺 ${cls}`)
 }

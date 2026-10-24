@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=585" />
+  <link rel="stylesheet" href="/styles.css?v=593" />
 </head>
 <body>
 <div id="app">
@@ -369,6 +369,9 @@
 <!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
      （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
 <script src="/vendor/codemirror/live-markdown.js?v=8"></script>
-<script src="/app.js?v=585"></script>
+<!-- 解压组件（2026-10-24）：xlsx/docx 预览（web-src/sidebar/work/work-doc.js）用 fflate.unzipSync
+     解 OOXML 包；须在 app.js 之前挂到 window.fflate。 -->
+<script src="/vendor/fflate.js?v=1"></script>
+<script src="/app.js?v=593"></script>
 </body>
 </html>

@@ -1,9 +1,13 @@
 // .canvas 文件（JSON Canvas 1.0，Obsidian 同格式）的图形预览+编辑：wkEdLangExt 对 .canvas 扩展名注入
-// wkCvExt —— 默认把整篇文档替换为 SVG 画布（群组/边/节点 + 点阵网格 + 平移/缩放），画布顶栏「编辑源码」
+// wkCvExt —— 默认把整篇文档替换为画布（群组/边/节点 + 点阵网格 + 平移/缩放），画布顶栏「编辑源码」
 // 切回 JSON（带高亮、可正常自动保存）；源码态文档首行挂「图形预览」钮切回画布。图形编辑（2026-10-14
 // 待办#2 补缺）：节点/组拖动改坐标、双击改文字，写入=原样改写源 JSON（保留未识别字段）dispatch 回
-// 编辑器文档走既有自动保存链。渲染零依赖（SVG 自绘，无外网 CDN）；canvas 自定色用内联 rgba（Safari
-// 对 SVG 内 color-mix 支持不稳），项目令牌色走 class。
+// 编辑器文档走既有自动保存链。
+// 2026-10-24 用户定案「搬用 comfyui 的画布结构」：图形一律画在 <canvas> 2D 上下文（网格/边/节点/文字），
+// DOM 只作**兄弟覆盖层**承载可交互件（行内编辑器、顶栏按钮）——DOM 不进画布手势路径，canvas 的
+// pointer capture 也就不会把按钮 click 吞掉（旧实现把 capture 无条件挂在包含顶栏的容器上，实报按钮失效）。
+// 手势判定同 ComfyUI：按下不抢指针，位移越过 6px 才 setPointerCapture（click 语义保持原生），up/cancel
+// 一律释放。渲染零依赖（不引外部 canvas 库）；自定色用内联 rgba（Safari 对 color-mix 支持不稳）。
 /* @module sidebar/work/work-canvas.js */
 
   // ---------- JSON Canvas 解析 ----------
@@ -64,7 +68,6 @@
   // ---------- 相机（平移/缩放；模块级单份：docChanged 重建 widget 时保留视口，换文件重 fit） ----------
   let wkCvCam = { k: 1, tx: 0, ty: 0, fit: false }
   let wkCvLastFile = ''
-  let wkCvSeq = 0 // defs id 去重后缀（换装饰的瞬间新旧 widget 短暂共存）
   // 包围盒适配：k 帽 [0.05, 4]，内容居中。cw/ch = 可用视口尺寸。
   function wkCvFit(nodes, cw, ch) {
     if (!nodes.length) return { k: 1, tx: 0, ty: 0, fit: true }
@@ -76,10 +79,9 @@
     const k = Math.max(0.05, Math.min(4, Math.min((cw - 40) / Math.max(1, x1 - x0), (ch - 40) / Math.max(1, y1 - y0), 1.5)))
     return { k, tx: (cw - (x1 - x0) * k) / 2 - x0 * k, ty: (ch - (y1 - y0) * k) / 2 - y0 * k, fit: true }
   }
-  function wkCvApply(svg, cam) {
-    const g = svg && svg.querySelector('g.wk-cv-world')
-    if (g) g.setAttribute('transform', `translate(${cam.tx},${cam.ty}) scale(${cam.k})`)
-  }
+  // 世界 ⇄ 屏幕（画布内坐标，不含 canvas 的页面偏移）：screen = world * k + t。
+  function wkCvToScreen(cam, x, y) { return [x * cam.k + cam.tx, y * cam.k + cam.ty] }
+  function wkCvToWorld(cam, sx, sy) { return [(sx - cam.tx) / cam.k, (sy - cam.ty) / cam.k] }
   // 节点某侧的锚点（世界坐标）；side 缺省返回 null，由调用方按相对方位就近取。
   function wkCvAnchor(n, side) {
     if (side === 'left') return [n.x, n.y + n.h / 2]
@@ -90,8 +92,7 @@
   }
   // 连线几何：端点锚 + 出线方向法线。显式 fromSide/toSide 按声明取锚与法线；缺省按两节点中心
   // 连线的主轴取最近侧（水平位移为主取左/右、竖直为主取上/下）。贝塞尔控制点 = 各自锚点沿该侧
-  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入（旧实现控制点按整体主轴生成，
-  // 声明侧向与实际走向冲突时出线方向观感即「起点终点不对」，此为返修根因）。
+  // 法线伸出到「对端方向分量」的一半 —— 曲线严格从声明侧出发/进入。
   const WKCV_SIDE_DIRS = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] }
   function wkCvAnchorDir(n, side, tx, ty) {
     if (side && WKCV_SIDE_DIRS[side]) {
@@ -112,24 +113,236 @@
     const kB = Math.max(24, Math.abs((b[0] - a[0]) * B.n[0] + (b[1] - a[1]) * B.n[1]) / 2)
     const c1 = [a[0] + A.n[0] * kA, a[1] + A.n[1] * kA]
     const c2 = [b[0] + B.n[0] * kB, b[1] + B.n[1] * kB]
-    const d = `M ${a[0]} ${a[1]} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${b[0]} ${b[1]}`
     // 三次贝塞尔 t=0.5：(P0 + 3P1 + 3P2 + P3) / 8（放 label）
     const mx = (a[0] + 3 * c1[0] + 3 * c2[0] + b[0]) / 8
     const my = (a[1] + 3 * c1[1] + 3 * c2[1] + b[1]) / 8
-    return { d, mx, my }
+    return { a, c1, c2, b, mx, my }
   }
 
-  // ---------- SVG 工具 ----------
-  function wkCvEl(tag, attrs) {
-    const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
-    for (const k in attrs) el.setAttribute(k, attrs[k])
-    return el
+  // ---------- 画布绘制（2D context；世界坐标 → 屏幕统一乘相机） ----------
+  const WKCV_FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif'
+  // 主题色快照（每次重绘读一次；canvas 不认 CSS 变量）
+  function wkCvTheme() {
+    const cs = getComputedStyle(document.documentElement)
+    const g = (n, d) => (cs.getPropertyValue(n) || '').trim() || d
+    return {
+      bg: g('--bg', '#fff'), text: g('--text', '#222'), text2: g('--text-2', '#555'),
+      text3: g('--text-3', '#888'), border: g('--border', '#ddd'), blue: g('--blue', '#4d6bfe'),
+    }
+  }
+  // 文本按像素宽度折行（CJK 可逐字断、拉丁词优先整词）。返回行数组，最多 maxLines 行。
+  function wkCvWrap(ctx, text, maxW, maxLines) {
+    const out = []
+    for (const para of String(text == null ? '' : text).split('\n')) {
+      if (out.length >= maxLines) return out
+      let line = ''
+      let word = ''
+      const flushWord = () => { line += word; word = '' }
+      for (const ch of para) {
+        if (ch === ' ') { flushWord(); line += ch; continue }
+        // 拉丁字母数字成词，其它（CJK/标点）逐字
+        if (/[A-Za-z0-9_@#$%&*+\-/\\=.:;'"!?()\[\]{}<>]/.test(ch)) { word += ch; continue }
+        flushWord()
+        if (line && ctx.measureText(line + ch).width > maxW) { out.push(line); line = ''; if (out.length >= maxLines) return out }
+        line += ch
+      }
+      flushWord()
+      if (line && ctx.measureText(line).width > maxW) {
+        // 整词超宽：逐字硬断
+        let cur = ''
+        for (const ch of line) {
+          if (cur && ctx.measureText(cur + ch).width > maxW) { out.push(cur); cur = ''; if (out.length >= maxLines) return out }
+          cur += ch
+        }
+        line = cur
+      }
+      if (line || !para) out.push(line)
+    }
+    return out
+  }
+  function wkCvRoundRect(ctx, x, y, w, h, r) {
+    const rr = Math.max(0, Math.min(r, w / 2, h / 2))
+    ctx.beginPath()
+    ctx.moveTo(x + rr, y)
+    ctx.lineTo(x + w - rr, y)
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr)
+    ctx.lineTo(x + w, y + h - rr)
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h)
+    ctx.lineTo(x + rr, y + h)
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr)
+    ctx.lineTo(x, y + rr)
+    ctx.quadraticCurveTo(x, y, x + rr, y)
+    ctx.closePath()
+  }
+  // 主绘制：只画、不带状态。opts.active = 正在拖动的节点集合（画高亮 + 偏移已并进坐标）。
+  function wkCvPaint(canvas, data, cam, theme, opts) {
+    const stage = canvas.parentElement
+    const dpr = window.devicePixelRatio || 1
+    const cw = Math.max(1, stage ? stage.clientWidth : 0)
+    const ch = Math.max(1, stage ? stage.clientHeight : 0)
+    const pw = Math.round(cw * dpr), ph = Math.round(ch * dpr)
+    if (canvas.width !== pw || canvas.height !== ph) { canvas.width = pw; canvas.height = ph }
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cw, ch)
+    ctx.fillStyle = theme.bg
+    ctx.fillRect(0, 0, cw, ch)
+    const k = cam.k
+    const dragSet = (opts && opts.drag) || null
+    const off = (n) => (dragSet && dragSet.byId.get(n.id)) || [0, 0]
+
+    // 点阵网格：世界 24 单位格；缩得太小时逐级加倍，屏上点距不小于 12px，总点数封顶。
+    let step = 24
+    while (step * k < 12) step *= 2
+    const [wx0, wy0] = wkCvToWorld(cam, 0, 0)
+    const [wx1, wy1] = wkCvToWorld(cam, cw, ch)
+    const gx0 = Math.floor(wx0 / step) * step, gy0 = Math.floor(wy0 / step) * step
+    const nx = Math.floor((wx1 - gx0) / step) + 1, ny = Math.floor((wy1 - gy0) / step) + 1
+    const every = Math.max(1, Math.ceil((nx * ny) / 4000))
+    ctx.fillStyle = theme.border
+    ctx.globalAlpha = 0.55
+    let ci = 0
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        if ((ci++ % every) !== 0) continue
+        const [sx, sy] = wkCvToScreen(cam, gx0 + ix * step, gy0 + iy * step)
+        ctx.beginPath()
+        ctx.arc(sx, sy, 1.2, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    ctx.globalAlpha = 1
+
+    // 边（世界坐标直接经 ctx 变换绘制：曲线 + 箭头 + 标签）
+    ctx.save()
+    ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+    ctx.lineWidth = 1.5 / k
+    ctx.strokeStyle = theme.text3
+    ctx.fillStyle = theme.text3
+    for (const e of data.edges) {
+      const oa = off(e.from), ob = off(e.to)
+      const A = { ...e.from, x: e.from.x + oa[0], y: e.from.y + oa[1] }
+      const B = { ...e.to, x: e.to.x + ob[0], y: e.to.y + ob[1] }
+      const g = wkCvEdgeGeom({ ...e, from: A, to: B })
+      const col = e.color || theme.text3
+      ctx.strokeStyle = col
+      ctx.fillStyle = col
+      ctx.beginPath()
+      ctx.moveTo(g.a[0], g.a[1])
+      ctx.bezierCurveTo(g.c1[0], g.c1[1], g.c2[0], g.c2[1], g.b[0], g.b[1])
+      ctx.stroke()
+      if (e.arrow) {
+        // 箭头方向 = 曲线在终点的切线（控制点 c2 → b）
+        const ang = Math.atan2(g.b[1] - g.c2[1], g.b[0] - g.c2[0])
+        const al = 9 / k, aw = 4.5 / k
+        ctx.beginPath()
+        ctx.moveTo(g.b[0], g.b[1])
+        ctx.lineTo(g.b[0] - al * Math.cos(ang) + aw * Math.sin(ang), g.b[1] - al * Math.sin(ang) - aw * Math.cos(ang))
+        ctx.lineTo(g.b[0] - al * Math.cos(ang) - aw * Math.sin(ang), g.b[1] - al * Math.sin(ang) + aw * Math.cos(ang))
+        ctx.closePath()
+        ctx.fill()
+      }
+      if (e.label) {
+        ctx.font = `${11 / k}px ${WKCV_FONT}`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.lineWidth = 3 / k
+        ctx.strokeStyle = theme.bg
+        ctx.strokeText(e.label, g.mx, g.my)
+        ctx.fillStyle = e.color || theme.text2
+        ctx.fillText(e.label, g.mx, g.my)
+      }
+    }
+    ctx.restore()
+
+    // 节点（群组先画、垫底；其余按数组序 = 命中测试的 z 序）
+    const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
+    for (const n of ordered) {
+      const [dx, dy] = off(n)
+      const x = n.x + dx, y = n.y + dy
+      ctx.save()
+      ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+      const isDrag = !!(dragSet && dragSet.byId.has(n.id))
+      const col = n.color || ''
+      wkCvRoundRect(ctx, x, y, n.w, n.h, n.type === 'group' ? 10 : 8)
+      ctx.fillStyle = col ? wkCvRgba(col, n.type === 'group' ? 0.08 : 0.16) : (isDrag ? wkCvRgba(theme.blue, 0.06) : 'rgba(0,0,0,0)')
+      ctx.fill()
+      ctx.lineWidth = (isDrag ? 2 : 1) / k
+      ctx.strokeStyle = isDrag ? theme.blue : col ? wkCvRgba(col, 0.65) : theme.border
+      if (n.type === 'group') ctx.setLineDash([5 / k, 4 / k])
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      if (n.type === 'group') {
+        if (n.label) {
+          ctx.save()
+          ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+          ctx.font = `600 ${12 / k}px ${WKCV_FONT}`
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'alphabetic'
+          ctx.lineWidth = 3 / k
+          ctx.strokeStyle = theme.bg
+          ctx.strokeText(n.label, x + 2, y - 8 / k)
+          ctx.fillStyle = col ? wkCvRgba(col, 0.95) : theme.text2
+          ctx.fillText(n.label, x + 2, y - 8 / k)
+          ctx.restore()
+        }
+        continue
+      }
+      // 节点正文：按节点宽度折行，超出高度裁掉
+      const padX = 8, padY = 6
+      const maxW = Math.max(10, n.w - padX * 2)
+      const fs = 12 / k
+      ctx.save()
+      ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * cam.tx, dpr * cam.ty)
+      ctx.beginPath()
+      ctx.rect(x + padX, y + padY, maxW, Math.max(10, n.h - padY * 2))
+      ctx.clip()
+      ctx.font = `${fs}px ${WKCV_FONT}`
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      ctx.fillStyle = theme.text
+      const lh = 18 / k
+      const lines = wkCvWrap(ctx, n.text, maxW, Math.max(1, Math.ceil((n.h - padY * 2) / lh)))
+      for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], x + padX, y + padY + i * lh)
+      ctx.restore()
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
-  // ---------- 图形编辑（节点/组拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回
-  // 编辑器文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
-  // dispatch 触发 widget 重建不丢视口。拖动过程只做视觉位移，pointerup 才一次性写文档（一次手势 =
-  // 一次编辑 = 一条撤销步）。连线端点随拖动的跟随要等重建（重建后按新坐标重画），拖动中不实时跟。 ----------
+  // 命中测试：屏幕点 → 节点（节点在群组之上 ⇒ 逆序找非组，再找组）。返回 {node, dx, dy} 或 null。
+  function wkCvHit(ordered, cam, sx, sy) {
+    const [wx, wy] = wkCvToWorld(cam, sx, sy)
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      const n = ordered[i]
+      if (wx >= n.x && wx <= n.x + n.w && wy >= n.y && wy <= n.y + n.h) return n
+    }
+    return null
+  }
+  // 拖动集合：组 = 组框 + 中心落在组框内的节点（Obsidian 语义）
+  function wkCvDragGroup(data, n) {
+    const moved = [n]
+    if (n.type === 'group') {
+      for (const m of data.nodes) {
+        if (m === n || m.type === 'group') continue
+        const cx = m.x + m.w / 2, cy = m.y + m.h / 2
+        if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
+      }
+    }
+    return moved
+  }
+  // 屏幕矩形（给行内编辑器定位）
+  function wkCvScreenRect(cam, n) {
+    const [sx, sy] = wkCvToScreen(cam, n.x, n.y)
+    return { x: sx, y: sy, w: n.w * cam.k, h: n.h * cam.k }
+  }
+
+  // ---------- 图形编辑（拖动改坐标 + 双击改文字；写入 = 原样改写源 JSON 再整篇 dispatch 回编辑器
+  // 文档——保留源里本前端不识别的扩展字段，写回后走既有自动保存链落盘。相机在模块级保留，
+  // dispatch 触发 widget 重建不丢视口。拖动过程只画位移，pointerup 才一次性写文档（一次手势 =
+  // 一次编辑 = 一条撤销步）。 ----------
   function wkCvWriteDoc(view, j) {
     try {
       const text = JSON.stringify(j, null, 2) + '\n'
@@ -139,90 +352,50 @@
   function wkCvRawNode(raw, id) {
     return (Array.isArray(raw && raw.nodes) ? raw.nodes : []).find((x) => x && x.id === id) || null
   }
-  function wkCvBindEdit(view, root, data, raw, gElById) {
-    for (const n of data.nodes) {
-      const gEl = gElById.get(n.id)
-      if (!gEl) continue
-      gEl.classList.add(n.type === 'group' ? 'wk-cv-drag-grp' : 'wk-cv-drag-node')
-      // 拖动（左键/单指）：拖组 = 组框 + 组内节点（中心落在组框内）一起平移，对齐 Obsidian 语义。
-      gEl.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) return
-        e.stopPropagation() // 不进 pan
-        const moved = [n]
-        if (n.type === 'group') {
-          for (const m of data.nodes) {
-            if (m === n || m.type === 'group') continue
-            const cx = m.x + m.w / 2, cy = m.y + m.h / 2
-            if (cx >= n.x && cx <= n.x + n.w && cy >= n.y && cy <= n.y + n.h) moved.push(m)
-          }
-        }
-        const sx = e.clientX, sy = e.clientY
-        let dx = 0, dy = 0
-        root.classList.add('wk-cv-dragging')
-        try { gEl.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
-        const move = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          dx = (ev.clientX - sx) / wkCvCam.k
-          dy = (ev.clientY - sy) / wkCvCam.k
-          for (const m of moved) {
-            const el = gElById.get(m.id)
-            if (el) el.setAttribute('transform', `translate(${dx},${dy})`)
-          }
-        }
-        const finish = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          gEl.removeEventListener('pointermove', move)
-          gEl.removeEventListener('pointerup', finish)
-          gEl.removeEventListener('pointercancel', cancel)
-          root.classList.remove('wk-cv-dragging')
-          if (!dx && !dy) return
-          for (const m of moved) {
-            const r = wkCvRawNode(raw, m.id)
-            if (!r) continue
-            r.x = Math.round((Number(r.x) || 0) + dx)
-            r.y = Math.round((Number(r.y) || 0) + dy)
-            m.x += dx
-            m.y += dy
-            const el = gElById.get(m.id)
-            if (el) el.removeAttribute('transform')
-          }
-          wkCvWriteDoc(view, raw)
-        }
-        const cancel = (ev) => {
-          if (ev.pointerId !== e.pointerId) return
-          gEl.removeEventListener('pointermove', move)
-          gEl.removeEventListener('pointerup', finish)
-          gEl.removeEventListener('pointercancel', cancel)
-          root.classList.remove('wk-cv-dragging')
-          for (const m of moved) {
-            const el = gElById.get(m.id)
-            if (el) el.removeAttribute('transform')
-          }
-        }
-        gEl.addEventListener('pointermove', move)
-        gEl.addEventListener('pointerup', finish)
-        gEl.addEventListener('pointercancel', cancel)
-      })
-      // 双击改文字：节点改 text/file/url（按源里已有的字段写回，不新增键）；组改 label。
-      gEl.addEventListener('dblclick', (e) => {
-        e.stopPropagation()
-        const r = wkCvRawNode(raw, n.id)
-        if (!r) return
-        if (n.type === 'group') {
-          const v = window.prompt('组名称', n.label || '')
-          if (v === null) return
-          r.label = v
-          n.label = v
-        } else {
-          const key = typeof r.text === 'string' ? 'text' : typeof r.file === 'string' ? 'file' : typeof r.url === 'string' ? 'url' : 'text'
-          const v = window.prompt('节点文字', n.text || '')
-          if (v === null) return
-          r[key] = v
-          n.text = v
-        }
-        wkCvWriteDoc(view, raw)
-      })
+  // 行内编辑（ComfyUI 同构：编辑态 = DOM 覆盖层里的 textarea，画布手势整体关闭）：
+  // Enter / blur 提交，Escape 取消，Shift+Enter 换行。写入 = 源 JSON 上已有的那个字段（不新增键）。
+  function wkCvOpenEditor(view, root, overlay, data, raw, cam, n) {
+    if (root.classList.contains('wk-cv-editing')) return
+    root.classList.add('wk-cv-editing')
+    const r = wkCvScreenRect(cam, n)
+    const ta = document.createElement('textarea')
+    ta.className = 'wk-cv-edit'
+    ta.style.left = Math.max(0, r.x) + 'px'
+    ta.style.top = Math.max(0, r.y) + 'px'
+    ta.style.width = Math.max(80, r.w) + 'px'
+    ta.style.height = Math.max(48, r.h) + 'px'
+    const rn = wkCvRawNode(raw, n.id)
+    ta.value = n.type === 'group'
+      ? String((rn && rn.label) || '')
+      : String((rn && (rn.text ?? rn.file ?? rn.url)) || '')
+    overlay.appendChild(ta)
+    let done = false
+    const close = () => {
+      if (done) return
+      done = true
+      root.classList.remove('wk-cv-editing')
+      if (ta.parentElement) ta.parentElement.removeChild(ta)
     }
+    const commit = () => {
+      if (done) return
+      const val = ta.value
+      close()
+      const target = wkCvRawNode(raw, n.id)
+      if (!target) return
+      if (n.type === 'group') target.label = val
+      else if ('text' in target) target.text = val
+      else if ('file' in target) target.file = val
+      else if ('url' in target) target.url = val
+      wkCvWriteDoc(view, raw)
+    }
+    ta.addEventListener('pointerdown', (e) => e.stopPropagation())
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close() }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() }
+    })
+    ta.addEventListener('blur', commit)
+    ta.focus()
+    ta.select()
   }
 
   // ---------- 画布 widget（decoField 的 block replace 宿主；跨行 replace 只允许走 StateField） ----------
@@ -255,8 +428,7 @@
         view.dispatch({ effects: wkCvToggle.of() })
       })
       bar.appendChild(cnt)
-      // 编辑手段提示（2026-10-14 返修）：拖动/双击无任何可见 affordance，「无法编辑」的反馈里有
-      // 一部分是能力存在但不可发现——顶栏常驻一行操作提示，源码态同隐藏。
+      // 编辑手段提示：拖动/双击无任何可见 affordance——顶栏常驻一行操作提示，源码态同隐藏。
       const hint = document.createElement('span')
       hint.className = 'wk-cv-hint'
       hint.textContent = '拖动移动 · 双击改文字 · 拖组带成员 · 捏合/滚轮缩放'
@@ -264,153 +436,134 @@
       bar.appendChild(srcBtn)
       root.appendChild(bar)
       if (data.err) {
-        const hint = document.createElement('div')
-        hint.className = 'wk-cv-empty wk-cv-bad'
-        hint.textContent = data.err + ' — 点右上「编辑源码」修复'
-        root.appendChild(hint)
+        const bad = document.createElement('div')
+        bad.className = 'wk-cv-empty wk-cv-bad'
+        bad.textContent = data.err + ' — 点右上「编辑源码」修复'
+        root.appendChild(bad)
         return root
       }
       if (!data.nodes.length) {
-        const hint = document.createElement('div')
-        hint.className = 'wk-cv-empty'
-        hint.textContent = '空画布 — 点右上「编辑源码」写入 JSON Canvas（nodes/edges）'
-        root.appendChild(hint)
+        const empty = document.createElement('div')
+        empty.className = 'wk-cv-empty'
+        empty.textContent = '空画布 — 点右上「编辑源码」写入 JSON Canvas（nodes/edges）'
+        root.appendChild(empty)
         return root
       }
-      const seq = ++wkCvSeq
-      const svg = wkCvEl('svg', { class: 'wk-cv-svg' })
-      const defs = wkCvEl('defs', {})
-      // 点阵网格（pattern 在世界坐标系里随相机变换，24px 格距）
-      const pat = wkCvEl('pattern', { id: `wkcvg${seq}`, width: 24, height: 24, patternUnits: 'userSpaceOnUse' })
-      pat.appendChild(wkCvEl('circle', { cx: 1.2, cy: 1.2, r: 1.2, class: 'wk-cv-dot' }))
-      defs.appendChild(pat)
-      // 边箭头 marker（按色注册，id 带色值去重）
-      const mk = (color) => {
-        const id = `wkcvk${seq}${color ? color.slice(1) : 'n'}`
-        if (!defs.querySelector(`#${id}`)) {
-          const marker = wkCvEl('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' })
-          const tri = wkCvEl('path', { d: 'M 0 1 L 9 5 L 0 9 z' })
-          if (color) tri.style.fill = color
-          else tri.setAttribute('class', 'wk-cv-arrow')
-          marker.appendChild(tri)
-          defs.appendChild(marker)
-        }
-        return id
-      }
-      svg.appendChild(defs)
-      const world = wkCvEl('g', { class: 'wk-cv-world' })
-      svg.appendChild(world)
-      const cover = 200000 // 网格铺底的世界域（pan 到 ±10 万单位内不露底）
-      world.appendChild(wkCvEl('rect', { x: -cover / 2, y: -cover / 2, width: cover, height: cover, fill: `url(#wkcvg${seq})` }))
-      const edgesG = wkCvEl('g', { class: 'wk-cv-edges' })
-      const nodesG = wkCvEl('g', { class: 'wk-cv-nodes' })
-      world.appendChild(edgesG)
-      world.appendChild(nodesG)
-      // 边
-      for (const e of data.edges) {
-        const g = wkCvEdgeGeom(e)
-        const path = wkCvEl('path', { d: g.d, class: 'wk-cv-edge', fill: 'none' })
-        if (e.color) path.style.stroke = e.color
-        if (e.arrow) path.setAttribute('marker-end', `url(#${mk(e.color)})`)
-        edgesG.appendChild(path)
-        if (e.label) {
-          const t = wkCvEl('text', { x: g.mx, y: g.my, class: 'wk-cv-elabel', 'text-anchor': 'middle' })
-          t.textContent = e.label
-          edgesG.appendChild(t)
-        }
-      }
-      // 节点：群组先画（z 序垫底），其余按数组序。图形编辑（2026-10-14 待办#2 补缺）：节点/组可拖动
-      // 改坐标、双击改文字，落点 = 原样改写源 JSON（保留未识别字段）并 dispatch 回编辑器文档
-      // （走既有自动保存链落盘）。raw = JSON.parse 原文（渲染用 normalized 副本，写入用 raw 保字段）；
-      // 能走到此处 = wkCvParse 已验证 JSON 合法（坏 JSON 在 err 分支早退），此处解析不设防。
-      const raw = JSON.parse(this.text)
-      const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
-      const XHTML = 'http://www.w3.org/1999/xhtml'
-      const gElById = new Map()
-      for (const n of ordered) {
-        const gEl = wkCvEl('g', { class: 'wk-cv-node' + (n.type === 'group' ? ' wk-cv-group' : '') })
-        gElById.set(n.id, gEl)
-        const rect = wkCvEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: n.type === 'group' ? 10 : 8, class: 'wk-cv-box' })
-        if (n.color) {
-          rect.style.fill = wkCvRgba(n.color, n.type === 'group' ? 0.08 : 0.16)
-          rect.style.stroke = wkCvRgba(n.color, 0.65)
-        }
-        if (n.type === 'group') rect.setAttribute('stroke-dasharray', '5 4')
-        gEl.appendChild(rect)
-        if (n.type === 'group') {
-          if (n.label) {
-            // 组名按 Obsidian 惯例放框外顶上（旧实现塞框内第一行，与节点正文争空间 =「组的 UI 不好」）
-            const t = wkCvEl('text', { x: n.x + 2, y: n.y - 8, class: 'wk-cv-glabel' })
-            t.textContent = n.label
-            if (n.color) t.style.fill = wkCvRgba(n.color, 0.95)
-            gEl.appendChild(t)
-          }
-        } else {
-          const fo = wkCvEl('foreignObject', { x: n.x + 8, y: n.y + 6, width: Math.max(10, n.w - 16), height: Math.max(10, n.h - 12) })
-          const box = document.createElementNS(XHTML, 'div')
-          box.className = 'wk-cv-text'
-          box.textContent = n.text
-          fo.appendChild(box)
-          gEl.appendChild(fo)
-        }
-        nodesG.appendChild(gEl)
-      }
-      if (raw) wkCvBindEdit(view, root, data, raw, gElById)
+      // ComfyUI 结构：stage（定位锚）里 canvas 画一切图形，overlay 是**兄弟**层（只放编辑控件）。
+      const stage = document.createElement('div')
+      stage.className = 'wk-cv-stage'
+      const canvas = document.createElement('canvas')
+      canvas.className = 'wk-cv-canvas'
+      const overlay = document.createElement('div')
+      overlay.className = 'wk-cv-overlay'
+      stage.appendChild(canvas)
+      stage.appendChild(overlay)
+      root.appendChild(stage)
+      const theme = wkCvTheme()
+
       // 相机：未 fit 过（新文件）→ 包围盒适配；否则保留上次的平移缩放
-      if (!wkCvCam.fit) {
-        const sc = view.dom.querySelector('.cm-scroller')
-        wkCvCam = wkCvFit(data.nodes, sc ? sc.clientWidth : 600, sc ? sc.clientHeight : 400)
-      }
-      wkCvApply(svg, wkCvCam)
-      root.appendChild(svg)
-      // 高度跟随滚动容器（.cm-content 内百分比高度链不通，JS 实测）
-      const sc2 = view.dom.querySelector('.cm-scroller')
-      const setH = () => { if (sc2 && sc2.clientHeight) root.style.height = Math.max(200, sc2.clientHeight - 24) + 'px' }
-      setH()
-      this._ro = new ResizeObserver(setH)
-      if (sc2) this._ro.observe(sc2)
-      // 平移 / 缩放：单指拖 = pan；双指 = 捏合缩放（锚中点）+ 中点位移 pan；Ctrl+滚轮（Safari 触控板
-      // 捏合的手势编码）= 指针锚定缩放；普通滚轮 = 平移。事件截断在画布容器，不漏给编辑器光标。
-      const active = new Map()
+      if (!wkCvCam.fit) wkCvCam = wkCvFit(data.nodes, stage.clientWidth || 600, stage.clientHeight || 400)
+      const ordered = [...data.nodes.filter((n) => n.type === 'group'), ...data.nodes.filter((n) => n.type !== 'group')]
+      let dragPaint = null // {byId: Map<id,[dx,dy]>}
+      const repaint = () => wkCvPaint(canvas, data, wkCvCam, theme, { drag: dragPaint })
+      repaint()
+
+      // 尺寸变化：canvas 像素尺寸跟随 stage（ResizeObserver 也负责首帧后的布局稳定）
+      const ro = new ResizeObserver(() => { repaint() })
+      ro.observe(stage)
+      this._ro = ro
+
+      // ---- 手势（只绑 canvas；overlay/顶栏不在捕获路径上） ----
+      const active = new Map() // pointerId → [clientX, clientY]
+      let pend = null          // {id, x, y} 未越过阈值的按下
+      let drag = null          // {id, nodes:[...], sx, sy, dx, dy, moved}
       let pinch = null
-      root.addEventListener('pointerdown', (e) => {
+      const PAN_SLOP = 6
+      const localXY = (e) => {
+        const r = canvas.getBoundingClientRect()
+        return [e.clientX - r.left, e.clientY - r.top]
+      }
+      const releaseCap = (id) => { try { if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id) } catch { /* 已释放 */ } }
+      const endDrag = () => { drag = null; dragPaint = null; root.classList.remove('wk-cv-dragging') }
+
+      canvas.addEventListener('pointerdown', (e) => {
+        if (root.classList.contains('wk-cv-editing')) return
+        if (e.pointerType === 'mouse' && e.button !== 0) return
         active.set(e.pointerId, [e.clientX, e.clientY])
         if (active.size === 2) {
+          // 双指：进入捏合，取消可能的节点拖动
+          endDrag()
           const [a, b] = [...active.values()]
           pinch = { d: Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1])), k: wkCvCam.k, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
+          pend = null
+        } else if (active.size === 1) {
+          pend = { id: e.pointerId, x: e.clientX, y: e.clientY }
+          const [lx, ly] = localXY(e)
+          const hit = wkCvHit(ordered, wkCvCam, lx, ly)
+          if (hit) drag = { id: e.pointerId, node: hit, nodes: wkCvDragGroup(data, hit), sx: e.clientX, sy: e.clientY, dx: 0, dy: 0 }
         }
-        root.setPointerCapture(e.pointerId)
         e.stopPropagation()
       })
-      root.addEventListener('pointermove', (e) => {
+
+      canvas.addEventListener('pointermove', (e) => {
         if (!active.has(e.pointerId)) return
         const prev = active.get(e.pointerId)
         active.set(e.pointerId, [e.clientX, e.clientY])
+        // 阈值前不抢指针（click 语义保持原生）；越过 6px 才捕获
+        if (pend && pend.id === e.pointerId && active.size === 1) {
+          if (Math.hypot(e.clientX - pend.x, e.clientY - pend.y) < PAN_SLOP) { e.stopPropagation(); return }
+          pend = null
+          try { canvas.setPointerCapture(e.pointerId) } catch { /* 捕获失败照常走 move/up */ }
+        }
         if (active.size === 2 && pinch) {
           const [a, b] = [...active.values()]
           const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2
           const d = Math.max(1, Math.hypot(a[0] - b[0], a[1] - b[1]))
-          // 缩放锚定双指中点 + 中点位移平移
           wkCvCam.k = Math.max(0.05, Math.min(4, pinch.k * (d / pinch.d)))
           wkCvCam.tx += cx - pinch.mid[0]
           wkCvCam.ty += cy - pinch.mid[1]
           pinch.mid = [cx, cy]
+        } else if (active.size === 1 && drag && drag.id === e.pointerId) {
+          drag.dx = (e.clientX - drag.sx) / wkCvCam.k
+          drag.dy = (e.clientY - drag.sy) / wkCvCam.k
+          if (drag.dx || drag.dy) root.classList.add('wk-cv-dragging')
+          const byId = new Map()
+          for (const m of drag.nodes) byId.set(m.id, [drag.dx, drag.dy])
+          dragPaint = { byId }
         } else if (active.size === 1) {
           wkCvCam.tx += e.clientX - prev[0]
           wkCvCam.ty += e.clientY - prev[1]
         }
-        wkCvApply(svg, wkCvCam)
+        repaint()
         e.stopPropagation()
       })
-      const up = (e) => { active.delete(e.pointerId); if (active.size < 2) pinch = null; e.stopPropagation() }
-      root.addEventListener('pointerup', up)
-      root.addEventListener('pointercancel', up)
-      root.addEventListener('wheel', (e) => {
+
+      const up = (e) => {
+        active.delete(e.pointerId)
+        if (pend && pend.id === e.pointerId) pend = null
+        releaseCap(e.pointerId)
+        if (active.size < 2) pinch = null
+        if (drag && drag.id === e.pointerId) {
+          const { nodes, dx, dy } = drag
+          endDrag()
+          if (dx || dy) wkCvWriteRaw(view, JSON.parse(this.text), nodes, dx, dy)
+          repaint()
+        }
+        e.stopPropagation()
+      }
+      canvas.addEventListener('pointerup', up)
+      canvas.addEventListener('pointercancel', up)
+      canvas.addEventListener('lostpointercapture', (e) => {
+        active.delete(e.pointerId)
+        if (pend && pend.id === e.pointerId) pend = null
+        if (drag && drag.id === e.pointerId) { endDrag(); repaint() }
+      })
+
+      canvas.addEventListener('wheel', (e) => {
         e.preventDefault()
         e.stopPropagation()
+        const [cx, cy] = localXY(e)
         if (e.ctrlKey) {
-          const rect = svg.getBoundingClientRect()
-          const cx = e.clientX - rect.left, cy = e.clientY - rect.top
           const k0 = wkCvCam.k
           wkCvCam.k = Math.max(0.05, Math.min(4, k0 * Math.exp(-e.deltaY * 0.002)))
           // 缩放锚定指针：指针下的世界点不动
@@ -420,13 +573,35 @@
           wkCvCam.tx -= e.deltaX
           wkCvCam.ty -= e.deltaY
         }
-        wkCvApply(svg, wkCvCam)
+        repaint()
       }, { passive: false })
+
+      // 双击 = 进入该节点/组的行内编辑（ComfyUI：编辑控件落在 DOM 覆盖层，画布手势关闭）
+      canvas.addEventListener('dblclick', (e) => {
+        if (root.classList.contains('wk-cv-editing')) return
+        const [lx, ly] = localXY(e)
+        const hit = wkCvHit(ordered, wkCvCam, lx, ly)
+        if (!hit) return
+        e.stopPropagation()
+        const raw = JSON.parse(this.text)
+        wkCvOpenEditor(view, root, overlay, data, raw, wkCvCam, hit)
+      })
       return root
     }
     destroy() {
       if (this._ro) { this._ro.disconnect(); this._ro = null }
     }
+  }
+
+  // 拖动落盘：按 id 在原样 JSON 上改坐标（保留未识别字段），整篇 dispatch 回编辑区。
+  function wkCvWriteRaw(view, raw, nodes, dx, dy) {
+    for (const m of nodes) {
+      const r = wkCvRawNode(raw, m.id)
+      if (!r) continue
+      r.x = Math.round((Number(r.x) || 0) + dx)
+      r.y = Math.round((Number(r.y) || 0) + dy)
+    }
+    wkCvWriteDoc(view, raw)
   }
 
   // ---------- 源码态的回流入口（首行行前小按钮「图形预览」） ----------

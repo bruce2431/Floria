@@ -1,5 +1,6 @@
 // 右栏页态内容补挂 + 侧栏（项目选择/项目列表/文件树/自动对账/数据补齐）与其渲染。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 import { bindRowPeek, isPinned, peekClear } from '../recent.js'
+import { fileTypeIcon } from '../../core/icons.js'
 /* @module sidebar/work/work-files.js */
 
   // ---------- 外部卡申报补拉 ----------
@@ -156,13 +157,13 @@ import { bindRowPeek, isPinned, peekClear } from '../recent.js'
         const open = wkOpen.has(p)
         h += `<button class="wk-row dir${open ? ' open' : ''}" data-wkdir="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
         // 图标 SVG 无自带尺寸，必须落在有 svg 尺寸规则的 slot 里——裸插会取替换元素默认 300×150（巨型图标撑爆行高）
-        h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${I.folder}</span>`
+        h += `<span class="wk-chev">${open ? I.dshChevDown : I.dshChevRight}</span><span class="wk-fic">${fileTypeIcon(n.name, 16, true)}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
         if (open) h += wkTreeHtml(n.children, depth + 1, p)
       } else {
         const on = p === state.workFile ? ' on' : ''
         h += `<button class="wk-row file${on}" data-wkfile="${esc(p)}" draggable="true" style="${pad}" title="${esc(p)}">`
-        h += `<span class="wk-chec"></span><span class="wk-fic">${I.dshFile}</span>`
+        h += `<span class="wk-chec"></span><span class="wk-fic">${fileTypeIcon(n.name)}</span>`
         h += `<span class="wk-name">${esc(n.name)}</span></button>`
       }
     }

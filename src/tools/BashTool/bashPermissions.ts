@@ -1970,6 +1970,15 @@ export async function bashToolHasPermission(
     }
   }
 
+  // 权限豁免（2026-10-24）：settings 显式授予 `Bash(*)` 时，cd+git 的额外询问与该授权自相矛盾——
+  // 用户已声明全量放行，再拦只会把已放行的命令变成待批准。判据 = allow 规则表里存在 contents 为
+  // `*` 的条目（裸 `Bash` 规则不含 contents，不算）。两处 cd+git 守卫（本文件与 pipe 分段）共用此判据。
+  const bashAllowAll = getRuleByContentsForTool(
+    appState.toolPermissionContext,
+    BashTool,
+    'allow',
+  ).has('*')
+
   // Check for non-subcommand Bash operators like `>`, `|`, etc.
   // This must happen before dangerous path checks so that piped commands
   // are handled by the operator logic (which generates "multiple operations" messages)
@@ -1979,6 +1988,7 @@ export async function bashToolHasPermission(
       bashToolHasPermission(i, context, getCommandSubcommandPrefixFn),
     { isNormalizedCdCommand, isNormalizedGitCommand },
     astRoot,
+    bashAllowAll,
   )
   if (commandOperatorResult.behavior !== 'passthrough') {
     // SECURITY FIX: When pipe segment processing returns 'allow', we must still validate
@@ -2206,7 +2216,7 @@ export async function bashToolHasPermission(
   // because bashToolCheckPermission checks each subcommand independently via
   // BashTool.isReadOnly(), which would re-derive compoundCommandHasCd=false
   // from just "git status" alone, bypassing the readOnlyValidation.ts check.
-  if (compoundCommandHasCd) {
+  if (compoundCommandHasCd && !bashAllowAll) {
     const hasGitCommand = subcommands.some(cmd =>
       isNormalizedGitCommand(cmd.trim()),
     )

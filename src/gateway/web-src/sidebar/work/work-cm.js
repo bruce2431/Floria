@@ -3,6 +3,7 @@ import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js
 import { surroundExt, wrapKeymap } from '../../editor/editor-transactions.js'
 import { cmMathExt } from '../../editor/cm-math.js'
 import { edTaskPlugin } from '../../editor/task-list.js'
+import { edBlockMarkPlugin } from '../../editor/block-mark.js'
 import { edAttImgPlugin, edAttFilePlugin } from '../../editor/editor-attachments.js'
 import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from '../../inputbar/images.js'
 /* @module sidebar/work/work-cm.js */
@@ -166,6 +167,7 @@ import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardI
         CM.mouseSelectingField,
         CM.livePreviewPlugin,
         CM.markdownStylePlugin,
+        edBlockMarkPlugin, // 块级标记按「标记节点相邻」退化（不整行；列表渲圆点/序号）
         CM.mathPlugin,
         CM.blockMathField,
         cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法

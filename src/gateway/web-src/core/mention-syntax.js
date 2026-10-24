@@ -45,13 +45,19 @@ import { esc } from './util.js'
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
   // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
+  // 2026-10-24 用户定案「发送后的引用 UI 要与底栏一致」：气泡侧三种 chip（路径/会话/插件）
+  // 一律 = 图标 + 蓝字（与底栏 .mention 同构），不再有边框胶囊/等宽灰字/无图标形态。
   function mentionChipHtml(kind, name, ptype) {
     if (kind === 'path') {
       const label = '@' + name
-      return `<span class="mention-chip m-path" title="${label}"><span class="mc-t">${label}</span></span>`
+      const icon = ptype === 'dir' ? I.dshFolder : fileIcon(name)
+      return `<span class="mention-chip m-path" title="${label}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
     }
-    const label = kind === 'session' ? splitSessionToken(name).title : name
-    return `<span class="mention-chip ${kind === 'session' ? 'm-session' : 'm-plugin'}">${label}</span>`
+    if (kind === 'session') {
+      const title = splitSessionToken(name).title
+      return `<span class="mention-chip m-session"><span class="mc-ic">${MENTION_SESSION_ICON}</span><span class="mc-t">${title}</span></span>`
+    }
+    return `<span class="mention-chip m-plugin"><span class="mc-ic">${I.dshPlugin}</span><span class="mc-t">${name}</span></span>`
   }
 
   // 引用原文编码（2026-10-21）：原文要挤进令牌的一行字段，必须先抹掉会被 mdInline 预处理的记号
@@ -66,6 +72,40 @@ import { esc } from './util.js'
     const raw = String(s == null ? '' : s)
     if (!raw) return ''
     try { return decodeURIComponent(raw) } catch (_) { return raw }
+  }
+
+  // ---------- 引用原文块 ⇄ 折叠令牌（唯一真源）----------
+  // 块形态（模型侧/旧消息）：`[@引用回复:idx|标题]\n原文\n[/引用回复]`。
+  // 折叠形态（渲染侧/底栏 doc）：`[@引用回复:idx|标题|<百分号编码原文>]`——单行，可整体装饰成一枚胶囊。
+  // 底栏 doc 存折叠形态（chip 即所见），**发送时 unfoldQuoteBodies 还原块形态**，模型读到的仍是原文。
+  const QUOTE_REPLY_BODY_RE = /\[@引用回复:(\d+)\|([^\]]*)\]([\s\S]*?)\[\/引用回复\]/g
+  const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])([\s\S]*?)\[\/引用PDF\]/g
+  const QUOTE_REPLY_FOLDED_RE = /\[@引用回复:(\d+)\|([^\]|\n]*)\|([^\]\n]*)\]/g
+  const QUOTE_PDF_FOLDED_RE = /\[@引用PDF:([^\]|]+)\|([^\]\n]*)\]/g
+  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获；
+  // 收尾之后的用户话术若与收尾同行，补一个换行避免与胶囊黏在同一行。
+  function foldQuoteBodies(text) {
+    const clean = (body) => String(body == null ? '' : body).replace(/^\s+|\s+$/g, '')
+    const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(clean(body)) + ']')
+    const tailBreak = (whole, offset, match) => {
+      const rest = String(whole).slice(offset + match.length)
+      return rest && !rest.startsWith('\n') ? '\n' : ''
+    }
+    return String(text || '')
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
+  }
+  // 折叠 → 块（发送口）：底栏 doc 的折叠胶囊在这里还原成模型可读的原文块。
+  function unfoldQuoteBodies(text) {
+    return String(text || '')
+      .replace(QUOTE_REPLY_FOLDED_RE, (m, idx, title, bodyEnc) => {
+        const body = decodeQuoteBody(bodyEnc)
+        return body ? `[@引用回复:${idx}|${title}]\n${body}\n[/引用回复]` : m
+      })
+      .replace(QUOTE_PDF_FOLDED_RE, (m, token, bodyEnc) => {
+        const body = decodeQuoteBody(bodyEnc)
+        return body ? `${token}\n${body}\n[/引用PDF]` : m
+      })
   }
 
   // 选中引用的消息内形态（透明胶囊 + 文件图标 + 「引用自 <文件名>」，与输入栏内 .mention.ref 同族观感）。
@@ -113,9 +153,11 @@ export {
   QUOTE_REPLY_RE,
   decodeQuoteBody,
   encodeQuoteBody,
+  foldQuoteBodies,
   mentionChipHtml,
   quotePdfChipHtml,
   quoteRefChipHtml,
   quoteReplyChipHtml,
   splitSessionToken,
+  unfoldQuoteBodies,
 }

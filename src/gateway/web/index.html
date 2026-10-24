@@ -25,7 +25,7 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=593" />
+  <link rel="stylesheet" href="/styles.css?v=603" />
 </head>
 <body>
 <div id="app">
@@ -297,9 +297,9 @@
                   <button id="send-btn" class="primary" title="只读查看 · 无法发送" aria-label="发送"></button>
                 </div>
               </div>
-              <!-- composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁入 #input-bar 子元素位，用户定案：
-                   审批/提问 UI 是输入栏的子元素，出现=输入栏自身大小变化（外观让位 .bar-takeover，输入内容组
-                   隐藏，卡即输入栏本体），不再是兄弟节点替换 -->
+              <!-- composer takeover（2026-10-24 用户定案：底栏不再变形）：审批/提问卡是浮在输入栏
+                   上方的独立图层（absolute bottom:100%，覆盖消息流、不推聊天区），从底栏背后上滑出/
+                   下滑回；输入栏本体保持原样（可输入、草稿不受影响） -->
               <div id="composer-takeover" hidden></div>
               <!-- 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）：CLI TodoV2 清单（源码 useTasksV2
                    单源出口 → task-state 链）在底栏上的生长式浮窗。输入栏（#input-bar）的子元素、贴其上沿定位
@@ -307,7 +307,7 @@
                    计数 + chevron），点击上展 .td-panel（同一头部顶置 + 圆点状态行列表；宽=输入栏宽−48px 居中、
                    底边与输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px,var(--bar-room,460px)) 内部滚动），
                    再点头部向下收敛。
-                   无清单整窗 hidden；审批/提问接管卡在场 → .blocked 收敛且禁点（.bar-takeover 规则本就 display:none 让位）。 -->
+                   无清单整窗 hidden；审批/提问浮层在场 → .blocked 收敛且禁点（#input-bar.tk-open 隐藏其头部条）。 -->
               <div id="task-dock" hidden>
                 <button id="task-lip" class="td-lip" type="button" aria-expanded="false" aria-controls="task-panel" title="展开任务清单"></button>
                 <div id="task-panel" class="td-panel" role="region" aria-label="任务清单"></div>
@@ -366,12 +366,12 @@
 <!-- KaTeX（2026-10-06）：全局 katex（UMD），须在 app.js 之前加载——core/markdown.js 的公式预扫描
      直接调 katex.renderToString；缺失时该模块跳过公式渲染（$…$ 原样显示），故脚本顺序是硬约束。 -->
 <script src="/vendor/katex/katex.min.js?v=473"></script>
-<!-- CodeMirror 6 + codemirror-live-markdown（2026-10-07）：work 编辑区 md Live Preview 的全局 IIFE
-     （window.CMLiveMarkdown）。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
-<script src="/vendor/codemirror/live-markdown.js?v=8"></script>
+<!-- CM6 编辑层（2026-10-24）：@floria/cm6 包自带的全局 IIFE（CM6 依赖全内联，挂 window.FloriaCM6），
+     底栏与 work 编辑区共用。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
+<script src="/cm6/floria-cm6.iife.js?v=1"></script>
 <!-- 解压组件（2026-10-24）：xlsx/docx 预览（web-src/sidebar/work/work-doc.js）用 fflate.unzipSync
      解 OOXML 包；须在 app.js 之前挂到 window.fflate。 -->
 <script src="/vendor/fflate.js?v=1"></script>
-<script src="/app.js?v=593"></script>
+<script src="/app.js?v=603"></script>
 </body>
 </html>

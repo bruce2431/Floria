@@ -688,28 +688,42 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    （用户定案「静态的提问卡不可交互的…直接移除就好」）：提问在消息流里只剩紧凑工具行 .tool-line。
    web 可交互提问 = CLI 经审批链下发的 question 分支，样式见下方 .appr-card.qa-card。 */
 
-/* ===== composer takeover（2026-08-22 占输入栏；2026-09-08 三轮迁为 #input-bar 子元素，用户定案）=====
-   提问/审批 UI 是输入栏的子元素，出现=输入栏自身大小变化：.bar-takeover 态输入内容组整组隐藏、
-   卡面本体（白底/描边/圆角/阴影）保持不退场——审批/提问卡是「输入栏表面里换的内容」，
-   不是浮在聊天区的独立面板（2026-09-09 根修，用户定案「根治」）；
-   解决后撤 .bar-takeover 输入行内容回归（对齐 dsh ApprovalPanel .root / QuestionComposer .frame）。 */
-#composer-takeover { display: block; width: 100%; }
-#composer-takeover[hidden] { display: none; }
-/* 输入栏让位态：仅 padding 让位 0（卡内容全出血贴卡面，黄条头贴顶、圆角由裁溢出裁出）
-   +输入内容组隐藏；卡面铬一律不动。2026-09-26 根修（用户实报：上一轮还在跑时打了草稿，审批/提问卡
-   一弹出草稿整段消失且不回来）——退场**禁用 display:none**：聚焦中的 contenteditable 一旦被移出
-   渲染树，WebKit（iPad Safari / iOS 各浏览器）会连同文本内容一起销毁（无图时用户正聚焦在 #input 里
-   打字；有图时刚用过文件选择器、焦点已离开输入栏，故现象只落在「无图」）。改脱流 + visibility:hidden：
-   ①绝对定位不参与流布局 ⇒ 栏高仍只由卡决定（与 display:none 同几何）；②元素与内容留在渲染树内不被
-   销毁 ⇒ 草稿存活；③不可见不可点 ⇒ 接管期输入栏确实让位。非渲染退场顺带丢掉的失焦由 approval.js
-   showTakeover 显式 blur() 补回（不变量 = 接管卡在场 isEditing() 必假）。 */
-#input-bar.bar-takeover { padding: 0; overflow: hidden; }
-#input-bar.bar-takeover > :not(#composer-takeover) {
-  position: absolute; visibility: hidden; pointer-events: none;
+/* ===== composer takeover（2026-10-24 用户定案：底栏不再变形，改为底栏上方的独立浮层）=====
+   审批/提问卡属「底栏衍生 UI」，与消息流分层：卡片浮在输入栏上方（absolute bottom:100%），
+   覆盖在消息流之上，不推聊天区（不写 #chat-scroll padding），也不改输入栏几何/外观/焦点
+   （输入栏保持原样可输入，草稿天然存活）。
+   出入场 = 卡片在裁剪盒内上滑/下滑：静止位整块藏在底栏背后（translateY(100%+间隙)），
+   .tk-in 滑出到位、.tk-out 滑回底栏背后并淡出。盒 padding 给卡片阴影留位，overflow 裁掉
+   底栏背后不可见的部分。 */
+#composer-takeover {
+  /* 宽度比底栏窄一档（两侧各缩 14px，与任务浮窗同档）；底边与底栏上沿接壤（无间隙） */
+  position: absolute; left: 14px; right: 14px; bottom: 100%;
+  padding: 16px 0 0; /* 只留上方阴影位，下方不留缝 = 与底栏接壤 */
+  overflow: hidden; pointer-events: none;
+  z-index: 2;
 }
-/* takeover 内的审批卡铺满输入栏宽度（去掉 chat 内的宽度上限），且剥掉自身卡面铬
-   （独立边框/底色/阴影/圆角全去）——黄条头保留为状态带，卡面即输入栏卡面（2026-09-09 根修） */
-#composer-takeover .appr-card { width: 100%; max-width: none; margin: 0; border: none; border-radius: 0; background: transparent; box-shadow: none; }
+#composer-takeover[hidden] { display: none; }
+#composer-takeover .appr-card {
+  width: 100%; max-width: none; margin: 0;
+  max-height: calc(100dvh - 180px);
+  display: flex; flex-direction: column;
+  /* dsh QueueDock 外形：上圆角、下直角、无下边框——底边与输入栏卡面拼成一块（接壤），
+     由输入栏自己的上边框作分隔线；向上投影，不向底栏投阴影 */
+  border-radius: 14px 14px 0 0;
+  /* 分界线要明显（用户实测）：底边框按正文墨色加深，与底栏上边框叠成一条清晰接缝 */
+  border-bottom: 1px solid var(--hairline);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.04);
+  transform: translateY(100%); /* 收起位：整块在裁剪盒下沿之外 = 底栏背后 */
+  opacity: 0;
+  transition: transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.18s ease;
+  pointer-events: auto;
+}
+#composer-takeover.tk-in .appr-card { transform: none; opacity: 1; }
+#composer-takeover.tk-out .appr-card { transform: translateY(100%); opacity: 0; }
+#composer-takeover .appr-body { flex: 1 1 auto; min-height: 0; }
+/* 接管卡在场：任务浮窗让位（头部条不显示，避免与浮层重叠）；输入栏本体不动 */
+#input-bar.tk-open #task-dock { visibility: hidden; }
 /* ===== 底栏任务浮窗（2026-09-10；2026-10-04 改 dsh 任务栏形态）=====
    dsh 任务栏形状（用户 2026-10-04 定案，参考 dsh 截图）：收敛态 = 一条完整头部条（列表图标 + 「任务」+
    计数 + chevron）；展开态 = 同一头部顶置 + 圆点状态行列表——两态视觉连续，头部随展开上移。
@@ -972,38 +986,9 @@ body.touch .change-card .ch-toggle { opacity: 1; } /* 真触屏恒显（iPad 伪
 }
 /* 键盘在场不做缓动（键盘节）：底栏位移/抬升必须与键盘同步，0.55s 过渡会整程拖尾在键盘后面 */
 body.kb-open #input-wrap { transition: none; }
-/* 拓展/收回动画期（类挂 #input-wrap）：#input-bar 裁溢出并成为卡片定位上下文——卡片 absolute
-   bottom:0 贴输入栏底（输入栏底边经 docked translateY(-100%) 固定）=底边锚定：出现=按钮行钉在
-   原输入栏位置不动、卡片顶部向上展开；收回=按钮行不动、卡片向下收短（2026-09-08 二轮定案）。 */
-#input-wrap.composer-growing #input-bar { position: relative; overflow: hidden; }
-#input-wrap.composer-growing #composer-takeover { position: absolute; bottom: 0; left: 0; width: 100%; }
-/* 动画载体（2026-09-08 三轮）：#input-bar height 显式 px 起止过渡=「输入栏自身大小变化」
-   （auto↔auto 不插值，多行增高等日常变化不触发）。2026-09-09 根修：显形/收合全部由 height 过渡
-   +overflow 裁剪承担，composer-fade / composer-fade-out 淡入淡出机制整体删除——旧版 220ms 淡入与
-   320ms 长高同跑=出现首帧底部空白、收回后输入行再淡入=底部空窗。 */
-#input-bar { transition: height 0.32s cubic-bezier(0.22, 0.61, 0.36, 1); }
-/* 收起（2026-09-10 用户定案「收起时先从下到上渐隐审批栏 UI，然后复现一般输入栏 UI」→ 同日二轮修正
-   「收起时候的渐隐和折叠应该是并行发生的」；时序在 approval.js clearTakeover，本段只声明三态视觉）：
-   ① .appr-out 审批卡自下而上渐隐——clip-path 底边 0→100% 插值=可见区从底边往上削，配 opacity 收尾
-      （0.17s，须 ≤ HEIGHT_MS，卡在折叠收口前先淡尽）。
-   ② .bar-collapsing 输入内容组复现并贴底对齐——输入栏底边固定（docked 由 translateY(-100%) 锚定），
-      折叠期内容零位移，只有顶边下移收短。
-   ③ .bar-reveal 输入内容组淡入。
-   ①②③ 同帧起播（单一时间轴），卡与输入内容在底边处交叉过渡；旧版①→②③ 串行共 490ms。 */
-@keyframes apprOutUp { from { clip-path: inset(0 0 0 0); opacity: 1; } to { clip-path: inset(0 0 100% 0); opacity: 0; } }
-#composer-takeover.appr-out { animation: apprOutUp 0.17s cubic-bezier(0.4, 0, 1, 1) both; }
-@keyframes barRevealIn { from { opacity: 0; } to { opacity: 1; } }
-/* 入场（2026-09-10 用户实测「弹出有点生硬」）：旧版入场零过渡——输入内容组瞬间 display:none、
-   卡片底部（按钮行）以全不透明瞬间出现，只剩 height 长得把卡面往上展开=「内容硬切 + 盒子长高」。
-   新增 .appr-in：卡片内容自下方 10px 浮起 + 淡入（220ms ease-out），与高度长出（320ms）同帧起播。
-   卡面本体（白底/描边/圆角/阴影）在 .bar-takeover 态不退场 ⇒ 内容淡入不会露首帧空洞
-   （09-09 铲除的 composer-fade 是「整卡渐隐」，白底一起消失才出现空洞）。
-   10px 位移落在卡片底部内边距内（.appr-btns padding:14px 16px）⇒ 按钮行不被裁角。
-   只在「普通输入栏 → 卡片」那一次播放：换题/重渲染不重播（showTakeover firstShow 门）。 */
-@keyframes apprInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-#composer-takeover.appr-in { animation: apprInUp 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-#input-bar.bar-collapsing { justify-content: flex-end; overflow: hidden; }
-#input-bar.bar-reveal > :not(#composer-takeover) { animation: barRevealIn 0.17s ease-out both; }
+/* 拓展/收回动画（2026-10-24 重做）：几何/时序全在 #composer-takeover 区块（上滑/下滑），
+   输入栏本体不参与任何接管动画。 */
+
 /* 空态：相对 stage 真定位（SubPj3 .inputbar 同款基线）——台面中心锚定（76.75% + translate(-50%,-50%)）。
    该锚点是**底栏相对立绘的位置**，2026-09-27 用户定案「和图片的相对位置不可以改」——任何改动都不得
    移动底栏在立绘里的落点（曾试过改底边锚，底栏上移压住女孩手臂，被否）。 */
@@ -3013,10 +2998,10 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 }
 .wk-ed-body:has(> .wk-ed-cm) { overflow: hidden; }
 
-/* ---------- .canvas 图形预览（2026-10-13，WS2 待办 7；work-canvas.js 渲染） ----------
-   .wk-cv 是 CM6 block replace 装饰的宿主：顶栏（摘要 + 切源码钮）+ canvas 画布。画布手势（单指 pan /
-   双指捏合 / Ctrl+滚轮缩放）由模块内 JS 处理并 stopPropagation，touch-action: none 让浏览器不抢手势、
-   也不让触摸落进 contenteditable。颜色：canvas 自定色走内联 rgba（模块内算），令牌色走本表 class。 */
+/* ---------- .canvas 图形预览（work-canvas.js 渲染） ----------
+   .wk-cv 是 CM6 block replace 装饰的宿主：顶栏（摘要 + 切源码钮）+ stage。手势（左键空白/空格拖动平移、
+   Ctrl/⌘拖动框选、滚轮缩放、拖角缩放节点）由模块内 JS 处理并 stopPropagation，touch-action: none 让浏览器
+   不抢手势、也不让触摸落进 contenteditable。颜色：canvas 自定色走内联 rgba（模块内算），令牌色走本表 class。 */
 .wk-cv { display: flex; flex-direction: column; min-height: 200px; touch-action: none; user-select: none; -webkit-user-select: none; }
 .wk-cv-bar { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 4px 8px; }
 .wk-cv-cnt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-3); }
@@ -3024,14 +3009,17 @@ body.touch .turn-rail .tr-preview { pointer-events: auto; cursor: pointer; }
 .wk-cv-btn { flex: none; padding: 3px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; color: var(--text-2); background: var(--bg); }
 .wk-cv-btn:hover { color: var(--text); background: var(--hover); }
 .wk-cv-open { margin: 0 0 0 8px; padding: 1px 8px; font-size: 11px; vertical-align: middle; } /* 源码态首行行前的小钮 */
-/* ComfyUI 同构：stage 是画布定位锚，canvas 画全部图形，overlay 为**兄弟**层（只放编辑控件）。
-   手势只绑 canvas，DOM 覆盖层不在捕获路径上（这就是「编辑源码」按钮此前被吞 click 的结构解）。 */
+/* ComfyUI 同构：stage 是画布定位锚；bg/fg 双 canvas 叠放（bg = 网格+连线，fg = 节点），
+   overlay 为**兄弟**层（只放编辑控件）。手势只绑 fg canvas，DOM 覆盖层不在捕获路径上
+   （这就是「编辑源码」按钮此前被吞 click 的结构解）。 */
 .wk-cv-stage { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: var(--bg); border: 1px solid var(--border-soft); border-radius: 10px; }
-.wk-cv-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
-.wk-cv-dragging .wk-cv-canvas { cursor: grabbing; }
-.wk-cv-overlay { position: absolute; inset: 0; pointer-events: none; }
+.wk-cv-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.wk-cv-bg { z-index: 0; pointer-events: none; }
+.wk-cv-fg { z-index: 1; cursor: grab; }
+.wk-cv-dragging .wk-cv-fg { cursor: grabbing; }
+.wk-cv-overlay { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .wk-cv-overlay > * { pointer-events: auto; }
-.wk-cv-editing .wk-cv-canvas { pointer-events: none; cursor: default; }
+.wk-cv-editing .wk-cv-fg { pointer-events: none; cursor: default; }
 .wk-cv-edit { position: absolute; box-sizing: border-box; margin: 0; padding: 8px 10px; border: 2px solid var(--blue); border-radius: 8px; background: var(--bg); color: var(--text); font: 12px/1.5 var(--mono, ui-monospace, monospace); resize: none; outline: none; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
 /* PDF 预览（2026-10-24，pdf.js 真实渲染，work-pdf.js）：38px 工具条 + 竖向页栈；
    结构与 dsh `ui-sidebar-documentpreview/pdf` 同口径（懒渲染 / 文本层 / 适宽与固定缩放）。 */

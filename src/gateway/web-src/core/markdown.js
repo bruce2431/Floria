@@ -80,7 +80,7 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
 
   // ---------- 围栏代码块渲染（2026-10-10 codex 化：语法高亮 + 头栏 + 软换行） ----------
   // 高亮复用内置网关已 vendored 的 codemirror-live-markdown `highlightCode`（lowlight/highlight.js，
-  // 输出 hljs-* 类；见 vendor/codemirror/live-markdown.js，全局 window.CMLiveMarkdown）——不自建高亮器。
+  // 输出 hljs-* 类；即 @floria/cm6 包的 edCMG，见 editor/cm-bridge.js）——不自建高亮器。
   // 语言为空/库缺失/未注册 → highlightCodeHtml 返 null，正文回落「已转义纯文本」（不预判语言，禁猜高亮）。
   const CB_WRAP_KEY = 'floria-code-wrap'
   let cbWrapOn = true // 默认软换行（用户 2026-10-10 定案「没有自动换行」；持久化偏好见 initCodeBlock）
@@ -90,7 +90,7 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
   // 高亮原码：入参必须是「未转义」的原始代码（lowlight 内部自行 escapeHtml，给已转义文本会二次转义）。
   // lang 为空/库缺失/语言未注册 → null = 调用方走已转义纯文本。
   function highlightCodeHtml(raw, lang) {
-    const CM = typeof window !== 'undefined' ? window.CMLiveMarkdown : null
+    const CM = edCMG
     if (!CM || !CM.highlightCode || !lang) return null
     try {
       const r = CM.highlightCode(raw, lang)

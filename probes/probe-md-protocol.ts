@@ -15,6 +15,9 @@ import { resolve } from 'path'
 
 const ROOT = resolve(import.meta.dir, '..')
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8')
+// CM6 内核在独立包（Pj16-SubPj4-CM6），结构断言读包源码
+const PKG = resolve(ROOT, '../Pj16-SubPj4-CM6/src')
+const readPkg = (p: string) => readFileSync(resolve(PKG, p), 'utf8')
 
 let pass = 0
 let fail = 0
@@ -65,30 +68,36 @@ const cmspec = read('src/gateway/web-src/core/math-spec.js')
 for (const k of ['MATH_SRC_BLOCK_DOLLAR', 'MATH_SRC_BLOCK_BRACKET', 'MATH_SRC_INLINE_PAREN', 'MATH_SRC_INLINE_DOLLAR', 'mathInlineOk', 'MATH_EXTRACT_ORDER']) {
   ok(new RegExp(`export \\{[^}]*${k}`).test(cmspec) || cmspec.includes(k), `#11 math-spec.js 涵盖 ${k}`)
 }
-const cmMath = read('src/gateway/web-src/editor/cm-math.js')
-ok(/from '\.\.\/core\/math-spec\.js'/.test(cmMath), '#11 cm-math.js 从同一 math-spec 取文法')
+const cmMath = readPkg('kernel/cm-math.js')
+ok(/from '\.\/math-spec\.js'/.test(cmMath), '#11 包内 cm-math 从包内 math-spec 取文法')
 ok(/cmMathScan/.test(cmMath) && /InlineCode/.test(cmMath) && /FencedCode/.test(cmMath), '#11 cm-math.js 扫公式跳过代码区间')
 ok(/cmMathExt/.test(cmMath) && /export \{ cmMathExt \}/.test(cmMath), '#11 cm-math.js 导出 cmMathExt（两宿主共用一份）')
+// 文法单真源跨仓校验：包内 copy 必须与 Floria core/math-spec.js 逐字同源（分隔符正则源串）
+const pkgSpec = readPkg('kernel/math-spec.js')
+for (const k of ['MATH_SRC_BLOCK_DOLLAR', 'MATH_SRC_INLINE_PAREN', 'MATH_SRC_INLINE_DOLLAR', 'mathInlineOk']) {
+  const line = (src: string) => (src.match(new RegExp(`^.*${k} = .*$`, 'm')) || [''])[0]
+  ok(!!line(pkgSpec) && line(pkgSpec) === line(cmspec), `#11 包内 math-spec 与 core/math-spec 同源（${k}）`)
+}
 // 光标邻近退化判据须与 vendor live-markdown `cn` 同款=**闭区间**（`a.from<=to && a.to>=from`）——
 // 开区间会漏掉光标落在公式边界（紧邻 `$` 前/后）的退化（2026-10-15 实报：「$…$ 临近不退化为源码」）。
 ok(/r\.from <= to && r\.to >= from/.test(cmMath), '#11 cm-math 选区命中=闭区间（与 vendor cn 同款，边界光标即退化）')
 ok(!/r\.from < to && r\.to > from/.test(cmMath), '#11 cm-math 无开区间残留（开区间漏边界态=根因）')
 
-const composer = read('src/gateway/web-src/inputbar/composer-cm.js')
-const workcm = read('src/gateway/web-src/sidebar/work/work-cm.js')
+const composer = readPkg('hosts/composer.js')
+const workcm = readPkg('hosts/work-cm.js')
 const mention = read('src/gateway/web-src/inputbar/mention.js')
-ok(/cmMathExt\(cmCM\)/.test(composer), '#11 底栏挂 cmMathExt')
+ok(/cmMathExt\(CM\)/.test(composer), '#11 底栏挂 cmMathExt')
 ok(/cmMathExt\(CM\)/.test(workcm), '#11 work 编辑区挂 cmMathExt')
 
 // #15 包裹 / #16 复制：命令层唯一
-const tr = read('src/gateway/web-src/editor/editor-transactions.js')
-const api = read('src/gateway/web-src/editor/editor-api.js')
-const clip = read('src/gateway/web-src/editor/editor-clipboard.js')
+const tr = readPkg('kernel/editor-transactions.js')
+const api = readPkg('kernel/editor-api.js')
+const clip = readPkg('kernel/editor-clipboard.js')
 ok(/function wrapSelectionCM\(/.test(tr) && /changeByRange/.test(tr), '#15 包裹 = CM6 changeByRange 事务（不改 DOM）')
 ok(/Mod-b/.test(tr) && /Mod-i/.test(tr) && /Mod-e/.test(tr), '#15 wrapKeymap 含 Mod-b/i/e')
 ok(/const ED_EDITORS = new Map\(\)/.test(api) && /function editorCommand\(/.test(api), '#15/#16 editor-api 注册表 + editorCommand 调度')
 ok(/makeEditorFacade/.test(api) && /toggleTask\(line, checked\)/.test(api), '#15/#10 facade 暴露 wrapSelection/toggleTask')
-ok(/from '\.\.\/core\/markdown\.js'/.test(clip) && /selectionMd\(selection\)/.test(clip), '#16 复制门面直接消费 markdown.js data-md 链')
+ok(/selectionMd\(selection\)/.test(clip) && /edEnv\(\)/.test(clip), '#16 复制门面经 env 注入消费 markdown.js data-md 链')
 ok(/wrapKeymap\(\)/.test(composer) && /wrapKeymap\(\)/.test(workcm), '#15 两宿主共用 wrapKeymap')
 ok(/makeEditorFacade\(\{ id: 'composer'/.test(composer) && /makeEditorFacade\(\{ id: 'work'/.test(workcm), '#15/#16 两宿主注册 facade')
 ok(!/contenteditable|execCommand/.test(tr + api), '#15 命令层无 execCommand/contenteditable 直改')
@@ -101,17 +110,17 @@ ok(/insertAttachmentMarkdown\(/.test(imgs), '#13 images.js 上传后插原文 md
 ok(/function renderImgPills\(/.test(imgs) && /uploadedMentionItems/.test(imgs), '#6 images.js 胶囊行还原 + @ 上传组数据源')
 ok(/<div id="img-pills"/.test(idx) && /\$\('img-pills'\)/.test(imgs), '#6 #img-pills 元素在 index.html、images.js 有活引用')
 ok(/uploadedMentionItems/.test(mention) && /imgpick/.test(mention), '#6 mention.js 消费「上传」组（imgpick/filepick）')
-const tasklist = read('src/gateway/web-src/editor/task-list.js')
+const tasklist = readPkg('kernel/task-list.js')
 ok(/edTaskPlugin/.test(tasklist) && /TaskMarker/.test(tasklist) && /toggleTaskLineCM/.test(tasklist), '#2 task-list.js TaskMarker → 真 input 写回源码')
 ok(/function contentEdges\(/.test(mkSrc) && /createTreeWalker/.test(mkSrc), '#5 contentEdges 改 TreeWalker（不做 firstChild 盲降）')
 ok(/copyRenderedSelection/.test(ctxm) && !/selectionMd\b/.test(ctxm.match(/import[^\n]*/g)?.join('\n') || ''), '#16 ctx-meter 复制走 editor-clipboard 门面')
-const attach = read('src/gateway/web-src/editor/editor-attachments.js')
+const attach = readPkg('kernel/editor-attachments.js')
 ok(/!\[[^\]]*\]\(/.test(attach) && /\[[^\]]*\]\(/.test(attach), '#13 图片 `![]()` / 文件 `[]()` 两种引用形态')
 ok(/edAttImgPlugin/.test(attach), '#13 图片引用行内直渲（edAttImgPlugin）')
 
 // 拼接注册 + 样式
 const bundle = read('scripts/bundle-web-modules.ts')
-for (const f of ['core/math-spec.js', 'editor/cm-global.js', 'editor/editor-transactions.js', 'editor/editor-api.js', 'editor/editor-markdown.js', 'editor/editor-attachments.js', 'editor/editor-clipboard.js', 'editor/cm-math.js', 'editor/task-list.js']) {
+for (const f of ['core/math-spec.js', 'editor/cm-bridge.js']) {
   ok(bundle.includes(`file: '${f}'`), `bundle 注册 ${f}`)
 }
 const css = read('src/gateway/web/styles.css')

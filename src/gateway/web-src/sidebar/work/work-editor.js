@@ -4,15 +4,15 @@ import { wkPdfClose, wkPdfRender } from './work-pdf.js'
   // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
   // 每条评论的行范围 l0..l1 落成 CodeMirror 行装饰：未解决 .cmt-mark-open / 已解决 .cmt-mark-res。
   function cmtApplyMarks() {
-    if (!wkEdView) return
+    const view = wkEdGetView()
+    if (!view) return
     const marks = cmtRangesFor(state.workFile)
-    wkEdCmtMarks = marks
-    wkEdView.dispatch({ effects: wkEdCmtEffect.of(marks) })
+    wkEdApplyMarks(marks)
     if (wkCmtScrollId) {
       const id = wkCmtScrollId
       wkCmtScrollId = ''
       const hit = marks.find((m) => m.id === id)
-      if (hit) wkEdScrollToLine(Math.min(hit.l0, wkEdView.state.doc.lines))
+      if (hit) wkEdScrollToLine(Math.min(hit.l0, view.state.doc.lines))
     }
   }
 
@@ -60,10 +60,10 @@ import { wkPdfClose, wkPdfRender } from './work-pdf.js'
     wkEdDirty = false
     wkEdConflict = false
     wkEdPendingDoc = null
-    wkEdCmtMarks = []
     wkEdProj = ''
     wkPdfClose()
-    if (wkEdView) { wkEdSetLang(''); wkEdSetDoc('') }
+    if (wkEdGetView()) { wkEdSetLang(''); wkEdSetDoc('') }
+    wkEdApplyMarks([])
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
@@ -85,14 +85,13 @@ import { wkPdfClose, wkPdfRender } from './work-pdf.js'
     // 可编辑文本（含 md）：常驻 CodeMirror 6 编辑器。把 host 挂回 body 并测量（body 可能被别的渲染重建过
     // 子节点）；仅当 readFile 置了 wkEdPendingDoc（新文件）才换文档 + 热换语言，否则保留编辑器现状
     // （重渲不得用陈旧基线覆盖用户未保存的编辑）。
-    const view = wkEdEnsureView()
-    body.replaceChildren(wkEdHost)
+    wkEditor.attach(body)
     if (wkEdPendingDoc !== null) {
       wkEdSetLang(state.workFile)
       wkEdSetDoc(wkEdPendingDoc)
       wkEdPendingDoc = null
     }
-    requestAnimationFrame(() => view.requestMeasure())
+    wkEditor.measure()
     cmtApplyMarks() // 评论标记：被批注的行加高亮
     wkEdState()
   }

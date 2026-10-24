@@ -2,10 +2,10 @@
 // 任何一条链都不得自带第二套正则——否则同一条消息在消息流与编辑器里渲染结果会分叉。
 // 三条消费链：
 //   ① 消息流 core/markdown.js extractMath（遮罩代码 → 抽公式 → esc → mdInline 末尾 restoreMath）；
-//   ② work md 编辑区 editor/cm-math.js 的 ViewPlugin；
-//   ③ 底栏 composer editor/cm-math.js（同一扩展，两宿主共用）。
+//   ② work md 编辑区 @floria/cm6 包内 kernel/cm-math.js 的 StateField；
+//   ③ 底栏 composer（同一扩展，两宿主共用）。
 // 覆盖形态：`$…$` 行内、`$$…$$` 块级、`\(…\)` 行内、`\[…\]` 块级。
-// ```math 围栏与 `` `$…$` `` 代码内写法是 vendor live-markdown 既有约定（不动、非本层职责）。
+// ```math 围栏与 `` `$…$` `` 代码内写法是 codemirror-live-markdown 既有约定（不动、非本层职责）。
 /* @module core/math-spec.js */
   // 源串（不带 flag）：消费方各自 new RegExp(src, 'g') —— 共享同一个 RegExp 对象会踩 lastIndex 状态。
   const MATH_SRC_BLOCK_DOLLAR = '\\$\\$([\\s\\S]+?)\\$\\$'   // $$…$$（可跨行）

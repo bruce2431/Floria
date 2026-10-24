@@ -83,25 +83,10 @@ const PIECES: { file: string; part: number }[] = [
   // reconcileWorkSurface()。顶层仅函数声明（共享 IIFE 内提升），须排在 work-state.js 之后（其 import 面用到
   // WORK_SLOT_DEF）。调用方 = work-files.js 的 selectProject、work-mount.js 的 initWork。
   { file: 'sidebar/work-context.js', part: 1 },
-  // 编辑器模块组（2026-10-15 待办返修轮任务D，自 archive/wip-20261015 移植）：cm-global（vendor 取值口）
-  // → transactions（CM6 事务：包裹/勾选/插入）→ api（facade 注册表 + editorCommand 唯一调度口）
-  // → markdown（renderMarkdown 门面）→ attachments（上传落盘 + 原文 md 引用 + 行内图片 widget）
-  // → clipboard（渲染面复制还原 md 源码门面）。顶层只有函数声明与 const 表（edImgWidgetBase 依赖
-  // window.CMLiveMarkdown，vendor 先于 app.js 载入）；宿主（composer-cm / work-cm）在本组之后调用导出。
-  { file: 'editor/cm-global.js', part: 1 },
-  { file: 'editor/editor-transactions.js', part: 1 },
-  { file: 'editor/editor-api.js', part: 1 },
-  { file: 'editor/editor-markdown.js', part: 1 },
-  { file: 'editor/editor-attachments.js', part: 1 },
-  { file: 'editor/editor-clipboard.js', part: 1 },
-  // CM6 数学插件（2026-10-15 待办 11）：文法取自 core/math-spec.js，两编辑器共用本件（cmMathExt）。
-  { file: 'editor/cm-math.js', part: 1 },
-  // CM6 任务列表复选框（2026-10-16 待办 2）：任务行 `- [ ]` 的 TaskMarker 三字符渲成真 <input>，
-  // 点击写回源码（toggleTaskLineCM）。依赖 cm-global + editor-transactions（均在上）。
-  { file: 'editor/task-list.js', part: 1 },
-  // 块级标记相邻退化（2026-10-24 待办 3）：HeaderMark/ListMark/QuoteMark 按「标记节点」闭区间判定，
-  // 只有相邻才露原文、其余按块隐藏；列表项渲染圆点/序号。两宿主（work-cm / composer-cm）共用本件。
-  { file: 'editor/block-mark.js', part: 1 },
+  // CM6 接缝（2026-10-24）：编辑器内核整体移入 @floria/cm6 包（/cm6/floria-cm6.iife.js 先于 app.js
+  // 载入，挂 window.FloriaCM6）。本件注入宿主依赖并把内核符号摊进共享作用域（transactions/api/markdown/
+  // attachments/clipboard/cm-math/task-list/block-mark 均来自包）；宿主（composer-cm / work-cm）在此后调用。
+  { file: 'editor/cm-bridge.js', part: 1 },
   // work 模式侧栏（2026-10-08 纯搬迁拆分，保原物理序）：原 sidebar/work.js 单段切为门面 + 8 件 work/*；
   // 门面 sidebar/work.js 承原 import 面与 export 块（外部 import './sidebar/work.js' 路径不变），
   // 其余按职责切块——各件先后 = 原段内物理序。依赖 views/registry.js 的 showCard 与 engine/state.js 的 state/chatArea/#work-*。

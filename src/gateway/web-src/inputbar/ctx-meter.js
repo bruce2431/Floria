@@ -5,7 +5,6 @@ import { stage, progScrollUntil, stageRelease, stageFollow, stageSync } from '..
 import { gateSubmit } from '../engine/auth.js'
 import { gateAwait, gws } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
-import { copyRenderedImages, copyRenderedSelection } from '../editor/editor-clipboard.js'
 import { inputEl, sendBtn, ctxMeterEl, ctxBtnEl, ctxPanelEl, bubblePop, overlay, state } from '../engine/state.js'
 import { toast, isMobile } from '../core/util.js'
 import { renderSettle, btnMode } from './approval.js'
@@ -169,7 +168,7 @@ import { setPanel } from '../sidebar/recent.js'
   // 2026-09-06 纯文本复制：鼠标选中复制走浏览器默认会连 text/html 一起写剪贴板
   // （粘回输入栏/外部富文本编辑器保留背景色等样式），全局拦截 copy 只写 text/plain。
   // 2026-10-09 扩展：消息区选区先还原**原始 md 源码**；2026-10-15 任务D 收口为
-  // editor/editor-clipboard.copyRenderedSelection 门面（公式块还原 `$…$`/`$$…$$` 源码，整块覆盖用 data-md
+  // @floria/cm6 摊出的 copyRenderedSelection（公式块还原 `$…$`/`$$…$$` 源码，整块覆盖用 data-md
   // 原文，块内碎片/非消息区返回 null）→ 回落纯文本。此拦截是全局唯一入口（msg-actions 不再另起 copy 监听）。
   document.addEventListener('copy', (e) => {
     const sel = window.getSelection()

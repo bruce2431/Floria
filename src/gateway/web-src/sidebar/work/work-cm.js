@@ -1,424 +1,54 @@
-// 编辑区 CodeMirror6 引擎：建视图 / 热换语言 / 主题 / 评论行装饰 / 选区行号（惰性建单例）。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
-import { makeEditorFacade, editorApiSetActive } from '../../editor/editor-api.js'
-import { surroundExt, wrapKeymap } from '../../editor/editor-transactions.js'
-import { cmMathExt } from '../../editor/cm-math.js'
-import { edTaskPlugin } from '../../editor/task-list.js'
-import { edBlockMarkPlugin } from '../../editor/block-mark.js'
-import { edAttImgPlugin, edAttFilePlugin } from '../../editor/editor-attachments.js'
-import { addImageFiles, addImageUrls, addUploadFiles, clipboardFiles, clipboardImageUrls } from '../../inputbar/images.js'
+// 编辑区 CodeMirror 引擎适配层：CM6 能力全在 @floria/cm6 包（window.FloriaCM6.createWorkEditor），
+// 本件只保留宿主状态（文件/脏态/保存基线/评论面板）并把包实例包装成既有 wkEd* 符号，供 work-editor.js 等调用。
 /* @module sidebar/work/work-cm.js */
-  // ---------- 编辑区（主区左栏） ----------
+  // ---------- 编辑区宿主状态（主区左栏） ----------
   // 所有可编辑文本文件（markdown 与代码/纯文本一视同仁）都是常驻 CodeMirror 6 编辑器：整篇恒可编辑，
-  // 无阅读/编辑两态、无模式按钮；markdown 走 Obsidian 式 Live Preview（光标所在块就地显源码标记），
-  // 其余按扩展名加载语言高亮——长行按窗口软换行（EditorView.lineWrapping）。库 codemirror-live-markdown
-  // 与各语言包以 vendored 全局脚本 window.CMLiveMarkdown 提供（复用已 vendored 的全局 katex 渲染公式）。
-  // 真源 = EditorView.state.doc（wkEdText 仅作上次落盘基线）。图片 <img> / 不可编辑文件仍走各自只读分支。
+  // 无阅读/编辑两态、无模式按钮；markdown 走 Obsidian 式 Live Preview，其余按扩展名加载语言高亮。
+  // 真源 = EditorView.state.doc（wkEdText 仅作上次落盘基线）。
   // 保存 = 停止输入 1s 自动（去抖）+ Ctrl+S 立即；写回带 ETag 基线 wkEdMtime，外部改过 → 409，不静默覆盖。
   let wkEdFile = ''     // 已载入编辑缓冲的路径（与 wkEdMeta/wkEdText 同拍）；'' = 未载入
   let wkEdMeta = null   // { isImg, editable, msg? }；null = 未载入
-  let wkEdText = ''     // 上次落盘/读入的文件正文（实时真源在 wkEdView.state.doc；保存基线）
+  let wkEdText = ''     // 上次落盘/读入的文件正文（实时真源在编辑器 doc；保存基线）
   let wkEdMtime = null  // 读侧 ETag 解析的 mtime（毫秒），写回冲突基线；null = 无
   let wkEdDirty = false
   let wkEdTimer = 0
   let wkEdSaving = false
   let wkEdConflict = false
   let wkCmtScrollId = '' // 评论面板定位跳转待消费的评论 id（渲染完原文标记后滚到该行）
-  // CodeMirror 6（2026-10-07）：全生命周期只建一次 EditorView，跨文件复用（切文件只换文档 + 热换语言）。
-  let wkEdCM = null       // window.CMLiveMarkdown（建 view 时缓存；缺失即显式报错，不静默降级）
-  let wkEdView = null     // EditorView 实例；null = 尚未创建
-  let wkEdHost = null     // EditorView 的包裹 div（作为挂载单元在 #wk-ed-body 内换父）
-  let wkEdProgAnn = null  // Annotation：标记「程序性改文档」，updateListener 据此区分用户编辑
-  let wkEdCmtEffect = null // StateEffect<marks[]>：把评论行范围送进编辑器装饰器
-  let wkEdCmtMarks = []   // 最近一次评论标记数据（建 view 时回填/重挂用）
-  let wkEdLangComp = null // Compartment：按文件扩展名热换语言扩展（markdown Live Preview / 代码语言 / 纯文本）
-  let wkEdHlStyle = null  // HighlightStyle：代码语法高亮（tag → --hl-* CSS 变量，日夜随动）
-  let wkEdPendingDoc = null // 待灌入编辑器的新文档（readFile 置位；renderEdBody 消费后清空）——避免重渲时用陈旧基线覆盖用户编辑
+  let wkEdPendingDoc = null // 待灌入编辑器的新文档（readFile 置位；renderEdBody 消费后清空）
 
   function fileUrl(p) {
     return apiUrl(`/gateway/file?label=${encodeURIComponent(state.workProj)}&path=${encodeURIComponent(p)}`)
   }
+
+  // ---------- CM6 引擎实例（包内惰性建单 view，跨文件复用） ----------
+  const wkEditor = FloriaCM6.createWorkEditor({
+    apiUrl: (p) => apiUrl(p),
+    getWorkProj: () => state.workProj,
+    getWorkFile: () => wkEdFile,
+    isEditable: () => !!(wkEdMeta && wkEdMeta.editable),
+    mdInlineText: (nodes) => mdInlineText(nodes),
+    getCanvasExt: (CM, hlStyle) => wkCvExt(CM, hlStyle),
+    onUserEdit: () => { wkEdDirty = true; wkEdState(); wkEdScheduleSave() },
+    paste: {
+      clipboardFiles: (cd) => clipboardFiles(cd),
+      clipboardImageUrls: (html) => clipboardImageUrls(html),
+      addImageFiles: (f, t) => addImageFiles(f, t),
+      addUploadFiles: (f, t) => addUploadFiles(f, t),
+      addImageUrls: (u, t) => addImageUrls(u, t),
+    },
+  })
+
   // 当前正文真源文本 = 编辑器文档（无编辑器则回退基线）。
   function wkEdDocText() {
-    return wkEdView ? wkEdView.state.doc.toString() : wkEdText
+    const view = wkEditor.getView()
+    return view ? view.state.doc.toString() : wkEdText
   }
-
-  // ---------- 编辑区 CodeMirror 6 编辑器 ----------
-  // 惰性建 view（全生命周期一次）：默认键位/历史 + 按文件热换的语言 compartment（markdown Live Preview 或
-  // 代码语言）+ 软换行 + 库自带主题 + 本项目主题（CSS 变量，日夜随动）+ 评论行装饰 field + 文档变更监听。
-  function wkEdEnsureView() {
-    if (wkEdView) return wkEdView
-    const CM = window.CMLiveMarkdown
-    if (!CM) throw new Error('CodeMirror 编辑器未加载（window.CMLiveMarkdown 缺失）')
-    wkEdCM = CM
-    // 表格 widget 单元格渲染器：库默认 `td.textContent`（纯文本）会把格内 md 原样吐出，
-    // 注入本工程的行内渲染器（core/markdown.js mdInlineText）⇒ 格内 `**粗**`/`` `码` ``/链接正常渲染。
-    CM.setTableCellRenderer(mdInlineText)
-    wkEdProgAnn = CM.Annotation.define()
-    wkEdCmtEffect = CM.StateEffect.define()
-    // 评论行装饰 field。StateField 只存状态不渲染——必须 provide 接到 view 的 decorations facet
-    // 才会进 DOM（缺接线则行标记永不渲染，2026-10-07 统一编辑器迁移时引入的静默失效）。
-    const cmtField = CM.StateField.define({
-      create: () => CM.Decoration.none,
-      update: (deco, tr) => {
-        let next = deco.map(tr.changes)
-        for (const e of tr.effects) if (e.is(wkEdCmtEffect)) next = wkEdBuildCmtDeco(e.value, tr.state)
-        return next
-      },
-      provide: (f) => CM.EditorView.decorations.from(f),
-    })
-    wkEdHost = document.createElement('div')
-    wkEdHost.className = 'wk-ed-cm'
-    wkEdLangComp = new CM.Compartment()
-    wkEdHlStyle = wkEdBuildHlStyle(CM)
-    const st = CM.EditorState.create({
-      doc: '',
-      extensions: [
-        CM.history(),
-        CM.keymap.of([...CM.defaultKeymap, ...CM.historyKeymap, ...CM.completionKeymap, ...wrapKeymap()]),
-        surroundExt(CM), // 待办 4：选中文本 + 敲 * / ` / _ / ~ → 两侧包裹（不替换选区）
-        CM.EditorView.lineWrapping, // 长行按窗口软换行（Obsidian 同款）
-        CM.autocompletion({ override: [wkEdCompletionSource] }),
-        wkEdLangComp.of(wkEdLangExt('')),
-        CM.editorTheme,
-        wkEdThemeSpec(CM),
-        CM.EditorView.updateListener.of(wkEdOnUpdate),
-        cmtField,
-      ],
-    })
-    wkEdView = new CM.EditorView({ state: st, parent: wkEdHost })
-    // editor 组公开面注册（2026-10-15 任务D）：work 编辑区进 editorCommand 统一调度（包裹/勾选/插入），
-    // 聚焦时上报活跃面。既有专属链（评论装饰/补全/保存/热换语言）原样不动，仍走本模块自有符号。
-    makeEditorFacade({ id: 'work', view: wkEdView })
-    wkEdView.contentDOM.addEventListener('focus', () => editorApiSetActive('work'))
-    // 粘贴图片/文件（待办 7）：编辑卡片直接粘贴 → 上传落盘 + 原文插 md 引用（与底栏同链，
-    // 落点 target='work'）。捕获阶段直挂，先于 CM 自身的粘贴处理；纯文本粘贴不拦（交 CM 默认）。
-    wkEdView.contentDOM.addEventListener('paste', wkEdOnPaste, true)
-    if (wkEdCmtMarks.length) wkEdView.dispatch({ effects: wkEdCmtEffect.of(wkEdCmtMarks) })
-    try { CM.initHighlighter() } catch (e) { /* 高亮初始化失败不致命（代码块退化为纯文本） */ }
-    return wkEdView
-  }
-
-  // 编辑卡片粘贴（待办 7）：剪贴板含图片/文件 → 上传落盘 + 原文插引用（target='work'）。
-  // 纯文本粘贴不拦（返回，交 CM 默认，保留 undo 栈与 IME 语义）。落点=当前项目（newSessionProject）。
-  function wkEdOnPaste(event) {
-    if (!wkEdView || wkEdView.state.readOnly) return
-    const cd = event.clipboardData
-    // 文件两态合一（2026-10-16，同底栏 cmOnPaste）：位图常只落 cd.items，旧只读 cd.files 会漏
-    const all = clipboardFiles(cd)
-    const imgs = all.filter((f) => /^image\//.test(f.type))
-    const docs = all.filter((f) => !/^image\//.test(f.type))
-    if (imgs.length) { event.preventDefault(); event.stopPropagation(); addImageFiles(imgs, 'work'); return }
-    if (docs.length) { event.preventDefault(); event.stopPropagation(); addUploadFiles(docs, 'work'); return }
-    // 无文件但有同源图（消息区复制图片）→ 拉字节插正文引用（编辑卡是文档面，插引用即内容）
-    const urls = clipboardImageUrls(cd && cd.getData ? cd.getData('text/html') : '')
-    if (urls.length) { event.preventDefault(); event.stopPropagation(); addImageUrls(urls, 'work') }
-  }
-
-  // 水平分隔线（`---` / `***` / `___`）渲染：库（codemirror-live-markdown 0.5.1-alpha.1）的 markdownStylePlugin
-  // 没有 HorizontalRule 项，`---` 在预览里原样显源码。本插件补上——未落光标时给该行加 `.wk-ed-hr` 画横线
-  // 并藏掉字符，光标进入该行（或拖选中）则显源码，与标题/引用的显隐口径一致。
-  function wkEdHrPlugin(CM) {
-    return CM.ViewPlugin.fromClass(class {
-      constructor(view) { this.decorations = this.build(view) }
-      update(u) {
-        if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = this.build(u.view)
-      }
-      build(view) {
-        const st = view.state
-        const activeLines = new Set()
-        for (const r of st.selection.ranges) {
-          const a = st.doc.lineAt(r.from).number
-          const b = st.doc.lineAt(r.to).number
-          for (let l = a; l <= b; l++) activeLines.add(l)
-        }
-        const isDrag = st.field(CM.mouseSelectingField, false)
-        const deco = []
-        CM.syntaxTree(st).iterate({
-          enter: (node) => {
-            if (node.name !== 'HorizontalRule') return
-            const line = st.doc.lineAt(node.from)
-            // 光标在该行（或拖选中）= 显源码：不加任何装饰，`---` 原样可编辑
-            if (activeLines.has(line.number) && !isDrag) return
-            // 行装饰必须落在行首（node.from 可能带缩进 ≠ line.from，直接用 node.from 会被 CM 拒收）
-            deco.push(CM.Decoration.line({ class: 'wk-ed-hr' }).range(line.from))
-            if (node.from >= node.to) return
-            deco.push(CM.Decoration.mark({ class: 'wk-ed-hr-hide' }).range(node.from, node.to))
-          },
-        })
-        return CM.Decoration.set(deco.sort((a, b) => a.from - b.from), true)
-      }
-    }, { decorations: (v) => v.decorations })
-  }
-
-  // 扩展名 → 语言扩展。markdown = Live Preview 全套（语法 + live-preview 装饰 + 公式/表格/链接/代码块）；
-  // .canvas = JSON Canvas 图形预览（work-canvas.js wkCvExt：默认 SVG 画布，可切源码编辑）；
-  // 代码/纯文本 = 对应语言包 + 基础高亮；无匹配扩展名 = 纯文本（无高亮）。
-  function wkEdLangExt(path) {
-    const CM = wkEdCM
-    if (!CM) return []
-    const m = /\.([a-z0-9]+)$/i.exec(path || '')
-    const e = m ? m[1].toLowerCase() : ''
-    if (e === 'canvas') return wkCvExt(CM)
-    if (/^(md|markdown)$/.test(e)) {
-      return [
-        // base=markdownLanguage 本身已含 GFM（commonmark.configure([GFM,…])，Table 在其中）⇒ 不必再传 extensions:[Table]
-        CM.markdown({ base: CM.markdownLanguage }),
-        CM.collapseOnSelectionFacet.of(true),
-        CM.mouseSelectingField,
-        CM.livePreviewPlugin,
-        CM.markdownStylePlugin,
-        edBlockMarkPlugin, // 块级标记按「标记节点相邻」退化（不整行；列表渲圆点/序号）
-        CM.mathPlugin,
-        CM.blockMathField,
-        cmMathExt(CM), // 标准分隔符公式（$…$ / $$…$$ / \(…\) / \[…\]），与消息流/底栏同文法
-        CM.tableField,
-        // uploads/ 附件引用由 edAttFilePlugin 独占渲染（类型徽标 chip），vendor 链接装饰让出该区间
-        CM.linkPlugin({ skipLink: (u) => /^(?:\.{1,2}\/)*uploads\//.test(u) }),
-        ...CM.codeBlockField(),
-        wkEdHrPlugin(CM),
-        edTaskPlugin, // 待办 2：`- [ ]` 渲成可点 checkbox（点击写回 [ ]↔[x]）
-        edAttImgPlugin, // 附件行内图片：`![](uploads/x.png)` 原子渲成 <img>（与底栏同件；补「编辑卡片缺图片渲染」）
-        edAttFilePlugin, // 附件行内文件引用：`[名](uploads/x)` 渲成「类型徽标 + 文件名」
-        // 与底栏同一删除规则：附件引用/图片是整体——游标进不去，退格/Delete 整块删，不逐字露源码
-        CM.EditorView.atomicRanges.of((view) => {
-          const sets = []
-          for (const pl of [edAttImgPlugin, edAttFilePlugin]) {
-            const p = view.plugin(pl)
-            if (p) sets.push(...p.decorations.iter())
-          }
-          return sets.length ? CM.Decoration.set(sets, true) : CM.Decoration.none
-        }),
-      ]
-    }
-    const L = wkEdLangFor(CM, e)
-    return L ? [L, CM.syntaxHighlighting(wkEdHlStyle)] : []
-  }
-  // 代码语法高亮样式：tag → 项目 CSS 变量（--hl-*）⇒ 日夜随动，无需重建。会话消息/旁白不受影响
-  // （只作用于编辑器）。
-  function wkEdBuildHlStyle(CM) {
-    const t = CM.tags
-    const c = (v) => ({ color: `var(${v})` })
-    return CM.HighlightStyle.define([
-      { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.operatorKeyword, t.modifier, t.self], ...c('--hl-kw') },
-      { tag: [t.string, t.special(t.string), t.regexp, t.character], ...c('--hl-str') },
-      { tag: [t.number, t.bool, t.null, t.atom], ...c('--hl-num') },
-      { tag: [t.comment, t.lineComment, t.blockComment, t.docComment, t.meta], ...c('--hl-com') },
-      { tag: t.heading, ...c('--hl-h') },
-      { tag: t.strong, ...c('--hl-b') },
-      { tag: t.emphasis, ...c('--hl-i') },
-      { tag: [t.link, t.url], ...c('--hl-link') },
-      { tag: [t.monospace, t.quote], ...c('--hl-code') },
-      { tag: [t.typeName, t.className, t.namespace, t.labelName], ...c('--hl-type') },
-      { tag: [t.function(t.variableName), t.function(t.propertyName)], ...c('--hl-fn') },
-      { tag: [t.propertyName, t.attributeName, t.definition(t.propertyName)], ...c('--hl-attr') },
-      { tag: [t.operator, t.punctuation, t.bracket, t.separator], ...c('--hl-op') },
-    ])
-  }
-  // 代码族语言包（@codemirror/lang-* 直取；legacy-modes 经 StreamLanguage 包装）。
-  function wkEdLangFor(CM, e) {
-    if (e === 'json') return CM.json()
-    if (/^(js|mjs|cjs|jsx)$/.test(e)) return CM.javascript()
-    if (/^(ts|tsx|mts|cts)$/.test(e)) return CM.javascript({ typescript: true })
-    if (/^(css|scss|less)$/.test(e)) return CM.css()
-    if (/^(html|htm|xml|svg|vue)$/.test(e)) return CM.html()
-    if (e === 'py') return CM.python()
-    if (/^(sh|bash|zsh)$/.test(e)) return CM.StreamLanguage.define(CM.shell)
-    if (/^(yaml|yml|toml|ini|conf)$/.test(e)) return CM.StreamLanguage.define(CM.yaml)
-    if (/^(tex|latex|sty|cls|bib)$/.test(e)) return CM.StreamLanguage.define(CM.stex)
-    return null
-  }
-  // 热换语言（切文件时调，compartment reconfigure 不触碰文档与撤销历史）。
-  function wkEdSetLang(path) {
-    if (!wkEdView) return
-    wkEdView.dispatch({ effects: wkEdLangComp.reconfigure(wkEdLangExt(path)) })
-  }
-
-  // ---------- 补全（2026-10-14：Pj18 转派待办 6，VSCode 式自动补全）----------
-  // 一个 override 源三分支：①路径补全（md 链接/引用、任何文件里 ]( / [[ / @ / 引号 / 圆括号 之后或
-  // 词含 / 时）——数据 = GET /gateway/fs（与 @ 浮窗同源，path = <label>/<目录>），逐目录缓存、写盘成功
-  // 即整体失效（新文件要能被补出）；②md 语法片段（触发词 h1/h2/bold/link/table/… → snippet）；③
-  // 代码/纯文本的文档内词补全（≥3 字母 token）。补全 UI（弹层/键位）由 vendor 的 autocompletion +
-  // completionKeymap 提供，样式见 styles.css「.cm-tooltip-autocomplete」段。
-  let wkEdPathCache = new Map()
-  let wkEdPathCacheProj = '' // 缓存按项目隔离（切项目即整表作废）
-  function wkEdInvalidatePathCache() {
-    wkEdPathCache = new Map()
-  }
-  async function wkEdListDir(dir) {
-    const proj = state.workProj
-    if (!proj) return []
-    if (wkEdPathCacheProj !== proj) { wkEdPathCacheProj = proj; wkEdPathCache = new Map() }
-    const key = dir || ''
-    if (wkEdPathCache.has(key)) return wkEdPathCache.get(key)
-    try {
-      const res = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(proj + (dir ? '/' + dir : ''))))
-      const data = await res.json()
-      const entries = res.ok && Array.isArray(data.entries)
-        ? data.entries.map((e2) => ({ name: String(e2.name), dir: e2.type === 'dir' }))
-        : []
-      wkEdPathCache.set(key, entries)
-      return entries
-    } catch (e) {
-      return [] // 失败不缓存：下次再拉（目录可能又可用了）
-    }
-  }
-  // md 语法片段表：触发词 → snippet 模板（$0/$1 为光标/占位跳点，与 VSCode 同语法）。
-  const WK_ED_MD_SNIPPETS = [
-    { label: 'h1', detail: '一级标题', apply: '# $0' },
-    { label: 'h2', detail: '二级标题', apply: '## $0' },
-    { label: 'h3', detail: '三级标题', apply: '### $0' },
-    { label: 'bold', detail: '粗体', apply: '**$0**' },
-    { label: 'italic', detail: '斜体', apply: '*$0*' },
-    { label: 'code', detail: '行内代码', apply: '`$0`' },
-    { label: 'link', detail: '链接', apply: '[$1]($0)' },
-    { label: 'img', detail: '图片', apply: '![$1]($0)' },
-    { label: 'task', detail: '任务列表', apply: '- [ ] $0' },
-    { label: 'quote', detail: '引用块', apply: '> $0' },
-    { label: 'hr', detail: '分隔线', apply: '---' },
-    { label: 'fence', detail: '代码围栏', apply: '```\n$0\n```' },
-    { label: 'table', detail: '表格', apply: '| 列1 | 列2 |\n| --- | --- |\n| $0 |  |' },
-  ]
-  function wkEdCompletionSource(ctx) {
-    const CM = wkEdCM
-    if (!CM || !wkEdFile || !wkEdMeta || !wkEdMeta.editable) return null
-    const line = ctx.state.doc.lineAt(ctx.pos)
-    const before = line.text.slice(0, ctx.pos - line.from)
-    // ① 路径补全：显式触发符（[[ / ]( / @ / 引号 / 圆括号）后，或词本身含 /
-    const pm = /(?:\[\[|\]\(|@|["'(])((?:[\w.\-]+\/)*[\w.\-]*)$/.exec(before)
-    const wm = ctx.matchBefore(/[\w.\-/]+/)
-    if (pm || (wm && wm.text.includes('/'))) {
-      const frag = (pm ? pm[1] : wm.text).replace(/\\/g, '/')
-      const slash = frag.lastIndexOf('/')
-      const dir = slash >= 0 ? frag.slice(0, slash) : ''
-      const name = slash >= 0 ? frag.slice(slash + 1) : frag
-      const from = ctx.pos - name.length
-      const ql = name.toLowerCase()
-      return wkEdListDir(dir).then((entries) => ({
-        from,
-        options: entries
-          .filter((e2) => !ql || e2.name.toLowerCase().includes(ql))
-          .slice(0, 30)
-          .map((e2) => ({ label: e2.name, type: e2.dir ? 'directory' : 'file', apply: e2.name + (e2.dir ? '/' : '') })),
-        validFor: /^[\w.\-/]*$/,
-      }))
-    }
-    const extM = /\.([a-z0-9]+)$/i.exec(wkEdFile)
-    const ext = extM ? extM[1].toLowerCase() : ''
-    const isMd = /^(md|markdown)$/.test(ext)
-    // ② md 语法片段：行首（可带少量块前缀字符）后跟字母触发词
-    if (isMd) {
-      const sm = /^[ \t]*(?:[-*+>]|\d+\.|#{1,6})?[ \t]*([A-Za-z]{1,8})$/.exec(before)
-      if (sm) {
-        const ql = sm[1].toLowerCase()
-        const hits = WK_ED_MD_SNIPPETS.filter((s) => s.label.startsWith(ql))
-        if (hits.length) {
-          return {
-            from: ctx.pos - sm[1].length,
-            options: hits.map((s) => ({ label: s.label, detail: s.detail, type: 'keyword', apply: CM.snippet(s.apply) })),
-            validFor: /^[A-Za-z]*$/,
-          }
-        }
-      }
-      return null
-    }
-    // ③ 文档内词补全（代码 / 纯文本）：≥3 字母 token，排除正在输入的词本身
-    const wm2 = ctx.matchBefore(/[A-Za-z_$][\w$]*/)
-    if (!wm2 || wm2.text.length < 2) return null
-    const seen = new Set()
-    const cur = wm2.text
-    const text = ctx.state.doc.toString()
-    const re = /[A-Za-z_$][\w$]{2,}/g
-    let m
-    while ((m = re.exec(text)) && seen.size < 500) {
-      if (m[0] !== cur && !seen.has(m[0])) seen.add(m[0])
-    }
-    const options = [...seen].slice(0, 200).map((w) => ({ label: w, type: 'text' }))
-    return { from: wm2.from, options, validFor: /^[\w$]*$/ }
-  }
-
-  // 本项目主题：用项目 CSS 变量（--text/--bg/--mono），日夜切换自动随动（不重建）。
-  function wkEdThemeSpec(CM) {
-    return CM.EditorView.theme({
-      '&': { fontSize: '12.5px', lineHeight: '1.6', color: 'var(--text)', backgroundColor: 'transparent', margin: '0' },
-      '&.cm-editor': { height: '100%' },
-      '.cm-scroller': { fontFamily: 'var(--mono)', overflow: 'auto' },
-      '.cm-content': { fontFamily: 'var(--mono)', padding: '16px 20px', caretColor: 'var(--text)' },
-      '.cm-line': { padding: '0' },
-      '&.cm-focused': { outline: 'none' },
-      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--text)' },
-      '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': {
-        backgroundColor: 'color-mix(in srgb, var(--text) 24%, transparent)',
-      },
-    })
-  }
-
-  // 用户编辑 vs 程序性改文档：docChanged 且无 progAnn ⇒ 记为脏并起去抖保存。
-  function wkEdOnUpdate(update) {
-    if (!update.docChanged) return
-    for (const tr of update.transactions) if (tr.annotation(wkEdProgAnn)) return
-    wkEdDirty = true
-    wkEdState()
-    wkEdScheduleSave()
-  }
-  // 去抖自动保存（冲突未决时暂停，交 Ctrl+S 显式处置，避免覆盖外部改动）。
-  function wkEdScheduleSave() {
-    if (wkEdConflict) return
-    if (wkEdTimer) clearTimeout(wkEdTimer)
-    wkEdTimer = setTimeout(() => { wkEdTimer = 0; wkEdSave({}) }, WK_SAVE_MS)
-  }
-
-  // 把编辑器文档设为 text（相等则跳过；否则带 progAnn 程序性 dispatch，不触发脏标记）。
-  function wkEdSetDoc(text) {
-    if (!wkEdView) return
-    const cur = wkEdView.state.doc.toString()
-    if (cur === text) return
-    wkEdView.dispatch({ changes: { from: 0, to: cur.length, insert: text }, annotations: wkEdProgAnn.of(true) })
-  }
-
-  // 评论行装饰：给 l0..l1 源行加 line decoration（RangeSetBuilder 必须按 from 升序、去重）。
-  function wkEdBuildCmtDeco(marks, st) {
-    const CM = wkEdCM
-    const doc = st.doc
-    const b = new CM.RangeSetBuilder()
-    const seen = new Set()
-    for (const m of (marks || []).slice().sort((a, x) => a.l0 - x.l0)) {
-      const l0 = Math.max(1, Math.min(m.l0, doc.lines))
-      const l1 = Math.max(l0, Math.min(m.l1, doc.lines))
-      for (let n = l0; n <= l1; n++) {
-        if (seen.has(n)) continue
-        seen.add(n)
-        const from = doc.line(n).from
-        b.add(from, from, CM.Decoration.line({ class: 'cmt-mark ' + (m.resolved ? 'cmt-mark-res' : 'cmt-mark-open') }))
-      }
-    }
-    return b.finish()
-  }
-
-  // 滚动到源行 n 并给该行闪标（评论跳转）
-  function wkEdScrollToLine(n) {
-    if (!wkEdView) return
-    const from = wkEdView.state.doc.line(Math.max(1, Math.min(n, wkEdView.state.doc.lines))).from
-    wkEdView.dispatch({ selection: { anchor: from }, effects: wkEdCM.EditorView.scrollIntoView(from, { y: 'center' }) })
-    const node = wkEdView.domAtPos(from).node
-    const el = node && node.nodeType === 3 ? node.parentElement : node
-    const line = el && el.closest ? el.closest('.cm-line') : null
-    if (line) {
-      line.classList.add('cmt-flash')
-      setTimeout(() => line.classList.remove('cmt-flash'), 1200)
-    }
-  }
-
-  // 选区 → 源行号区间 [l0,l1]（供 inputbar/quote.js 引用浮窗取行号；比渲染 DOM 爬锚更准）。
-  function wkEdQuoteLines(range) {
-    if (!wkEdView || !range) return null
-    try {
-      const a = wkEdView.posAtDOM(range.startContainer, range.startOffset)
-      const b = wkEdView.posAtDOM(range.endContainer, range.endOffset)
-      if (a < 0 || b < 0) return null
-      const d = wkEdView.state.doc
-      return [d.lineAt(Math.min(a, b)).number, d.lineAt(Math.max(a, b)).number]
-    } catch (e) {
-      return null
-    }
-  }
-
+  function wkEdEnsureView() { return wkEditor.ensureView() }
+  function wkEdSetLang(path) { wkEditor.setLang(path) }
+  function wkEdSetDoc(text) { wkEditor.setDoc(text) }
+  function wkEdApplyMarks(marks) { wkEditor.applyMarks(marks) }
+  function wkEdScrollToLine(n) { wkEditor.scrollToLine(n) }
+  function wkEdQuoteLines(range) { return wkEditor.quoteLines(range) }
+  function wkEdInvalidatePathCache() { wkEditor.invalidatePathCache() }
+  function wkEdGetView() { return wkEditor.getView() }

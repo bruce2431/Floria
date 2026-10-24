@@ -39,6 +39,22 @@
       },
     })
   }
+  // 「在资源管理器中打开」（2026-10-24）：网关进程在本机，explorer 打开的就是用户桌面。
+  // 文件 = 父目录里选中该文件（/select,）；目录 = 直接打开该目录。请求体与删除同构（label + path）。
+  async function revealWorkEntry(p) {
+    if (!p) return
+    try {
+      const res = await fetch(apiUrl('/gateway/file/reveal'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: state.workProj, path: p }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) throw new Error(data.error || '打开失败')
+    } catch (e) {
+      toast('打开失败：' + (e.message || e))
+    }
+  }
   async function deleteWorkEntry(p) {
     if (!p) return
     try {
@@ -74,19 +90,22 @@
       items: (el) =>
         el.dataset.wkfile
           ? [
+              { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
               { a: 'rename', icon: I.dshEdit, label: '重命名' },
               { a: 'download', icon: I.dshDownload, label: '下载' },
               { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
             ]
           : el.dataset.wkdir
             ? [
+                { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
                 { a: 'rename', icon: I.dshEdit, label: '重命名' },
                 { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
               ]
             : [],
       pick: (a, el) => {
         const p = el.dataset.wkfile || el.dataset.wkdir
-        if (a === 'rename') openFileRename(p)
+        if (a === 'reveal') revealWorkEntry(p)
+        else if (a === 'rename') openFileRename(p)
         else if (a === 'download') downloadWorkEntry(p)
         else deleteWorkEntry(p)
       },

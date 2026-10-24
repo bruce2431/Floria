@@ -231,155 +231,63 @@ import { firstSendHash } from '../sidebar/recent.js'
   // streamThinking/toolChip/addThinking 等）整体退役——网关从不给 web 投递 WS out 流，实时展示
   // 只走 SSE 会话上报 + jsonl 渲染权威（整页/增量重建），「正在处理」乐观主张折叠由 renderTransient
   // 从 pendingUserMsgs 统一渲染；历史定案注释（工具行只显当前步等）随链废弃，勿再引用。
-  // ---- composer takeover（2026-08-22 修复）：DSH 提问/审批占输入栏（替换 #input-bar），而非渲染在 chat 内。
-  //      takeover = 'approval' | null，记录当前占据输入栏的待审批卡（2026-09-11 ④ 起只读提问卡的 'ask'
-  //      接管已移除，见 chat/messages.js askLineHtml 注）；
-  //      解决（审批提交/审批撤销）后 #input-bar 回归（content swap，同输入栏卡片足迹）。 ----
+  // ---- composer takeover（2026-10-24 用户定案：底栏不再变形，改为底栏上方独立浮层）----
+  //      takeover = 'approval' | null，记录当前在场的待审批卡（提问与审批共用，2026-09-11 ④ 起只读
+  //      提问卡的 'ask' 接管已移除，见 chat/messages.js askLineHtml 注）。
+  //      形态：卡片是浮在输入栏上方的图层（#composer-takeover absolute bottom:100%），从底栏背后
+  //      向上滑出；输入栏几何/外观/焦点完全不动（不隐藏输入内容组、不改高度、不 blur），草稿天然存活；
+  //      聊天区不让位（不改 #chat-scroll padding）——底栏衍生 UI 一律是消息流之上的覆盖层。 ----
   let takeover = null
   // 分层治理 4C（2026-10-10）：engine/live.js 的读取口（写侧仍是尾部 setTakeover）——每次现读，
   // 调用方严禁缓存返回值。
   function getTakeover() { return takeover }
   const takeoverEl = () => $('composer-takeover')
-  // 2026-08-30 修复「提问卡相对位置大小奇怪」：takeover 卡片可远高于普通输入栏（多题卡 ~700px），
-  // 而 #chat-scroll 的 padding-bottom 是按输入栏足迹设计的固定值（styles.css 142px）→ 卡片贴底
-  // 向上生长直接叠压消息。改为按 #input-wrap 实际高度动态同步聊天滚动区预留（卡高+22px 底距+12px 间隙）。
-  // 2026-09-09 根修：padding 只写「动画终值」一次（show=满高、clear=清零），与 320ms 高度过渡同时启动、
-  // 由 #chat-scroll 自带的 padding-bottom CSS 过渡承担平滑；动画期（wrapAnimating）ResizeObserver 的
-  // 中间高度一律跳过——旧版每帧覆写=CSS 过渡反复重定目标+长会话逐帧全聊天区 layout，掉帧根源。
-  const chatScrollPadEl = $('chat-scroll')
-  let lastPad = null
-  function syncTakeoverPad(forceH) {
-    if (wrapAnimating) return
-    let p = ''
-    if (takeover) {
-      const h = forceH != null ? forceH : inputWrap.getBoundingClientRect().height
-      if (h > 0) p = Math.round(h + 34) + 'px'
-    }
-    if (p === lastPad) return
-    lastPad = p
-    chatScrollPadEl.style.paddingBottom = p
-    // 2026-09-10 根修：pad 写入与占位高度必须同帧一致——占位公式（clientHeight−padBot−
-    // 当前脚印）以 pad 为参数，pad 变了占位不同帧重算 = scrollHeight 变化 = maxScroll 偏离
-    // 贴顶位，浏览器钳制视口=「折叠提问卡消息流随动」根因。pad 单一写者在此同帧对账，
-    // 不变量：scrollHeight 对 pad 写入不变（占位对冲 pad 增量）→ 视口零钳制零移动。
-    // styles.css 已删 pad 过渡（过渡期 computed pad 中间值会让 stageFollow 读到与占位
-    // 写入不同源的 padBot，同源破坏），此处 computed pad 恒=终值。
-    if (stage.active) stageSync()
-  }
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTakeoverPad).observe(inputWrap)
-  // 2026-09-08 三轮重构（用户定案「审批 ui 应该是输入栏的子元素，改变输入栏的大小」）：#composer-takeover
-  //   迁入 #input-bar 内，出现/解决=输入栏本体高度变化（height px 起止过渡 + 动画期卡片 absolute
-  //   bottom:0 底边锚定：按钮行钉在原输入栏位置，出现=顶部向上展开、收回=向下收短）。
-  // 2026-09-09 根修（用户实测「看起来不是输入栏子状态/动画跳」逐帧取证后三处收口）：
-  //   ①表面连续——.bar-takeover 不再退场输入栏卡面（旧版边框/底色/阴影全透明 → 黄卡像浮在聊天区的
-  //     独立面板），只隐藏输入内容组、padding 让位 0，卡内容全出血贴卡面（styles.css）；
-  //   ②单一时间轴——卡片淡入/淡出机制（composer-fade/composer-fade-out/animFadeIn）整体删除：
-  //     显形与收合完全由 height 过渡+overflow 裁剪承担（旧版 220ms 淡入与 320ms 长高同跑=出现首帧
-  //     底部空白；收回 380ms 后输入行才淡入=0.3~0.4s 底部空窗）；输入行回归=收合完成后原位瞬换；
-  //   ③RO 守卫落地——wrapAnimating 真正被 syncTakeoverPad 读取（旧版只写不读，「动画期 RO 跳过」
-  //     未实现，动画期每帧覆写 padding=CSS 过渡重定目标+逐帧全聊天区 layout）。
-  //   连发竞态 wrapAnimToken 收敛不变（旧清理让位、新过渡捕获实时高度续走）。
-  // 2026-09-10 用户定案收起（二轮修正「收起时候的渐隐和折叠应该是并行发生的」）：单一时间轴并行——
-  //   审批卡自下而上渐隐（.appr-out → styles.css apprOutUp：clip-path 底边插值自下往上裁 + 透明度）
-  //   与输入栏高度收回（HEIGHT_MS）**同帧起播**；输入内容组复现（撤 .bar-takeover）贴底对齐
-  //   （.bar-collapsing justify-content:flex-end）并在同帧淡入（.bar-reveal）完成交叉过渡。
-  // 不变量：①渐隐与折叠同起、同在 HEIGHT_MS 窗口内收口（旧版两段串行=490ms 拖沓，用户实测否决）；
-  //   ②收起期卡片仍 absolute bottom:0（composer-growing）=底边钉原位，只有顶边下移 ⇒ 卡被自下而上
-  //     削掉、下方同步露出输入内容，两个动作几何方向一致不打架；③任一时刻至多一个动画所有者
-  //   （wrapAnimToken），终态 finishClear 复位全部标记，不留「动画中」残留。
-  const HEIGHT_MS = 320 // 必须 = styles.css #input-bar 的 height 过渡时长（长出/收回共用一条时间轴）
-  let wrapAnimToken = 0
-  let wrapAnimating = false
-  let wrapClosing = false // 收起动画进行中（此时 takeover 已置 null，高度还不是普通高度）
-  let wrapCloseTimer = null
-  let takeoverPlainH = 0 // 进入 takeover 前的输入栏高度（收起动画目标）
-  // 收起中途来新 takeover：撤掉收起态残留 + 停掉待执行收尾（高度/内联样式保持现状，showTakeover 自会用
-  // 实测高度续走），保证新卡不继承旧卡的渐隐/淡入动画。
-  function cancelClose() {
-    if (wrapCloseTimer) { clearTimeout(wrapCloseTimer); wrapCloseTimer = null }
-    wrapClosing = false
-    inputBarEl.classList.remove('bar-collapsing', 'bar-reveal')
-    const t0 = takeoverEl()
-    if (t0) t0.classList.remove('appr-out', 'appr-in')
-  }
+  // 2026-10-24 重做（用户定案「不要用低栏变形，从底栏滑出、悬浮在其上；聊天区不用让位；
+  // 底栏衍生的一切 UI 都是消息流上面一个图层」）：
+  //   ①卡片是独立浮层，几何/外观不参与输入栏布局——输入栏高度、padding、焦点、草稿全不受影响；
+  //   ②出入场 = 卡片在裁剪盒（bottom:100%）内 translateY 上滑/下滑，上滑起点整块藏进底栏背后，
+  //     视觉上「从底栏滑出」；换题/重渲染（卡已展开）不重播入场动画；
+  //   ③聊天区零让位：不写 #chat-scroll padding，卡片覆盖在消息流之上；
+  //   ④动画所有权收敛到 tkToken：收起途中来新卡则沿用当前位移续走，不留「动画中」残留。
+  const SLIDE_MS = 320 // = styles.css #composer-takeover .appr-card 的 transform 过渡时长
+  let tkToken = 0
   function showTakeover(html, kind) {
-    const my = ++wrapAnimToken
-    const wasClosing = wrapClosing // 必须在 cancelClose 复位前取：收起进行中 h0 仍是旧卡高度，不是普通高度
-    cancelClose()
-    // 入场动画只在「普通输入栏 → 卡片」这一次发生（换题/重渲染不重播，否则交互中整卡重跳一下）
-    const firstShow = !takeover && !wasClosing
-    // 旧动画残留（收起动画的内联高度 / 上一张卡生长动画中间值）必须先清：不清则 getBoundingClientRect
-    // 读到的是残留高度 ⇒ h1 实测失真、|h1-h0|<1.5 早退，输入栏被永久卡在错误高度（新卡还溢出在外）。
-    inputBarEl.style.height = ''
-    const h0 = inputBarEl.getBoundingClientRect().height
-    if (firstShow) takeoverPlainH = h0
-    inputBarEl.classList.add('bar-takeover')
-    // 2026-09-26：.bar-takeover 退场由 display:none 改脱流隐藏（根修注释见 styles.css）后，浏览器不再
-    // 顺带让聚焦的 contenteditable 失焦——显式补上。不变量 = 接管卡在场输入栏不可编辑 ⇒ isEditing()
-    // 必为假（否则 viewport.js 的键盘几何与整页平移会把已经收起的软键盘当仍在编辑态处理，界面卡在上移位）。
-    // 未聚焦时 blur() 是空操作，无条件调用即可（不引分支）。CM6 接管后 = contentDOM blur
-    composerBlur()
+    ++tkToken // 作废进行中的收起收尾
     const t = takeoverEl()
-    if (t) { t.innerHTML = html; t.hidden = false }
+    if (!t) return
+    const wasOpen = !!takeover
+    const wasClosing = t.classList.contains('tk-out')
     takeover = kind
-    renderTaskDock() // 2026-09-10 任务浮窗让位：接管卡在场 → 自动收敛 + 禁点（.blocked）
-    const h1 = inputBarEl.getBoundingClientRect().height
-    syncTakeoverPad(h1)
+    t.innerHTML = html
+    t.hidden = false
+    t.classList.remove('tk-out')
+    inputBarEl.classList.add('tk-open') // 仅作状态标记（任务浮窗让位）；不改输入栏视觉
+    if (!wasOpen && !wasClosing) {
+      // 首次出卡：先让浏览器渲染「藏在底栏背后」的首帧，再起播上滑
+      t.classList.remove('tk-in')
+      void t.offsetHeight
+    }
+    t.classList.add('tk-in')
+    renderTaskDock() // 接管卡在场 → 任务浮窗收敛并让位（状态标记 tk-open 隐藏其头部条）
     scrollBottom()
-    if (Math.abs(h1 - h0) < 1.5) return
-    wrapAnimating = true
-    // 入场内容动效（2026-09-10 用户实测「弹出有点生硬」）：与高度长出同帧起播——卡片内容自下方
-    // 浮起 + 淡入；卡面本体（白底/描边/圆角）全程在场，故不露空洞（09-09 铲除的 composer-fade 是
-    // 整卡渐隐，白底一起消失才出现首帧空洞）。
-    if (t && firstShow) t.classList.add('appr-in')
-    inputBarEl.style.height = h0 + 'px'
-    inputBarEl.classList.add('composer-growing')
-    void inputBarEl.offsetHeight
-    inputBarEl.style.height = h1 + 'px'
-    setTimeout(() => {
-      if (my !== wrapAnimToken) return
-      wrapAnimating = false
-      inputBarEl.classList.remove('composer-growing')
-      inputBarEl.style.height = ''
-      if (t) t.classList.remove('appr-in')
-    }, HEIGHT_MS + 60)
   }
   function clearTakeover() {
     if (!takeover) return
-    const my = ++wrapAnimToken
+    const my = ++tkToken
     takeover = null
     const t = takeoverEl()
-    const h0 = inputBarEl.getBoundingClientRect().height
-    const target = takeoverPlainH || h0
-    // 卡不在场 / 高度本就等于普通高度：无动画可播，直接终态（先 finishClear 复位 wrapAnimating，
-    // 再清 pad——顺序反了会被 syncTakeoverPad 的动画期守卫挡掉，聊天区留下卡片高度的空垫）
-    if (!t || Math.abs(h0 - target) < 1.5) { finishClear(t); syncTakeoverPad(); return }
-    wrapClosing = true
-    // pad 在高度动画启动同帧清零（wrapAnimating 会挡 RO，必须在此直接写）
-    syncTakeoverPad()
-    wrapAnimating = true
-    t.classList.remove('appr-in') // 入场未播完即被收起时，不让 apprInUp 与 apprOutUp 争同一 animation 简写
-    t.classList.add('appr-out') // 渐隐：卡自下而上（clip-path 底边插值）——与下面 height 过渡同帧起播
-    inputBarEl.style.height = h0 + 'px'
-    // 卡底边锚定（composer-growing 的 absolute bottom:0）+ 输入内容组贴底复现（bar-collapsing）且淡入（bar-reveal）
-    inputBarEl.classList.add('composer-growing', 'bar-collapsing', 'bar-reveal')
-    inputBarEl.classList.remove('bar-takeover')
-    void inputBarEl.offsetHeight
-    inputBarEl.style.height = target + 'px' // 折叠：与渐隐并行，同 HEIGHT_MS 收口
-    wrapCloseTimer = setTimeout(() => {
-      wrapCloseTimer = null
-      if (my !== wrapAnimToken) return
-      finishClear(t)
-      syncTakeoverPad()
-    }, HEIGHT_MS + 60)
-  }
-  function finishClear(t) {
-    wrapClosing = false
-    wrapAnimating = false
-    inputBarEl.classList.remove('composer-growing', 'bar-takeover', 'bar-collapsing', 'bar-reveal')
-    inputBarEl.style.height = ''
-    if (t) { t.hidden = true; t.innerHTML = ''; t.classList.remove('appr-out', 'appr-in') }
-    renderTaskDock() // 2026-09-10 任务浮窗解除让位：卡撤走 → 恢复可点（仍是收敛态，由用户点开）
+    if (!t) { inputBarEl.classList.remove('tk-open'); renderTaskDock(); return }
+    t.classList.remove('tk-in')
+    t.classList.add('tk-out') // 下滑回底栏背后 + 淡出；tk-open 保留到收尾，任务浮窗不提前闪现
+    setTimeout(() => {
+      if (my !== tkToken) return
+      t.hidden = true
+      t.innerHTML = ''
+      t.classList.remove('tk-out')
+      inputBarEl.classList.remove('tk-open')
+      renderTaskDock() // 浮动层撤走 → 任务浮窗恢复（仍是收敛态）
+    }, SLIDE_MS)
+    renderTaskDock() // 卡撤走 → 任务浮窗恢复（仍是收敛态，由用户点开）
   }
 
   // 2026-08-26 任务 A2：把 CLI 的 PermissionUpdate 建议转成前端可读标签/副标题
@@ -769,7 +677,7 @@ import { firstSendHash } from '../sidebar/recent.js'
   // 头部条（.td-lip，与面板同族白卡，即列表图标 + 「任务」 + 计数 + chevron），点击上展；展开态
   // 面板顶（.td-head）渲同一份头部，下方圆点行列表；宽度 = 输入栏宽 −48px 居中；展开底边与
   // 输入栏上沿留 --td-gap=10px 间距、最高 min(40vh,460px) 内部滚动。
-  // 接管卡（审批/提问）在场 → 自动收敛 + 禁点：.bar-takeover 规则本就以 display:none 让位，
+  // 接管卡（审批/提问）在场 → 自动收敛 + 禁点：浮层在场时头部条由 #input-bar.tk-open 隐藏，
   // 此处再清 taskOpen，保证卡撤走后浮窗重现仍是收敛态。
   function taskById(a, b) {
     const na = parseInt(a.id, 10)
@@ -853,21 +761,17 @@ export function setBtnModeSet(v) { btnMode = v }
 export function setApprovalPending(v) { approvalPending = v }
 
 export {
-  HEIGHT_MS,
   SHOW_LOCAL_SYS,
+  SLIDE_MS,
   addError,
   addSystem,
   approvalPending,
   btnMode,
-  chatScrollPadEl,
   claimStartTs,
   claimTick,
   claimTimer,
   claimTimerSet,
-  cancelClose,
   clearTakeover,
-  finishClear,
-  lastPad,
   procLabel,
   renderApproval,
   renderQuestionApproval,
@@ -881,14 +785,8 @@ export {
   showTakeover,
   sugLabel,
   sugSub,
-  syncTakeoverPad,
   syncTurnLive,
   takeover,
   takeoverEl,
-  takeoverPlainH,
   turnLive,
-  wrapAnimToken,
-  wrapAnimating,
-  wrapCloseTimer,
-  wrapClosing,
 }

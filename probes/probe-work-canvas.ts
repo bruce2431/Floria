@@ -9,8 +9,9 @@
  *   3) wkCvExt 组装：默认图形态（onField create=true）；装饰真源走 StateField 且 provide
  *      EditorView.decorations.from（跨行 block replace 仅 StateField 允许，ViewPlugin 会抛错）；
  *      block replace 覆盖整篇；源码态首行行前挂「图形预览」回流钮；JSON 高亮（源码态可编辑可自动保存）。
- *   4) 画布交互：pointerdown/move stopPropagation（事件不漏给 contenteditable 光标）、wheel ctrlKey
- *      缩放、双指捏合（两 pointer 距离比）、CSS touch-action:none。
+ *   4) 画布交互（搬 ComfyUI 前端）：手势 reducer（6px/300ms）、按下即捕获、CanvasPointer 设备识别、
+ *      DragAndScale（0.1..10）、滚轮=缩放（×1.1 / 触控板平滑）、Ctrl/⌘ 框选、Delete 修复链路、
+ *      Ctrl+A/C/V、LOD、bg/fg 双 canvas 兄弟结构、CSS touch-action:none。
  *   5) styles.css：.wk-cv 系列类齐全。
  *   6) PIECES 注册（bundle-web-modules.ts）：缺 = 需他文件配合项未落地，WARN 不计败。
  */
@@ -95,8 +96,8 @@ if (s0 > 0 && s1 > s0) {
 } else bad('解析器段定位失败（源码结构漂移）')
 
 // ---- 2. work-cm.js 分流 ----
-if (/e === 'canvas'\) return wkCvExt\(CM\)/.test(cm)) ok('wkEdLangExt：.canvas → wkCvExt(CM)')
-else bad('wkEdLangExt 缺 .canvas 分流')
+if (/getCanvasExt: \(CM, hlStyle\) => wkCvExt\(CM, hlStyle\)/.test(cm)) ok('适配层：getCanvasExt 注入 wkCvExt（包内按 .canvas 分流）')
+else bad('适配层缺 .canvas 扩展注入')
 
 // ---- 3. wkCvExt 组装 ----
 if (/create: \(\) => true/.test(cv)) ok('onField 默认图形态（create=true）')
@@ -107,12 +108,12 @@ if (/Decoration\.replace\(\{ widget: new WkCvWidget\(st\.doc\.toString\(\)\), bl
 else bad('缺 block replace 整篇装饰')
 if (/WkCvOpenBtn/.test(cv) && /图形预览/.test(cv)) ok('源码态有「图形预览」回流钮')
 else bad('源码态缺回流入口')
-if (/CM\.json\(\),\s*CM\.syntaxHighlighting\(wkEdHlStyle\)/.test(cv)) ok('源码态 JSON 高亮（复用 wkEdHlStyle）')
+if (/CM\.json\(\),\s*CM\.syntaxHighlighting\(hlStyle\)/.test(cv)) ok('源码态 JSON 高亮（复用 wkEdHlStyle）')
 else bad('源码态缺 JSON 高亮')
 if (/deco\.map\(tr\.changes\)/.test(cv)) ok('无关变化走 map（不动装饰）')
 else bad('update 缺 deco.map 短路')
 // widget 必须继承 CM.WidgetType（缺基类方法 ⇒ 首次 docChanged 半更新抛 TypeError，编辑区整体报废）
-if (/const WkCvWidgetBase = window\.CMLiveMarkdown\.WidgetType/.test(cv)) ok('取 CM.WidgetType 基类')
+if (/const WkCvWidgetBase = edCMG\.WidgetType/.test(cv)) ok('取 CM.WidgetType 基类')
 else bad('未取 CM.WidgetType 基类 —— widget 非 WidgetType，视图更新会崩')
 if (/class WkCvWidget extends WkCvWidgetBase/.test(cv)) ok('WkCvWidget 继承 WidgetType')
 else bad('WkCvWidget 未继承 WidgetType —— 打开即崩')
@@ -121,28 +122,55 @@ else bad('WkCvOpenBtn 未继承 WidgetType')
 if (/constructor\(text\) \{ super\(\); this\.text = text \}/.test(cv)) ok('WkCvWidget 派生构造首行 super()')
 else bad('WkCvWidget 派生构造缺 super()')
 
-// ---- 4. 画布交互 ----
+// ---- 4. 画布交互（ComfyUI 前端口径：litegraph 手势状态机 + LGraphCanvas 事件语义） ----
 if (/pointerdown[\s\S]*?stopPropagation\(\)/.test(cv)) ok('画布指针事件 stopPropagation（不漏给编辑器光标）')
 else bad('画布事件未截断')
-if (/e\.ctrlKey/.test(cv) && /Math\.exp\(-e\.deltaY/.test(cv)) ok('Ctrl+滚轮 = 指针锚定缩放')
-else bad('缺 Ctrl+滚轮缩放')
-if (/active\.size === 2/.test(cv) && /pinch\.k \* \(d \/ pinch\.d\)/.test(cv)) ok('双指捏合 = 距离比缩放')
-else bad('缺双指捏合')
-if (/setPointerCapture/.test(cv)) ok('指针捕获（拖出画布仍跟手）')
-else bad('缺指针捕获')
-// ComfyUI 结构：canvas 与 DOM 覆盖层是 **兄弟节点**（overlay 不在 canvas 捕获路径上）
-if (/stage\.appendChild\(canvas\)/.test(cv) && /stage\.appendChild\(overlay\)/.test(cv)) ok('ComfyUI 结构：canvas + overlay 兄弟节点')
-else bad('缺 canvas/overlay 兄弟结构')
-if (/pointerdown[\s\S]*?active\.set\(e\.pointerId/.test(cv) && /canvas\.addEventListener\('pointerdown'/.test(cv)) ok('手势只绑 canvas（DOM 覆盖层不抢）')
+// 手势原语：纯 reducer（idle→pressed→dragging）+ 按下立即捕获
+if (/function wkCvReduceGesture\(state, event\)/.test(cv) && /phase: 'dragging'/.test(cv)) ok('手势状态机 reduceGesture（idle→pressed→dragging）')
+else bad('缺手势状态机')
+if (/maxClickDrift = 6/.test(cv) && /doubleClickTime = 300/.test(cv)) ok('判定阈值 6px / 300ms（与 ComfyUI 一致）')
+else bad('手势阈值漂移')
+if (/function wkCvCaptureGesture\(element, pointerId, onInterrupt\)/.test(cv) && /element\.setPointerCapture\(pointerId\)/.test(cv)) ok('按下立即 setPointerCapture（loatpointercapture → reset）')
+else bad('缺按下即捕获')
+if (/class WkCvCanvasPointer/.test(cv) && /isTrackpadGesture\(e\)/.test(cv)) ok('CanvasPointer：触控板/鼠标滚轮识别')
+else bad('缺 CanvasPointer/设备识别')
+if (/class WkCvDragAndScale/.test(cv) && /this\.min_scale = 0\.1/.test(cv) && /this\.max_scale = 10/.test(cv)) ok('DragAndScale：scale 0.1..10')
+else bad('DragAndScale 缺失或量程漂移')
+// 滚轮 = 缩放（默认 mouseWheelScroll='zoom'）：鼠标步进 ×1.1，触控板平滑
+if (/const zoomSpeed = 1\.1/.test(cv) && /scale \*= zoomSpeed/.test(cv) && /1 \+ e\.deltaY \* \(1 - zoomSpeed\) \* 0\.18/.test(cv)) ok('滚轮缩放：鼠标步进 ×1.1 / 触控板平滑')
+else bad('滚轮缩放语义漂移')
+if (/changeScale\(scale, \[e\.clientX, e\.clientY\]/.test(cv)) ok('缩放锚定指针位置')
+else bad('缩放未锚定指针')
+if (/dragging_rectangle/.test(cv) && /_getItemsInRect/.test(cv)) ok('Ctrl/⌘ 拖动框选（dragging_rectangle）')
+else bad('缺框选')
+if (/if \(k === 'a'\)/.test(cv) && /if \(k === 'c'\)/.test(cv) && /if \(k === 'v'\)/.test(cv)) ok('Ctrl/⌘ + A/C/V')
+else bad('缺 A/C/V 键位')
+if (/this\.deleteSelected\(\)/.test(cv) && /a\.fromNode === b\.toNode/.test(cv)) ok('Delete 删除 + 前驱接后继（connectInputToOutput）')
+else bad('缺删除修复链路')
+if (/12 \* k < 8/.test(cv)) ok('低画质 LOD（12*scale<8 跳过文字）')
+else bad('缺 LOD 阈值')
+if (/function wkCvAttachNodeApi\(node, data\)/.test(cv)) ok('Positionable API 适配（pos/size/boundingRect/move）')
+else bad('缺 Positionable 适配')
+// ComfyUI 结构：bg/fg 双 canvas + DOM 覆盖层均互为**兄弟节点**（overlay 不在捕获路径上）
+if (/stage\.appendChild\(bg\)/.test(cv) && /stage\.appendChild\(canvas\)/.test(cv) && /stage\.appendChild\(overlay\)/.test(cv)) ok('ComfyUI 结构：bg/fg canvas + overlay 兄弟节点')
+else bad('缺双 canvas/overlay 兄弟结构')
+if (/wk-cv-bg/.test(cv) && /wk-cv-fg/.test(cv)) ok('双 canvas 分层类名（bg 网格连线 / fg 节点）')
+else bad('缺双 canvas 类名')
+if (/canvas\.addEventListener\('pointerdown'/.test(cv)) ok('手势只绑 fg canvas（DOM 覆盖层不抢）')
 else bad('手势未限定在 canvas')
+// 块高必须跟滚动容器可视高走（stage 只有绝对定位 canvas，不定高会塌成 min-height 200px）
+if (/sc\.clientHeight/.test(cv) && /root\.style\.height/.test(cv) && /ro\.observe\(view\.scrollDOM\)/.test(cv)) ok('画布块按编辑区可视高定高（stage 不塌）')
+else bad('画布块未按编辑区定高 —— 取景会按 200px 高算成微缩图')
 if (/wkCvOpenEditor/.test(cv) && /'Escape'/.test(cv) && /addEventListener\('blur', commit\)/.test(cv)) ok('行内编辑：textarea + Escape 取消 / blur 提交')
 else bad('缺 overlay 行内编辑器')
 
 // ---- 5. styles.css ----
-for (const cls of ['.wk-cv {', '.wk-cv-bar', '.wk-cv-btn', '.wk-cv-stage', '.wk-cv-canvas', '.wk-cv-overlay', '.wk-cv-edit', '.wk-cv-empty']) {
+for (const cls of ['.wk-cv {', '.wk-cv-bar', '.wk-cv-btn', '.wk-cv-stage', '.wk-cv-canvas', '.wk-cv-bg', '.wk-cv-fg', '.wk-cv-overlay', '.wk-cv-edit', '.wk-cv-empty']) {
   if (css.includes(cls)) ok(`styles.css 含 ${cls.replace(/[^a-z-].*/, '')}`)
   else bad(`styles.css 缺 ${cls}`)
 }
+if (/\.wk-cv-canvas \{[^}]*position: absolute/.test(css) && /\.wk-cv-fg \{[^}]*z-index: 1/.test(css)) ok('双 canvas 绝对叠放（fg 在上接手势）')
+else bad('双 canvas 未叠放')
 if (/\.wk-cv \{[^}]*touch-action: none/.test(css)) ok('画布 touch-action:none（手势归模块 JS）')
 else bad('画布未设 touch-action:none')
 

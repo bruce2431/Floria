@@ -26,6 +26,9 @@ const work = [
     .filter((f) => f.endsWith('.js'))
     .map((f) => `${WORK_DIR}/${f}`),
 ].map(read).join('\n')
+// CM6 编辑器引擎已收口到兄弟包 @floria/cm6（#71）：宿主内部（装饰器/语言 compartment/高亮/HR/表格渲染）
+// 在包内 `hosts/work-cm.js`，断言锁包源码；Floria 侧只剩适配转调。
+const workPkg = read('../Pj16-SubPj4-CM6/src/hosts/work-cm.js')
 
 let pass = 0
 let fail = 0
@@ -62,32 +65,32 @@ if (/import \{[^}]*cmtRangesFor[^}]*\} from '\.\/comments\.js'/.test(work)) ok('
 else bad('work.js 未 import cmtRangesFor')
 if (/function cmtApplyMarks\(/.test(work)) ok('work.js 定义 cmtApplyMarks（把评论行范围送进编辑器装饰器）')
 else bad('work.js 缺 cmtApplyMarks')
-if (/function wkEdBuildCmtDeco\(marks, st\)/.test(work) && /Decoration\.line\(\{ class: 'cmt-mark ' \+ \(m\.resolved/.test(work)) ok('评论标记 = Decoration.line（升序 + 未解决/已解决两态类）')
+if (/function buildCmtDeco\(marks, st\)/.test(workPkg) && /Decoration\.line\(\{ class: 'cmt-mark ' \+ \(m\.resolved/.test(workPkg)) ok('评论标记 = Decoration.line（升序 + 未解决/已解决两态类）')
 else bad('评论标记未接编辑器行装饰器')
-if (/wkEdCmtEffect\.of\(marks\)/.test(work) && /e\.is\(wkEdCmtEffect\)/.test(work)) ok('标记经 StateEffect → StateField 落装饰（cmtApplyMarks → wkEdCmtEffect）')
+if (/cmtEffect\.of\(/.test(workPkg) && /e\.is\(cmtEffect\)/.test(workPkg)) ok('标记经 StateEffect → StateField 落装饰（applyMarks → cmtEffect）')
 else bad('评论标记未接 StateEffect/StateField')
-if (/wkEdCmtEffect\.of\(marks\)/.test(work) && /wkEdView\.dispatch/.test(work)) ok('cmtApplyMarks 经 wkEdView.dispatch 送标记（无 DOM [data-l] 走法）')
-else bad('cmtApplyMarks 未走编辑器 dispatch')
-if (/function wkEdScrollToLine\(/.test(work) && /EditorView\.scrollIntoView/.test(work)) ok('定位回跳：wkEdScrollToLine → scrollIntoView + 闪标')
-else bad('缺定位回跳（wkEdScrollToLine）')
+if (/cmtEffect\.of\(cmtMarks\)/.test(workPkg) && /view\.dispatch/.test(workPkg)) ok('applyMarks 经 view.dispatch 送标记（无 DOM [data-l] 走法）')
+else bad('applyMarks 未走编辑器 dispatch')
+if (/function scrollToLine\(n\)/.test(workPkg) && /CM\.EditorView\.scrollIntoView/.test(workPkg)) ok('定位回跳：scrollToLine → scrollIntoView + 闪标')
+else bad('缺定位回跳（scrollToLine）')
 if (/cmtApplyMarks\(\) \/\/ 评论标记/.test(work)) ok('阅读态渲染末尾调用 cmtApplyMarks')
 else bad('阅读态渲染未调 cmtApplyMarks')
 if (/refreshMarks: cmtApplyMarks/.test(work)) ok('mountWork 注册 refreshMarks 钩子（评论变更 → 重绘标记）')
 else bad('mountWork 未注册 refreshMarks')
-if (/wkCmtScrollId/.test(work) && /wkEdView\.state\.doc\.lines/.test(work)) ok('定位回跳：wkCmtScrollId 消费时行号夹取 + scrollIntoView')
+if (/wkCmtScrollId/.test(work) && /view\.state\.doc\.lines/.test(work)) ok('定位回跳：wkCmtScrollId 消费时行号夹取 + scrollIntoView')
 else bad('缺定位回跳滚动')
 if (/cmtLoad\(state\.workProj\) \/\/ 评论恢复态补拉/.test(work) && /cmtLoad\(label\) \/\/ 原文标记也需要当前项目的评论/.test(work)) ok('ensureWork / selectProject 恒拉评论（原文标记不只评论 tab 才需要）')
 else bad('原文标记场景未恒拉评论数据')
 
 // ---- 3. 编辑区统一为 CodeMirror 6（所有可编辑文本文件；两态已撤） ----
-if (/CM\.EditorView\.lineWrapping/.test(work)) ok('work.js 编辑器启用 lineWrapping（长行按窗口软换行）')
-else bad('work.js 编辑器缺 lineWrapping —— 长行不换行')
-if (/wkEdLangComp = new CM\.Compartment\(\)/.test(work) && /function wkEdSetLang\(path\)/.test(work)) ok('work.js 语言 compartment（按扩展名热换语言扩展）')
-else bad('work.js 缺语言 compartment / wkEdSetLang')
+if (/CM\.EditorView\.lineWrapping/.test(workPkg)) ok('编辑器启用 lineWrapping（长行按窗口软换行）')
+else bad('编辑器缺 lineWrapping —— 长行不换行')
+if (/langComp = new CM\.Compartment\(\)/.test(workPkg) && /function setLang\(path\)/.test(workPkg)) ok('语言 compartment（按扩展名热换语言扩展）')
+else bad('缺语言 compartment / setLang')
 // base=markdownLanguage 自身即 commonmark.configure([GFM,…])（GFM 已含 Table）⇒ 不另传 extensions，语法树照常有 Table 节点
-if (/function wkEdLangExt\(path\)/.test(work) && /CM\.markdown\(\{ base: CM\.markdownLanguage \}\)/.test(work)) ok('wkEdLangExt：md 走 Live Preview 全套（base=markdownLanguage 自带 GFM 表格），其余按扩展名取语言包')
-else bad('wkEdLangExt 未接 markdown / 语言包')
-if (/function wkEdHrPlugin\(CM\)/.test(work) && /Decoration\.line\(\{ class: 'wk-ed-hr' \}\)/.test(work) && /wkEdHrPlugin\(CM\)/.test(work)) ok('wkEdHrPlugin：HorizontalRule 行走行装饰（库 styleMap 无此项）')
+if (/function langExt\(path\)/.test(workPkg) && /CM\.markdown\(\{ base: CM\.markdownLanguage \}\)/.test(workPkg)) ok('langExt：md 走 Live Preview 全套（base=markdownLanguage 自带 GFM 表格），其余按扩展名取语言包')
+else bad('langExt 未接 markdown / 语言包')
+if (/function hrPlugin\(\)/.test(workPkg) && /Decoration\.line\(\{ class: 'wk-ed-hr' \}\)/.test(workPkg) && /hrPlugin\(\)/.test(workPkg)) ok('hrPlugin：HorizontalRule 行走行装饰（库 styleMap 无此项）')
 else bad('缺 HorizontalRule（---）渲染插件')
 if (/\.wk-ed-hr-hide \{/.test(css) && /\.cm-line\.wk-ed-hr::after/.test(css)) ok('styles.css 有 .wk-ed-hr / .wk-ed-hr-hide 样式')
 else bad('styles.css 缺水平线样式')
@@ -95,19 +98,19 @@ else bad('styles.css 缺水平线样式')
 // （.cm-line，break-spaces）不一致 ⇒ 宿主覆盖为 pre-wrap，统一到 EditorView.lineWrapping 口径
 if (/#work-editor \.cm-codeblock-widget pre \{[^}]*white-space: pre-wrap/.test(css) && /#work-editor \.cm-codeblock-widget \{[^}]*var\(--field-2\)/.test(css)) ok('styles.css 代码块 widget 按窗口软换行（pre-wrap）+ 项目令牌底/边（库 hsl(--muted) 假设失效）')
 else bad('代码块 widget 仍不换行（库 pre 的 white-space:pre 未覆盖）或未用项目令牌')
-// vendored cm6 库补丁（scripts/vendor-codemirror/patches/）：行内标记（**加粗** 等）显隐按**父节点范围**判定
-const libPatch = read('scripts/vendor-codemirror/patches/codemirror-live-markdown@0.5.1-alpha.1.patch')
+// cm6 库补丁（兄弟包 Pj16-SubPj4-CM6/patches/）：行内标记（**加粗** 等）显隐按**父节点范围**判定
+const libPatch = read('../Pj16-SubPj4-CM6/patches/codemirror-live-markdown@0.5.1-alpha.1.patch')
 if (/INLINE_REVEAL_PARENTS/.test(libPatch) && /revealNode\.from/.test(libPatch)) ok('vendored 库补丁：行内标记显隐按父节点范围（光标落在内容中间即整块显码）')
 else bad('vendored 库缺行内显隐补丁（**加粗** 仍需光标贴 * 才显码）')
 // 表格单元格 md 渲染：库 TableWidget.toDOM 原为 th/td `textContent=`（纯文本，格内 md 原样吐出）；
 // 补丁加可注钩子 setTableCellRenderer → work.js 注入 core/markdown.js 的 mdInlineText
-if (/function mdInlineText\(s\)/.test(md) && /CM\.setTableCellRenderer\(mdInlineText\)/.test(work) && /setTableCellRenderer/.test(libPatch) && /renderTableCell/.test(libPatch)) ok('表格单元格 md 渲染：库补 setTableCellRenderer 钩子 + work.js 注入 mdInlineText（格内 **粗体**/`代码`/链接正常渲染）')
+if (/function mdInlineText\(s\)/.test(md) && /CM\.setTableCellRenderer\(H\.mdInlineText\)/.test(workPkg) && /setTableCellRenderer/.test(libPatch) && /renderTableCell/.test(libPatch)) ok('表格单元格 md 渲染：库补 setTableCellRenderer 钩子 + 宿主注入 mdInlineText（格内 **粗体**/`代码`/链接正常渲染）')
 else bad('表格单元格内 md 未渲染（库仍 textContent 直出）')
-if (/wkEdBuildHlStyle/.test(work) && /HighlightStyle\.define/.test(work)) ok('代码高亮 = HighlightStyle（tag → --hl-* CSS 变量，日夜随动）')
+if (/buildHlStyle/.test(workPkg) && /HighlightStyle\.define/.test(workPkg)) ok('代码高亮 = HighlightStyle（tag → --hl-* CSS 变量，日夜随动）')
 else bad('代码高亮未接 HighlightStyle')
 if (!/wkCodeHtml|wk-ed-ta|wk-ed-hl|state\.wkEdit|applyEdMode/.test(work)) ok('work.js 无两态残留（textarea 编辑 / 阅读态 / 模式按钮全清）')
 else bad('work.js 仍有两态残留（wkCodeHtml / wk-ed-ta / wk-ed-hl / state.wkEdit / applyEdMode）')
-if (/body\.replaceChildren\(wkEdHost\)/.test(work)) ok('renderEdBody：可编辑文本一律挂 CodeMirror 宿主')
+if (/bodyEl\.replaceChildren\(hostEl\)/.test(workPkg) && /wkEditor\.attach\(body\)/.test(work)) ok('renderEdBody：可编辑文本一律挂 CodeMirror 宿主')
 else bad('renderEdBody 未统一挂 CodeMirror 宿主')
 
 // ---- 4. 样式 + 拼接注册 + cache-bust ----

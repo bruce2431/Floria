@@ -1,7 +1,7 @@
 // probe-code-block.ts —— 围栏代码块渲染链路核验（codex 化：头栏 + 语法高亮 + 软换行，2026-10-10）
 //
 // 直接取 web-src/core/markdown.js 的真实源码文本（剥 import/export），注入 esc / @提及 stub 与
-// window（CMLiveMarkdown.highlightCode）/ document / localStorage stub，执行 mdHtml，断言：
+// edCMG（@floria/cm6 的 highlightCode）/ document / localStorage stub，执行 mdHtml，断言：
 //   ① 围栏 → .code-block（默认带 .wrap）＋头栏 .code-head（.code-lang 语言名 + .code-acts 两钮）
 //   ② 高亮可用且有语言 → 正文走 hljs-* HTML 且挂 data-lang；lowlight 自行 escape ⇒ 不得二次转义
 //   ③ 语言为空 / 库缺失 → 正文回落「已转义纯文本」、不挂 data-lang（头栏仍在，复制按钮照常可取文）
@@ -27,13 +27,13 @@ const body = noExport
 const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => (({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }) as Record<string, string>)[c])
 
-function build(windowObj: Record<string, unknown>, doc: unknown, store: Map<string, string>) {
+function build(windowObj: Record<string, unknown>, doc: unknown, store: Map<string, string>, cm: Record<string, unknown> | null) {
   const never = /$^/g
   const factory = new Function(
     'esc',
     'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_PDF_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE',
     'mentionChipHtml', 'quotePdfChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml',
-    'window', 'document', 'localStorage',
+    'window', 'document', 'localStorage', 'edCMG',
     `${body}\nreturn { mdHtml, mdInline, toggleCodeWrap, initCodeBlock }`,
   )
   const chip = () => ''
@@ -41,7 +41,7 @@ function build(windowObj: Record<string, unknown>, doc: unknown, store: Map<stri
     getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
     setItem: (k: string, v: string) => { store.set(k, v) },
   }
-  return factory(esc, never, never, never, never, never, never, chip, chip, chip, chip, windowObj, doc, localStorageStub) as {
+  return factory(esc, never, never, never, never, never, never, chip, chip, chip, chip, windowObj, doc, localStorageStub, cm) as {
     mdHtml: (s: string, la?: string) => string
     mdInline: (s: string) => string
     toggleCodeWrap: () => boolean
@@ -65,7 +65,7 @@ const decode = (s: string) =>
 
 // ---------- 有高亮库 ----------
 const storeA = new Map<string, string>()
-const A = build({ CMLiveMarkdown: { highlightCode: lowlightStub } }, docStub, storeA)
+const A = build({}, docStub, storeA, { highlightCode: lowlightStub })
 
 const h1 = A.mdHtml('```js\nconst a = 1\n```')
 ok(h1.includes('class="code-block wrap"'), '围栏 → .code-block 且默认 .wrap 软换行')
@@ -96,7 +96,7 @@ ok(!h4.includes('code-block'), '```chart 不走代码块分支')
 
 // ---------- 无高亮库（脚本缺失） ----------
 const storeB = new Map<string, string>()
-const B = build({}, docStub, storeB)
+const B = build({}, docStub, storeB, null)
 const h5 = B.mdHtml('```js\nx < y\n```')
 ok(!h5.includes('hljs-'), '库缺失时不产 hljs-*')
 ok(!h5.includes('data-lang'), '库缺失时不挂 data-lang')
@@ -105,14 +105,14 @@ ok(h5.includes('x &lt; y'), '库缺失时正文为已转义纯文本')
 
 // ---------- 换行偏好 ----------
 const storeC = new Map<string, string>()
-const C = build({ CMLiveMarkdown: { highlightCode: lowlightStub } }, docStub, storeC)
+const C = build({}, docStub, storeC, { highlightCode: lowlightStub })
 ok(C.mdHtml('```js\nz\n```').includes('code-block wrap'), '默认渲染带 wrap')
 ok(C.toggleCodeWrap() === false, 'toggleCodeWrap 翻转 true→false')
 ok(!C.mdHtml('```js\nz\n```').includes('code-block wrap'), '翻转后新渲染不带 wrap')
 ok(storeC.get('floria-code-wrap') === '0', '翻转写入 localStorage 偏好')
 
 const storeD = new Map<string, string>([['floria-code-wrap', '0']])
-const D = build({ CMLiveMarkdown: { highlightCode: lowlightStub } }, docStub, storeD)
+const D = build({}, docStub, storeD, { highlightCode: lowlightStub })
 D.initCodeBlock()
 ok(!D.mdHtml('```js\nz\n```').includes('code-block wrap'), 'initCodeBlock 读到 0 → 渲染不带 wrap')
 

@@ -10,7 +10,6 @@
 import { toast, esc } from '../core/util.js'
 import { I, fileIcon } from '../core/icons.js'
 import { syncGwSend } from './send.js'
-import { uploadAttachment, insertAttachmentMarkdown } from '../editor/editor-attachments.js'
 /* @module inputbar/images.js */
   // ---------- 视觉上行内部态 ----------
   // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?}。发送时文本拼 [Image #N]

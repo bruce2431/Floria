@@ -30,7 +30,8 @@ const bad = (m: string) => {
 }
 
 const css = read('src/gateway/web/styles.css')
-const vendor = read('src/gateway/web/vendor/codemirror/live-markdown.js')
+// CM6 基线现在来自兄弟包 Pj16-SubPj4-CM6（@floria/cm6 内联 @codemirror/view），不再有 vendored live-markdown.js
+const vendor = read('../Pj16-SubPj4-CM6/node_modules/@codemirror/view/dist/index.js')
 
 // ---- 1. 手势显式声明 ----
 const block = css.match(/\.wk-ed-cm \.cm-scroller,\s*\.wk-ed-cm \.cm-content \{[^}]*\}/)
@@ -48,8 +49,8 @@ if (/\.wk-ed-body \{ flex: 1; min-height: 0; overflow: auto; position: relative;
 else bad('.wk-ed-body 基线规则被改 —— 图片滚动分支受影响')
 
 // ---- 3. vendored 库基线（对照：不靠改库，全部在项目 CSS 层修） ----
-if (/cm-scroller":\{[^}]*overflowX:"auto"/.test(vendor) && !/cm-scroller":\{[^}]*overflowY/.test(vendor)) ok('vendored CM6 基线未动（.cm-scroller 默认仅 overflowX:auto）')
-else bad('vendored 库 .cm-scroller 基线漂移 —— 需重新核对本修复的前提')
+if (/"\.cm-scroller":\s*\{[^}]*overflowX:\s*"auto"/.test(vendor) && !/"\.cm-scroller":\s*\{[^}]*overflowY/.test(vendor)) ok('CM6 基线未动（.cm-scroller 默认仅 overflowX:auto）')
+else bad('CM6 库 .cm-scroller 基线漂移 —— 需重新核对本修复的前提')
 
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail ? 1 : 0)

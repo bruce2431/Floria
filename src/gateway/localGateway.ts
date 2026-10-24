@@ -2971,6 +2971,44 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     }
     return
   }
+  // 在系统资源管理器中定位：POST /gateway/file/reveal {label, path}（2026-10-24 work 文件树行菜单）
+  // 文件 → `explorer /select,<abs>`（在父目录里选中该文件）；目录 → `explorer <abs>`（直接打开）。
+  // 网关进程跑在用户本机，打开的即用户桌面；越界 / 不存在同 /gateway/file 口径（resolveWithinRoot）。
+  // explorer 成功时也常回非 0 退出码，故 detached 拉起、不取退出码，也不等它结束。
+  if (req.method === 'POST' && url.pathname === '/gateway/file/reveal') {
+    try {
+      const vp = await readReportBody(req)
+      const vProj = findProjects(root).find((g) => g.label === (typeof vp.label === 'string' ? vp.label : ''))
+      if (!vProj) {
+        sendJson(res, 404, { error: 'project not found' })
+        return
+      }
+      if (process.platform !== 'win32') {
+        sendJson(res, 501, { error: 'unsupported platform' })
+        return
+      }
+      const vAbs = resolveWithinRoot(resolve(vProj.dir, '..', '..'), typeof vp.path === 'string' ? vp.path : '')
+      if (!vAbs || !existsSync(vAbs)) {
+        sendJson(res, vAbs ? 404 : 403, { error: vAbs ? 'not found' : 'forbidden' })
+        return
+      }
+      const isDir = statSync(vAbs).isDirectory()
+      console.log(`[gateway] 资源管理器定位 ${vProj.label} → ${vAbs}（${isDir ? '目录' : '文件'}）`)
+      // `explorer.exe` 的 `/select,` 必须与路径整体拼接（逗号后不能有空格）。
+      // **禁传 windowsHide**：该标志在 Windows 上是 CREATE_NO_WINDOW，explorer 会把 STARTUPINFO 的
+      // SW_HIDE 一路带给它新建的文件夹窗口 ⇒ 窗口被隐藏（IsWindowVisible=false，用户看到「点了没反应」）。
+      const child = spawn('explorer.exe', isDir ? [vAbs] : ['/select,' + vAbs], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.on('error', (e) => console.log(`[gateway] 资源管理器定位失败：${(e as Error).message}`))
+      child.unref()
+      sendJson(res, 200, { ok: true })
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
   // 项目内新建文件 / 目录：POST /gateway/file/create {label, path, name, dir}（2026-10-13 work 侧栏
   // 「创建文件 / 文件夹」）。语义与防护全在 createProjectEntry（纯函数，探针 probe-file-create 直测）；
   // 此处只管解析 label（label 唯一命中，含工作区根）。path = 落点目录（'' = 项目根）。

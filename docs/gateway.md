@@ -302,13 +302,15 @@ web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
 
-## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/write`、`/gateway/file/create`、`/gateway/file/upload`、`/gateway/file/move`）
+## 16. 项目内文件树写端点（`/gateway/file/rename`、`/gateway/file/delete`、`/gateway/file/reveal`、`/gateway/file/write`、`/gateway/file/create`、`/gateway/file/upload`、`/gateway/file/move`）
 
 work 文件树行操作浮窗（[web-ui.md](web-ui.md) §45）的提交侧。两端点只解析 `label` 找项目根，语义与防护全在导出纯函数里——端点即「纯函数结果码 → HTTP 码」的直译，写法与 `/gateway/fs` 复用 `resolveWithinRoot` 同源。
 
 **`POST /gateway/file/rename`** body `{label, path, name}` → `renameProjectEntry(projRoot, path, name)`。只改 basename、不跨目录移动。新名走 `sanitizeEntryName`（同 `/gateway/upload` 的清洗口径，已抽出共用：basename 化 + `\/:*?"<>|` 与控制符换 `_` + Windows 保留名加 `_` 前缀 + 截断 120 字符且保扩展名）；新名里的路径/盘符式前缀被 basename 剥掉（只可能「少字」，不可能逃出项目根）。**目标已存在 → 409 拒绝，不覆盖也不自动序号**——改名是用户显式输入，静默换成别的名字比报错更糟；新名与原名相同 → 200 幂等 no-op。响应 `{ok, name, path}`（`path` 为改名后的项目内相对路径，正斜杠）。
 
 **`POST /gateway/file/delete`** body `{label, path}` → `trashProjectEntry(projRoot, path)`。**「删除」= 移动**（工作区规范禁止 `rm`）：`renameSync` 到 `<项目根>/.trash/`，永不真删、永不覆盖——`.trash/` 下同名冲突加 `<YYYYMMDDHHMMSS>-` 前缀（同秒再撞加 `-N`）。目录删除 = 整棵子树一次搬走。响应 `{ok, trash:'.trash/<名>'}`。`.trash` 以 `.` 开头，本就不进 `/gateway/project` 文件树（`walkProjectTree` 跳过点开头条目，且在 `SKIP_TREE_DIRS` 内）。
+
+**`POST /gateway/file/reveal`**（2026-10-24，work 文件树行菜单「在资源管理器中打开」，[web-ui.md](web-ui.md) §45）body `{label, path}`。网关进程即用户本机进程，直接拉起系统资源管理器：文件 → `explorer.exe /select,<abs>`（在父目录中选中该文件），目录 → `explorer.exe <abs>`（直接打开）。`detached + stdio:'ignore' + unref` 拉起、**不读退出码**（explorer 成功时也常回非 0）、不等其结束。**禁传 `windowsHide`**：Windows 上即 `CREATE_NO_WINDOW`，explorer 会把 `STARTUPINFO` 的 `SW_HIDE` 带给新建文件夹窗口 ⇒ 窗口被隐藏（`IsWindowVisible=false`，表现为「点了没反应」）；响应 `{ok:true}` 只表示已发起。路径防护同下方共用口径（越界 403、不存在 404），**空 `path` = 项目根自身、允许**（与 rename/delete 的 403 不同，打开项目根是合法意图）；非 Windows → **501 `unsupported platform`**。
 
 **共用防护**：`resolveWithinRoot(projRoot, path)` 越界与空 `path`（= 项目根自身）→ **403**；条目不存在 → **404**；名称为空 → **400**。两端点均受上方 `/gateway/*` token/cookie 校验保护，且都在 `findProjects` **按 `label` 唯一命中**后才动盘（2026-10-15 待办 7 起**不再硬判 `scope==='project'`**——`scope==='global'` 的工作区根同样可按其 label 命中、作为一等项目接受写操作；`findProjects` 的 label 空间跨 scope 不重叠，按 label 定位即够。同一改动亦覆盖 `GET /gateway/project` 与 `file/{move,write,create}`。**例外**：`/gateway/comments` 与 `/gateway/backend/*` 仍按 `scope==='project'` 硬判——评论属项目不落全局根散装区，backend 需 `hasBackend` 只有项目具备）。
 

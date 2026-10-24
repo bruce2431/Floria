@@ -1,10 +1,10 @@
 /* 遥测 · 会话查看器 — Service Worker（静态资源缓存 + 离线兜底） */
 /* 2026-08-28 CORE 改绝对路径：SPA 路径路由（/session/<hash>）下 SW scope=/，相对路径等价但显式绝对防歧义 */
-const CACHE = 'floria-v593'
+const CACHE = 'floria-v603'
 // /vendor/katex/*（2026-10-06 公式渲染）：js+css+woff2 字体一并预缓存，保证离线时公式仍可排版
-// /vendor/codemirror/*（2026-10-07 Live Preview）：md 编辑区的 CodeMirror 6 全局 IIFE 一并预缓存
+// /cm6/*（2026-10-24）：@floria/cm6 全局 IIFE（CM6 依赖全内联）随包预缓存，离线编辑可用
 const CORE = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.json', '/icon.ico',
-  '/vendor/codemirror/live-markdown.js',
+  '/cm6/floria-cm6.iife.js',
   // 解压组件（2026-10-24）：xlsx/docx 预览依赖 window.fflate
   '/vendor/fflate.js',
   '/vendor/katex/katex.min.js', '/vendor/katex/katex.min.css',

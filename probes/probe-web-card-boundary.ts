@@ -21,7 +21,11 @@
  *     卡挂表只需 import 它，是卡片对外接口的共享底座）
  *   - feature/preview-frame.js（项目预览帧渲染实现：preview 卡 mountPreview、ext 卡 rail-ext 状态；
  *     属显式登记的共享底座，非「卡 → 兄弟子系统」）
+ *   - sidebar/work-tools.js（工作工具页注册表契约：卡自注册入口 registerWkTool，与 engine/registry.js
+ *     同思路——注册面归宿主，被卡依赖不构成「卡 → sidebar 子系统」）
  *   - 卡**自身目录** `./*`（含子目录，同目录组件随卡）
+ *   - 卡**自身特性域** `feature/<卡目录名>/**`（依赖链 `views/cards/<x> → feature/<x> → engine/core`；
+ *     该域同时被宿主/其它层读，不是兄弟子系统）
  * 显式例外（带注释，本版不动 routing）：
  *   - views/cards/session/session-card.js → chat/route.js（`teardownSessionView`，会话卡=会话视图本体）
  *
@@ -69,6 +73,7 @@ const ALLOW_EXACT = new Set([
   'engine/ext-decl.js', // 外部申报纯校验/壳 src 串（契约层共享底座）
   'engine/card-bus.js', // 卡片公开 API 总线（帧表/命令通道/跨卡 broker/能力表，2026-10-11）
   'feature/preview-frame.js', // 项目预览帧渲染实现（显式登记的共享底座）
+  'sidebar/work-tools.js', // 工作工具页注册表契约（卡自注册入口，非 sidebar 业务）
 ])
 const EXCEPTIONS: Record<string, string[]> = {
   // 会话卡 = 会话视图本体，deactivate 挂 teardownSessionView
@@ -98,6 +103,8 @@ if (!existsSync(CARDS)) {
   for (const abs of files) {
     const rel = logical(abs) // views/cards/<name>/<name>-card.js
     const ownDir = rel.slice(0, rel.lastIndexOf('/')) // views/cards/<name>
+    const cardName = ownDir.slice(ownDir.lastIndexOf('/') + 1) // <name>
+    const ownFeature = `feature/${cardName}/` // 卡自身特性域（卡目录同名）
     const src = readFileSync(abs, 'utf-8')
     const exc = new Set((EXCEPTIONS[rel] ?? []).map((s) => resolveSpec(abs, `../../../${s}`)))
     let n = 0
@@ -112,6 +119,7 @@ if (!existsSync(CARDS)) {
       }
       const target = resolveSpec(abs, spec)
       if (target.startsWith(ownDir + '/')) continue // 同卡目录（含子目录）
+      if (target.startsWith(ownFeature)) continue // 卡自身特性域（views/cards/<x> → feature/<x>）
       if (ALLOW_EXACT.has(target)) continue // 小底座/契约/外部申报共享底座
       if (exc.has(target)) continue // 显式例外
       violated = true

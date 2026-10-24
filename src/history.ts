@@ -363,7 +363,7 @@ async function addToPromptHistory(
   const storedPastedContents: Record<number, StoredPastedContent> = {}
   if (entry.pastedContents) {
     for (const [id, content] of Object.entries(entry.pastedContents)) {
-      // Filter out images (they're stored separately in image-cache)
+      // Filter out images (they're stored separately in file-cache)
       if (content.type === 'image') {
         continue
       }

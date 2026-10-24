@@ -485,7 +485,7 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
           // 原 `isFirst ? cmd.pastedContents : undefined` 把两者混为一谈：queueProcessor
           // 批量抽干同 mode 非斜杠命令（一轮内多条 prompt 一次 executeUserInput），
           // 第 2..N 条 pastedContents 被抹平 → processUserInput 的 storeImages 不执行
-          // → image-cache 无字节 → web 内联图 404 回落 [Image #N] 裸文本。
+          // → file-cache 无字节 → web 内联图 404 回落 [Image #N] 裸文本。
           // 回合级上下文（ideSelection/attachments/setUserInputOnProcessing）仍由 isFirst 门控。
           pastedContents: cmd.pastedContents,
           messages,

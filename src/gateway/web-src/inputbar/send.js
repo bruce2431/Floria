@@ -25,7 +25,7 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
     // 2026-08-28 图片占位：[Image #N] 与 pastedContents id 一一对应。
     // 2026-09-02 防撞根修：id 由本端分配全会话唯一（从已用最大 imageId+1 起，对齐 CLI
     // getInitialPasteId 语义），随 images 显式上行——CLI pastedContentsFromImages 尊重显式 id。
-    // 原恒从 1 起：同会话第二条带图消息互覆 image-cache 字节 → 历史图错图。
+    // 原恒从 1 起：同会话第二条带图消息互覆 file-cache 字节 → 历史图错图。
     if (imgs.length) {
       const base = live.maxImgId || 0
       imgs.forEach((im, i) => { im.id = base + 1 + i })
@@ -137,8 +137,8 @@ import { getNewSessionModel, setNewSessionModel } from './model-select.js'
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型
   // Read 按会话启动根解析即得文件；落盘同轮定案改跟随会话（上传带 sid/project，网关按会话根落盘）
-  // → 同会话上传+发送恒为 uploads/<名>；跨会话补发（A 会话上传、B 会话发送）按 B 的 cwd 相对化
-  // （../<A>/uploads/x）。Windows 大小写不敏感、\ / 通用；跨盘符无法相对 → 原样绝对路径
+  // → 同会话上传+发送恒为 <配置根>/file-cache/<会话id>/<名> 的 cwd 相对形；跨会话/跨目录按 B 的 cwd
+  // 相对化。Windows 大小写不敏感、\ / 通用；跨盘符无法相对 → 原样绝对路径
   // （物理上唯一正确表示）。cwd 未知（异常旧记录）同退绝对路径——不是兜底分支，是「无 cwd 就无法相对化」的诚实表示。
   function relPath(fromDir, toPath) {
     const seg = (p) => String(p).replace(/\//g, '\\').split('\\').filter((s) => s.length > 0)

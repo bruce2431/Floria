@@ -17,6 +17,7 @@ import { getIsInteractive, getLastInteractionTime } from '../bootstrap/state.js'
 import {
   cleanupNpmCacheForAnthropicPackages,
   cleanupOldMessageFilesInBackground,
+  cleanupOldTempFiles,
   cleanupOldVersionsThrottled,
 } from './cleanup.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
@@ -91,4 +92,10 @@ export function startBackgroundHousekeeping(): void {
     // Don't let this interval keep the process alive
     interval.unref()
   }
+
+  // `.claude/temp` 每天清理 24h 前的临时文件（长驻会话也覆盖；首轮由上面的清理链触发）。
+  const tempInterval = setInterval(() => {
+    void cleanupOldTempFiles()
+  }, RECURRING_CLEANUP_INTERVAL_MS)
+  tempInterval.unref()
 }

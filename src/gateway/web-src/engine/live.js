@@ -457,13 +457,13 @@ import { toast } from '../core/util.js'
     }
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
-    // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
+    // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，file-cache 字节
     // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）。
     // 2026-09-16 单调不回卷根修：视图（localMessages）在压缩归档/delta 重写窗口会丢历史块，
     // 清零重扫会把 maxImgId 回卷 → 下张图复用旧 id → CLI storeImage('w') 覆写字节 + 网关
     // max-age=86400 把首次取到的旧字节钉在该 URL 上 = 新图显示成旧图（b5bd1265 实证 A/B/C
     // 三图全 1 号互覆）。id 不复用是分配器不变量，不依赖视图完整：重扫只增不减（跨会话切回
-    // 基准偏高无害，image-cache 按会话分目录，id 只需会话内唯一）。
+    // 基准偏高无害，file-cache 按会话分目录，id 只需会话内唯一）。
     for (const m of messages) {
       for (const b of m.blocks || []) {
         if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
@@ -551,7 +551,7 @@ import { toast } from '../core/util.js'
       // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
       const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
       // img 换血（2026-09-18 内存峰值/闪烁根治）：整页 innerHTML 重建全部节点 → 全部 <img> 重建且
-      // image-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
+      // file-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
       // 「先塌后弹」闪烁）。src 相同的图内容不变 → 重建前按 src 采池，重建后同 src 换回旧节点
       //（池 shift 支持同 src 多图），零回源零重解码；池剩余节点随 GC 回收。
       const imgPools = new Map()
@@ -628,7 +628,7 @@ import { toast } from '../core/util.js'
     //    展开的折叠照常恢复」），增量路径同受此不变量约束——此处按同一键语义捕获并恢复
     //    （键不在旧集的新增折叠保留 HTML 默认：处理中展开、工具行收起）。
     // ② 用户气泡及其图片：气泡在段内不变（who/图/文件/复制钮落盘后皆静态），重建节点令 imgs
-    //    重新请求/解码（image-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
+    //    重新请求/解码（file-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
     //    的跳动。DOM 已有同 key 气泡时保留旧节点、丢弃新段气泡节点只换其余（气泡=段首元素，
     //    其余部分删后插回流末锚点前=文档序不变；处理中段恒为末段，旧气泡与流末锚点之间不存在
     //    他段节点）。
@@ -657,7 +657,7 @@ import { toast } from '../core/util.js'
     if (keepBubble) newBubble.remove()
     // img 换血（2026-09-18「旁白消息的图片仍闪」根治）：段内除段首用户气泡外的节点（尤其
     // 引导气泡 data-t="g<gi>"——上传图片经排队注入后正是落在这里，与旁白行同段）每帧重建，
-    // 新 <img> 到 paint 时尚未解码（image-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
+    // 新 <img> 到 paint 时尚未解码（file-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
     // 再回弹。与全量重建路径同一不变量：已落盘图片字节不可变 → 同 src 的旧节点直接换回，
     // 零回源零重解码。只从「本次将被删除」的节点采池——保留的旧气泡节点不动（引导气泡与
     // 用户气泡可能同 src，采走会让保留气泡丢图）。

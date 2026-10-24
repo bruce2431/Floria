@@ -1,5 +1,7 @@
 // 右栏页态内容补挂 + 侧栏（项目选择/项目列表/文件树/自动对账/数据补齐）与其渲染。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 import { bindRowPeek, isPinned, peekClear } from '../recent.js'
+import { cmtInvalidate, cmtLoad } from '../../feature/comment/comment-data.js'
+import { cmtRender } from '../../feature/comment/comment-panel.js'
 /* @module sidebar/work/work-files.js */
 
   // ---------- 外部卡申报补拉 ----------

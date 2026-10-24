@@ -184,7 +184,7 @@ function pastedContentsFromImages(
     if (typeof it.content !== 'string' || !it.content) continue
     // 2026-09-02 图片 id 防撞号：web 前端分配全会话唯一 id（对齐 CLI 本地粘贴 getInitialPasteId
     // 语义）——显式合法 id 直接用（占位 [Image #id] 与之一一对应）；无显式 id（旧版前端）回落
-    // 自造递增。原恒从 1 起，同会话第二条带图消息互覆 image-cache 字节 → 历史图错图。
+    // 自造递增。原恒从 1 起，同会话第二条带图消息互覆 file-cache 字节 → 历史图错图。
     const explicit = it.id
     let id =
       typeof explicit === 'number' && Number.isInteger(explicit) && explicit > 0 ? explicit : 0

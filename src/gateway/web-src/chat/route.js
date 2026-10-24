@@ -339,7 +339,7 @@ import { hydrateExtCardId } from '../engine/ext-runtime.js'
           live.txProcStart = claimStartTs() // 主张计时起点移交（bindLiveFoldTimer 续算，跨接管不回跳）
           setFirstSendHash('')
         }
-        // 2026-08-30 图片内联渲染：会话 uuid（image-cache 目录名）供用户气泡 <img> URL 拼接，
+        // 2026-08-30 图片内联渲染：会话 uuid（file-cache 目录名）供用户气泡 <img> URL 拼接，
         // 首开即设（refreshSession 同款，防首屏图片 URL 带空 uuid）
         if (file) live.curUuid = file.replace(/\.jsonl$/, '')
         live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || 0 // 切会话：基线硬重置为本会话末条 ts

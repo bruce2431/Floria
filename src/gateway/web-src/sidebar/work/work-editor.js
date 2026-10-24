@@ -1,5 +1,6 @@
 // 编辑区渲染与读写：原文评论标记 / renderEditor / 读文件 / 自动保存 / 冲突处置 / 开关文件。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 import { wkPdfClose, wkPdfRender } from './work-pdf.js'
+import { cmtRangesFor } from '../../feature/comment/comment-data.js'
 /* @module sidebar/work/work-editor.js */
   // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
   // 每条评论的行范围 l0..l1 落成 CodeMirror 行装饰：未解决 .cmt-mark-open / 已解决 .cmt-mark-res。

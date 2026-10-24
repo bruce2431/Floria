@@ -5,7 +5,7 @@
 // （'' = 预览页，工具 id = 工具页）。右栏在场时 tab 条常驻（applyPvTab 按 wkPreview 显隐）。
 // 任何模块可调 registerWkTool({ id, title, pane, mount }) 挂一枚工具 tab——本表只做「注册 → 按序渲 tab →
 // 交调用方切内容」，不写任何工具内容（与 engine/registry.js 视图卡同思路）。
-//   内置（work.js 注册）：'comments' 评论（sidebar/comments.js 渲染进 #wk-cmt）；外部注册 = 任意模块调
+//   内置：'comments' 评论（views/cards/comment/comment-card.js 自注册，渲染进 #wk-cmt）；外部注册 = 任意模块调
 //   registerWkTool 追加，注册序即 tab 序。
 // 契约：tab = <button class="wk-pv-tab" data-wkpv="<id>">（点击委托挂在 work.js 的 #wk-pv-tabs 容器上，
 // 本表重渲不清事件）；active 态与 pane 互斥显隐由 work.js applyPvTab 唯一落。

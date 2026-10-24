@@ -1,9 +1,10 @@
 // 附件链（2026-10-15 待办 13 改造；2026-10-16 待办 6 还原胶囊行；2026-10-16 待办 2 收口底栏口径）。
-// 上传（粘贴/拖拽/+ 浮窗）→ 落盘（POST /gateway/upload，落盘名 = 时间戳 `YYYYMMDDHHMMSS.<ext>`）。
+// 上传（粘贴/拖拽/+ 浮窗）→ 落盘（POST /gateway/file-cache：<项目根>/.claude/file-cache/<会话>/，与粘贴图片同目录；
+// 落盘名 = 原名主体 + 时间戳 + 原扩展名）。网关返回 rel（`file-cache/<会话id>/<名>`）作为引用唯一键。
 // **正文引用落点按 target 分**（2026-10-16 待办 2 定案）：
 //   · 底栏 composer：**只进附件胶囊行**（`#img-pills`），不自动往输入框正文插 md 引用——胶囊即待发表达。
-//   · work 编辑卡：插正文引用（图片 `![名](uploads/x.png)` 行内直渲 editor-attachments.edAttImgPlugin、
-//     文件 `[名](uploads/x)` 链接）——编辑卡是文档面，正文引用即内容。
+//   · work 编辑卡：插正文引用（图片 `![名](file-cache/…)` 行内直渲 editor-attachments.edAttImgPlugin、
+//     文件 `[名](file-cache/…)` 链接）——编辑卡是文档面，正文引用即内容。
 //   · @ 浮窗「上传」组：把本次已上传附件插回正文（mention.js 消费 uploadedMentionItems）——正文引用此路可达。
 // 发送链不变量原样保留：pendingImages/pendingFiles 仍是发送链内部态（send.js 消费：[Image #N] 占位 +
 // images base64 视觉上行 / [文件:占位] 相对化上行），与正文是否插引用无关。
@@ -12,17 +13,17 @@ import { I, fileIcon } from '../core/icons.js'
 import { syncGwSend } from './send.js'
 /* @module inputbar/images.js */
   // ---------- 视觉上行内部态 ----------
-  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?}。发送时文本拼 [Image #N]
-  // 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
-  // attName = 同次上传落盘后的文件名（`uploads/<attName>` 正文引用的键；落盘失败则无，胶囊照显、@ 不可引用）。
+  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?, attRel?}。发送时文本拼
+  // [Image #N] 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、
+  // 执行时 resize）。attName/attRel = 同次上传落盘后的文件名与引用键（落盘失败则无，胶囊照显、@ 不可引用）。
   let pendingImages = []
   function clearPendingImages() {
     pendingImages = []
     renderImgPills()
     syncGwSend()
   }
-  // pendingFiles: {name, abs, size}（落盘文件）。发送时文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行
-  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](uploads/x)` 链接是同一次上传的引用表达。
+  // pendingFiles: {name, rel, abs, size}（落盘文件）。发送时文本拼 [文件:<路径>] 占位随消息上行
+  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](file-cache/…)` 链接是同一次上传的引用表达。
   let pendingFiles = []
   function clearPendingFiles() {
     pendingFiles = []
@@ -63,9 +64,9 @@ import { syncGwSend } from './send.js'
   function uploadedMentionItems() {
     const out = []
     for (const p of pendingImages) {
-      if (p.attName) out.push({ kind: 'imgpick', name: p.attName, md: `![${p.attName}](uploads/${encodeURIComponent(p.attName)})` })
+      if (p.attRel) out.push({ kind: 'imgpick', name: p.attName, md: `![${p.attName}](${encodeURI(p.attRel)})` })
     }
-    for (const f of pendingFiles) out.push({ kind: 'filepick', name: f.name, md: `[${f.name}](uploads/${encodeURIComponent(f.name)})` })
+    for (const f of pendingFiles) out.push({ kind: 'filepick', name: f.name, md: `[${f.name}](${encodeURI(f.rel)})` })
     return out
   }
   // 编码：≤1.5MB 且 png/jpg/webp 直传原 base64（截图文字不重压）；否则 canvas 重编码 jpeg
@@ -100,7 +101,7 @@ import { syncGwSend } from './send.js'
     })
   }
   // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列（胶囊缩略图）+ 原文件上传落盘（时间戳名）。
-  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](uploads/x)`（CM 行内直渲）。
+  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](file-cache/…)`（CM 行内直渲）。
   // 落盘失败时视觉上行仍有效（无 attName、@ 不可引用，发送链 [Image #N] 照旧上行）。
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
@@ -119,7 +120,7 @@ import { syncGwSend } from './send.js'
         if (att) insertAttachmentMarkdown(tgtEd, att)
         continue
       }
-      if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
+      if (att) { enc.attName = att.name; enc.attRel = att.rel } // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
       // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
       // 「不要自动在正文渲染，被图片胶囊劫持」）。
@@ -128,9 +129,9 @@ import { syncGwSend } from './send.js'
     if (toComposer) syncGwSend()
   }
   // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
-  // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
-  // 已开）；首页尚无会话时 project=newSessionProject()——与 gwSend 首送建会话的归属参数同源，
-  // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
+  // + 原文插 `[名](file-cache/…)` 文件名链接。落盘跟随会话（与粘贴图片同目录）：sid=当前会话（存量/
+  // 已开）；首页尚无会话时 project=<workProj|newSessionProject()>——与 gwSend 首送建会话的归属参数同源，
+  // 保证「上传落点的项目根 = 消息会话启动根」；两者皆无 → 网关自身根。
   async function addUploadFiles(files, target) {
     const tgtEd = target || 'composer'
     const toComposer = tgtEd === 'composer'
@@ -164,7 +165,7 @@ function clipboardFiles(cd) {
   return out
 }
 // 从剪贴板 text/html 里取**同源** <img> 的 URL（pathname+search）：消息区选中图片复制时
-// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/image-cache/…">`。
+// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/file-cache/…">`。
 // 只认同源（跨域取不到字节、data: 无意义）→ 交给 addImageUrls 拉回字节。
 function clipboardImageUrls(html) {
   const s = String(html || '')

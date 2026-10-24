@@ -248,8 +248,8 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：原文并进锚点令牌的第三个字段（百分号编码），
   // 由 core/mention-syntax.js 的 chip 构造器渲染成「图标 + 原文」的蓝色引用胶囊（不再有 blockquote 的
   // margin/padding = 与正文上下对齐，也不再显示「引用自…第 N 条回复」标签）。模型侧原文不动（令牌块原样上行）。
-  // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
-  // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
+  // **折叠后不补换行**（2026-10-24 用户实报「引用发送后后面总有莫名其妙的换行」）：胶囊是行内元素，
+  // 用户话术紧接其后自然流动；补 `\n` 会被 mdHtml 拆成下一段并落 `<br>`，表现为「引用后凭空换行」。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
   const quoteBodiesAsMarkdown = foldQuoteBodies
 

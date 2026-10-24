@@ -6,7 +6,7 @@ import { CACHE_PATHS } from './cachePaths.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
 import { type FsOperations, getFsImplementation } from './fsOperations.js'
-import { cleanupOldImageCaches } from './imageStore.js'
+import { cleanupOldFileCaches } from './fileCache.js'
 import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
@@ -423,6 +423,40 @@ export async function cleanupOldDebugLogs(): Promise<CleanupResult> {
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
 /**
+ * 清理配置根 `temp/` 下超过 24 小时的临时文件（文件/目录整体删除）。
+ * 该目录 = 所有 agent 临时产物的唯一落点（全局 CLAUDE 声明的 `.claude/temp` 豁免）；
+ * 目录本身保留，避免并发写入时被移除。
+ */
+export async function cleanupOldTempFiles(): Promise<CleanupResult> {
+  const cutoff = new Date(Date.now() - ONE_DAY_MS)
+  const result: CleanupResult = { messages: 0, errors: 0 }
+  const fsImpl = getFsImplementation()
+  const tempDir = join(getClaudeConfigHomeDir(), 'temp')
+
+  let dirents
+  try {
+    dirents = await fsImpl.readdir(tempDir)
+  } catch {
+    return result
+  }
+
+  for (const dirent of dirents) {
+    const p = join(tempDir, dirent.name)
+    try {
+      const stats = await fsImpl.stat(p)
+      if (stats.mtime < cutoff) {
+        await fsImpl.rm(p, { recursive: true, force: true })
+        result.messages++
+      }
+    } catch {
+      result.errors++
+    }
+  }
+
+  return result
+}
+
+/**
  * Clean up old npm cache entries for Anthropic packages.
  * This helps reduce disk usage since we publish many dev versions per day.
  * Only runs once per day for Ant users.
@@ -582,7 +616,8 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
   await cleanupOldFileHistoryBackups()
   await cleanupOldSessionEnvDirs()
   await cleanupOldDebugLogs()
-  await cleanupOldImageCaches()
+  await cleanupOldFileCaches()
+  await cleanupOldTempFiles()
   await cleanupOldPastes(getCutoffDate())
   const removedWorktrees = await cleanupStaleAgentWorktrees(getCutoffDate())
   if (removedWorktrees > 0) {

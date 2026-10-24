@@ -13,12 +13,11 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
   const MD_IMG_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/
   let mdImgResolver = null
   const setImageSrcResolver = (fn) => { mdImgResolver = fn }
-  // 附件引用（2026-10-16）：正文里的 `![](uploads/x.png)`——@ 艾特插入 / 上传后发送的原文（会话 cwd
-  // 相对路径，跨会话补发为 `../<项目>/uploads/x`）。渲染成**行内小图**（与文字同高，见 styles.css
-  // `.msg .md-att-img`），类名带 msg-img ⇒ 复用既有 lightbox 委托（点小图看大图、点空白关闭），与
-  // 消息流里的图片是同一条预览链。取图 URL 同样注入（core 不依赖 feature）：无 resolver / 无 label
-  // → 保留原文（不兜底）。
-  const MD_ATT_CODE = /^(?:\.{1,2}\/)*uploads\/[^)\s]+$/
+  // 附件引用（2026-10-24 统一 file-cache）：正文里的 `![](file-cache/<会话id>/x.png)`——@ 艾特插入 /
+  // 上传后发送的原文（网关签发的 rel，基址 = 配置根/file-cache）。渲染成**行内小图**
+  // （与文字同高，见 styles.css `.msg .md-att-img`），类名带 msg-img ⇒ 复用既有 lightbox 委托，与消息
+  // 流里的图片是同一条预览链。取图 URL 由 resolver 注入（core 不依赖 feature）：无 resolver → 保留原文。
+  const MD_ATT_CODE = /^file-cache\/[^)\s]+$/
   let mdAttResolver = null
   const setAttachmentResolver = (fn) => { mdAttResolver = fn }
 
@@ -138,7 +137,7 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
     // 图片代号（AI 生成图）：![](文件名.png) → <img>，code 过白名单 + resolver 拼取图 URL；
     // 不匹配或无 resolver 则保留原文（不兜底）。必须在下方链接替换之前，否则被拆成 ! + <a>。
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, code) => {
-      // 附件引用（uploads/）：行内小图（与文字同高），类含 msg-img ⇒ 与消息图片共用 lightbox
+      // 附件引用（file-cache/）：行内小图（与文字同高），类含 msg-img ⇒ 与消息图片共用 lightbox
       if (mdAttResolver && MD_ATT_CODE.test(code)) {
         const aurl = mdAttResolver(code)
         if (aurl) return `<img class="msg-img md-att-img" loading="lazy" alt="${alt}" src="${esc(aurl)}">`
@@ -148,8 +147,8 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       if (!url) return `![${alt}](${code})`
       return `<img class="msg-img md-img" loading="lazy" alt="${alt}" src="${esc(url)}">`
     })
-    // 附件文件引用（uploads/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](uploads/x)`）；
-    // 非 uploads 链接仍走普通外链。
+    // 附件文件引用（file-cache/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](file-cache/…)`）；
+    // 非 file-cache 链接仍走普通外链。
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
       if (MD_ATT_CODE.test(u)) {
         return `<span class="mention-chip m-path m-att" title="${u}"><span class="mc-ic">${fileIcon(u)}</span><span class="mc-t">${t}</span></span>`

@@ -82,18 +82,16 @@ import { esc } from './util.js'
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])([\s\S]*?)\[\/引用PDF\]/g
   const QUOTE_REPLY_FOLDED_RE = /\[@引用回复:(\d+)\|([^\]|\n]*)\|([^\]\n]*)\]/g
   const QUOTE_PDF_FOLDED_RE = /\[@引用PDF:([^\]|]+)\|([^\]\n]*)\]/g
-  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获；
-  // 收尾之后的用户话术若与收尾同行，补一个换行避免与胶囊黏在同一行。
+  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获。
+  // **折叠后严禁补换行**（2026-10-24 用户实报「引用发送后后面总有莫名其妙的换行」）：mdHtml 按行
+  // 拆段、行间落 <br>，块形态里锚点/原文/收尾三行只服务于模型；渲染侧整块折成一枚行内胶囊，
+  // 用户话术必须紧接胶囊流动（补 \n 会变成紧跟在胶囊后的额外 <br>）。
   function foldQuoteBodies(text) {
     const clean = (body) => String(body == null ? '' : body).replace(/^\s+|\s+$/g, '')
     const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(clean(body)) + ']')
-    const tailBreak = (whole, offset, match) => {
-      const rest = String(whole).slice(offset + match.length)
-      return rest && !rest.startsWith('\n') ? '\n' : ''
-    }
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
-      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body) => withBody(`[@引用回复:${idx}|${title}]`, body))
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body) => withBody(token, body))
   }
   // 折叠 → 块（发送口）：底栏 doc 的折叠胶囊在这里还原成模型可读的原文块。
   function unfoldQuoteBodies(text) {

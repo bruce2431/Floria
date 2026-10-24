@@ -10,136 +10,14 @@
 
   const $ = (id) => document.getElementById(id)
 
-  // ---------- SVG 图标 ----------
-  const I = {
-    logo: '<img class="logo-mark" src="/icon.ico" alt="floria">',
-    pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1.2-4.6L16.5 4.1a1.9 1.9 0 0 1 2.7 0l.7.7a1.9 1.9 0 0 1 0 2.7L8.6 18.8 4 20z"/><path d="M13.5 6.5l4 4"/></svg>',
-    mag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.8" cy="10.8" r="6.3"/><path d="M15.6 15.6 20 20"/></svg>',
-    bubble: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 5h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5v-3.5H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
-    toggle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3.5" y="5" width="6.5" height="14" rx="2"/><rect x="14" y="5" width="6.5" height="14" rx="2"/></svg>',
-    // 主题切换（2026-10-06 夜晚模式）：侧栏头部动作区的日/月钮——浅色态显月亮（点了转暗）、
-    // 暗色态显太阳（点了转亮）。与 mag/collapse 同语言：24 视框 / 1.7 描线 / currentColor。
-    sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.3M12 19.1v2.3M2.6 12h2.3M19.1 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>',
-    moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 13.6A8.2 8.2 0 1 1 10.4 3.8a6.4 6.4 0 0 0 9.8 9.8z"/></svg>',
-    collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 6 15.5 12 9.5 18"/></svg>',
-    folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
-    // 插件（2026-09-23 视图卡化：从 index.html 的 tab 内联 SVG 迁入，注册表按 icon:'plug' 引用）
-    plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M10.2 3.5H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 3.5h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1V4.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M10.2 13.7H4.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/><path d="M19.4 13.7h-5.6a1.1 1.1 0 0 0-1.1 1.1v5.6a1.1 1.1 0 0 0 1.1 1.1h5.6a1.1 1.1 0 0 0 1.1-1.1v-5.6a1.1 1.1 0 0 0-1.1-1.1z"/></svg>',
-    msg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-5 3.5V19H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>',
-    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg>',
-    gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>',
-    chip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></svg>',
-    // 神经（2026-09-23 视图卡化：原 neurons.js 的 NEU_ICON 常量迁入，注册表按 icon:'brain' 引用）
-    brain: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 4.5a2.5 2.5 0 0 0-2.5 2.5 2.5 2.5 0 0 0-1.8 4.2A2.6 2.6 0 0 0 6 15.6 2.5 2.5 0 0 0 8.5 18h1V4.5z"/><path d="M14.5 4.5A2.5 2.5 0 0 1 17 7a2.5 2.5 0 0 1 1.8 4.2 2.6 2.6 0 0 1-.8 4.4A2.5 2.5 0 0 1 15.5 18h-1V4.5z"/><path d="M12 4.5v13.5M12 18v1.5"/></svg>',
-    // DeepSeek 鲸鱼 logo（deepseek-harness packages/client/ui-primitives/src/FishLogo.tsx，figma I39:24057 精确提取，fill=currentColor 随父级）
-    whale: '<svg class="whale" viewBox="0 0 23.16 17.04" fill="none" aria-hidden="true"><path d="M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z" fill="currentColor"/></svg>',
-    // ---- dsh 产品图标集（2026-09-28 整体换到 deepseek-harness v0.2.0-rc.1：packages/client/ui-primitives/src/icons/
-    //      index.tsx + shared-artwork.tsx 精确 path）。全族统一 16 viewBox / `stroke=currentColor` 描线：
-    //      Regular(1px) 用于列表行与内联胶囊，Medium(1.3px) 用于强调按钮（+ 等）——与 dsh InputBar/MenuView/
-    //      ReferenceChip 的取重一致（MenuView 与 ReferenceChip 均用 Regular，InputBar 的 + 用 Medium）。
-    //      ⚠️ 图标不设 stroke-linecap/linejoin：dsh 产品图标集默认即 butt/miter，圆头会让细描线发胖。
-    //      ⚠️ stroke 一律逐条挂在 path 上，**不可挂 `<svg>`**（dsh 原样：`strokeWidth` 在 `<svg>`、`stroke="currentColor"`
-    //         在各 path）。本族含 `fill="currentColor"` 实心路径的字形（dshFile/Browse、dshSkill）若在 `<svg>` 上写
-    //         stroke，该实心轮廓会被再描一遍 = 粗细翻倍（2026-09-29 用户点名「这几个莫名的粗」的根因）。
-    //      语义映射（floria 行 → dsh 图标）：会话=ChatLines / 目录=FolderClose / 文件=Browse / 技能=Skill /
-    //      插件=PluginPinwheel / 上级目录=ChevronUp / 上传文件=Paperclip / 「+」按钮本身=PlusMedium。
-    //      命令菜单各命令各有字形，见下方「命令菜单逐命令字形」段。----
-    dshPlus: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 2V14"/><path d="M2 8H14"/></svg>', // IconPlusOutlineMedium
-    // 图片：dsh 产品集**无**图片图标（v0.2.0-rc.1 全部 Icon 里无 image/photo/gallery；dsh 的图片走
-    //     ComposerAttachments 缩略图、与文件同一个 paperclip 入口）。改用 **Radix Icons** 的 `image`
-    //     （github.com/radix-ui/icons，MIT，packages/radix-icons/icons/image.svg，**原 path 一字未改**）：
-    //     15 视框、单条 fill=currentColor 路径 = 与 dsh 同族的「实心路径」画法（同 dshFile/Browse、dshPlan、
-    //     dshSkill），毛重与该族 1px 描线一致；此处只按本表格式外加 `<svg viewBox fill="none">` 外壳。
-    //     旧件是自绘 1.3 描边 + 圆头 + 实心点，比同排重一档、排在一起即「不齐」。
-    dshImage: '<svg viewBox="0 0 15 15" fill="none"><path d="M12.5 1C13.3284 1 14 1.67157 14 2.5V12.5C14 13.3284 13.3284 14 12.5 14H2.5C1.72334 14 1.08461 13.4097 1.00781 12.6533L1 12.5V2.5C1 1.67157 1.67157 1 2.5 1H12.5ZM2 9.63574V12.5L2.00977 12.6006C2.04966 12.7961 2.20392 12.9503 2.39941 12.9902L2.5 13H8.94141L7.52832 11.4395V11.4385L3.98828 7.64746L2 9.63574ZM8.4834 11.1523L10.1553 13H12.5L12.6006 12.9902C12.7961 12.9503 12.9503 12.7961 12.9902 12.6006L13 12.5V10.6367L11 8.63672L8.4834 11.1523ZM2.39941 2.00977C2.17145 2.05629 2 2.25829 2 2.5V8.36328L3.68164 6.68164L3.75195 6.625C3.82721 6.57522 3.91621 6.54823 4.00781 6.5498C4.1298 6.55192 4.24585 6.60417 4.3291 6.69336L7.87305 10.4893L10.6816 7.68164L10.752 7.62402C10.9266 7.50851 11.1645 7.5278 11.3184 7.68164L13 9.36328V2.5C13 2.25829 12.8286 2.05629 12.6006 2.00977L12.5 2H2.5L2.39941 2.00977ZM7.5 3.74902C8.46693 3.74902 9.25098 4.53307 9.25098 5.5C9.25098 6.46693 8.46693 7.25098 7.5 7.25098C6.53307 7.25098 5.74902 6.46693 5.74902 5.5C5.74902 4.53307 6.53307 3.74902 7.5 3.74902ZM7.5 4.64941C7.03013 4.64941 6.64941 5.03013 6.64941 5.5C6.64941 5.96987 7.03013 6.35059 7.5 6.35059C7.96987 6.35059 8.35059 5.96987 8.35059 5.5C8.35059 5.03013 7.96987 4.64941 7.5 4.64941Z" fill="currentColor"/></svg>',
-    dshFile: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M4.9375 5.90295H11.0625" stroke="currentColor"/><path d="M4.9375 9.02991H8.27841" stroke="currentColor"/><path d="M12.5 1.32617C13.3039 1.32617 14 1.95171 14 2.77637V13.2246C13.9996 14.0489 13.3036 14.6738 12.5 14.6738H3.5C2.69637 14.6738 2.00042 14.0489 2 13.2246V2.77637C2 1.95171 2.69613 1.32617 3.5 1.32617H12.5ZM3.5 2.32617C3.1993 2.32617 3 2.55186 3 2.77637V13.2246C3.00044 13.4489 3.19963 13.6738 3.5 13.6738H12.5C12.8004 13.6738 12.9996 13.4489 13 13.2246V2.77637C13 2.55186 12.8007 2.32617 12.5 2.32617H3.5Z" fill="currentColor"/></svg>', // BrowseOutlineArtwork（ReferenceIcon file）
-    dshChat: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M5 6.75H11"/><path d="M5 9H8"/><path d="M2.37067 11.2497C1.5872 9.89252 1.32042 8.29798 1.61945 6.7597C1.91847 5.22141 2.76317 3.84293 3.99801 2.87809C5.23285 1.91325 6.7747 1.427 8.33964 1.50888C9.90458 1.59076 11.3873 2.23526 12.5147 3.32369C13.6422 4.41232 14.3384 5.8717 14.4751 7.43304C14.6118 8.99438 14.1797 10.5525 13.2585 11.8205C12.3372 13.0885 10.9889 13.9809 9.4617 14.3334C8.18666 14.6277 6.8587 14.529 5.64964 14.0601C5.17095 13.8745 4.76937 13.4929 4.26509 13.3963C3.67389 13.2832 2.95232 13.5595 2.0377 14.3334"/></svg>', // ChatLinesOutlineArtwork（ReferenceIcon session）
-    dshFolder: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M1.50439 3.11059C1.50439 2.55831 1.95211 2.1106 2.50439 2.1106H5.43389C5.67773 2.1106 5.91318 2.19969 6.09593 2.36113L7.71649 3.79265C7.89924 3.95409 8.1347 4.04319 8.3785 4.04319H13.4958C14.0481 4.04319 14.4958 4.4909 14.4958 5.04319V12.8894C14.4958 13.4417 14.0481 13.8894 13.4958 13.8894H2.50439C1.95211 13.8894 1.50439 13.4417 1.50439 12.8894V4.04319V3.11059Z"/><path d="M3.63501 7.66614H12.3647"/></svg>', // FolderCloseArtwork（ReferenceIcon folder）
-    dshSkill: '<svg viewBox="0 0 17 17" fill="none" stroke-width="1"><path d="M4.57788 5.77124H10.7029" stroke="currentColor"/><path d="M4.57788 8.89819H7.91879" stroke="currentColor"/><path d="M12.1404 1.19446C12.9442 1.19446 13.6404 1.81999 13.6404 2.64465V8.89856H12.6404V2.64465C12.6404 2.42015 12.4411 2.19446 12.1404 2.19446H3.14038C2.83968 2.19446 2.64038 2.42015 2.64038 2.64465V13.0929C2.64082 13.3172 2.84001 13.5421 3.14038 13.5421H8.88159V14.5421H3.14038C2.33675 14.5421 1.6408 13.9172 1.64038 13.0929V2.64465C1.64038 1.81999 2.33651 1.19446 3.14038 1.19446H12.1404Z" fill="currentColor"/><path d="M12.0051 15.1056C12.0051 13.6395 10.8166 12.451 9.35059 12.451C10.8166 12.451 12.0051 11.2626 12.0051 9.79651C12.0051 11.2626 13.1936 12.451 14.6597 12.451C13.1936 12.451 12.0051 13.6395 12.0051 15.1056Z" stroke="currentColor"/></svg>', // IconSkillOutlineRegular（技能：文档 + 星）
-    dshPlugin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M7.84457 5.06199C11.6605 4.93876 14.7962 6.14848 14.8484 7.76397C14.8875 8.97461 13.1838 10.0696 10.7215 10.5942"/><path d="M5.12742 8.07731C5.00419 4.26138 6.21391 1.12568 7.8294 1.07351C9.04004 1.03441 10.135 2.73808 10.6596 5.20037"/><path d="M8.02457 10.6802C4.20865 10.8034 1.07294 9.5937 1.02077 7.97821C0.981678 6.76758 2.68535 5.67262 5.14763 5.14798"/><path d="M10.7476 7.89535C10.8708 11.7113 9.66109 14.847 8.0456 14.8991C6.83496 14.9382 5.74 13.2346 5.21536 10.7723"/></svg>', // IconPluginPinwheelOutlineRegular（插件：风车）
-    dshUp: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 10L8.70711 6.70711C8.31658 6.31658 7.68342 6.31658 7.29289 6.70711L4 10"/></svg>', // IconChevronUpOutlineRegular（上级目录）
-    // 置顶（2026-10-18 work 侧栏会话 tab 菜单）：图钉，dsh 同族 16 viewBox / 1px 描线自绘。
-    dshPin: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M5.5 1.75h5"/><path d="M6.5 1.75v4.1L5 7.35v1.15h6V7.35l-1.5-1.5V1.75"/><path d="M8 8.5v5.75"/></svg>',
-    dshDownload: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M8 2.5V9.5"/><path d="M4.75 6.25 8 9.5l3.25-3.25"/><path d="M2.5 10.75v1.75a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-1.75"/></svg>', // 下载（2026-10-14 待办 3：文件行菜单「下载」项；dsh 同族 1px 描线自绘）
-    dshExplorer: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M13.25 8.75v3.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3.5"/><path d="M9.75 2.25h4v4"/><path d="M13.75 2.25 7.5 8.5"/></svg>', // 在资源管理器中打开（2026-10-24 文件/目录行菜单；dsh 同族 1px 描线自绘：外开箭头）
-    dshPaperclip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M12.75 4.5V9.5C12.75 10.7598 12.2496 11.968 11.3588 12.8588C10.468 13.7496 9.25978 14.25 8 14.25C6.74022 14.25 5.53204 13.7496 4.64124 12.8588C3.75045 11.968 3.25 10.7598 3.25 9.5V5C3.25 4.13805 3.59241 3.3114 4.2019 2.7019C4.8114 2.09241 5.63805 1.75 6.5 1.75C7.36195 1.75 8.1886 2.09241 8.7981 2.7019C9.40759 3.3114 9.75 4.13805 9.75 5V9.5C9.75 9.96413 9.56563 10.4092 9.23744 10.7374C8.90925 11.0656 8.46413 11.25 8 11.25C7.53587 11.25 7.09075 11.0656 6.76256 10.7374C6.43437 10.4092 6.25 9.96413 6.25 9.5V5.5"/></svg>', // IconPaperclipOutlineRegular（上传文件）
-    // ---- 命令菜单逐命令字形（2026-09-29）--------------------------------------------------------
-    // 抄处：dsh `packages/client/ui-commands/src/client/presentation.ts` 的 HOST_FACES——dsh 给**每个**
-    // 内置命令各自的图标（goal/plan/feedback/compact/permission/export 各不同），不是整列共用一个「+」。
-    // floria 的 + 弹窗此前 11 行命令全渲染 I.dshPlus，读起来就是未完成的占位（用户点名「廉价感」）。
-    // 全部取自 ui-primitives/src/icons/index.tsx 精确 path，逐条按各 artwork 自身签名取（str. 1px）：
-    //   compact=IconCompactOutline / model=IconSlidersTwoOutline / permission=PermissionIcon.tsx
-    //   FullAccessArtwork / plan=IconPlanOutline(=ListPen) / rename=IconEditOutline /
-    //   resume=IconPlayOutline / retry=IconRefreshOutline / status=IconGaugeOutline。
-    // 备用件（当前无菜单行消费，先存字形）：goal=IconGoalOutline（floria 后端无 /goal 命令）、
-    //   trash=IconTrashOutline（原 /clear 行用；2026-09-29 该行已从 + 菜单删除）。
-    // 注意：IconQueueOutline 只是 ChatLines 的别名（=会话图标），故 resume 取 Play；IconShieldOutline
-    // 的 path 是 `SHIELD_OUTLINE_PATH` 常量，已就地展开。Sliders 的 stroke-linecap=round 是该 artwork
-    // 自带的（非本族默认），照抄不动。skills/plugins 复用 MENTION_SKILL_ICON / MENTION_PLUGIN_ICON。
-    dshCompact: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path opacity="0.35" d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z" stroke="currentColor"/><path d="M8 1.5C8.85359 1.5 9.69883 1.66813 10.4874 1.99478C11.2761 2.32144 11.9926 2.80022 12.5962 3.40381C13.1998 4.00739 13.6786 4.72394 14.0052 5.51256C14.3319 6.30117 14.5 7.14641 14.5 8" stroke="currentColor"/></svg>', // IconCompactOutlineArtwork
-    dshTrash: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M1.28149 3.88831H14.7187" stroke="currentColor"/><path d="M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833" stroke="currentColor"/><path d="M2.57349 3.88831L3.19366 13.2943C3.21937 13.5502 3.33952 13.7872 3.53065 13.9593C3.72178 14.1313 3.97016 14.2259 4.22729 14.2246H11.7728C12.0299 14.2259 12.2783 14.1313 12.4694 13.9593C12.6605 13.7872 12.7807 13.5502 12.8064 13.2943L13.4266 3.88831" stroke="currentColor"/><path d="M6.44946 6.98926V11.1238" stroke="currentColor"/><path d="M9.55054 6.98926V11.1238" stroke="currentColor"/></svg>', // IconTrashOutlineArtwork
-    dshSliders: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round"><path d="M2.3 5h5.85M12.05 5h1.65"/><circle cx="9.95" cy="5" r="1.45"/><path d="M2.3 11h1.65M7.85 11h5.85"/><circle cx="5.75" cy="11" r="1.45"/></svg>', // IconSlidersTwoOutlineArtwork
-    dshShield: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M6.59624 2.14853C7.50155 1.80917 8.49914 1.80919 9.40444 2.14859L13.9245 3.84317V7.11961C13.9245 11.6089 10.5565 13.5975 8.00035 14.5779C5.44423 13.5975 2.07544 11.6089 2.07544 7.11961V3.84317L6.59624 2.14853Z" stroke="currentColor" stroke-linejoin="round"/><path d="M8 4.39209V9.89209" stroke="currentColor"/><path d="M8 10.8081V11.8081" stroke="currentColor"/></svg>', // PermissionIcon.tsx FullAccessArtwork（盾 + 感叹号）
-    dshPlan: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M4.9375 5.90295H11.0625" stroke="currentColor"/><path d="M4.9375 9.02991H8.27841" stroke="currentColor"/><path d="M12.5 1.32617C13.3039 1.32617 14 1.95171 14 2.77637V7.61328L13 8.68164V2.77637C13 2.55186 12.8007 2.32617 12.5 2.32617H3.5C3.1993 2.32617 3 2.55186 3 2.77637V13.2246C3.00044 13.4489 3.19963 13.6738 3.5 13.6738H8.32812L7.39258 14.6738H3.5C2.69637 14.6738 2.00042 14.0489 2 13.2246V2.77637C2 1.95171 2.69613 1.32617 3.5 1.32617H12.5Z" fill="currentColor"/><path d="M8.97212 14.3693C9.17511 14.5723 9.37811 14.7753 9.5811 14.9783C9.67012 14.8953 9.75914 14.8123 9.84815 14.7293C11.4505 13.2352 13.0528 11.7411 14.6551 10.247C14.7441 10.164 14.8331 10.081 14.9221 9.99803C14.5989 9.6748 14.2756 9.35157 13.9524 9.02834C13.8694 9.11736 13.7864 9.20637 13.7034 9.29539C12.2093 10.8977 10.7152 12.5 9.22113 14.1023C9.13813 14.1913 9.05513 14.2803 8.97212 14.3693Z" fill="currentColor"/><path d="M11.6323 13.7841C11.6323 14.0395 11.6323 14.295 11.6323 14.5504C11.6812 14.5523 11.7301 14.5543 11.779 14.5562C12.659 14.5913 13.539 14.6263 14.419 14.6614C14.4679 14.6633 14.5168 14.6653 14.5657 14.6672C14.5657 14.3339 14.5657 14.0006 14.5657 13.6672C14.5168 13.6692 14.4679 13.6711 14.419 13.6731C13.539 13.7081 12.659 13.7432 11.779 13.7783C11.7301 13.7802 11.6812 13.7821 11.6323 13.7841Z" fill="currentColor"/></svg>', // IconPlanOutlineArtwork（= IconListPenOutlineArtwork）
-    dshEditOutline: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M8.85596 2.69971H4.19971C3.37141 2.69971 2.69992 3.37146 2.69971 4.19971V11.8003C2.69992 12.6285 3.37141 13.3003 4.19971 13.3003H11.8003C12.6283 13.2999 13.3001 12.6283 13.3003 11.8003V7.89893H14.3003V11.8003C14.3001 13.1806 13.1806 14.2999 11.8003 14.3003H4.19971C2.81913 14.3003 1.69992 13.1808 1.69971 11.8003V4.19971C1.69992 2.81918 2.81913 1.69971 4.19971 1.69971H8.85596V2.69971Z" fill="currentColor"/><path d="M7.7849 8.23878L13.888 2.13574" stroke="currentColor"/></svg>', // IconEditOutlineArtwork（区别于行菜单的 dshEdit，同族 1px）
-    dshPlay: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z" stroke="currentColor"/><path d="M10.3329 7.91346C10.3996 7.95195 10.3996 8.04818 10.3329 8.08667L6.78304 10.1362C6.71638 10.1747 6.63304 10.1266 6.63304 10.0496L6.63304 5.95055C6.63304 5.87357 6.71638 5.82546 6.78304 5.86395L10.3329 7.91346Z" stroke="currentColor"/></svg>', // IconPlayOutlineArtwork
-    dshRefresh: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5C9.9001 1.5 11.7001 2.3 13.0001 3.6L14.5001 5.1" stroke="currentColor"/><path d="M14.4999 1.5V5.1H10.8999" stroke="currentColor"/></svg>', // IconRefreshOutlineArtwork（区别于 24 视框的 I.refresh）
-    dshGauge: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M3.4041 13.096C2.49514 12.187 1.87614 11.0288 1.62537 9.76798C1.37459 8.50716 1.50331 7.20028 1.99525 6.01261C2.48719 4.82494 3.32025 3.80981 4.3891 3.09557C5.45795 2.38134 6.71458 2.00008 8.0001 2C9.28563 2.00008 10.5423 2.38134 11.6111 3.09557C12.68 3.80981 13.513 4.82494 14.005 6.01261C14.4969 7.20028 14.6256 8.50716 14.3748 9.76798C14.1241 11.0288 13.5051 12.187 12.5961 13.096" stroke="currentColor"/><path d="M8 8.49994L11.6114 4.88855" stroke="currentColor"/><path d="M8 9.75C8.69036 9.75 9.25 9.19036 9.25 8.5C9.25 7.80964 8.69036 7.25 8 7.25C7.30964 7.25 6.75 7.80964 6.75 8.5C6.75 9.19036 7.30964 9.75 8 9.75Z" fill="currentColor"/></svg>', // IconGaugeOutlineArtwork
-    dshGoal: '<svg viewBox="0 0 16 16" fill="none" stroke-width="1"><path d="M14.5001 8C14.5 9.28552 14.1188 10.5422 13.4045 11.611C12.6903 12.6799 11.6752 13.5129 10.4875 14.0049C9.29982 14.4968 7.99295 14.6255 6.73212 14.3747C5.4713 14.124 4.31314 13.505 3.4041 12.596C2.49514 11.687 1.87614 10.5288 1.62537 9.26798C1.37459 8.00716 1.50331 6.70028 1.99525 5.51261C2.48719 4.32494 3.32025 3.30981 4.3891 2.59557C5.45795 1.88134 6.71458 1.50008 8.0001 1.5" stroke="currentColor"/><path d="M11.5 8C11.5001 8.69227 11.2948 9.36901 10.9102 9.94463C10.5257 10.5202 9.97901 10.9689 9.33944 11.2338C8.69986 11.4987 7.99609 11.5681 7.31712 11.433C6.63816 11.2979 6.01449 10.9645 5.52501 10.475C5.03548 9.98552 4.70209 9.36185 4.56702 8.68289C4.43195 8.00392 4.50127 7.30015 4.76619 6.66057C5.03112 6.021 5.47976 5.47436 6.05538 5.08978C6.631 4.70519 7.30774 4.49995 8.00001 4.5" stroke="currentColor"/><path d="M8.00024 7.99976L11.2 4.80005" stroke="currentColor"/><path d="M12.4719 5.62245C12.4246 5.66972 12.3569 5.69025 12.2913 5.67715L10.7814 5.37555C10.7022 5.35972 10.6402 5.29781 10.6244 5.2186L10.3228 3.70866C10.3097 3.6431 10.3302 3.57533 10.3775 3.52806L12.1826 1.723C12.2863 1.61929 12.4627 1.65879 12.5122 1.79684L12.9271 2.95225C12.9472 3.00847 12.9915 3.05272 13.0477 3.07291L14.2031 3.48774C14.3412 3.5373 14.3807 3.71368 14.277 3.81739L12.4719 5.62245Z" stroke="currentColor"/></svg>', // IconGoalOutlineArtwork（备用：floria 后端无 /goal 命令）
-    dshSend: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z"/></svg>',
-    dshStop: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"/><rect x="5.6" y="5.6" width="4.8" height="4.8" rx="1" fill="currentColor"/></svg>', // 2026-09-04 圆形方孔停止键（回合进行中）
-    dshChevDown: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z"/></svg>',
-    dshChevRight: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M5.5 2.15137L5.92383 2.57617L8.65137 5.30273C8.90706 5.55843 9.13382 5.78438 9.29785 5.98828C9.46883 6.20088 9.61756 6.44405 9.66602 6.75C9.69222 6.91565 9.69222 7.08435 9.66602 7.25C9.61756 7.55595 9.46883 7.79912 9.29785 8.01172C9.13382 8.21561 8.90706 8.44157 8.65137 8.69727L5.92383 11.4238L5.5 11.8486L4.65137 11L5.07617 10.5762L7.80273 7.84863C8.07732 7.57405 8.24849 7.40124 8.3623 7.25977C8.46904 7.12709 8.47813 7.07728 8.48047 7.0625C8.48703 7.02105 8.48703 6.97895 8.48047 6.9375C8.47813 6.92272 8.46904 6.87291 8.3623 6.74023C8.24848 6.59876 8.07732 6.42595 7.80273 6.15137L5.07617 3.42383L4.65137 3L5.5 2.15137Z"/></svg>',
-    dshCheck: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M15.0498 3.92579L8.49512 12.3818C8.25774 12.6881 8.04517 12.9645 7.84668 13.1689C7.63957 13.3823 7.38732 13.5841 7.04492 13.6719C6.86373 13.7183 6.6757 13.7346 6.48926 13.7197C6.13666 13.6915 5.8528 13.5355 5.6123 13.3604C5.38201 13.1926 5.12573 12.9567 4.83984 12.6953L1.03125 9.21289L1.96875 8.1875L5.77734 11.6699C6.08684 11.9529 6.27773 12.1249 6.43066 12.2363C6.50183 12.2882 6.54699 12.3135 6.57324 12.3252C6.58525 12.3305 6.59269 12.3322 6.5957 12.333C6.59802 12.3336 6.59961 12.334 6.59961 12.334C6.63317 12.3367 6.66758 12.3335 6.7002 12.3252C6.7002 12.3252 6.70211 12.3251 6.7041 12.3242C6.70698 12.3229 6.71348 12.319 6.72461 12.3115C6.74849 12.2956 6.78843 12.2642 6.84961 12.2012C6.98138 12.0654 7.13957 11.8628 7.39648 11.5313L13.9502 3.07422L15.0498 3.92579Z"/></svg>',
-    dshWarn: '<svg viewBox="0 0 14 14" fill="currentColor"><path d="M6.3002 3.32843L7.69986 3.32843L7.69986 7.79657H6.3002L6.3002 3.32843Z"/><path d="M6.3002 9.01935H7.69986V10.6711H6.3002V9.01935Z"/><path d="M12.6328 6.99976C12.6328 3.88874 10.111 1.36694 7 1.36694C3.88899 1.36695 1.3672 3.88875 1.36719 6.99976C1.36719 10.1108 3.88899 12.6326 7 12.6326C10.111 12.6326 12.6328 10.1108 12.6328 6.99976ZM13.8582 6.99976C13.8582 10.7873 10.7876 13.8579 7 13.8579C3.21244 13.8579 0.141846 10.7873 0.141846 6.99976C0.141857 3.2122 3.21245 0.141612 7 0.141602C10.7876 0.141602 13.8581 3.21219 13.8582 6.99976Z"/></svg>',
-    dshClose: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg>',
-    // 行菜单图标（2026-08-24 DSH 会话行 Menu 移植：重命名=EditOutline）
-    dshEdit: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.9482 1.97949L13.9253 4.95508L5.51453 13.3659L2.53613 12.6157L2.18896 9.24414L10.9482 1.97949ZM8.2951 4.63011L4.75226 8.17207L7.71064 9.1084L11.2535 5.56544L8.2951 4.63011ZM3.60287 10.1729L3.78518 12.1367L5.7417 12.5674L6.2064 12.1027L4.06812 11.4503L3.60287 10.1729Z"/></svg>',
-    // 阅读视图（work 编辑区 阅读/编辑 切换用；展开的书页，描线族，与 dshChev/dshSliders 同 1px 口径）
-    dshBook: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.7C6.9 2.9 5.45 2.6 4.15 2.6c-.55 0-1.08.06-1.55.18v9.04c.47-.12 1-.18 1.55-.18 1.3 0 2.75.3 3.85 1.1"/><path d="M8 3.7c1.1-.8 2.55-1.1 3.85-1.1.55 0 1.08.06 1.55.18v9.04c-.47-.12-1-.18-1.55-.18-1.3 0-2.75.3-3.85 1.1"/><path d="M8 3.7v9.04"/></svg>',
-    // 新建独立会话（web 与 CLI 等权并行）：终端窗口 + 提示符
-    web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14"/><path d="M12.5 14h4"/></svg>',
-  }
-
-  // ---------- 文件类型徽标（2026-10-22） ----------
-  // 用途：附件胶囊（#img-pills .file-pill）、消息文件卡片（.msg-file）、引用胶囊（.mc-ic）、
-  // work 工具栏文件胶囊（.wk-tb-ico）。形 = 16 视框圆角方块 + 白色类型缩写，色取该格式的
-  // 通用联想色（PDF 红 / Word 蓝 / Excel 绿 / PPT 橙），小尺寸（12–20px）下仍可辨。
-  // 未知扩展名回落中性文档页形（currentColor，随主题明暗）。
-  const FILE_BADGE = {
-    pdf: ['PDF', '#e5484d'],
-    doc: ['W', '#2b6cb0'], docx: ['W', '#2b6cb0'], rtf: ['W', '#2b6cb0'], odt: ['W', '#2b6cb0'],
-    xls: ['X', '#2f855a'], xlsx: ['X', '#2f855a'], csv: ['X', '#2f855a'], ods: ['X', '#2f855a'],
-    ppt: ['P', '#dd6b20'], pptx: ['P', '#dd6b20'], odp: ['P', '#dd6b20'],
-    md: ['M', '#64748b'], markdown: ['M', '#64748b'],
-    txt: ['T', '#64748b'], log: ['T', '#64748b'],
-    js: ['{}', '#7c5cff'], mjs: ['{}', '#7c5cff'], cjs: ['{}', '#7c5cff'], ts: ['{}', '#7c5cff'],
-    tsx: ['{}', '#7c5cff'], jsx: ['{}', '#7c5cff'], py: ['{}', '#7c5cff'], go: ['{}', '#7c5cff'],
-    rs: ['{}', '#7c5cff'], java: ['{}', '#7c5cff'], c: ['{}', '#7c5cff'], h: ['{}', '#7c5cff'],
-    cpp: ['{}', '#7c5cff'], sh: ['{}', '#7c5cff'], bash: ['{}', '#7c5cff'], html: ['{}', '#7c5cff'],
-    css: ['{}', '#7c5cff'], json: ['{}', '#7c5cff'], yml: ['{}', '#7c5cff'], yaml: ['{}', '#7c5cff'],
-    toml: ['{}', '#7c5cff'],
-    png: ['IMG', '#0e7490'], jpg: ['IMG', '#0e7490'], jpeg: ['IMG', '#0e7490'], webp: ['IMG', '#0e7490'],
-    gif: ['IMG', '#0e7490'], svg: ['IMG', '#0e7490'],
-    zip: ['Z', '#a16207'], rar: ['Z', '#a16207'], '7z': ['Z', '#a16207'], tar: ['Z', '#a16207'],
-    gz: ['Z', '#a16207'],
-    mp3: ['♪', '#be185d'], wav: ['♪', '#be185d'], m4a: ['♪', '#be185d'], flac: ['♪', '#be185d'],
-    mp4: ['▶', '#9333ea'], mov: ['▶', '#9333ea'], mkv: ['▶', '#9333ea'], webm: ['▶', '#9333ea'],
-  }
-  const FILE_UNKNOWN_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1"><path d="M4.5 1.5h4.6L13 5.4v9.1a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1z" stroke-linejoin="round"/><path d="M9 1.7v3.7h3.8"/></svg>'
-  function fileExt(name) {
-    const base = String(name == null ? '' : name).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''
-    const i = base.lastIndexOf('.')
-    return i > 0 ? base.slice(i + 1).toLowerCase() : ''
-  }
-  // name 只用于取扩展名查表，不参与拼接（无注入面）；label/color 均来自常量表。
-  function fileIcon(name) {
-    const hit = FILE_BADGE[fileExt(name)]
-    if (!hit) return FILE_UNKNOWN_ICON
-    const [label, color] = hit
-    const size = label.length > 2 ? 4.4 : label.length > 1 ? 5.6 : 7.6
-    return `<svg class="file-ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="14" rx="3.2" fill="${color}"/><text x="8" y="11.35" text-anchor="middle" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-size="${size}" font-weight="700" fill="#fff">${label}</text></svg>`
-  }
+  // 2026-10-24 收口：图标表（I + fileIcon）整体移入 UI 基础包
+  // `SubPj1-遥测网页/packages/web/src/icons.js`，产物 /webui/floria-web.iife.js 先于 app.js 同步加载并挂
+  // window.FloriaWeb。缺包即抛错（不回落本地副本——回落会让两份图标表各自漂移）。
+  if (!window.FloriaWeb) throw new Error('@floria/web 包未加载（/webui/floria-web.iife.js 须先于 app.js）')
+  const {
+    I,
+    fileIcon,
+  } = window.FloriaWeb
 
   // ---------- 管理视图数据源（2026-08-15 起接后端 /gateway/plugins：真实已安装插件/技能 + 官方市场） ----------
   // 结构镜像后端返回：{ plugins:{personal,public}, skills:{personal,public} }，每项 {n, d, v, inst}。
@@ -585,18 +463,16 @@ function setConnUp(v) { connUp = v }
   const QUOTE_PDF_BODY_RE = /(\[@引用PDF:[^\]]*\])([\s\S]*?)\[\/引用PDF\]/g
   const QUOTE_REPLY_FOLDED_RE = /\[@引用回复:(\d+)\|([^\]|\n]*)\|([^\]\n]*)\]/g
   const QUOTE_PDF_FOLDED_RE = /\[@引用PDF:([^\]|]+)\|([^\]\n]*)\]/g
-  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获；
-  // 收尾之后的用户话术若与收尾同行，补一个换行避免与胶囊黏在同一行。
+  // 块 → 折叠。收尾令牌不保证独占一行（退格/编辑会把它与正文并到同行），故用非贪婪全量捕获。
+  // **折叠后严禁补换行**（2026-10-24 用户实报「引用发送后后面总有莫名其妙的换行」）：mdHtml 按行
+  // 拆段、行间落 <br>，块形态里锚点/原文/收尾三行只服务于模型；渲染侧整块折成一枚行内胶囊，
+  // 用户话术必须紧接胶囊流动（补 \n 会变成紧跟在胶囊后的额外 <br>）。
   function foldQuoteBodies(text) {
     const clean = (body) => String(body == null ? '' : body).replace(/^\s+|\s+$/g, '')
     const withBody = (token, body) => token.replace(/\]$/, '|' + encodeQuoteBody(clean(body)) + ']')
-    const tailBreak = (whole, offset, match) => {
-      const rest = String(whole).slice(offset + match.length)
-      return rest && !rest.startsWith('\n') ? '\n' : ''
-    }
     return String(text || '')
-      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body, offset, whole) => `${withBody(`[@引用回复:${idx}|${title}]`, body)}${tailBreak(whole, offset, m)}`)
-      .replace(QUOTE_PDF_BODY_RE, (m, token, body, offset, whole) => `${withBody(token, body)}${tailBreak(whole, offset, m)}`)
+      .replace(QUOTE_REPLY_BODY_RE, (m, idx, title, body) => withBody(`[@引用回复:${idx}|${title}]`, body))
+      .replace(QUOTE_PDF_BODY_RE, (m, token, body) => withBody(token, body))
   }
   // 折叠 → 块（发送口）：底栏 doc 的折叠胶囊在这里还原成模型可读的原文块。
   function unfoldQuoteBodies(text) {
@@ -664,12 +540,11 @@ function setConnUp(v) { connUp = v }
   const MD_IMG_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpe?g|webp|gif)$/
   let mdImgResolver = null
   const setImageSrcResolver = (fn) => { mdImgResolver = fn }
-  // 附件引用（2026-10-16）：正文里的 `![](uploads/x.png)`——@ 艾特插入 / 上传后发送的原文（会话 cwd
-  // 相对路径，跨会话补发为 `../<项目>/uploads/x`）。渲染成**行内小图**（与文字同高，见 styles.css
-  // `.msg .md-att-img`），类名带 msg-img ⇒ 复用既有 lightbox 委托（点小图看大图、点空白关闭），与
-  // 消息流里的图片是同一条预览链。取图 URL 同样注入（core 不依赖 feature）：无 resolver / 无 label
-  // → 保留原文（不兜底）。
-  const MD_ATT_CODE = /^(?:\.{1,2}\/)*uploads\/[^)\s]+$/
+  // 附件引用（2026-10-24 统一 file-cache）：正文里的 `![](file-cache/<会话id>/x.png)`——@ 艾特插入 /
+  // 上传后发送的原文（网关签发的 rel，基址 = 配置根/file-cache）。渲染成**行内小图**
+  // （与文字同高，见 styles.css `.msg .md-att-img`），类名带 msg-img ⇒ 复用既有 lightbox 委托，与消息
+  // 流里的图片是同一条预览链。取图 URL 由 resolver 注入（core 不依赖 feature）：无 resolver → 保留原文。
+  const MD_ATT_CODE = /^file-cache\/[^)\s]+$/
   let mdAttResolver = null
   const setAttachmentResolver = (fn) => { mdAttResolver = fn }
 
@@ -789,7 +664,7 @@ function setConnUp(v) { connUp = v }
     // 图片代号（AI 生成图）：![](文件名.png) → <img>，code 过白名单 + resolver 拼取图 URL；
     // 不匹配或无 resolver 则保留原文（不兜底）。必须在下方链接替换之前，否则被拆成 ! + <a>。
     s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, code) => {
-      // 附件引用（uploads/）：行内小图（与文字同高），类含 msg-img ⇒ 与消息图片共用 lightbox
+      // 附件引用（file-cache/）：行内小图（与文字同高），类含 msg-img ⇒ 与消息图片共用 lightbox
       if (mdAttResolver && MD_ATT_CODE.test(code)) {
         const aurl = mdAttResolver(code)
         if (aurl) return `<img class="msg-img md-att-img" loading="lazy" alt="${alt}" src="${esc(aurl)}">`
@@ -799,8 +674,8 @@ function setConnUp(v) { connUp = v }
       if (!url) return `![${alt}](${code})`
       return `<img class="msg-img md-img" loading="lazy" alt="${alt}" src="${esc(url)}">`
     })
-    // 附件文件引用（uploads/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](uploads/x)`）；
-    // 非 uploads 链接仍走普通外链。
+    // 附件文件引用（file-cache/）：与编辑器同形 = 类型徽标 + 文件名（@ 上传组插入的 `[名](file-cache/…)`）；
+    // 非 file-cache 链接仍走普通外链。
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, t, u) => {
       if (MD_ATT_CODE.test(u)) {
         return `<span class="mention-chip m-path m-att" title="${u}"><span class="mc-ic">${fileIcon(u)}</span><span class="mc-t">${t}</span></span>`
@@ -1961,13 +1836,13 @@ function setSessionCwd(v) { sessionCwd = v }
     }
     live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || live.lastDataTs
     // 2026-09-02 排队图 id 防撞：扫描当前会话 display 已用最大 imageId（CLI getInitialPasteId
-    // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，image-cache 字节
+    // 同法），gwSend 分配 id 从 max+1 起——同会话多条带图消息 id 互不复用，file-cache 字节
     // 不再互覆（原恒从 1 起，第二条覆盖第一条 → 历史图错图）。
     // 2026-09-16 单调不回卷根修：视图（localMessages）在压缩归档/delta 重写窗口会丢历史块，
     // 清零重扫会把 maxImgId 回卷 → 下张图复用旧 id → CLI storeImage('w') 覆写字节 + 网关
     // max-age=86400 把首次取到的旧字节钉在该 URL 上 = 新图显示成旧图（b5bd1265 实证 A/B/C
     // 三图全 1 号互覆）。id 不复用是分配器不变量，不依赖视图完整：重扫只增不减（跨会话切回
-    // 基准偏高无害，image-cache 按会话分目录，id 只需会话内唯一）。
+    // 基准偏高无害，file-cache 按会话分目录，id 只需会话内唯一）。
     for (const m of messages) {
       for (const b of m.blocks || []) {
         if (b.kind === 'image' && typeof b.imageId === 'number' && b.imageId > live.maxImgId) live.maxImgId = b.imageId
@@ -2055,7 +1930,7 @@ function setSessionCwd(v) { sessionCwd = v }
       // 采集刷新前的消息 key（data-m|data-t），重建后只给新增块播放入场动画
       const prevMsgs = new Set([...messagesEl.querySelectorAll('[data-m]')].map((e) => e.dataset.m + '|' + (e.dataset.t || '')))
       // img 换血（2026-09-18 内存峰值/闪烁根治）：整页 innerHTML 重建全部节点 → 全部 <img> 重建且
-      // image-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
+      // file-cache private,no-cache 每张必回源（网络风暴 + 全图重新解码 = 回合边界卡顿峰值 +
       // 「先塌后弹」闪烁）。src 相同的图内容不变 → 重建前按 src 采池，重建后同 src 换回旧节点
       //（池 shift 支持同 src 多图），零回源零重解码；池剩余节点随 GC 回收。
       const imgPools = new Map()
@@ -2132,7 +2007,7 @@ function setSessionCwd(v) { sessionCwd = v }
     //    展开的折叠照常恢复」），增量路径同受此不变量约束——此处按同一键语义捕获并恢复
     //    （键不在旧集的新增折叠保留 HTML 默认：处理中展开、工具行收起）。
     // ② 用户气泡及其图片：气泡在段内不变（who/图/文件/复制钮落盘后皆静态），重建节点令 imgs
-    //    重新请求/解码（image-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
+    //    重新请求/解码（file-cache no-cache 必回源 → 至少一帧 0 高塌缩再回弹）= 每增量先塌后弹
     //    的跳动。DOM 已有同 key 气泡时保留旧节点、丢弃新段气泡节点只换其余（气泡=段首元素，
     //    其余部分删后插回流末锚点前=文档序不变；处理中段恒为末段，旧气泡与流末锚点之间不存在
     //    他段节点）。
@@ -2161,7 +2036,7 @@ function setSessionCwd(v) { sessionCwd = v }
     if (keepBubble) newBubble.remove()
     // img 换血（2026-09-18「旁白消息的图片仍闪」根治）：段内除段首用户气泡外的节点（尤其
     // 引导气泡 data-t="g<gi>"——上传图片经排队注入后正是落在这里，与旁白行同段）每帧重建，
-    // 新 <img> 到 paint 时尚未解码（image-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
+    // 新 <img> 到 paint 时尚未解码（file-cache private,no-cache 必回源）= 至少一帧 0 高塌缩
     // 再回弹。与全量重建路径同一不变量：已落盘图片字节不可变 → 同 src 的旧节点直接换回，
     // 零回源零重解码。只从「本次将被删除」的节点采池——保留的旧气泡节点不动（引导气泡与
     // 用户气泡可能同 src，采走会让保留气泡丢图）。
@@ -2673,7 +2548,7 @@ function setLivePorts(p) { liveMsgPort = p.msg; liveUiPort = p.ui; liveStagePort
           live.txProcStart = claimStartTs() // 主张计时起点移交（bindLiveFoldTimer 续算，跨接管不回跳）
           setFirstSendHash('')
         }
-        // 2026-08-30 图片内联渲染：会话 uuid（image-cache 目录名）供用户气泡 <img> URL 拼接，
+        // 2026-08-30 图片内联渲染：会话 uuid（file-cache 目录名）供用户气泡 <img> URL 拼接，
         // 首开即设（refreshSession 同款，防首屏图片 URL 带空 uuid）
         if (file) live.curUuid = file.replace(/\.jsonl$/, '')
         live.lastDataTs = (messages.length && messages[messages.length - 1].timestamp) || 0 // 切会话：基线硬重置为本会话末条 ts
@@ -2751,14 +2626,12 @@ function setLastNavHash(v) { lastNavHash = v }
     const label = s ? (s.projectLabel || '') : ''
     return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent('.claude/images/' + code)}` : null
   })
-  // 附件引用取图（2026-10-16）：正文里的 `![](uploads/x.png)`（上传落盘件，会话 cwd 相对）→ 同一
-  // GET /gateway/file 链（label 同口径、path 直接就是正文里那条相对路径）。取不到 label → null
-  // ⇒ 渲染层保留原文。此前这类引用不匹配 MD_IMG_CODE（只认裸文件名）→ 发送后的消息里直接显示
-  // 原始 md 文本 `![…](uploads/…)`（用户实报「上传图片会有类似 [image 的东西」）。
+  // 附件引用取图（2026-10-24 统一 file-cache）：正文里的 `![](file-cache/<会话id>/x.png)` 是网关签发的
+  // rel（基址 = 会话启动根/.claude/file-cache），取字节走 GET /gateway/file-cache/<会话id>/<名>?sid=——
+  // dir/uuid 无法区分项目，必须带上当前会话 sid 供网关解出项目根。
   setAttachmentResolver((code) => {
-    const s = findSession(live.curUuid)
-    const label = s ? (s.projectLabel || '') : ''
-    return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent(code)}` : null
+    const sid = state.currentHash
+    return `/gateway/${code}` + (sid ? `?sid=${encodeURIComponent(sid)}` : '')
   })
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）
   const TOOL_NAMES = {
@@ -3235,15 +3108,15 @@ function setLastNavHash(v) { lastNavHash = v }
 
   // 用户气泡正文（2026-08-30 图片渲染，用户定案：图在气泡外）：
   // 带 imageId 的 image 块 → 气泡只出文本（剥掉文本里已渲染图的 [Image #N] 占位），
-  // 图由 userImgsHtml 渲染在气泡框外；字节走网关 GET /gateway/image-cache/<会话uuid>/<id>
-  // （复用 CLI processUserInput storeImages 落盘的 image-cache，display JSON 不塞 base64）。
+  // 图由 userImgsHtml 渲染在气泡框外；字节走网关 GET /gateway/file-cache/<会话uuid>/<id>?sid=<会话hash>
+  // （复用 CLI processUserInput storeImages 落盘的 <项目根>/.claude/file-cache，display JSON 不塞 base64）。
   // 无 imageId（旧记录）→ 回落 [图片] 占位/纯文本；图已落盘后被清（会话重启
-  // cleanupOldImageCaches 清非当前会话缓存）→ userImgsHtml onerror 出 [Image #N] 裸文本。
+  // cleanupOldFileCaches 清非当前会话缓存）→ userImgsHtml onerror 出 [Image #N] 裸文本。
   function userBodyHtml(m) {
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
-    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ image-cache 文件名 ↔ 图片块
+    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ file-cache 文件名 ↔ 图片块
     // imageId 同源），**永不上屏：无条件全剥**。旧「只剥有 image 块对应的那几个 id」在链上任何一处
     // 少一张图时（网关曾按 ≤4 张静默截断；non-vision 模型 CLI 丢弃 image 块同理）多出的占位会漏成
     // 消息裸文本（用户实测 [Image #5] [Image #6] [Image #7]）。对应图片本体由 userImgsHtml 依图片块
@@ -3258,7 +3131,7 @@ function setLastNavHash(v) { lastNavHash = v }
   }
 
   // 文本里的 [Image #N] 占位（web 发送端拼的内部令牌）→ id 列表。CLI 落盘文件名即 N
-  // （storeImages 按 pastedContents id 命名），故凭占位即可拼出 image-cache URL。
+  // （storeImages 按 pastedContents id 命名），故凭占位即可拼出 file-cache URL。
   function textImageIds(m) {
     const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
     const out = []
@@ -3277,13 +3150,15 @@ function setLastNavHash(v) { lastNavHash = v }
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     if (!ids.length) ids.push(...textImageIds(m))
     if (!ids.length) return ''
-    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/image-cache/${live.curUuid || ''}/${id}">`).join('')
+    const sid = state.currentHash ? '?sid=' + encodeURIComponent(state.currentHash) : ''
+    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${sid}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
 
   // 文件卡片（2026-09-12 文件上传，用户定案「像图片一样有对应的 UI」）：与图片同构——消息文本里
   // 的 [文件:<落盘绝对路径>] 占位剥出渲染成气泡外下方文件卡片（图标+文件名，title=完整路径，
-  // 点击复制路径供粘贴他用）。文件已落盘（uploads/ 不随会话清理），无图片的 404/裸文本回落问题。
+  // 点击复制路径供粘贴他用）。文件落 file-cache/<会话id>/（与粘贴图片同目录，随会话清理），
+  // 卡片形态与图片的 404/裸文本回落不共用。
   function fileCardsHtml(paths) {
     const cards = paths.map((p) => {
       const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
@@ -5586,6 +5461,361 @@ function setFirstSendHash(v) { firstSendHash = v }
       (t) => `<button type="button" class="wk-pv-tab" data-wkpv="${esc(t.id)}">${esc(t.title)}</button>`,
     ).join('')
   }
+
+  // 类名一律 cmt* 前缀：全部模块顶层声明共享一个 IIFE 作用域（见 probe-web-module-scope）。
+  let cmtList = []        // 当前项目评论（服务端权威副本）
+  let cmtProj = ''        // cmtList 归属项目 label
+  let cmtLoaded = false    // cmtList 是否已为 cmtProj 拉取成功
+  let cmtLoading = false
+  let cmtErr = ''
+
+  // 宿主能力注入（work 侧 / 预处理器侧不反向 import 卡）
+  let cmtOpenFile = null
+  let cmtEnsurePane = null
+  let cmtRefreshMarks = null
+
+  function cmtSetHooks(h) {
+    if (!h) return
+    if (typeof h.openFile === 'function') cmtOpenFile = h.openFile
+    if (typeof h.ensurePane === 'function') cmtEnsurePane = h.ensurePane
+    if (typeof h.refreshMarks === 'function') cmtRefreshMarks = h.refreshMarks
+  }
+
+  function cmtHookOpenFile(path, id) { if (cmtOpenFile) cmtOpenFile(path, id) }
+  function cmtHookEnsurePane() { if (cmtEnsurePane) cmtEnsurePane() }
+
+  // 渲染同步：面板 + 原文标记（work.js 阅读态按 cmtRangesFor 打标的唯一重绘入口）
+  function cmtAfterChange() {
+    cmtRender()
+    if (cmtRefreshMarks) cmtRefreshMarks()
+  }
+
+  // 供 work.js 在原文（阅读态）打标记：当前项目内、指定文件的评论行范围（1 基源行号）
+  function cmtRangesFor(path) {
+    const p = String(path || '').replace(/\\/g, '/')
+    if (!p || !cmtProj) return []
+    return cmtList
+      .filter(
+        (c) =>
+          c && typeof c === 'object' &&
+          String(c.path || '').replace(/\\/g, '/') === p &&
+          Number(c.l1) >= 1,
+      )
+      .map((c) => ({
+        id: String(c.id || ''),
+        l0: Number(c.l0) || 1,
+        l1: Number(c.l1) || Number(c.l0) || 1,
+        resolved: !!c.resolved,
+      }))
+  }
+
+  // 换项目 / 退 work：作废内存副本（下次 cmtLoad 重新拉）
+  function cmtInvalidate() {
+    cmtList = []
+    cmtProj = ''
+    cmtLoaded = false
+    cmtLoading = false
+    cmtErr = ''
+    if (cmtRefreshMarks) cmtRefreshMarks() // 换项目：清掉上一项目的原文标记
+  }
+
+  function cmtId() {
+    return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+  }
+  function cmtFmtTime(iso) {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    const p = (n) => String(n).padStart(2, '0')
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+  }
+
+  async function cmtFetch(proj) {
+    if (!proj || needToken()) {
+      cmtLoading = false
+      return
+    }
+    cmtLoading = true
+    cmtErr = ''
+    cmtRender()
+    try {
+      const res = await fetch(apiUrl('/gateway/comments?label=' + encodeURIComponent(proj)))
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || '加载失败')
+      cmtList = (Array.isArray(data.comments) ? data.comments : []).filter((c) => c && typeof c === 'object' && !Array.isArray(c))
+      cmtProj = proj
+      cmtLoaded = true
+    } catch (e) {
+      cmtErr = e.message || String(e)
+      cmtLoaded = false
+    } finally {
+      cmtLoading = false
+      cmtAfterChange()
+    }
+  }
+
+  // 已有当前项目副本就直接用（免重复请求）；换项目才拉
+  async function cmtLoad(proj) {
+    if (!proj) {
+      cmtInvalidate()
+      cmtRender()
+      return
+    }
+    if (cmtLoaded && proj === cmtProj) return
+    await cmtFetch(proj)
+  }
+
+  // 整份回写（唯一写口）：cmtList 当前值 → 服务端。失败 toast 并返回 false（调用方决定是否回滚内存副本）。
+  async function cmtSave() {
+    const proj = state.workProj
+    if (!proj) return false
+    try {
+      const res = await fetch(apiUrl('/gateway/comments'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: proj, comments: cmtList }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
+      return true
+    } catch (e) {
+      toast('评论保存失败：' + (e.message || e))
+      return false
+    }
+  }
+
+  // 内存副本改 → 渲染 → 回写；回写失败回滚（不静默丢改动）
+  async function cmtMutate(fn) {
+    const prev = cmtList
+    fn()
+    cmtAfterChange()
+    if (!(await cmtSave())) {
+      cmtList = prev
+      cmtAfterChange()
+    }
+  }
+
+  // 读口（面板 / 卡 API 只读，不直取可变绑定）
+  function cmtState() {
+    return {
+      list: cmtList,
+      proj: cmtProj,
+      loading: cmtLoading,
+      err: cmtErr,
+    }
+  }
+  function cmtRemove(c) {
+    cmtMutate(() => { cmtList = cmtList.filter((x) => x !== c) })
+  }
+  function cmtToggleResolved(c) {
+    cmtMutate(() => { c.resolved = !c.resolved })
+  }
+
+  async function cmtAdd(proj, entry) {
+    if (!proj) return false
+    if (!(cmtLoaded && cmtProj === proj)) await cmtFetch(proj)
+    if (cmtProj !== proj) return false
+    cmtList.push(entry)
+    cmtAfterChange()
+    if (!(await cmtSave())) {
+      cmtList = cmtList.filter((c) => c !== entry)
+      cmtAfterChange()
+      return false
+    }
+    return true
+  }
+
+  let cmtPop = null       // 选区「添加评论」浮层
+
+  function cmtClosePop() {
+    if (cmtPop) { cmtPop.remove(); cmtPop = null }
+  }
+  function openCommentComposer(snap) {
+    if (!snap || snap.kind !== 'file' || !snap.file) return
+    cmtHookEnsurePane() // 落点可见：右栏切到评论 tab（注释提交后立刻在列表里看到）
+    cmtClosePop()
+    const pop = document.createElement('div')
+    pop.className = 'cmt-pop'
+    const n0 = Number(snap.l0) || 0
+    const n1 = Number(snap.l1) || 0
+    const loc = esc(snap.file) + (n0 ? ' · ' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') + ' 行' : '')
+    pop.innerHTML =
+      '<div class="cmp-loc">' + loc + '</div>' +
+      '<blockquote class="cmp-ex">' + esc(String(snap.text || '').slice(0, 300)) + '</blockquote>' +
+      '<textarea class="cmp-in" placeholder="添加评论…" rows="3"></textarea>' +
+      '<div class="cmp-bar"><button type="button" class="cmp-cancel">取消</button><button type="button" class="cmp-ok">评论</button></div>'
+    document.body.appendChild(pop)
+    const r = snap.rect || { left: 0, bottom: 0 }
+    const w = pop.offsetWidth
+    const h = pop.offsetHeight
+    pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
+    pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
+    const ta = pop.querySelector('.cmp-in')
+    ta.focus()
+    pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮层内按下不算「点外部」
+    pop.querySelector('.cmp-cancel').addEventListener('click', cmtClosePop)
+    const submit = async () => {
+      const body = ta.value.trim()
+      if (!body) { ta.focus(); return }
+      const entry = {
+        id: cmtId(),
+        path: snap.file,
+        l0: n0,
+        l1: n1,
+        excerpt: String(snap.text || '').slice(0, 300),
+        body,
+        author: 'me',
+        createdAt: new Date().toISOString(),
+        resolved: false,
+      }
+      cmtClosePop()
+      if (await cmtAdd(snap.proj || state.workProj, entry)) toast('已添加评论')
+    }
+    pop.querySelector('.cmp-ok').addEventListener('click', submit)
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() }
+      else if (e.key === 'Escape') { e.preventDefault(); cmtClosePop() }
+    })
+    cmtPop = pop
+  }
+
+  // 点浮层外 / 滚动 / Esc → 关（fixed 浮层会漂离锚点；与 quote.js 浮窗同策略）。
+  // 滚动关闭守护的不变量 = 「锚点漂移」：只有**浮层外**的滚动才让选区滚走、浮层漂离锚点；
+  // 浮层内 cmp-in 自己的内容滚动（评论正文超出可见行数后的纵向滚动）不改变锚点关系，
+  // 不得关窗——否则输入长评论的瞬间（textarea 内容一滚）浮层即死（capture 监听 window 也收到元素 scroll）。
+  document.addEventListener('mousedown', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() })
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cmtPop) cmtClosePop() })
+  window.addEventListener('scroll', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() }, { passive: true, capture: true })
+
+  let cmtFilter = 'all'   // 'all' | 'open'（只看未解决）
+  let cmtMounted = false
+
+  function cmtCmp(a, b) {
+    const pa = String(a.path || '')
+    const pb = String(b.path || '')
+    if (pa !== pb) return pa < pb ? -1 : 1
+    return (Number(a.l0) || 0) - (Number(b.l0) || 0)
+  }
+  function cmtItemHtml(c) {
+    const n0 = Number(c.l0) || 0
+    const n1 = Number(c.l1) || 0
+    const loc = esc(String(c.path || '')) + (n0 ? ':' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') : '')
+    return '<div class="cmt-item' + (c.resolved ? ' resolved' : '') + '" data-cid="' + esc(String(c.id || '')) + '">' +
+      '<div class="cmt-head">' +
+        '<button type="button" class="cmt-loc" data-cmtloc="' + esc(String(c.path || '')) + '">' + loc + '</button>' +
+        '<span class="cmt-time">' + esc(cmtFmtTime(c.createdAt)) + '</span>' +
+      '</div>' +
+      (c.excerpt ? '<blockquote class="cmt-ex">' + esc(String(c.excerpt)) + '</blockquote>' : '') +
+      '<div class="cmt-text">' + esc(String(c.body || '')) + '</div>' +
+      '<div class="cmt-acts">' +
+        '<button type="button" data-cmtact="resolve">' + (c.resolved ? '重开' : '解决') + '</button>' +
+        '<button type="button" class="danger" data-cmtact="del">删除</button>' +
+      '</div>' +
+    '</div>'
+  }
+  function cmtRender() {
+    const el = $('wk-cmt')
+    if (!el) return
+    if (!state.workProj) {
+      el.innerHTML = '<div class="cmt-empty">未选择项目</div>'
+      return
+    }
+    const { list: all, loading, err } = cmtState()
+    if (loading) {
+      el.innerHTML = '<div class="cmt-empty">加载中…</div>'
+      return
+    }
+    if (err) {
+      el.innerHTML = '<div class="cmt-empty">' + esc(err) + '</div>'
+      return
+    }
+    const open = all.filter((c) => !c.resolved).length
+    const head =
+      '<div class="cmt-filters">' +
+        '<button type="button" class="cmt-f' + (cmtFilter === 'all' ? ' on' : '') + '" data-cmtf="all">全部 ' + all.length + '</button>' +
+        '<button type="button" class="cmt-f' + (cmtFilter === 'open' ? ' on' : '') + '" data-cmtf="open">未解决 ' + open + '</button>' +
+      '</div>'
+    const list = (cmtFilter === 'open' ? all.filter((c) => !c.resolved) : all).slice().sort(cmtCmp)
+    const body = list.length
+      ? list.map(cmtItemHtml).join('')
+      : '<div class="cmt-empty">' + (all.length ? '没有未解决的评论' : '还没有评论。在文件里选中内容后添加。') + '</div>'
+    el.innerHTML = head + '<div class="cmt-list">' + body + '</div>'
+  }
+
+  // 面板事件委托（一次）：容器 innerHTML 整体重渲，逐条绑定会被抹掉
+  function cmtMount() {
+    const el = $('wk-cmt')
+    if (!el || cmtMounted) return
+    cmtMounted = true
+    el.addEventListener('click', (e) => {
+      const f = e.target.closest('[data-cmtf]')
+      if (f) {
+        cmtFilter = f.dataset.cmtf === 'open' ? 'open' : 'all'
+        cmtRender()
+        return
+      }
+      const loc = e.target.closest('[data-cmtloc]')
+      if (loc) {
+        const item = loc.closest('[data-cid]')
+        cmtHookOpenFile(loc.dataset.cmtloc, item ? item.dataset.cid : '')
+        return
+      }
+      const act = e.target.closest('[data-cmtact]')
+      const item = act && act.closest('[data-cid]')
+      if (!item) return
+      const c = cmtState().list.find((x) => String(x.id) === item.dataset.cid)
+      if (!c) return
+      if (act.dataset.cmtact === 'resolve') cmtToggleResolved(c)
+      else if (act.dataset.cmtact === 'del') cmtRemove(c)
+    })
+  }
+
+  // 卡描述符（与 views/cards/* 同构：id/title/命令表）。host pane 卡无槽位 mount，注册面走 ToolCapsule。
+  const commentCardDef = {
+    id: 'comment',
+    title: '评论',
+    tip: '项目评论批注',
+    icon: 'msg',
+    tab: false,
+    pane: 'wk-cmt',
+    ns: 'floria-comment',
+    cmds: ['state', 'locate'],
+  }
+
+  // ① ToolCapsule 工具页：打开该页时拉当前项目评论并渲染（cmtMount 幂等，事件委托只绑一次）
+  registerWkTool({
+    id: 'comments',
+    title: commentCardDef.title,
+    pane: commentCardDef.pane,
+    mount: () => {
+      cmtMount()
+      cmtLoad(state.workProj)
+      cmtRender()
+    },
+  })
+
+  // ② 公开 API：只读快照，无状态、幂等
+  function cmtSnapshot() {
+    const { list, proj, loading, err } = cmtState()
+    return { project: proj, total: list.length, open: list.filter((c) => !c.resolved).length, loading, error: err }
+  }
+  cardBus.registerInlineCard({
+    instanceId: 'floria-comment',
+    ns: commentCardDef.ns,
+    cmds: commentCardDef.cmds,
+    handlers: {
+      state: () => cmtSnapshot(),
+      locate: () => ({
+        ...cmtSnapshot(),
+        comments: cmtState().list.map((c) => ({
+          id: String(c.id || ''),
+          path: String(c.path || ''),
+          l0: Number(c.l0) || 0,
+          l1: Number(c.l1) || 0,
+          resolved: !!c.resolved,
+        })),
+      }),
+    },
+  })
 
   // 项目槽缺省（新项目 / 无槽时用）。**键名 = 槽内键名 = state 上同名 live 字段**
   // （state.workSlots[<label>]，见 core/ui-state.js 与 core/storage.js 的 stashWorkSlot/loadWorkSlot）。
@@ -10289,18 +10519,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     $('wk-view').innerHTML = I.collapse
     // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按「右栏在不在场」写（不在场 = 插件图标 + 「工具栏」，
     // 在场 = ✕ + 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
-    // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
-    // 按需拉+渲）。外部注册 = 任意模块调 registerWkTool 追加，本模块不感知其内容。
-    registerWkTool({
-      id: 'comments',
-      title: '评论',
-      pane: 'wk-cmt',
-      mount: () => {
-        cmtLoad(state.workProj)
-        cmtRender()
-      },
-    })
-    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时切到评论工具页 /
+    // 右栏工具 tab 的「评论」由评论卡自注册（views/cards/comment/comment-card.js）——宿主不再知道
+    // 该工具的存在，只注入它需要的能力回调（下一行起）。
+    // 评论卡 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时切到评论工具页 /
     // 评论增删改后重绘原文标记）
     cmtSetHooks({
       openFile: (p, id) => {
@@ -10310,7 +10531,6 @@ function setFirstSendHash(v) { firstSendHash = v }
       ensurePane: () => setPvTab('comments'), // 切评论工具页（含开栏 + 拉内容）
       refreshMarks: cmtApplyMarks,
     })
-    cmtMount()
     // 顶栏三种 pill 的点击一律**直调侧栏那条同一个函数**，不在此自写 state（顶栏不另立链路）。
     // 「工具栏」胶囊 = 右栏整列开/关：调 setPane('workspace', on)（其内落 setPvPane：在场维 + 关栏时
     // 顺带回预览态）。文件 pill（可多枚）= 见下面 data-wkftab 分支（调 openWorkFile / closeWkFile）。
@@ -10535,302 +10755,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     mountWork()
     applySbMode()
   }
-
-  // ---------- 项目评论批注（work 右栏评论 tab） ----------
-  // 一条评论 = 文件路径 + 行范围（l0/l1）+ 选中原文摘录（excerpt）+ 正文（body），锚点来自
-  // inputbar/quote.js 的 quoteSnapOfRange（kind:'file'）快照。存储 <项目根>/.claude/comments.json，
-  // 读写走网关 /gateway/comments（localGateway.ts 的 readProjectComments/writeProjectComments）。
-  // 前端为唯一写入方、每次**全量替换**（拉回 → 改内存副本 → 整份回写；列表规模小，避免增量合并歧义）。
-  //
-  // 与 work.js 解耦（不 import，回调注册）：work.js 在 mountWork 里调 cmtSetHooks 注册
-  //   openFile   = 点评论定位 → 打开文件（openWorkFile）
-  //   ensurePane = 选区「添加评论」时确保右栏在场且切到评论 tab
-  // quote.js 只 import openCommentComposer（选区浮窗「添加评论」行 → 本模块浮层）。
-  // 类名一律 cmt* 前缀：全部模块顶层声明共享一个 IIFE 作用域（见 probe-web-module-scope）。
-  let cmtList = []        // 当前项目评论（服务端权威副本）
-  let cmtProj = ''        // cmtList 归属项目 label
-  let cmtLoaded = false    // cmtList 是否已为 cmtProj 拉取成功
-  let cmtLoading = false
-  let cmtErr = ''
-  let cmtFilter = 'all'   // 'all' | 'open'（只看未解决）
-  let cmtPop = null       // 选区「添加评论」浮层
-  let cmtMounted = false
-  let cmtOpenFile = null
-  let cmtEnsurePane = null
-  let cmtRefreshMarks = null
-
-  function cmtSetHooks(h) {
-    if (!h) return
-    if (typeof h.openFile === 'function') cmtOpenFile = h.openFile
-    if (typeof h.ensurePane === 'function') cmtEnsurePane = h.ensurePane
-    if (typeof h.refreshMarks === 'function') cmtRefreshMarks = h.refreshMarks
-  }
-
-  // 渲染同步：面板 + 原文标记（work.js 阅读态按 cmtRangesFor 打标的唯一重绘入口）
-  function cmtAfterChange() {
-    cmtRender()
-    if (cmtRefreshMarks) cmtRefreshMarks()
-  }
-
-  // 供 work.js 在原文（阅读态）打标记：当前项目内、指定文件的评论行范围（1 基源行号）
-  function cmtRangesFor(path) {
-    const p = String(path || '').replace(/\\/g, '/')
-    if (!p || !cmtProj) return []
-    return cmtList
-      .filter(
-        (c) =>
-          c && typeof c === 'object' &&
-          String(c.path || '').replace(/\\/g, '/') === p &&
-          Number(c.l1) >= 1,
-      )
-      .map((c) => ({
-        id: String(c.id || ''),
-        l0: Number(c.l0) || 1,
-        l1: Number(c.l1) || Number(c.l0) || 1,
-        resolved: !!c.resolved,
-      }))
-  }
-
-  // 换项目 / 退 work：作废内存副本（下次 cmtLoad 重新拉）
-  function cmtInvalidate() {
-    cmtList = []
-    cmtProj = ''
-    cmtLoaded = false
-    cmtLoading = false
-    cmtErr = ''
-    if (cmtRefreshMarks) cmtRefreshMarks() // 换项目：清掉上一项目的原文标记
-  }
-
-  function cmtId() {
-    return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
-  }
-  function cmtFmtTime(iso) {
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return ''
-    const p = (n) => String(n).padStart(2, '0')
-    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
-  }
-
-  async function cmtFetch(proj) {
-    if (!proj || needToken()) {
-      cmtLoading = false
-      return
-    }
-    cmtLoading = true
-    cmtErr = ''
-    cmtRender()
-    try {
-      const res = await fetch(apiUrl('/gateway/comments?label=' + encodeURIComponent(proj)))
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.error || '加载失败')
-      cmtList = (Array.isArray(data.comments) ? data.comments : []).filter((c) => c && typeof c === 'object' && !Array.isArray(c))
-      cmtProj = proj
-      cmtLoaded = true
-    } catch (e) {
-      cmtErr = e.message || String(e)
-      cmtLoaded = false
-    } finally {
-      cmtLoading = false
-      cmtAfterChange()
-    }
-  }
-
-  // 已有当前项目副本就直接用（免重复请求）；换项目才拉
-  async function cmtLoad(proj) {
-    if (!proj) {
-      cmtInvalidate()
-      cmtRender()
-      return
-    }
-    if (cmtLoaded && proj === cmtProj) return
-    await cmtFetch(proj)
-  }
-
-  // 整份回写（唯一写口）：cmtList 当前值 → 服务端。失败 toast 并返回 false（调用方决定是否回滚内存副本）。
-  async function cmtSave() {
-    const proj = state.workProj
-    if (!proj) return false
-    try {
-      const res = await fetch(apiUrl('/gateway/comments'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: proj, comments: cmtList }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
-      return true
-    } catch (e) {
-      toast('评论保存失败：' + (e.message || e))
-      return false
-    }
-  }
-
-  // 内存副本改 → 渲染 → 回写；回写失败回滚（不静默丢改动）
-  async function cmtMutate(fn) {
-    const prev = cmtList
-    fn()
-    cmtAfterChange()
-    if (!(await cmtSave())) {
-      cmtList = prev
-      cmtAfterChange()
-    }
-  }
-
-  async function cmtAdd(proj, entry) {
-    if (!proj) return false
-    if (!(cmtLoaded && cmtProj === proj)) await cmtFetch(proj)
-    if (cmtProj !== proj) return false
-    cmtList.push(entry)
-    cmtAfterChange()
-    if (!(await cmtSave())) {
-      cmtList = cmtList.filter((c) => c !== entry)
-      cmtAfterChange()
-      return false
-    }
-    return true
-  }
-
-  // ---------- 评论面板渲染（#wk-cmt = work 右栏「评论」工具页的 pane，work.js 的 cmtRender 调；
-  // 页态与显隐归 work.js applyPvTab——本模块只管内容，不碰 #wk-cmt 的 hidden）----------
-  function cmtCmp(a, b) {
-    const pa = String(a.path || '')
-    const pb = String(b.path || '')
-    if (pa !== pb) return pa < pb ? -1 : 1
-    return (Number(a.l0) || 0) - (Number(b.l0) || 0)
-  }
-  function cmtItemHtml(c) {
-    const n0 = Number(c.l0) || 0
-    const n1 = Number(c.l1) || 0
-    const loc = esc(String(c.path || '')) + (n0 ? ':' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') : '')
-    return '<div class="cmt-item' + (c.resolved ? ' resolved' : '') + '" data-cid="' + esc(String(c.id || '')) + '">' +
-      '<div class="cmt-head">' +
-        '<button type="button" class="cmt-loc" data-cmtloc="' + esc(String(c.path || '')) + '">' + loc + '</button>' +
-        '<span class="cmt-time">' + esc(cmtFmtTime(c.createdAt)) + '</span>' +
-      '</div>' +
-      (c.excerpt ? '<blockquote class="cmt-ex">' + esc(String(c.excerpt)) + '</blockquote>' : '') +
-      '<div class="cmt-text">' + esc(String(c.body || '')) + '</div>' +
-      '<div class="cmt-acts">' +
-        '<button type="button" data-cmtact="resolve">' + (c.resolved ? '重开' : '解决') + '</button>' +
-        '<button type="button" class="danger" data-cmtact="del">删除</button>' +
-      '</div>' +
-    '</div>'
-  }
-  function cmtRender() {
-    const el = $('wk-cmt')
-    if (!el) return
-    if (!state.workProj) {
-      el.innerHTML = '<div class="cmt-empty">未选择项目</div>'
-      return
-    }
-    if (cmtLoading) {
-      el.innerHTML = '<div class="cmt-empty">加载中…</div>'
-      return
-    }
-    if (cmtErr) {
-      el.innerHTML = '<div class="cmt-empty">' + esc(cmtErr) + '</div>'
-      return
-    }
-    const open = cmtList.filter((c) => !c.resolved).length
-    const head =
-      '<div class="cmt-filters">' +
-        '<button type="button" class="cmt-f' + (cmtFilter === 'all' ? ' on' : '') + '" data-cmtf="all">全部 ' + cmtList.length + '</button>' +
-        '<button type="button" class="cmt-f' + (cmtFilter === 'open' ? ' on' : '') + '" data-cmtf="open">未解决 ' + open + '</button>' +
-      '</div>'
-    const list = (cmtFilter === 'open' ? cmtList.filter((c) => !c.resolved) : cmtList).slice().sort(cmtCmp)
-    const body = list.length
-      ? list.map(cmtItemHtml).join('')
-      : '<div class="cmt-empty">' + (cmtList.length ? '没有未解决的评论' : '还没有评论。在文件里选中内容后添加。') + '</div>'
-    el.innerHTML = head + '<div class="cmt-list">' + body + '</div>'
-  }
-
-  // 面板事件委托（一次）：容器 innerHTML 整体重渲，逐条绑定会被抹掉
-  function cmtMount() {
-    const el = $('wk-cmt')
-    if (!el || cmtMounted) return
-    cmtMounted = true
-    el.addEventListener('click', (e) => {
-      const f = e.target.closest('[data-cmtf]')
-      if (f) {
-        cmtFilter = f.dataset.cmtf === 'open' ? 'open' : 'all'
-        cmtRender()
-        return
-      }
-      const loc = e.target.closest('[data-cmtloc]')
-      if (loc) {
-        const item = loc.closest('[data-cid]')
-        if (cmtOpenFile) cmtOpenFile(loc.dataset.cmtloc, item ? item.dataset.cid : '')
-        return
-      }
-      const act = e.target.closest('[data-cmtact]')
-      const item = act && act.closest('[data-cid]')
-      if (!item) return
-      const c = cmtList.find((x) => String(x.id) === item.dataset.cid)
-      if (!c) return
-      if (act.dataset.cmtact === 'resolve') cmtMutate(() => { c.resolved = !c.resolved })
-      else if (act.dataset.cmtact === 'del') cmtMutate(() => { cmtList = cmtList.filter((x) => x !== c) })
-    })
-  }
-
-  // ---------- 选区「添加评论」浮层（quote.js 的「添加评论」行 → 这里）----------
-  function cmtClosePop() {
-    if (cmtPop) { cmtPop.remove(); cmtPop = null }
-  }
-  function openCommentComposer(snap) {
-    if (!snap || snap.kind !== 'file' || !snap.file) return
-    if (cmtEnsurePane) cmtEnsurePane() // 落点可见：右栏切到评论 tab（注释提交后立刻在列表里看到）
-    cmtClosePop()
-    const pop = document.createElement('div')
-    pop.className = 'cmt-pop'
-    const n0 = Number(snap.l0) || 0
-    const n1 = Number(snap.l1) || 0
-    const loc = esc(snap.file) + (n0 ? ' · ' + n0 + (n1 && n1 !== n0 ? '-' + n1 : '') + ' 行' : '')
-    pop.innerHTML =
-      '<div class="cmp-loc">' + loc + '</div>' +
-      '<blockquote class="cmp-ex">' + esc(String(snap.text || '').slice(0, 300)) + '</blockquote>' +
-      '<textarea class="cmp-in" placeholder="添加评论…" rows="3"></textarea>' +
-      '<div class="cmp-bar"><button type="button" class="cmp-cancel">取消</button><button type="button" class="cmp-ok">评论</button></div>'
-    document.body.appendChild(pop)
-    const r = snap.rect || { left: 0, bottom: 0 }
-    const w = pop.offsetWidth
-    const h = pop.offsetHeight
-    pop.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + 'px'
-    pop.style.top = Math.round(Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))) + 'px'
-    const ta = pop.querySelector('.cmp-in')
-    ta.focus()
-    pop.addEventListener('mousedown', (e) => e.stopPropagation()) // 浮层内按下不算「点外部」
-    pop.querySelector('.cmp-cancel').addEventListener('click', cmtClosePop)
-    const submit = async () => {
-      const body = ta.value.trim()
-      if (!body) { ta.focus(); return }
-      const entry = {
-        id: cmtId(),
-        path: snap.file,
-        l0: n0,
-        l1: n1,
-        excerpt: String(snap.text || '').slice(0, 300),
-        body,
-        author: 'me',
-        createdAt: new Date().toISOString(),
-        resolved: false,
-      }
-      cmtClosePop()
-      if (await cmtAdd(snap.proj || state.workProj, entry)) toast('已添加评论')
-    }
-    pop.querySelector('.cmp-ok').addEventListener('click', submit)
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit() }
-      else if (e.key === 'Escape') { e.preventDefault(); cmtClosePop() }
-    })
-    cmtPop = pop
-  }
-
-  // 点浮层外 / 滚动 / Esc → 关（fixed 浮层会漂离锚点；与 quote.js 浮窗同策略）。
-  // 滚动关闭守护的不变量 = 「锚点漂移」：只有**浮层外**的滚动才让选区滚走、浮层漂离锚点；
-  // 浮层内 cmp-in 自己的内容滚动（评论正文超出可见行数后的纵向滚动）不改变锚点关系，
-  // 不得关窗——否则输入长评论的瞬间（textarea 内容一滚）浮层即死（capture 监听 window 也收到元素 scroll）。
-  document.addEventListener('mousedown', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() })
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && cmtPop) cmtClosePop() })
-  window.addEventListener('scroll', (e) => { if (cmtPop && !cmtPop.contains(e.target)) cmtClosePop() }, { passive: true, capture: true })
 
   // ---------- 事件绑定 ----------
   // 侧栏开合（2026-09-25 定案：折叠态宽度归 0，64px rail 折叠带撤除；2026-10-14 待办#19 定案：
@@ -11604,8 +11528,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 引用**原文块**在气泡里的形态（2026-10-21 用户定案）：原文并进锚点令牌的第三个字段（百分号编码），
   // 由 core/mention-syntax.js 的 chip 构造器渲染成「图标 + 原文」的蓝色引用胶囊（不再有 blockquote 的
   // margin/padding = 与正文上下对齐，也不再显示「引用自…第 N 条回复」标签）。模型侧原文不动（令牌块原样上行）。
-  // **收尾令牌之后的用户话术必须另起一行**（2026-10-21 用户实报「并没有渲染为原始文本」）：消息形态是
-  // `…\n[/引用回复]<用户补充的话>`（无换行），不补 `\n` 会与引用胶囊同一行显示。
+  // **折叠后不补换行**（2026-10-24 用户实报「引用发送后后面总有莫名其妙的换行」）：胶囊是行内元素，
+  // 用户话术紧接其后自然流动；补 `\n` 会被 mdHtml 拆成下一段并落 `<br>`，表现为「引用后凭空换行」。
   // 三个渲染入口（messages.js userBodyHtml / approval.js renderTransient 的 bodyText 与队列 txt）共用本收口。
   const quoteBodiesAsMarkdown = foldQuoteBodies
 
@@ -12077,8 +12001,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     const q = barQuery().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩' }]
-    // 文件上传行（2026-09-12）：任意类型多选，POST /gateway/upload 落盘 exe 目录 uploads/，文件胶囊进附件行
-    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 exe 目录 uploads/' })
+    // 文件上传行（2026-10-24）：任意类型多选，POST /gateway/file-cache 落盘 <项目根>/.claude/file-cache（按会话），
+    // 文件胶囊进附件行
+    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 file-cache/（按会话）' })
     if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
     const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时（同 @ 提及）
     for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
@@ -12713,7 +12638,10 @@ function setModelUserPicked(v) { modelUserPicked = v }
   // 每次现读可变绑定，调用方严禁缓存返回值。
   function getPendingUserMsgs() { return pendingUserMsgs }
   function addUser(text, imgs, files) {
-    clearTakeover() // 清掉残留的提问/审批 takeover
+    // 审批卡在场时发送消息不撤卡（2026-10-24 实测 bug：消息照发，但卡被 clearTakeover 洗掉、
+    // 审批状态仍阻塞在 CLI 侧 ⇒ 用户无处作答）。审批卡只由回执/CLI 侧操作/切会话撤除
+    // （approval-confirmed / approval-dismiss / route.js 切会话），发送不参与其生命周期。
+    if (takeover !== 'approval') clearTakeover() // 其余残留 takeover 照旧清掉
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
     // 「新回合开启主张」。主张至多一个：主张折叠在场时后续发送恒为 dock 成员。
     const hasLive = !!messagesEl.querySelector('details.done-fold.done-live')
@@ -13781,17 +13709,17 @@ function setApprovalPending(v) { approvalPending = v }
 
 function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   // ---------- 视觉上行内部态 ----------
-  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?}。发送时文本拼 [Image #N]
-  // 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、执行时 resize）。
-  // attName = 同次上传落盘后的文件名（`uploads/<attName>` 正文引用的键；落盘失败则无，胶囊照显、@ 不可引用）。
+  // pendingImages: {content(base64 无前缀), mediaType, filename, dataUrl, attName?, attRel?}。发送时文本拼
+  // [Image #N] 占位 + images 随 'send' 上行 → 网关透传 → CLI gatewayClient 构造 pastedContents（不落盘、
+  // 执行时 resize）。attName/attRel = 同次上传落盘后的文件名与引用键（落盘失败则无，胶囊照显、@ 不可引用）。
   let pendingImages = []
   function clearPendingImages() {
     pendingImages = []
     renderImgPills()
     syncGwSend()
   }
-  // pendingFiles: {name, abs, size}（落盘文件）。发送时文本拼 [文件:<会话 cwd 相对路径>] 占位随消息上行
-  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](uploads/x)` 链接是同一次上传的引用表达。
+  // pendingFiles: {name, rel, abs, size}（落盘文件）。发送时文本拼 [文件:<路径>] 占位随消息上行
+  // （CLI 端即普通文本，模型按路径 Read）；正文里的 `[名](file-cache/…)` 链接是同一次上传的引用表达。
   let pendingFiles = []
   function clearPendingFiles() {
     pendingFiles = []
@@ -13832,9 +13760,9 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
   function uploadedMentionItems() {
     const out = []
     for (const p of pendingImages) {
-      if (p.attName) out.push({ kind: 'imgpick', name: p.attName, md: `![${p.attName}](uploads/${encodeURIComponent(p.attName)})` })
+      if (p.attRel) out.push({ kind: 'imgpick', name: p.attName, md: `![${p.attName}](${encodeURI(p.attRel)})` })
     }
-    for (const f of pendingFiles) out.push({ kind: 'filepick', name: f.name, md: `[${f.name}](uploads/${encodeURIComponent(f.name)})` })
+    for (const f of pendingFiles) out.push({ kind: 'filepick', name: f.name, md: `[${f.name}](${encodeURI(f.rel)})` })
     return out
   }
   // 编码：≤1.5MB 且 png/jpg/webp 直传原 base64（截图文字不重压）；否则 canvas 重编码 jpeg
@@ -13869,7 +13797,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     })
   }
   // 图片附件（粘贴/拖拽/+ 浮窗）：视觉上行 base64 入列（胶囊缩略图）+ 原文件上传落盘（时间戳名）。
-  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](uploads/x)`（CM 行内直渲）。
+  // 正文引用按 target 分：composer 不插（只进胶囊）；work 插 `![名](file-cache/…)`（CM 行内直渲）。
   // 落盘失败时视觉上行仍有效（无 attName、@ 不可引用，发送链 [Image #N] 照旧上行）。
   // target = editorCommand 落点 id（'composer' 底栏 / 'work' 编辑卡片），缺省底栏
   async function addImageFiles(files, target) {
@@ -13888,7 +13816,7 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
         if (att) insertAttachmentMarkdown(tgtEd, att)
         continue
       }
-      if (att) enc.attName = att.name // @ 浮窗可引用的键（落盘成功才有）
+      if (att) { enc.attName = att.name; enc.attRel = att.rel } // @ 浮窗可引用的键（落盘成功才有）
       pendingImages.push(enc)
       // 底栏（composer）上传 = 只进胶囊行待发，**不自动往输入框正文插引用**（2026-10-16 待办 2：
       // 「不要自动在正文渲染，被图片胶囊劫持」）。
@@ -13897,9 +13825,9 @@ function setAuthPorts(p) { authUi = p.ui; authData = p.data; authSend = p.send }
     if (toComposer) syncGwSend()
   }
   // 文件附件（+ 浮窗「上传文件」/粘贴）：上传落盘 → pendingFiles 入列（发送侧 [文件:占位] 自动相对化）
-  // + 原文插 `[名](uploads/x)` 文件名链接。落盘跟随会话（2026-09-12 四轮用户定案）：sid=当前会话（存量/
-  // 已开）；首页尚无会话时 project=newSessionProject()——与 gwSend 首送建会话的归属参数同源，
-  // 保证「上传落点=消息会话落点」；两者皆无（纯首页）网关落全局根。
+  // + 原文插 `[名](file-cache/…)` 文件名链接。落盘跟随会话（与粘贴图片同目录）：sid=当前会话（存量/
+  // 已开）；首页尚无会话时 project=<workProj|newSessionProject()>——与 gwSend 首送建会话的归属参数同源，
+  // 保证「上传落点的项目根 = 消息会话启动根」；两者皆无 → 网关自身根。
   async function addUploadFiles(files, target) {
     const tgtEd = target || 'composer'
     const toComposer = tgtEd === 'composer'
@@ -13933,7 +13861,7 @@ function clipboardFiles(cd) {
   return out
 }
 // 从剪贴板 text/html 里取**同源** <img> 的 URL（pathname+search）：消息区选中图片复制时
-// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/image-cache/…">`。
+// editor-clipboard.copyRenderedImages 写的就是 `<img src="/gateway/file-cache/…">`。
 // 只认同源（跨域取不到字节、data: 无意义）→ 交给 addImageUrls 拉回字节。
 function clipboardImageUrls(html) {
   const s = String(html || '')
@@ -13981,7 +13909,7 @@ async function addImageUrls(urls, target) {
     // 2026-08-28 图片占位：[Image #N] 与 pastedContents id 一一对应。
     // 2026-09-02 防撞根修：id 由本端分配全会话唯一（从已用最大 imageId+1 起，对齐 CLI
     // getInitialPasteId 语义），随 images 显式上行——CLI pastedContentsFromImages 尊重显式 id。
-    // 原恒从 1 起：同会话第二条带图消息互覆 image-cache 字节 → 历史图错图。
+    // 原恒从 1 起：同会话第二条带图消息互覆 file-cache 字节 → 历史图错图。
     if (imgs.length) {
       const base = live.maxImgId || 0
       imgs.forEach((im, i) => { im.id = base + 1 + i })
@@ -14093,8 +14021,8 @@ async function addImageUrls(urls, target) {
 
   // 2026-09-12 文件占位相对化（用户定案「使用相对路径」）：[文件:<会话 cwd 相对路径>]——CLI/模型
   // Read 按会话启动根解析即得文件；落盘同轮定案改跟随会话（上传带 sid/project，网关按会话根落盘）
-  // → 同会话上传+发送恒为 uploads/<名>；跨会话补发（A 会话上传、B 会话发送）按 B 的 cwd 相对化
-  // （../<A>/uploads/x）。Windows 大小写不敏感、\ / 通用；跨盘符无法相对 → 原样绝对路径
+  // → 同会话上传+发送恒为 <配置根>/file-cache/<会话id>/<名> 的 cwd 相对形；跨会话/跨目录按 B 的 cwd
+  // 相对化。Windows 大小写不敏感、\ / 通用；跨盘符无法相对 → 原样绝对路径
   // （物理上唯一正确表示）。cwd 未知（异常旧记录）同退绝对路径——不是兜底分支，是「无 cwd 就无法相对化」的诚实表示。
   function relPath(fromDir, toPath) {
     const seg = (p) => String(p).replace(/\//g, '\\').split('\\').filter((s) => s.length > 0)
@@ -14404,7 +14332,7 @@ function setGatewayPorts(p) { gwApproval = p.approval; gwSendPort = p.send; gwMe
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
   const QUOTE_BUILTIN_ID = 'ai-edit'
   // 「添加评论」（2026-10-06）：只对**文件选区**在场——评论对象 = 文件 + 行范围（kind:'file'），
-  // 回复/PDF 选区没有文件位置可锚。落地 = sidebar/comments.js 的 openCommentComposer（另一条内置动作，
+  // 回复/PDF 选区没有文件位置可锚。落地 = feature/comment/comment-composer.js 的 openCommentComposer（另一条内置动作，
   // 不进 AI 编辑的输入栏链）。同 id 申报行同样被略过（与 ai-edit 一致：内置优先）。
   const QUOTE_COMMENT_ID = 'comment'
   function quoteActionRows(snap) {

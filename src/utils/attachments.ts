@@ -1061,8 +1061,8 @@ export async function getQueuedCommandAttachments(
     filtered.map(async _ => {
       const imageBlocks = await buildImageContentBlocks(_.pastedContents)
       // 排队图字节落盘补齐（2026-09-02 排队图 404 根修）：回合中排队命令经 mid-chain drain
-      // 注入消费，全程不经过 processUserInput（storeImages 唯一调用点）→ image-cache 无字节，
-      // attachment 落盘虽带 imagePasteIds，web 内联渲染（/gateway/image-cache/<uuid>/<id>）与
+      // 注入消费，全程不经过 processUserInput（storeImages 唯一调用点）→ file-cache 无字节，
+      // attachment 落盘虽带 imagePasteIds，web 内联渲染（/gateway/file-cache/<uuid>/<id>）与
       // CLI UserImageMessage 双 404。此处按同一 id 集合补落盘；本函数在命令消费前每轮 tool loop
       // 重复执行，同 id 同内容重写幂等，无需去重。
       if (_.pastedContents) await storeImages(_.pastedContents)

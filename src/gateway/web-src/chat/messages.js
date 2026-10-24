@@ -2,7 +2,7 @@
 import { setAttachmentResolver, setImageSrcResolver } from '../core/markdown.js'
 import { esc } from '../core/util.js'
 import { findSession } from '../engine/sessions.js'
-import { live } from '../engine/state.js'
+import { live, state } from '../engine/state.js'
 import { fmtDur } from './messages/msg-actions.js'
 import { toolIcon } from './messages/icons.js'
 /* @module chat/messages.js */
@@ -17,14 +17,12 @@ import { toolIcon } from './messages/icons.js'
     const label = s ? (s.projectLabel || '') : ''
     return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent('.claude/images/' + code)}` : null
   })
-  // 附件引用取图（2026-10-16）：正文里的 `![](uploads/x.png)`（上传落盘件，会话 cwd 相对）→ 同一
-  // GET /gateway/file 链（label 同口径、path 直接就是正文里那条相对路径）。取不到 label → null
-  // ⇒ 渲染层保留原文。此前这类引用不匹配 MD_IMG_CODE（只认裸文件名）→ 发送后的消息里直接显示
-  // 原始 md 文本 `![…](uploads/…)`（用户实报「上传图片会有类似 [image 的东西」）。
+  // 附件引用取图（2026-10-24 统一 file-cache）：正文里的 `![](file-cache/<会话id>/x.png)` 是网关签发的
+  // rel（基址 = 会话启动根/.claude/file-cache），取字节走 GET /gateway/file-cache/<会话id>/<名>?sid=——
+  // dir/uuid 无法区分项目，必须带上当前会话 sid 供网关解出项目根。
   setAttachmentResolver((code) => {
-    const s = findSession(live.curUuid)
-    const label = s ? (s.projectLabel || '') : ''
-    return label ? `/gateway/file?label=${encodeURIComponent(label)}&path=${encodeURIComponent(code)}` : null
+    const sid = state.currentHash
+    return `/gateway/${code}` + (sid ? `?sid=${encodeURIComponent(sid)}` : '')
   })
   // 工具名 → 中文动作（弱化行展示，不单独成气泡）
   const TOOL_NAMES = {

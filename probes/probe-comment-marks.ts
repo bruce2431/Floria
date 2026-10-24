@@ -4,7 +4,7 @@
  *
  * 目标：评论不只列在右栏，还要**落回原文**——被批注的行在编辑区有可见标记。
  * 结构锁点（只读源码，不启 DOM）：
- *   1) comments.js 是标记的唯一数据源：导出 cmtRangesFor（按 path + l0/l1），
+ *   1) feature/comment/comment-data.js 是标记的唯一数据源：导出 cmtRangesFor（按 path + l0/l1），
  *      评论增删改后经 cmtAfterChange 回调 refreshMarks 让 work.js 重绘标记。
  *   2) 编辑区（所有可编辑文本文件）恒为 CodeMirror 6：work.js 渲染末尾调 cmtApplyMarks，
  *      经 wkEdCmtEffect → StateField → Decoration.line 把命中行加 .cmt-mark / .cmt-mark-res。
@@ -41,27 +41,28 @@ const bad = (m: string) => {
   console.log(`FAIL  ${m}`)
 }
 
-const cmt = read('src/gateway/web-src/sidebar/comments.js')
+const cmt = read('src/gateway/web-src/feature/comment/comment-data.js')
+const cmtPanel = read('src/gateway/web-src/views/cards/comment/comment-panel.js')
 const md = read('src/gateway/web-src/core/markdown.js')
 const css = read('src/gateway/web/styles.css')
 const bundle = read('scripts/bundle-web-modules.ts')
 const idx = read('src/gateway/web/index.html')
 const sw = read('src/gateway/web/sw.js')
 
-// ---- 1. comments.js：标记数据源 + 变更回调 ----
-if (/function cmtRangesFor\(/.test(cmt)) ok('comments.js 导出 cmtRangesFor（按文件路径给评论行范围）')
-else bad('comments.js 缺 cmtRangesFor —— 原文标记无数据源')
-if (/cmtRangesFor,/.test(cmt)) ok('comments.js 的 cmtRangesFor 已 export（work.js 可 import）')
-else bad('comments.js 未导出 cmtRangesFor')
+// ---- 1. feature/comment/comment-data.js：标记数据源 + 变更回调 ----
+if (/function cmtRangesFor\(/.test(cmt)) ok('comment-data.js 导出 cmtRangesFor（按文件路径给评论行范围）')
+else bad('comment-data.js 缺 cmtRangesFor —— 原文标记无数据源')
+if (/cmtRangesFor,/.test(cmt)) ok('comment-data.js 的 cmtRangesFor 已 export（work.js 可 import）')
+else bad('comment-data.js 未导出 cmtRangesFor')
 if (/function cmtAfterChange\(/.test(cmt) && /cmtRefreshMarks\(\)/.test(cmt)) ok('cmtAfterChange 回调 refreshMarks（评论变更 → 原文标记重绘）')
-else bad('comments.js 缺 cmtAfterChange/refreshMarks 回调 —— 增删评论后原文标记不更新')
+else bad('comment-data.js 缺 cmtAfterChange/refreshMarks 回调 —— 增删评论后原文标记不更新')
 if (/refreshMarks: /.test(cmt) || /h\.refreshMarks/.test(cmt)) ok('cmtSetHooks 接受 refreshMarks（与 work.js 解耦注册）')
 else bad('cmtSetHooks 未接 refreshMarks')
-if (/cmtOpenFile\(loc\.dataset\.cmtloc, item \? item\.dataset\.cid : ''\)/.test(cmt)) ok('面板定位把评论 id 一并交给 openFile（回跳能滚到该行）')
+if (/cmtHookOpenFile\(loc\.dataset\.cmtloc, item \? item\.dataset\.cid : ''\)/.test(cmtPanel)) ok('面板定位把评论 id 一并交给 openFile 钩子（回跳能滚到该行）')
 else bad('面板定位未传评论 id')
 
 // ---- 2. work.js：编辑器行装饰器打标 ----
-if (/import \{[^}]*cmtRangesFor[^}]*\} from '\.\/comments\.js'/.test(work)) ok('work.js import cmtRangesFor（标记单一数据源）')
+if (/import \{[^}]*cmtRangesFor[^}]*\} from '\.\.\/feature\/comment\/comment-data\.js'/.test(work)) ok('work.js import cmtRangesFor（标记单一数据源）')
 else bad('work.js 未 import cmtRangesFor')
 if (/function cmtApplyMarks\(/.test(work)) ok('work.js 定义 cmtApplyMarks（把评论行范围送进编辑器装饰器）')
 else bad('work.js 缺 cmtApplyMarks')
@@ -116,10 +117,12 @@ else bad('renderEdBody 未统一挂 CodeMirror 宿主')
 // ---- 4. 样式 + 拼接注册 + cache-bust ----
 if (/\.cmt-mark \{/.test(css) && /\.cmt-mark-res \{/.test(css) && /\.cmt-flash \{/.test(css)) ok('styles.css 有 .cmt-mark / .cmt-mark-res / .cmt-flash')
 else bad('styles.css 缺评论标记样式')
-if (/--hl-kw:/.test(css) && /\.wk-ed-cm \{/.test(css)) ok('styles.css 有 --hl-* 高亮令牌 + .wk-ed-cm 宿主样式')
-else bad('styles.css 缺 --hl-* 令牌 / .wk-ed-cm 样式')
-if (/sidebar\/comments\.js/.test(bundle)) ok('bundle-web-modules 已注册 sidebar/comments.js')
-else bad('bundle-web-modules 未注册 comments.js')
+// 主题令牌已迁 UI 基础包 @floria/web（2026-10-24）：--hl-* 在包 theme.css，宿主样式留在 styles.css
+const webTheme = read('src/gateway/web/webui/floria-web.css')
+if (/--hl-kw:/.test(webTheme) && /\.wk-ed-cm \{/.test(css)) ok('基础包 floria-web.css 有 --hl-* 高亮令牌 + styles.css 有 .wk-ed-cm 宿主样式')
+else bad('缺 --hl-* 令牌（应在 webui/floria-web.css）/ .wk-ed-cm 样式')
+if (/feature\/comment\/comment-data\.js/.test(bundle) && /views\/cards\/comment\/comment-panel\.js/.test(bundle) && /feature\/comment\/comment-composer\.js/.test(bundle) && /views\/cards\/comment\/comment-card\.js/.test(bundle)) ok('bundle-web-modules 已注册评论四件（data/composer/panel/card）')
+else bad('bundle-web-modules 未注册完整评论四件')
 const vCss = /styles\.css\?v=(\d+)/.exec(idx)?.[1]
 const vApp = /app\.js\?v=(\d+)/.exec(idx)?.[1]
 const vSw = /floria-v(\d+)/.exec(sw)?.[1]

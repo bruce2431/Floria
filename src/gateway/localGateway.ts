@@ -32,6 +32,7 @@ import { createServer as netCreateServer, createConnection as netCreateConnectio
 import { spawn, spawnSync } from 'node:child_process'
 import { WebSocketServer, WebSocket } from 'ws'
 import { getPortableRoot, getClaudeConfigHomeDir } from '../utils/envUtils.js'
+import { FILE_CACHE_DIR, PENDING_FILE_DIR, getFileCacheDir } from '../utils/fileCache.js'
 import { getProjectRoot } from '../bootstrap/state.js'
 import {
   extractJsonStringField,
@@ -1220,11 +1221,11 @@ export function createProjectEntry(projRoot: string, relDir: string, rawName: st
 
 /**
  * 项目内上传文件（2026-10-13 work 侧栏「上传文件 / 文件夹」，#wk-new-pop 接入）。落点语义与
- * /gateway/upload 同一套：**同名不覆盖 → -1/-2 序号**（上传是批量动作，序号避让是上传领域先例；
+ * /gateway/file-cache 同一套：**同名不覆盖 → -1/-2 序号**（上传是批量动作，序号避让是上传领域先例；
  * 与 create/rename 的「显式输入 409」刻意区分——那两处用户看得见名字，这里由文件系统带来）。
  * 落点目录 mkdirSync(recursive)——「上传文件夹」的目录段来自用户所选文件夹的结构，递归建目录
  * 即该语义本身；落盘范围仍由 resolveWithinRoot 锁死在项目根内（越界 403）。
- * 字节上限由 handler 的 readBodyWithLimit 管（20 MB，对齐 /gateway/upload）。
+ * 字节上限由 handler 的 readBodyWithLimit 管（20 MB，对齐 /gateway/file-cache）。
  * 抽成纯函数让探针直测真实现（probe-file-create.ts）。
  */
 export function uploadProjectFile(projRoot: string, relDir: string, rawName: string, buf: Buffer): EntryOpResult {
@@ -1725,6 +1726,20 @@ function decodeSessionPath(id: string, root: string): { path: string; uuid: stri
   const rootWithSep = root.endsWith(sep) ? root : root + sep
   if (!p.startsWith(rootWithSep)) throw new Error('越界路径被拒绝: ' + p)
   return { path: p, uuid: basename(p).replace(/\.jsonl$/, '') }
+}
+
+// sid → 会话启动根（`<启动根>/.claude/projects/<uuid>.jsonl` 剥 marker）。
+// file-cache 落盘/取字节都以该根为基址：CLI 侧 getProjectRoot() 与 web 会话 spawn cwd 同源。
+// 非法/越界/路径形不符 → null（调用方按 project label 或网关自身根解析）。
+function sessionRootFromId(id: string, root: string): string | null {
+  try {
+    const { path: p } = decodeSessionPath(id, root)
+    const marker = sep + '.claude' + sep + 'projects'
+    const k = p.toLowerCase().lastIndexOf(marker.toLowerCase())
+    return k > 0 ? p.slice(0, k) : null
+  } catch {
+    return null
+  }
 }
 
 // 上下文占用（2026-08-23 dsh ContextMeter 移植数据源）：取转录最后一条 assistant 的 message.usage，
@@ -3036,8 +3051,8 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   }
   // 项目内上传文件：POST /gateway/file/upload?label=&path=<落点目录>&name=<文件名>，body=原始字节
   // （2026-10-13 work 侧栏「上传文件 / 文件夹」）。语义与防护全在 uploadProjectFile（纯函数，
-  // probe-file-create 直测）：同名 -1/-2 序号避让（对齐 /gateway/upload 先例）、落点目录 recursive
-  // 创建（承载「上传文件夹」的子目录结构）、越界 403、单文件上限 20 MB（对齐 /gateway/upload）。
+  // probe-file-create 直测）：同名 -1/-2 序号避让（对齐 /gateway/file-cache 先例）、落点目录 recursive
+  // 创建（承载「上传文件夹」的子目录结构）、越界 403、单文件上限 20 MB（对齐 /gateway/file-cache）。
   // label 唯一命中（含工作区根）。受上方 /gateway/* token 校验保护。
   if (req.method === 'POST' && url.pathname === '/gateway/file/upload') {
     try {
@@ -3097,51 +3112,92 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
 
-  // 2026-09-12 web 文件上传（+ 浮窗「上传文件」行）：POST /gateway/upload?name=<文件名>&sid=<会话hash>|&project=<项目>，body=原始字节。
-  // 落盘跟随会话（2026-09-12 四轮用户定案）：sid 解码（=base64url(<启动根>/.claude/projects/<uuid>.jsonl)，
-  // decodeSessionPath 内强制限便携根内）剥 marker 得会话启动根——全局笔=全局根/项目会话=项目根/桥接
-  // CLI=其 cwd，与消息占位相对化（relPath）同根同源；解码失败 → 磁盘扫描 sessionProjectRootOf 兜一层；
-  // 新会话（首页首送前上传，尚无 sid）带 project → webSessionProjectRoot 同源解析（与 wsession 同语义，
-  // label 不命中回落全局根）；无任何会话上下文 → exe 目录（getProjectRoot，旧案位置）。
-  // 同名不覆盖 → -1/-2 序号。受上方 /gateway/* token/cookie 校验保护；文件名 basename 化 +
-  // Windows 非法字符/保留名清洗；单文件上限 20MB。
-  if (req.method === 'POST' && url.pathname === '/gateway/upload') {
+  // 2026-10-24 附件统一缓存（upload 链退役）：POST /gateway/file-cache?name=<文件名>&sid=<会话hash>[&project=<label>]，
+  // body=原始字节。image-cache 已升级并入本链（用户定案：统一为 file-cache，不保留两套缓存）：
+  // 落盘 = <会话启动根>/.claude/file-cache/<会话 uuid>/<文件名>，按项目+会话分目录、同根同清理。
+  //   · sid = base64url(<启动根>/.claude/projects/<uuid>.jsonl)（decodeSessionPath 内强制限便携根内），
+  //     剥 marker 得会话启动根（projectRoot）、uuid 即目录名——与 CLI getSessionId()/getProjectRoot() 同源。
+  //   · 首页首送前上传（尚无 sid）：带 project label 时按该项目根（与 wsession 建会话 cwd 同源），
+  //     目录名 _pending（尚未归属任何会话的暂存，清理时跳过）；label 也没有 → 网关自身根。
+  // 同名不覆盖 → -1/-2 序号。文件名 basename 化 + Windows 非法字符清洗；单文件上限 20MB。
+  // 响应 rel = `file-cache/<dir>/<name>`：正文引用的唯一键，渲染侧映射为 /gateway/file-cache/<dir>/<name>（附同一 sid/project 查询）。
+  if (req.method === 'POST' && url.pathname === '/gateway/file-cache') {
     try {
       const name = sanitizeEntryName(url.searchParams.get('name') || '') || 'file'
       const nameExt = extname(name)
-      let upRoot: string | null = null
-      const upSid = (url.searchParams.get('sid') || '').trim()
-      const upProj = (url.searchParams.get('project') || '').trim()
-      if (upSid) {
-        try {
-          const p = decodeSessionPath(upSid, root).path
-          const marker = sep + '.claude' + sep + 'projects'
-          const k = p.toLowerCase().lastIndexOf(marker.toLowerCase())
-          if (k > 0) upRoot = p.slice(0, k)
-        } catch { /* 越界/非法 id → 磁盘扫描 */ }
-        if (!upRoot) {
-          const g = sessionProjectRootOf(upSid)
-          if (g) upRoot = g.projectLabel ? webSessionProjectRoot(g.projectLabel) : getPortableRoot()
-        }
-      } else if (upProj) {
-        upRoot = webSessionProjectRoot(upProj)
+      const fcSid = (url.searchParams.get('sid') || '').trim()
+      const fcProj = (url.searchParams.get('project') || '').trim()
+      let dirKey = PENDING_FILE_DIR
+      if (fcSid) {
+        try { dirKey = decodeSessionPath(fcSid, root).uuid } catch { /* 非法/越界 id → 暂存目录 */ }
       }
-      if (!upRoot) upRoot = getProjectRoot()
-      const upDir = join(upRoot, 'uploads')
-      mkdirSync(upDir, { recursive: true })
-      let target = join(upDir, name)
+      const fcRoot = (fcSid && sessionRootFromId(fcSid, root)) || (fcProj ? webSessionProjectRoot(fcProj) : getProjectRoot())
+      const fcDir = getFileCacheDir(fcRoot, dirKey)
+      mkdirSync(fcDir, { recursive: true })
+      let target = join(fcDir, name)
       if (existsSync(target)) {
         const stem = name.slice(0, name.length - nameExt.length)
         let i = 1
-        while (existsSync(join(upDir, `${stem}-${i}${nameExt}`))) i++
-        target = join(upDir, `${stem}-${i}${nameExt}`)
+        while (existsSync(join(fcDir, `${stem}-${i}${nameExt}`))) i++
+        target = join(fcDir, `${stem}-${i}${nameExt}`)
       }
       const buf = await readBodyWithLimit(req, 20 * 1024 * 1024)
       writeFileSync(target, buf)
-      sendJson(res, 200, { ok: true, name: basename(target), path: `uploads/${basename(target)}`, abs: target, size: buf.length })
+      const saved = basename(target)
+      sendJson(res, 200, { ok: true, name: saved, rel: `${FILE_CACHE_DIR}/${dirKey}/${saved}`, abs: target, size: buf.length })
     } catch (e) {
       if (e instanceof ReportBodyTooLargeError) sendReportBodyError(res, e)
       else sendError(res, e)
+    }
+    return
+  }
+  // 文件缓存读取：GET /gateway/file-cache/<会话uuid|_pending>/<键>?sid=<会话hash>[&project=<label>]
+  // （image-cache 已升级并入此链）。基址 = 会话启动根/.claude/file-cache（由 sid 解出；
+  // 无 sid 时按 project label、再退网关自身根，与 POST 同序）。
+  // 键两种形态，同一目录：① 纯数字 id —— CLI 落盘的粘贴图片 <id>.<ext>（扩展名由 mediaType 推导，
+  // 此处按 `<id>.` 前缀 readdir 解析，消费端无需知道扩展名）；② 完整文件名 —— 网关落盘的上传附件。
+  // 文件名单段校验（禁 / \ .. 与空串），目录键限 uuid / _pending——越界一律 400。
+  if (req.method === 'GET' && url.pathname.startsWith('/gateway/file-cache/')) {
+    const m = /^\/gateway\/file-cache\/([0-9a-f-]{36}|_pending)\/([^/]+)$/.exec(url.pathname)
+    if (!m) {
+      sendJson(res, 400, { error: 'invalid path' })
+      return
+    }
+    let fcKey = m[2]
+    try { fcKey = decodeURIComponent(m[2]) } catch { /* 畸形编码 → 用原文，下面校验会挡掉危险字符 */ }
+    if (!fcKey || fcKey === '.' || fcKey === '..' || /[\\/]/.test(fcKey)) {
+      sendJson(res, 400, { error: 'invalid name' })
+      return
+    }
+    const fcSid = (url.searchParams.get('sid') || '').trim()
+    const fcProj = (url.searchParams.get('project') || '').trim()
+    const fcRoot = (fcSid && sessionRootFromId(fcSid, root)) || (fcProj ? webSessionProjectRoot(fcProj) : getProjectRoot())
+    const fcDir = getFileCacheDir(fcRoot, m[1])
+    let fcHit = fcKey
+    if (/^\d+$/.test(fcKey)) {
+      try {
+        fcHit = readdirSync(fcDir).find((f) => /^\d+\./.test(f) && f.startsWith(`${fcKey}.`)) || ''
+      } catch {
+        fcHit = ''
+      }
+      if (!fcHit) {
+        sendJson(res, 404, { error: 'not found' })
+        return
+      }
+    }
+    const fcPath = join(fcDir, fcHit)
+    try {
+      const buf = readFileSync(fcPath)
+      res.writeHead(200, {
+        'Content-Type': MIME[extname(fcPath)] || 'application/octet-stream',
+        'Content-Length': buf.length,
+        // 2026-09-16 no-cache 根修（用户定案，原 image-cache 口径沿用）：id/文件名虽由分配器保证唯一，
+        // 但会话目录可被清理重写，no-cache 是「URL 字节一变立即反映」的防线，localhost/LAN 开销可忽略。
+        'Cache-Control': 'private, no-cache',
+      })
+      res.end(buf)
+    } catch {
+      sendJson(res, 404, { error: 'not found' })
     }
     return
   }
@@ -3264,41 +3320,6 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       sendJson(res, 200, data)
     } catch (e) {
       sendError(res, e)
-    }
-    return
-  }
-  // 2026-08-30 web 图片内联渲染：GET /gateway/image-cache/<sessionId>/<imageId>。
-  // 数据源 = CLI processUserInput storeImages 落盘的 image-cache/<sessionId>/<id>.<ext>
-  // （utils/imageStore.ts；id = pastedContents id，与文本 [Image #N] 占位一一对应）。
-  // 扩展名由 mediaType 推导，此处按 <id>. 前缀 readdir 解析，消费端无需知道扩展名。
-  // 已在上方 /gateway/* 统一 token/票证门内；路径两段白名单校验（uuid/纯数字）防穿越。
-  if (req.method === 'GET' && url.pathname.startsWith('/gateway/image-cache/')) {
-    const m = /^\/gateway\/image-cache\/([0-9a-f-]{36})\/(\d+)$/.exec(url.pathname)
-    if (!m) {
-      sendJson(res, 400, { error: 'invalid path' })
-      return
-    }
-    const [, imgSid, imgId] = m
-    const imgDir = join(getClaudeConfigHomeDir(), 'image-cache', imgSid)
-    try {
-      const hit = readdirSync(imgDir).find((f) => /^\d+\./.test(f) && f.startsWith(`${imgId}.`))
-      if (!hit) {
-        sendJson(res, 404, { error: 'not found' })
-        return
-      }
-      const buf = readFileSync(join(imgDir, hit))
-      res.writeHead(200, {
-        'Content-Type': MIME[extname(hit)] || 'application/octet-stream',
-        'Content-Length': buf.length,
-        // 2026-09-16 no-cache 根修（用户定案）：原 max-age=86400 会把首次取到的字节钉在
-        // /image-cache/<sid>/<id> 上 24h——id 撞号覆写后新气泡仍显示旧图（b5bd1265 实证
-        // B 显示成 A）。id 唯一由分配器保证（web-src live.js 单调 maxImgId + CLI 显式 id 透传），
-        // 此处 no-cache 是「URL 字节一变立即反映」的防线，localhost/LAN 重取开销可忽略。
-        'Cache-Control': 'private, no-cache',
-      })
-      res.end(buf)
-    } catch {
-      sendJson(res, 404, { error: 'not found' })
     }
     return
   }

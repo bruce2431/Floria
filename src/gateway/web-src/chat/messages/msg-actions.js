@@ -2,7 +2,7 @@
 import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
 import { I, fileIcon } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
-import { messagesEl, live } from '../../engine/state.js'
+import { messagesEl, live, state } from '../../engine/state.js'
 import { cardBus } from '../../engine/card-bus.js'
 import { quoteBodiesAsMarkdown } from '../../inputbar/mention.js'
 import { ICON_COPY, writeClipboard } from './usage.js'
@@ -169,15 +169,15 @@ import { ICON_COPY, writeClipboard } from './usage.js'
 
   // 用户气泡正文（2026-08-30 图片渲染，用户定案：图在气泡外）：
   // 带 imageId 的 image 块 → 气泡只出文本（剥掉文本里已渲染图的 [Image #N] 占位），
-  // 图由 userImgsHtml 渲染在气泡框外；字节走网关 GET /gateway/image-cache/<会话uuid>/<id>
-  // （复用 CLI processUserInput storeImages 落盘的 image-cache，display JSON 不塞 base64）。
+  // 图由 userImgsHtml 渲染在气泡框外；字节走网关 GET /gateway/file-cache/<会话uuid>/<id>?sid=<会话hash>
+  // （复用 CLI processUserInput storeImages 落盘的 <项目根>/.claude/file-cache，display JSON 不塞 base64）。
   // 无 imageId（旧记录）→ 回落 [图片] 占位/纯文本；图已落盘后被清（会话重启
-  // cleanupOldImageCaches 清非当前会话缓存）→ userImgsHtml onerror 出 [Image #N] 裸文本。
+  // cleanupOldFileCaches 清非当前会话缓存）→ userImgsHtml onerror 出 [Image #N] 裸文本。
   function userBodyHtml(m) {
     const ids = []
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     let txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
-    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ image-cache 文件名 ↔ 图片块
+    // [Image #N] 是 web 发送端内部令牌（占位 ↔ pastedContents id ↔ file-cache 文件名 ↔ 图片块
     // imageId 同源），**永不上屏：无条件全剥**。旧「只剥有 image 块对应的那几个 id」在链上任何一处
     // 少一张图时（网关曾按 ≤4 张静默截断；non-vision 模型 CLI 丢弃 image 块同理）多出的占位会漏成
     // 消息裸文本（用户实测 [Image #5] [Image #6] [Image #7]）。对应图片本体由 userImgsHtml 依图片块
@@ -192,7 +192,7 @@ import { ICON_COPY, writeClipboard } from './usage.js'
   }
 
   // 文本里的 [Image #N] 占位（web 发送端拼的内部令牌）→ id 列表。CLI 落盘文件名即 N
-  // （storeImages 按 pastedContents id 命名），故凭占位即可拼出 image-cache URL。
+  // （storeImages 按 pastedContents id 命名），故凭占位即可拼出 file-cache URL。
   function textImageIds(m) {
     const txt = m.blocks.filter((b) => b.kind === 'text').map((b) => b.text).join('')
     const out = []
@@ -211,13 +211,15 @@ import { ICON_COPY, writeClipboard } from './usage.js'
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     if (!ids.length) ids.push(...textImageIds(m))
     if (!ids.length) return ''
-    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/image-cache/${live.curUuid || ''}/${id}">`).join('')
+    const sid = state.currentHash ? '?sid=' + encodeURIComponent(state.currentHash) : ''
+    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${sid}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
 
   // 文件卡片（2026-09-12 文件上传，用户定案「像图片一样有对应的 UI」）：与图片同构——消息文本里
   // 的 [文件:<落盘绝对路径>] 占位剥出渲染成气泡外下方文件卡片（图标+文件名，title=完整路径，
-  // 点击复制路径供粘贴他用）。文件已落盘（uploads/ 不随会话清理），无图片的 404/裸文本回落问题。
+  // 点击复制路径供粘贴他用）。文件落 file-cache/<会话id>/（与粘贴图片同目录，随会话清理），
+  // 卡片形态与图片的 404/裸文本回落不共用。
   function fileCardsHtml(paths) {
     const cards = paths.map((p) => {
       const name = String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p

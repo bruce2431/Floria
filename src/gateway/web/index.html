@@ -25,7 +25,10 @@
   <!-- 2026-08-28 资源改绝对路径：SPA 路径路由（/session/<hash> 等）下相对路径会解析到子路径 404 -->
   <!-- KaTeX 公式样式（2026-10-06）：须排在 /styles.css 之前，本项目的 .math-block/.md-math 覆盖其后 -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=473" />
-  <link rel="stylesheet" href="/styles.css?v=603" />
+  <!-- UI 基础包（@floria/web，2026-10-24）：主题令牌 + reset + 统一滚动条。须排在业务样式之前，
+       app.js 之前另加载其 IIFE（window.FloriaWeb）。源 = SubPj1-遥测网页/packages/web/。 -->
+  <link rel="stylesheet" href="/webui/floria-web.css?v=1" />
+  <link rel="stylesheet" href="/styles.css?v=610" />
 </head>
 <body>
 <div id="app">
@@ -210,7 +213,7 @@
          mountPreview 渲，与「项目」视图卡同一份三级链）/ 工具 id = 工具态（#wk-pv-tabs 顶 tab 条 +
          该工具 pane）。tab 由 work-tools.js 注册表渲染（首枚恒为「预览」页签 → 回预览态，其后 = 注册序，
          外部模块可 registerWkTool 追加）；tab 条随栏在场常驻；pane 互斥显隐归 applyPvTab。
-         内置工具 = 评论（pane #wk-cmt，sidebar/comments.js 渲）。
+         内置工具 = 评论（pane #wk-cmt，views/cards/comment/comment-card.js 注册 + feature/comment 渲）。
          同 #work-editor，不用 .view-card —— 它是 work 模式常驻栏，不是槽位卡。 -->
     <section id="work-preview">
       <div class="wk-pv-tabs" id="wk-pv-tabs" hidden></div>
@@ -262,7 +265,7 @@
               <div class="row">
                 <div class="tools">
                   <input id="img-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
-                  <!-- 文件上传（2026-09-12）：+ 浮窗「上传文件」行触发；POST /gateway/upload 落盘 exe 目录 uploads/ -->
+                  <!-- 文件上传（2026-10-24）：+ 浮窗「上传文件」行触发；POST /gateway/file-cache 落盘配置根 file-cache/（按会话） -->
                   <input id="file-upload" type="file" multiple hidden />
                   <button id="cmd-btn" class="add" title="命令" aria-label="命令" aria-haspopup="listbox"></button>
                   <!-- 项目选择器（2026-09-02）：空态=右侧切换目标项目（=侧栏项目「+」同链路 state.newProject，
@@ -372,6 +375,9 @@
 <!-- 解压组件（2026-10-24）：xlsx/docx 预览（web-src/sidebar/work/work-doc.js）用 fflate.unzipSync
      解 OOXML 包；须在 app.js 之前挂到 window.fflate。 -->
 <script src="/vendor/fflate.js?v=1"></script>
-<script src="/app.js?v=603"></script>
+<!-- UI 基础包 IIFE（2026-10-24）：挂 window.FloriaWeb（I / fileIcon / esc / fromHtml / VERSION），
+     核心图标表改为转调本全局。须在 app.js 之前加载，缺包时模块直接抛错。 -->
+<script src="/webui/floria-web.iife.js?v=1"></script>
+<script src="/app.js?v=610"></script>
 </body>
 </html>

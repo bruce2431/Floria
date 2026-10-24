@@ -1,153 +1,9 @@
 /* floria — 会话查看器前端（ChatGPT 风格黑白主题）
    配色：黑白灰 + 唯一彩色 = 发送按钮蓝
    布局：主聊天区 + 左侧可折叠侧栏（折叠 0px 宽、唤出入口=左上角汉堡 + 左缘热区 / 展开 panel 280px） */
-:root {
-  color-scheme: light; /* 原生滚动条 / 表单控件随主题（iPad·Safari 忽略 ::-webkit-scrollbar，只认这个） */
-  --bg: #ffffff;
-  --chat-bg: #ffffff;
-  --rail-bg: #fafafa;
-  --plane: #ececf1; /* 底板（2026-09-23 卡化）：容器底色，从卡与卡、卡与边缘的缝里露出来当分隔 */
-  --border: #ececec;
-  --border-soft: #f2f2f3;
-  --text: #1c1c1e;
-  --text-2: #8e8e93;
-  --text-3: #c4c4c9;
-  --hover: #f2f2f4;
-  --active: #e9e9ec;
-  --selected: #e4e4ea; /* 会话列表选中行底（比 --active 更深，2026-10-06） */
-  /* 浮起面（悬停扶起 tab / 长按扶起文件行）：独立于 --bg 的抬升面令牌。浅色=白卡压底板，
-     夜晚底板是 #000，沿用 --bg(#161616) 会与底板糊在一起、黑影也失效，故单列一套。
-     2026-10-06 用户报「白天浮起同样不明显」：白天底板是 --plane(#ececf1 灰)，白卡只高出 19 级明度，
-     原 #e2e2e6 描边 + 0.12 投影读不出「抬升」——改为深色描边 + 双层投影，与夜晚（底#000/浮#2e2e2e
-     +18%亮描边+0.8投影）取同等对比强度。 */
-  --float-bg: #ffffff;
-  --float-line: rgba(0, 0, 0, 0.14);
-  --float-shadow: 0 10px 26px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
-  --blue: #4d6bfe;
-  --blue-hover: #3b5bfd;
-  /* 统一滚动条（2026-10-10）：thumb 半透明——容器底色有白卡/灰底板/黑浮层三种，实色 token 必在
-     某一种上失衡；透明轨道 + 半透明 thumb 是唯一能同时适配所有底的一套值。 */
-  --sb-thumb: rgba(0, 0, 0, 0.2);
-  --sb-thumb-hover: rgba(0, 0, 0, 0.35);
-  --shadow: 0 10px 34px rgba(0, 0, 0, 0.14);
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.08);
-  --radius: 14px;
-  --panel-w: 280px;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  /* dsh 移植面语义令牌（2026-10-06 主题化）：浅色值 = 各移植块原先写死的展开值，逐值保留不飘移；
-     暗色在 html[data-theme="dark"] 覆盖。原先写死 #fff/#0f1115/#61666b/rgba(38,49,72,.06) 的块
-     改引这些令牌，颜色的真源从「每处写死」收敛为「一层令牌 + 一层暗色覆盖」。 */
-  --ink: #0f1115;        /* dsh 正文 / 标题 / 主按钮底 */
-  --ink-hover: #2c3138;  /* 深面色钮悬停（图钉 × / 主按钮） */
-  --ink-2: #61666b;      /* dsh 次要文本 / 图标 */
-  --ink-3: #81858c;      /* dsh 更次文本（描述、分组标题） */
-  --ink-4: #adb2b8;      /* dsh 占位符 / 禁用 */
-  --field-2: #f7f8fa;    /* 代码块 / chart 条 / 列表悬停面 */
-  --field-3: #f5f6f7;    /* 小圆钮面（+ 按钮） */
-  --hairline: rgba(0, 0, 0, 0.1);      /* dsh 细边框 */
-  --hairline-2: rgba(0, 0, 0, 0.08);   /* dsh 更浅细边框 */
-  --hairline-strong: rgba(0, 0, 0, 0.18); /* 悬停态加重的细边框 */
-  --hover-ink: rgba(38, 49, 72, 0.06); /* dsh 行/项悬停高亮 */
-  --knob: #ffffff;                        /* 开关滑块（浮在轨道上的实体圆） */
-  --inset-bg: rgba(0, 0, 0, 0.06);        /* 模式切换「空位」凹面 */
-  --inset-shadow: rgba(0, 0, 0, 0.10);    /* 凹面内阴影 */
-  /* 语义色（审批/提问卡）：浅色值 = 原硬编码，暗色在 html[data-theme="dark"] 覆盖 */
-  --warn-bg: #fef3c7;    --warn-fg: #b45309;    --warn-line: #fcd34d;
-  --danger-soft: #fef6f6; --danger-fg: #b91c1c;
-  --ok-soft: #f6fbf7;    --ok-fg: #15803d;
-  --accent-hover: #f7faff; --accent-sel: #eff5ff;
-  /* 代码语法高亮（编辑区 CodeMirror 6，2026-10-07）：tag → 令牌，暗色在 html[data-theme="dark"] 覆盖。
-     供 sidebar/work.js wkEdBuildHlStyle 的 HighlightStyle 以 var() 引用（日夜随动，无需重建编辑器）。 */
-  --hl-kw: #8b5cf6;    /* 关键字 / 修饰符 / self */
-  --hl-str: #16a34a;   /* 字符串 / 正则 / 字符 */
-  --hl-num: #d97706;   /* 数字 / 布尔 / null / atom */
-  --hl-com: var(--text-3); /* 注释 / meta */
-  --hl-h: #3b82f6;     /* 标题 */
-  --hl-b: #db2777;     /* 加粗 */
-  --hl-i: #0891b2;     /* 斜体 */
-  --hl-link: #2563eb;  /* 链接 / URL */
-  --hl-code: #ea580c;  /* 行内代码 / 引用 */
-  --hl-type: #0d9488;  /* 类型 / 类 / 命名空间 */
-  --hl-fn: #7c3aed;    /* 函数名 */
-  --hl-attr: #b45309;  /* 属性 / 特性名 */
-  --hl-op: var(--text-2); /* 运算符 / 标点 */
-}
 
-/* 夜晚模式（2026-10-06）：配色参考 Prism（prism.openai.com 实机截图采样——画布 #000 / 面 #161616 /
-   线条·悬停 #2a2a2a / 正文浅灰）。仅覆盖颜色令牌，几何与结构一律不变（每处消费 --token 的元素自动跟随；
-   --sunken-bg 等派生量随之）。缺省态由 <head> 内联脚本按 localStorage['floria-theme'] 预置
-   document.documentElement[data-theme]（缺省跟随系统 prefers-color-scheme），故首帧即正确、无闪帧。 */
-html[data-theme="dark"] {
-  color-scheme: dark;
-  /* 暗色取 Obsidian 默认主题的基色阶：背景 #1e1e1e 起、底板 #141414，正文 #dadada——
-     **不纯黑不纯白**（纯 #000 卡片缝不可辨、纯 #fff 正文刺眼）。层级由 base 阶拉开：
-     底板 14 < rail 19 < bg 1e < field-2 26 < active 30 < border 36。 */
-  --bg: #1e1e1e;                                  /* primary background（base-00） */
-  --chat-bg: #1e1e1e;
-  --rail-bg: #191919;                             /* secondary background（比卡片低一档） */
-  --plane: #141414;                               /* 底板：卡与卡之间露出的缝，不再纯黑 */
-  --border: #363636;                              /* base-30 */
-  --border-soft: #2a2a2a;                         /* base-25 */
-  --text: #dadada;                                /* base-100 */
-  --text-2: #b3b3b3;                              /* base-70 */
-  --text-3: #7a7a7a;                              /* base-50/60 之间：faint 但不隐形 */
-  --hover: #2a2a2a;
-  --active: #333333;
-  --selected: #3a3a3a;
-  --float-bg: #262626;                            /* 抬升面：高于卡片底的浮卡底 */
-  --float-line: rgba(255, 255, 255, 0.16);
-  --float-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --blue: #4d6bfe;
-  --blue-hover: #3b5bfd;
-  --sb-thumb: rgba(255, 255, 255, 0.18);
-  --sb-thumb-hover: rgba(255, 255, 255, 0.34);
-  --shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
-  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.32);
-  --ink: #dadada;
-  --ink-hover: #e6e6e6;
-  --ink-2: #b3b3b3;
-  --ink-3: #999999;
-  --ink-4: #6f6f6f;
-  --field-2: #262626;
-  --field-3: #2a2a2a;
-  --hairline: rgba(255, 255, 255, 0.14);
-  --hairline-2: rgba(255, 255, 255, 0.1);
-  --hairline-strong: rgba(255, 255, 255, 0.22);
-  --hover-ink: rgba(255, 255, 255, 0.06);
-  --knob: #dadada;
-  --inset-bg: rgba(0, 0, 0, 0.35);
-  --inset-shadow: rgba(0, 0, 0, 0.45);
-  --warn-bg: #3a2c0c;    --warn-fg: #fbbf24;    --warn-line: #6b5410;
-  --danger-soft: #341a1a; --danger-fg: #f87171;
-  --ok-soft: #14261a;    --ok-fg: #4ade80;
-  --accent-hover: #17233c; --accent-sel: #1c2a48;
-  /* 代码语法高亮：换成 Obsidian/One Dark 一族的低饱和色（原 #4ade80/#fbbf24 在 #1e1e1e 上偏刺眼），
-     色相不变、只降亮度与饱和度，暗底久看不累。 */
-  --hl-kw: #c678dd;
-  --hl-str: #98c379;
-  --hl-num: #d19a66;
-  --hl-h: #61afef;
-  --hl-b: #e06c75;
-  --hl-i: #56b6c2;
-  --hl-link: #61afef;
-  --hl-code: #98c379;
-  --hl-type: #e5c07b;
-  --hl-fn: #61afef;
-  --hl-attr: #d19a66;
-  --hl-op: #abb2bf;
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* 全局统一滚动条（2026-10-10）：所有滚动容器共用一套滑条——宽 8px、轨道透明、thumb 用 --sb-*
-   随日夜，不再逐容器重复定义（旧版五处各写 width+thumb、且未设 track ⇒ 夜晚露白边，实报
-   「部分滑条是丑陋的白边」）。iPad/Safari 自 13 起忽略 ::-webkit-scrollbar，整条会退回原生
-   滚动条，其日夜由 :root / html[data-theme="dark"] 的 color-scheme 决定（表单控件与 CM6 内部
-   滚动条同理）。刻意隐藏滑条处（.wk-tb-tabs / .wk-pv-tabs）以更高的类特异性覆盖，仍生效。 */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--sb-thumb); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--sb-thumb-hover); }
+/* 主题令牌 / reset / 统一滚动条已迁至 UI 基础包 @floria/web（index.html 里 /webui/floria-web.css，
+   源 = SubPj1-遥测网页/packages/web/src/theme.css）；本文件只留业务布局与卡片样式。 */
 
 /* html 高度=动态视口 100dvh（2026-09-10 根修）：html,body 的 100% 是恒定大视口（URL 栏
    收起态高），iPad Safari 顶栏展开时叠盖视口顶——贴顶乐观气泡被顶栏遮挡 + 占位按大视口
@@ -321,7 +177,7 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
 /* AI 生成图（2026-10-03）：模型输出 ![](文件名.png) 渲染在回复正文 .blocks 内（不在 .msg-imgs），
    故单列样式；上限 480px 超出收缩，复用 .msg-img 类接入既有 lightbox 委托（点图看大图）。 */
 .msg .blocks .md-img { display: block; max-width: min(100%, 480px); height: auto; border-radius: 10px; margin: 6px 0; cursor: zoom-in; }
-/* 正文内附件引用小图（2026-10-16）：消息正文里的 `![](uploads/x.png)`（@ 艾特插入 / 发送后回显）压到
+/* 正文内附件引用小图（2026-10-24 file-cache）：消息正文里的 `![](file-cache/…)`（@ 艾特插入 / 发送后回显）压到
    **文字行高**（参考即梦），与 CM 编辑面 .cm-att-img 同口径——正文内联图只在用户主动引用时出现，不做成大图块。
    类含 msg-img ⇒ 复用既有 lightbox 委托（点小图看大图、点空白关闭），与消息流内图片同一条预览链 */
 .msg .md-att-img { display: inline-block; max-height: 1.4em; max-width: 4.2em; width: auto; height: auto; border-radius: 4px; margin: 0 3px; vertical-align: -0.3em; cursor: zoom-in; }
@@ -329,7 +185,7 @@ body.kb-open #app { transform: translateY(calc(-1 * var(--kb, 0px))); }
    <input type="checkbox" class="md-task-checkbox" data-task-line disabled>——只读展示（勾选态由源码决定，
    渲染面不改消息内容；可编辑面走 CM6，见 editor-transactions.toggleTaskLineCM）。禁 CSS 伪元素模拟。 */
 .md-task-checkbox { appearance: auto; width: 14px; height: 14px; margin: 0 6px 0 0; vertical-align: -2px; accent-color: var(--blue); cursor: default; }
-/* CM6 行内附件图片 widget（2026-10-15 待办 13 / editor-attachments.edAttImgPlugin）：`![](uploads/x)`
+/* CM6 行内附件图片 widget（2026-10-24 / editor-attachments.edAttImgPlugin）：`![](file-cache/…)`
    原子替换为 <img>；光标/拖选落在区间内 = 还原源码（widget 不挂），故此处只管可见态几何。
    2026-10-16 待办 2：正文内联图压到「和文字一样大小」（参考即梦）——只改此正文渲染几何，胶囊行
    （#img-pills .img-pill img，尺寸另在下方）不动。 */
@@ -2642,7 +2498,7 @@ body.wk-resizing { cursor: col-resize; user-select: none; }
 /* 预览态容器（#wk-pv-body）：挂 mountPreview 的三级链产物（.preview-frame / 默认页 / 空态）。 */
 .wk-pv-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 
-/* ============ work 右栏工具 pane：评论（sidebar/comments.js 渲染，显隐归 work.js applyPvTab）============
+/* ============ work 右栏工具 pane：评论（feature/comment/comment-panel.js 渲染，显隐归 work.js applyPvTab）============
    顶栏工具栏胶囊 #wk-tb-tool 的 active/图标/文字跟着页态（state.wkPvTab，落点 = work.js applyPvTab）。 */
 /* 评论面板：顶过滤行 + 可滚列表 */
 .wk-cmt { flex: 1; min-height: 0; display: flex; flex-direction: column; }

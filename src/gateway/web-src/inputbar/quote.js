@@ -6,7 +6,7 @@ import { esc } from '../core/util.js'
 import { findSession } from '../engine/sessions.js'
 import { quoteActions } from '../engine/ext-runtime.js'
 import { IS_TOUCH_DEVICE } from '../sidebar/recent.js'
-import { openCommentComposer } from '../sidebar/comments.js'
+import { openCommentComposer } from '../feature/comment/comment-composer.js'
 import { gwSend, syncGwSend } from './send.js'
 /* @module inputbar/quote.js */
   // ---------- 选中引用（quote）----------
@@ -121,7 +121,7 @@ import { gwSend, syncGwSend } from './send.js'
   // 同 id 时内置优先（申报表里同名条目直接被略过），内置行永不因申报而变样或被删。
   const QUOTE_BUILTIN_ID = 'ai-edit'
   // 「添加评论」（2026-10-06）：只对**文件选区**在场——评论对象 = 文件 + 行范围（kind:'file'），
-  // 回复/PDF 选区没有文件位置可锚。落地 = sidebar/comments.js 的 openCommentComposer（另一条内置动作，
+  // 回复/PDF 选区没有文件位置可锚。落地 = feature/comment/comment-composer.js 的 openCommentComposer（另一条内置动作，
   // 不进 AI 编辑的输入栏链）。同 id 申报行同样被略过（与 ai-edit 一致：内置优先）。
   const QUOTE_COMMENT_ID = 'comment'
   function quoteActionRows(snap) {

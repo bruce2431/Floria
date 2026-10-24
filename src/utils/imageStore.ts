@@ -1,12 +1,10 @@
-import { mkdir, open } from 'fs/promises'
 import { join } from 'path'
+import { mkdir, open } from 'fs/promises'
 import { getSessionId } from '../bootstrap/state.js'
 import type { PastedContent } from './config.js'
 import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
-import { getFsImplementation } from './fsOperations.js'
+import { getSessionFileCacheDir } from './fileCache.js'
 
-const IMAGE_STORE_DIR = 'image-cache'
 const MAX_STORED_IMAGE_PATHS = 200
 
 // In-memory cache of stored image paths
@@ -14,9 +12,11 @@ const storedImagePaths = new Map<number, string>()
 
 /**
  * Get the image store directory for the current session.
+ * 2026-10-24：image-cache 升级为 file-cache——粘贴图片与上传附件共用同一会话目录
+ * （图片 = <id>.<ext>，附件 = 原名+时间戳），读写/清理只有一套规则。
  */
 function getImageStoreDir(): string {
-  return join(getClaudeConfigHomeDir(), IMAGE_STORE_DIR, getSessionId())
+  return getSessionFileCacheDir(getSessionId())
 }
 
 /**
@@ -123,45 +123,3 @@ function evictOldestIfAtCap(): void {
   }
 }
 
-/**
- * Clean up old image cache directories from previous sessions.
- */
-export async function cleanupOldImageCaches(): Promise<void> {
-  const fsImpl = getFsImplementation()
-  const baseDir = join(getClaudeConfigHomeDir(), IMAGE_STORE_DIR)
-  const currentSessionId = getSessionId()
-
-  try {
-    let sessionDirs
-    try {
-      sessionDirs = await fsImpl.readdir(baseDir)
-    } catch {
-      return
-    }
-
-    for (const sessionDir of sessionDirs) {
-      if (sessionDir.name === currentSessionId) {
-        continue
-      }
-
-      const sessionPath = join(baseDir, sessionDir.name)
-      try {
-        await fsImpl.rm(sessionPath, { recursive: true, force: true })
-        logForDebugging(`Cleaned up old image cache: ${sessionPath}`)
-      } catch {
-        // Ignore errors for individual directories
-      }
-    }
-
-    try {
-      const remaining = await fsImpl.readdir(baseDir)
-      if (remaining.length === 0) {
-        await fsImpl.rmdir(baseDir)
-      }
-    } catch {
-      // Ignore
-    }
-  } catch {
-    // Ignore errors reading base directory
-  }
-}

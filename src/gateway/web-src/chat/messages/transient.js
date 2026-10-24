@@ -1,5 +1,5 @@
 // 乐观/暂态区：首条消息暂存补投、排队主张收编、absorbPending 接管
-import { renderTransient, clearTakeover } from '../../inputbar/approval.js'
+import { renderTransient, clearTakeover, takeover } from '../../inputbar/approval.js'
 import { state, live, messagesEl } from '../../engine/state.js'
 import { stageStart, scrollBottom } from '../stage.js'
 import { firstSendHash } from '../../sidebar/recent.js'
@@ -9,7 +9,10 @@ import { firstSendHash } from '../../sidebar/recent.js'
   // 每次现读可变绑定，调用方严禁缓存返回值。
   function getPendingUserMsgs() { return pendingUserMsgs }
   function addUser(text, imgs, files) {
-    clearTakeover() // 清掉残留的提问/审批 takeover
+    // 审批卡在场时发送消息不撤卡（2026-10-24 实测 bug：消息照发，但卡被 clearTakeover 洗掉、
+    // 审批状态仍阻塞在 CLI 侧 ⇒ 用户无处作答）。审批卡只由回执/CLI 侧操作/切会话撤除
+    // （approval-confirmed / approval-dismiss / route.js 切会话），发送不参与其生命周期。
+    if (takeover !== 'approval') clearTakeover() // 其余残留 takeover 照旧清掉
     // 任何 done-live 折叠在场（权威或本区乐观主张）= 回合运行中 → 排队成员；否则本次发送是
     // 「新回合开启主张」。主张至多一个：主张折叠在场时后续发送恒为 dock 成员。
     const hasLive = !!messagesEl.querySelector('details.done-fold.done-live')

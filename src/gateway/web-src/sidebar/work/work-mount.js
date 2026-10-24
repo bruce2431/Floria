@@ -65,18 +65,9 @@
     $('wk-view').innerHTML = I.collapse
     // 顶栏「工具栏」胶囊的图标/文字由 applyPvTab 按「右栏在不在场」写（不在场 = 插件图标 + 「工具栏」，
     // 在场 = ✕ + 「关闭」），此处不预置——applySbMode → applyPanes → applyPvTab 在 mountWork 之后立刻落一次。
-    // 右栏工具注册（注册序即 tab 序）：评论（pane = #wk-cmt，渲染仍归 comments.js；mount = 切到本 tab 时
-    // 按需拉+渲）。外部注册 = 任意模块调 registerWkTool 追加，本模块不感知其内容。
-    registerWkTool({
-      id: 'comments',
-      title: '评论',
-      pane: 'wk-cmt',
-      mount: () => {
-        cmtLoad(state.workProj)
-        cmtRender()
-      },
-    })
-    // 评论模块 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时切到评论工具页 /
+    // 右栏工具 tab 的「评论」由评论卡自注册（views/cards/comment/comment-card.js）——宿主不再知道
+    // 该工具的存在，只注入它需要的能力回调（下一行起）。
+    // 评论卡 ↔ work 解耦：注册回调（点评论定位开文件 / 选区添加评论时切到评论工具页 /
     // 评论增删改后重绘原文标记）
     cmtSetHooks({
       openFile: (p, id) => {
@@ -86,7 +77,6 @@
       ensurePane: () => setPvTab('comments'), // 切评论工具页（含开栏 + 拉内容）
       refreshMarks: cmtApplyMarks,
     })
-    cmtMount()
     // 顶栏三种 pill 的点击一律**直调侧栏那条同一个函数**，不在此自写 state（顶栏不另立链路）。
     // 「工具栏」胶囊 = 右栏整列开/关：调 setPane('workspace', on)（其内落 setPvPane：在场维 + 关栏时
     // 顺带回预览态）。文件 pill（可多枚）= 见下面 data-wkftab 分支（调 openWorkFile / closeWkFile）。

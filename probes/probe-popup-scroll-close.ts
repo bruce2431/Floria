@@ -31,18 +31,18 @@ const read = (p) => readFileSync(p, 'utf-8').replace(/\r\n/g, '\n')
   else bad('quote.js resize 关窗丢失')
 }
 
-// ---- 2. comments.js：scroll 监听收窄（同款语义） ----
+// ---- 2. feature/comment/comment-composer.js：scroll 监听收窄（同款语义） ----
 {
-  const src = read(resolve(SRC, 'sidebar/comments.js'))
+  const src = read(resolve(SRC, 'feature/comment/comment-composer.js'))
   const m = src.match(/window\.addEventListener\('scroll',\s*(\(?e\)?\s*=>\s*\{[^}]*\}),\s*\{\s*passive:\s*true,\s*capture:\s*true\s*\}\s*\)/)
-  if (m) ok('comments.js scroll capture 监听在位')
-  else bad('comments.js scroll capture 监听缺失')
-  if (m && /cmtPop\.contains\(e\.target\)/.test(m[1])) ok('comments.js 滚动源守卫：!cmtPop.contains(e.target) 才关')
-  else bad('comments.js 滚动源守卫缺失（浮层内 cmp-in 滚动会被误关）')
-  if (/document\.addEventListener\('mousedown', \(e\) => \{ if \(cmtPop && !cmtPop\.contains\(e\.target\)\) cmtClosePop\(\) \}\)/.test(src)) ok('comments.js 点外关窗保留')
-  else bad('comments.js 点外关窗丢失')
-  if (/e\.key === 'Escape' && cmtPop\) cmtClosePop\(\)/.test(src)) ok('comments.js Escape 关窗保留')
-  else bad('comments.js Escape 关窗丢失')
+  if (m) ok('comment-composer.js scroll capture 监听在位')
+  else bad('comment-composer.js scroll capture 监听缺失')
+  if (m && /cmtPop\.contains\(e\.target\)/.test(m[1])) ok('comment-composer.js 滚动源守卫：!cmtPop.contains(e.target) 才关')
+  else bad('comment-composer.js 滚动源守卫缺失（浮层内 cmp-in 滚动会被误关）')
+  if (/document\.addEventListener\('mousedown', \(e\) => \{ if \(cmtPop && !cmtPop\.contains\(e\.target\)\) cmtClosePop\(\) \}\)/.test(src)) ok('comment-composer.js 点外关窗保留')
+  else bad('comment-composer.js 点外关窗丢失')
+  if (/e\.key === 'Escape' && cmtPop\) cmtClosePop\(\)/.test(src)) ok('comment-composer.js Escape 关窗保留')
+  else bad('comment-composer.js Escape 关窗丢失')
 }
 
 // ---- 3. 跑真身：模拟「浮窗内 textarea 滚动」与「浮窗外滚动」的分流 ----

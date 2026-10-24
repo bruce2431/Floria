@@ -200,10 +200,11 @@ ok('壳不复用 .preview-frame/.preview-shell 类名（避免顶替宿主「当
 ok('B1 bundle-web-modules.ts 收编 views/cards/ext/ext-card.js', bundleTs.includes("views/cards/ext/ext-card.js"))
 const rows = [...bundleTs.matchAll(/\{ file: '((?:views|engine|feature)\/[\w/-]+\.js)'/g)].map((m) => m[1])
 // 2026-10-10 分层治理：卡契约下沉 engine/registry.js，且各卡模块顶层 registerCard 自注册 ⇒ registry 必须
-// 物理排在四张卡**之前**（TDZ：registerCard 需 `let CARDS=[]` 已求值），旧「卡在 registry 之前」已翻转。
+// 物理排在全部第一方卡**之前**（TDZ：registerCard 需 `let CARDS=[]` 已求值），旧「卡在 registry 之前」已翻转。
+// 卡数随卡片化增长（2026-10-24 评论卡加入 ⇒ 6），故只锁「≥4 且逐张在 registry 之后」，不锁死具体张数。
 const regAt = rows.indexOf('engine/registry.js')
 const cardRows = rows.filter((f) => f.startsWith('views/cards/'))
-ok('B1 契约 registry.js 先于四张第一方卡（engine/registry.js 早于 views/cards/*，自注册可入表）', regAt >= 0 && cardRows.length === 4 && cardRows.every((f) => rows.indexOf(f) > regAt), rows.join(' < '))
+ok('B1 契约 registry.js 先于全部第一方卡（engine/registry.js 早于 views/cards/*，自注册可入表）', regAt >= 0 && cardRows.length >= 4 && cardRows.every((f) => rows.indexOf(f) > regAt), rows.join(' < '))
 // 2026-10-10 Phase 5：registry 模块体在顶层调 setTabRefresh(renderMgrTabs) 注入重渲口 ⇒ ext-runtime 须
 // 物理排在其之前（TDZ：tabRefresh 的初值须已求值），且两者都排在四张卡之前。
 const extRtAt = rows.indexOf('engine/ext-runtime.js')

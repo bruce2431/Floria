@@ -76,6 +76,14 @@ const PIECES: { file: string; part: number }[] = [
   // work 工具页注册表（右栏工具态的水平标签栏）：纯函数声明 + 顶层 const WK_TOOL_DEFS，须在 work.js
   // 之前（其 mountWork 调 registerWkTool，applyPvTab 调 wkToolDefs/wkToolDef/wkToolNormId）。
   { file: 'sidebar/work-tools.js', part: 1 },
+  // 评论卡（2026-10-24 卡片化）：卡目录自包含 = 描述符/注册面 + 卡私有面板组件（views/cards/comment/）；
+  // 跨卡/宿主共享的实现归 feature/comment/（数据层、选区浮层——work.js 原文标记与 inputbar/quote.js 也要用）。
+  // 依赖链 = work-tools.js（registerWkTool）与 card-bus.js（registerInlineCard）⇒ 须排在其后；
+  // 执行序 = 数据 → 浮层 → 面板 → 卡，只有 comment-card 在顶层注册（其余只有声明）。
+  { file: 'feature/comment/comment-data.js', part: 1 },
+  { file: 'feature/comment/comment-composer.js', part: 1 },
+  { file: 'views/cards/comment/comment-panel.js', part: 1 },
+  { file: 'views/cards/comment/comment-card.js', part: 1 },
   // work 视图项目槽缺省（WORK_SLOT_DEF，2026-10-10 自 engine/state.js 下移为 work 领域值）：须在 work 侧栏
   // 各件之前（work-mount.js 的 initWork 调 loadWork(WORK_SLOT_DEF)、work-context.js 的 loadWorkSlot 同用）。
   { file: 'sidebar/work-state.js', part: 1 },
@@ -112,8 +120,6 @@ const PIECES: { file: string; part: number }[] = [
   // （拼接后单 IIFE 函数声明提升，序位按语义就近）。
   { file: 'sidebar/work/work-tabmenu.js', part: 1 },
   { file: 'sidebar/work/work-mount.js', part: 1 },
-  // 项目评论批注：排在 work.js 之后（其 cmtLoad/cmtRender 由 work.js 调），排在启动序列之前。
-  { file: 'sidebar/comments.js', part: 1 },
   // 入口（web-src/app.js）：事件绑定段（同区段原含会话壳）与启动序列段。
   { file: '__app__', part: 1 },
   { file: 'inputbar/ctx-meter.js', part: 1 },

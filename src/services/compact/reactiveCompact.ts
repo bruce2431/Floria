@@ -16,7 +16,7 @@
  * loaded when the flag is on; runtime opt-out is via the env var below.
  *
  * Media stripping only ever mutates the in-memory message array — it never
- * touches `imageStore.ts`'s image-cache disk files (those are session
+ * touches `imageStore.ts`'s file-cache disk files (those are session
  * scrollback/resume persistence and are intentionally preserved).
  */
 import { APIUserAbortError } from '@anthropic-ai/sdk'

@@ -43,7 +43,7 @@ export type DisplayBlock = {
   input?: unknown
   fileChange?: DisplayFileChange
   /**
-   * image 块专属（2026-08-30 web 内联渲染）：pastedContents id（= image-cache/<sessionId>/<id>.<ext>
+   * image 块专属（2026-08-30 web 内联渲染）：pastedContents id（= file-cache/<sessionId>/<id>.<ext>
    * 文件名主干，与文本里 `[Image #N]` 占位一一对应）。取自转录 user 记录 / queued_command attachment
    * 记录的 imagePasteIds（按 content 内 image 块顺序对位）。缺省 = 旧记录/无缓存文件，消费端回落占位。
    */
@@ -123,7 +123,7 @@ type SourceMessage = {
   /** system/local_command 记录的内容在顶层字符串（无 message 字段） */
   content?: unknown
   /**
-   * user 记录的图片粘贴 id（processUserInput storeImages 落 image-cache 时的文件名主干）；
+   * user 记录的图片粘贴 id（processUserInput storeImages 落 file-cache 时的文件名主干）；
    * 与 message.content 内 image 块按顺序一一对应（提交链路按 image 块序生成）。
    */
   imagePasteIds?: number[]

@@ -168,35 +168,45 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     for (const s of (MGR.skills && MGR.skills.personal) || []) if (!match || match(s.n) || match(s.d)) out.push({ kind: 'skill', name: s.n, desc: s.d, grp })
     return out
   }
+  // 全局文件清单是流式产出的（BFS 每批即并入）：跑完且零命中才报「无匹配」，未跑完就在尾部挂
+  // 「搜索中…」——有命中照常列出，用户不必干等全量索引。base = 推入搜索结果前的行数（文件视图含「返回」行）。
+  function pushSearchState(items, base) {
+    if (pickAll.err) { items.push({ kind: 'pathwait', name: '索引失败', desc: pickAll.err }); return }
+    if (!pickAll.done) { items.push({ kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' }); return }
+    if (items.length === (base || 0)) items.push({ kind: 'pathwait', name: '无匹配结果', desc: '' })
+  }
   function cmdEntries() {
     // 查询词：@ 模式 = @ 后到光标的文本；+ 模式 = 底栏全文（剥掉可能的前导 /）。
     const q = (cmd.mentionMode ? mention.q : barQuery()).trim().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = []
-    // 搜索态判据（2026-10-25 用户定案）：**@ 后有查询词**才进扁平全局搜索（不按类隔离、按时间混排）。
-    // 只输入 @ 而没跟其它文本 = 等价于正常唤出工具栏（首屏入口 / 当前视图），不搜索。
-    // + 模式底栏文本只用来**过滤当前入口视图**（2026-10-25 实测：有文字点 + 也被当全局搜索，弹「正在索引工作区」）。
-    if (cmd.mentionMode && q) {
-      items.push(...mentionItems(q))
-      const searchPending = pick.q && !pick.searchOff && !pickAll.items
-      if (searchPending) {
-        items.push(pickAll.err
-          ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
-          : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
-      } else if (!items.length) {
-        items.push({ kind: 'pathwait', name: '无匹配结果', desc: '' })
-      }
-      pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲
-      return items
-    }
-    // 入口视图：返回行 + 该类的全部条目（无条数上限）；底栏文本只做**层内过滤**（不跨类、不全局搜索）
+    // 范围判据（2026-10-25 用户定案）：**进了某一类视图 = 查询只在该类里搜**；没进视图时
+    // @ 后有查询词 = 跨类扁平全局搜索（不按类隔离、按时间混排）。只输入 @ 而无查询词 =
+    // 等价于唤出工具栏首屏（与 + 一致）。+ 模式底栏文本只过滤当前入口视图，从不触发全局搜索。
     if (cmd.view) {
       items.push({ kind: 'back', name: '返回', grp: '导航' })
       if (cmd.view === 'session') items.push(...cmdSessionRows(match, '会话'))
       else if (cmd.view === 'skill') items.push(...cmdSkillRows(match, '技能'))
-      else if (cmd.view === 'cmd') for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o, grp: '指令' })
-      // 文件视图：pickItems('') 保持层内浏览（传 q 会翻成全局搜索），查询词在本地过滤
-      else if (cmd.view === 'file') items.push(...pickItems('').filter((it) => it.kind === 'pathup' || match(it.name)))
+      // 指令分支必须带花括号：`else if (…) for (…) if (…) push()` 后面再跟 `else if` 会把
+      // 它吸附给内层 if（悬垂 else），文件视图分支永远不执行（2026-10-25 根因：@ 点「文件」只剩「返回」）。
+      else if (cmd.view === 'cmd') {
+        for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o, grp: '指令' })
+      }
+      // 文件视图：有查询词 = 只搜文件（同一条全局文件清单，不含会话/技能）；空查询 = 层内浏览。
+      else if (cmd.view === 'file') {
+        if (q) {
+          const base = items.length
+          items.push(...pickItems(q))
+          pushSearchState(items, base)
+          pickSearchKick(() => { if (cmd.open) renderCmdPop() })
+        } else items.push(...pickItems('').filter((it) => it.kind === 'pathup' || match(it.name)))
+      }
+      return items
+    }
+    if (cmd.mentionMode && q) {
+      items.push(...mentionItems(q))
+      pushSearchState(items)
+      pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 清单未跑完 → 流式补渲
       return items
     }
     // 首屏入口：两个上传动作 + 四类入口
@@ -265,7 +275,8 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
       // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       // 搜索结果（@ 后有查询词）= 扁平时间线，不印分组标题（用户定案「不隔离」）；@ 无词/+ 模式 = 入口视图分组。
-      const flat = cmd.mentionMode && !!mention.q.trim()
+      // 未进视图的跨类搜索才是扁平时间线；进了某类视图仍按组显示（导航行与该类标题）。
+      const flat = cmd.mentionMode && !cmd.view && !!mention.q.trim()
       let lastGrp = ''
       html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = it.grp || groupOf(it)
@@ -336,15 +347,16 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   function cmdSelect() {
     const it = cmd.items[cmd.active]
     if (!it || cmd.submitting) return
+    // 入口视图导航（两个模式共用，必须先于 @ 落地判：否则 @ 里点「文件」会被当成插入 [插件:文件] 胶囊）：
+    // 入口行 = 进入该类（此后查询词只在该类里搜）；返回行 = 回首屏。
+    if (it.kind === 'entry') { cmd.view = it.view; cmd.active = 0; renderCmdPop(); return }
+    if (it.kind === 'back') { cmd.view = ''; cmd.active = 0; renderCmdPop(); return }
     // @ 模式：所有条目都落地到 @ 锚点（含上传附件写回正文、目录下钻重渲）——统一走 mention.js，
     // 与 + 模式的「追加到输入栏末尾」刻意不同（@ 是就地替换查询）。
     if (cmd.mentionMode) { if (it.kind !== 'pathwait') selectMentionItem(it); return }
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
     if (it.kind === 'pathwait') return // 占位行不可选（清单未就绪）
-    // 入口视图导航（2026-10-25）：入口行 = 进入该类全部条目；返回行 = 回首屏入口。
-    if (it.kind === 'entry') { cmd.view = it.view; cmd.active = 0; renderCmdPop(); return }
-    if (it.kind === 'back') { cmd.view = ''; cmd.active = 0; renderCmdPop(); return }
     // 下钻/返回必须走 pickEnter：它同时把 searchOff 翻回层内浏览模式；只调 loadPickPath 会让
     // pickItems 继续按全局搜索分支渲染，点目录看起来「没反应」。
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {

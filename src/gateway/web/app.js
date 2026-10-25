@@ -10966,7 +10966,11 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 输入内 chip 的 × 删除归 composer-cm widget 自有监听（CM 事务删除，DOM 直删会腐蚀 doc）；
     // 此处只管 @ 会话的外点关闭——@ 的弹窗就是工具栏 #cmd-pop（2026-10-25 定案唯一弹窗），
     // 点工具栏内部不关，点外部才收（mousedown 链已先关过一次，这里是幂等兜底）。
-    if (!e.target.closest('#cmd-pop')) closeMentionPop()
+    // 用 composedPath 判「点是否落在浮窗内」：行内点击会先触发 cmdSelect 重渲（innerHTML 替换），
+    // 冒泡到这里时 e.target 已脱离 DOM，closest('#cmd-pop') 恒为 null ⇒ 误判点外、@ 浮窗刚进视图
+    // 就被关掉（2026-10-25 根因）。composedPath 在派发时固定，重渲后仍含原祖先链。
+    const inCmdPop = e.composedPath ? e.composedPath().includes(cmdPop) : (e.target.closest && !!e.target.closest('#cmd-pop'))
+    if (!inCmdPop) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
     if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
   })
@@ -11347,7 +11351,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 不设深度/目录数/条目数上限——搜索要能命中工作区任意深度的文件（2026-10-25 用户定案：
   // 截断过于严重，应显示全部）。隐藏目录与 node_modules/dist/.git 等仍由网关侧跳过。
   // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
-  const pickAll = { items: null, busy: false, seq: 0, err: '' }
+  // items 是**流式**清单：BFS 每扫完一批目录就并进去（用户边打边出结果，不必等全量跑完），
+  // done=true 才表示跑完整轮。浮窗打开即预热（refreshPick），打字时通常已可用。
+  const pickAll = { items: [], done: false, busy: false, seq: 0, err: '', onProgress: null }
   const PICK_FS_CONCURRENCY = 24
 
   // ---------- 条目分组（+ 工具栏入口视图的唯一真源）----------
@@ -11373,7 +11379,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
   function pickLabel() {
     // 搜索模式（2026-10-14 待办 20）：文件组标题提示结果口径（层内浏览则照旧标当前层）
-    if (pick.q && !pick.searchOff) return pickAll.items ? '工作区全局搜索' : '全局搜索…'
+    if (pick.q && !pick.searchOff) return pickAll.done ? '工作区全局搜索' : '全局搜索…'
     if (pick.loading) return '加载中…'
     if (pick.err) return '加载失败'
     return pick.path || '工作区根'
@@ -11381,10 +11387,9 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 构建全工作区递归清单（幂等；构建期间 busy 挡重入，seq 丢弃被 refreshPick 作废的旧轮）。
   // 完成不自行重渲——由调用方的 after 回调负责（浮窗还开着才重渲）。
   async function ensurePickAll() {
-    if (pickAll.items || pickAll.busy) return
+    if (pickAll.done || pickAll.busy) return
     pickAll.busy = true
     const seq = ++pickAll.seq
-    const out = []
     let layer = ['']
     const seen = new Set()
     let rootErr = ''
@@ -11393,6 +11398,8 @@ function setFirstSendHash(v) { firstSendHash = v }
         const next = []
         // 分批并发：整层一次打出去会在目录多的工作区形成数百并发请求（本地网关也能被拖慢）
         for (let i = 0; i < layer.length; i += PICK_FS_CONCURRENCY) {
+          const batchItems = []
+          const batchDirs = []
           await Promise.all(
             layer.slice(i, i + PICK_FS_CONCURRENCY).map(async (p) => {
               try {
@@ -11405,10 +11412,10 @@ function setFirstSendHash(v) { firstSendHash = v }
                 }
                 for (const e of data.entries) {
                   const cp = p ? `${p}/${e.name}` : e.name
-                  out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp, mtime: e.mtime || 0 })
+                  batchItems.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp, mtime: e.mtime || 0 })
                   if (e.type === 'dir' && !seen.has(cp)) {
                     seen.add(cp)
-                    next.push(cp)
+                    batchDirs.push(cp)
                   }
                 }
               } catch (e) {
@@ -11418,22 +11425,33 @@ function setFirstSendHash(v) { firstSendHash = v }
             }),
           )
           if (seq !== pickAll.seq) return
+          // 流式并进清单：本批结果立刻可被 pickItems 检索到，并立刻重渲一次浮窗。
+          pickAll.items.push(...batchItems)
+          next.push(...batchDirs)
+          if (pickAll.onProgress) pickAll.onProgress()
         }
         layer = next
       }
     } finally {
       if (seq === pickAll.seq) {
         pickAll.busy = false
-        if (rootErr) { pickAll.items = null; pickAll.err = rootErr }
-        else { pickAll.items = out; pickAll.err = '' }
+        pickAll.done = !rootErr
+        if (rootErr) { pickAll.items = []; pickAll.err = rootErr }
+        else pickAll.err = ''
+        // 收尾也要重渲一次：否则尾部「搜索中…」会一直挂着（pickSearchKick 只在未开跑时挂 .then）
+        if (pickAll.onProgress) pickAll.onProgress()
       }
     }
   }
   // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
   // 建清单，完成后浮窗仍开着才重渲。
   function pickSearchKick(re) {
-    // pickAll.err 非空 = 上一轮根层失败：不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
-    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy && !pickAll.err) ensurePickAll().then(re).catch(() => {})
+    // 清单流式产出：构建期间每批都回调（有结果立刻显示）；err 非空 = 上一轮根层失败，
+    // 不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
+    if (pick.q && !pick.searchOff && !pickAll.done && !pickAll.busy && !pickAll.err) {
+      pickAll.onProgress = re
+      ensurePickAll().then(() => { if (pickAll.onProgress) pickAll.onProgress() }).catch(() => {})
+    }
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -11467,7 +11485,6 @@ function setFirstSendHash(v) { firstSendHash = v }
     pick.q = ql
     const items = []
     if (ql && !pick.searchOff) {
-      if (!pickAll.items) return items
       for (const e of pickAll.items) {
         if (!e.name.toLowerCase().includes(ql)) continue
         items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true, t: e.mtime || 0 })
@@ -11611,12 +11628,17 @@ function setFirstSendHash(v) { firstSendHash = v }
     pick.q = '' // 查询/层级同属上一轮手势：不复位会先渲一帧旧查询结果（两个浮窗共用本状态）
     pick.path = ''
     pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
-    pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.items = [] // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.done = false
     pickAll.err = ''
     pickAll.seq++
     // 作废在途轮时必须同步释放 busy：旧轮 finally 见 seq 不符只跳过写回、不会复位 busy，
     // 否则下一次输入永远起不了新轮（文件搜索整组空白）
     pickAll.busy = false
+    // 打开即预热全局清单（不等用户打出查询词才开始扫：全量约 1500 个目录请求，早开始早出结果）。
+    // 流式批回调与层加载共用 after（渲染点已判 cmd.open）。
+    pickAll.onProgress = after || null
+    ensurePickAll().catch(() => {})
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
@@ -12018,35 +12040,45 @@ function setFirstSendHash(v) { firstSendHash = v }
     for (const s of (MGR.skills && MGR.skills.personal) || []) if (!match || match(s.n) || match(s.d)) out.push({ kind: 'skill', name: s.n, desc: s.d, grp })
     return out
   }
+  // 全局文件清单是流式产出的（BFS 每批即并入）：跑完且零命中才报「无匹配」，未跑完就在尾部挂
+  // 「搜索中…」——有命中照常列出，用户不必干等全量索引。base = 推入搜索结果前的行数（文件视图含「返回」行）。
+  function pushSearchState(items, base) {
+    if (pickAll.err) { items.push({ kind: 'pathwait', name: '索引失败', desc: pickAll.err }); return }
+    if (!pickAll.done) { items.push({ kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' }); return }
+    if (items.length === (base || 0)) items.push({ kind: 'pathwait', name: '无匹配结果', desc: '' })
+  }
   function cmdEntries() {
     // 查询词：@ 模式 = @ 后到光标的文本；+ 模式 = 底栏全文（剥掉可能的前导 /）。
     const q = (cmd.mentionMode ? mention.q : barQuery()).trim().toLowerCase().replace(/^\//, '')
     const match = (s) => !q || String(s || '').toLowerCase().includes(q)
     const items = []
-    // 搜索态判据（2026-10-25 用户定案）：**@ 后有查询词**才进扁平全局搜索（不按类隔离、按时间混排）。
-    // 只输入 @ 而没跟其它文本 = 等价于正常唤出工具栏（首屏入口 / 当前视图），不搜索。
-    // + 模式底栏文本只用来**过滤当前入口视图**（2026-10-25 实测：有文字点 + 也被当全局搜索，弹「正在索引工作区」）。
-    if (cmd.mentionMode && q) {
-      items.push(...mentionItems(q))
-      const searchPending = pick.q && !pick.searchOff && !pickAll.items
-      if (searchPending) {
-        items.push(pickAll.err
-          ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
-          : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
-      } else if (!items.length) {
-        items.push({ kind: 'pathwait', name: '无匹配结果', desc: '' })
-      }
-      pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲
-      return items
-    }
-    // 入口视图：返回行 + 该类的全部条目（无条数上限）；底栏文本只做**层内过滤**（不跨类、不全局搜索）
+    // 范围判据（2026-10-25 用户定案）：**进了某一类视图 = 查询只在该类里搜**；没进视图时
+    // @ 后有查询词 = 跨类扁平全局搜索（不按类隔离、按时间混排）。只输入 @ 而无查询词 =
+    // 等价于唤出工具栏首屏（与 + 一致）。+ 模式底栏文本只过滤当前入口视图，从不触发全局搜索。
     if (cmd.view) {
       items.push({ kind: 'back', name: '返回', grp: '导航' })
       if (cmd.view === 'session') items.push(...cmdSessionRows(match, '会话'))
       else if (cmd.view === 'skill') items.push(...cmdSkillRows(match, '技能'))
-      else if (cmd.view === 'cmd') for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o, grp: '指令' })
-      // 文件视图：pickItems('') 保持层内浏览（传 q 会翻成全局搜索），查询词在本地过滤
-      else if (cmd.view === 'file') items.push(...pickItems('').filter((it) => it.kind === 'pathup' || match(it.name)))
+      // 指令分支必须带花括号：`else if (…) for (…) if (…) push()` 后面再跟 `else if` 会把
+      // 它吸附给内层 if（悬垂 else），文件视图分支永远不执行（2026-10-25 根因：@ 点「文件」只剩「返回」）。
+      else if (cmd.view === 'cmd') {
+        for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o, grp: '指令' })
+      }
+      // 文件视图：有查询词 = 只搜文件（同一条全局文件清单，不含会话/技能）；空查询 = 层内浏览。
+      else if (cmd.view === 'file') {
+        if (q) {
+          const base = items.length
+          items.push(...pickItems(q))
+          pushSearchState(items, base)
+          pickSearchKick(() => { if (cmd.open) renderCmdPop() })
+        } else items.push(...pickItems('').filter((it) => it.kind === 'pathup' || match(it.name)))
+      }
+      return items
+    }
+    if (cmd.mentionMode && q) {
+      items.push(...mentionItems(q))
+      pushSearchState(items)
+      pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 清单未跑完 → 流式补渲
       return items
     }
     // 首屏入口：两个上传动作 + 四类入口
@@ -12115,7 +12147,8 @@ function setFirstSendHash(v) { firstSendHash = v }
       // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
       // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
       // 搜索结果（@ 后有查询词）= 扁平时间线，不印分组标题（用户定案「不隔离」）；@ 无词/+ 模式 = 入口视图分组。
-      const flat = cmd.mentionMode && !!mention.q.trim()
+      // 未进视图的跨类搜索才是扁平时间线；进了某类视图仍按组显示（导航行与该类标题）。
+      const flat = cmd.mentionMode && !cmd.view && !!mention.q.trim()
       let lastGrp = ''
       html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
         const g = it.grp || groupOf(it)
@@ -12186,15 +12219,16 @@ function setFirstSendHash(v) { firstSendHash = v }
   function cmdSelect() {
     const it = cmd.items[cmd.active]
     if (!it || cmd.submitting) return
+    // 入口视图导航（两个模式共用，必须先于 @ 落地判：否则 @ 里点「文件」会被当成插入 [插件:文件] 胶囊）：
+    // 入口行 = 进入该类（此后查询词只在该类里搜）；返回行 = 回首屏。
+    if (it.kind === 'entry') { cmd.view = it.view; cmd.active = 0; renderCmdPop(); return }
+    if (it.kind === 'back') { cmd.view = ''; cmd.active = 0; renderCmdPop(); return }
     // @ 模式：所有条目都落地到 @ 锚点（含上传附件写回正文、目录下钻重渲）——统一走 mention.js，
     // 与 + 模式的「追加到输入栏末尾」刻意不同（@ 是就地替换查询）。
     if (cmd.mentionMode) { if (it.kind !== 'pathwait') selectMentionItem(it); return }
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
     if (it.kind === 'pathwait') return // 占位行不可选（清单未就绪）
-    // 入口视图导航（2026-10-25）：入口行 = 进入该类全部条目；返回行 = 回首屏入口。
-    if (it.kind === 'entry') { cmd.view = it.view; cmd.active = 0; renderCmdPop(); return }
-    if (it.kind === 'back') { cmd.view = ''; cmd.active = 0; renderCmdPop(); return }
     // 下钻/返回必须走 pickEnter：它同时把 searchOff 翻回层内浏览模式；只调 loadPickPath 会让
     // pickItems 继续按全局搜索分支渲染，点目录看起来「没反应」。
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {

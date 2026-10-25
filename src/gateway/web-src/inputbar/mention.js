@@ -37,7 +37,9 @@ import { MGR } from '../sidebar/mgr-data.js'
   // 不设深度/目录数/条目数上限——搜索要能命中工作区任意深度的文件（2026-10-25 用户定案：
   // 截断过于严重，应显示全部）。隐藏目录与 node_modules/dist/.git 等仍由网关侧跳过。
   // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
-  const pickAll = { items: null, busy: false, seq: 0, err: '' }
+  // items 是**流式**清单：BFS 每扫完一批目录就并进去（用户边打边出结果，不必等全量跑完），
+  // done=true 才表示跑完整轮。浮窗打开即预热（refreshPick），打字时通常已可用。
+  const pickAll = { items: [], done: false, busy: false, seq: 0, err: '', onProgress: null }
   const PICK_FS_CONCURRENCY = 24
 
   // ---------- 条目分组（+ 工具栏入口视图的唯一真源）----------
@@ -63,7 +65,7 @@ import { MGR } from '../sidebar/mgr-data.js'
   }
   function pickLabel() {
     // 搜索模式（2026-10-14 待办 20）：文件组标题提示结果口径（层内浏览则照旧标当前层）
-    if (pick.q && !pick.searchOff) return pickAll.items ? '工作区全局搜索' : '全局搜索…'
+    if (pick.q && !pick.searchOff) return pickAll.done ? '工作区全局搜索' : '全局搜索…'
     if (pick.loading) return '加载中…'
     if (pick.err) return '加载失败'
     return pick.path || '工作区根'
@@ -71,10 +73,9 @@ import { MGR } from '../sidebar/mgr-data.js'
   // 构建全工作区递归清单（幂等；构建期间 busy 挡重入，seq 丢弃被 refreshPick 作废的旧轮）。
   // 完成不自行重渲——由调用方的 after 回调负责（浮窗还开着才重渲）。
   async function ensurePickAll() {
-    if (pickAll.items || pickAll.busy) return
+    if (pickAll.done || pickAll.busy) return
     pickAll.busy = true
     const seq = ++pickAll.seq
-    const out = []
     let layer = ['']
     const seen = new Set()
     let rootErr = ''
@@ -83,6 +84,8 @@ import { MGR } from '../sidebar/mgr-data.js'
         const next = []
         // 分批并发：整层一次打出去会在目录多的工作区形成数百并发请求（本地网关也能被拖慢）
         for (let i = 0; i < layer.length; i += PICK_FS_CONCURRENCY) {
+          const batchItems = []
+          const batchDirs = []
           await Promise.all(
             layer.slice(i, i + PICK_FS_CONCURRENCY).map(async (p) => {
               try {
@@ -95,10 +98,10 @@ import { MGR } from '../sidebar/mgr-data.js'
                 }
                 for (const e of data.entries) {
                   const cp = p ? `${p}/${e.name}` : e.name
-                  out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp, mtime: e.mtime || 0 })
+                  batchItems.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp, mtime: e.mtime || 0 })
                   if (e.type === 'dir' && !seen.has(cp)) {
                     seen.add(cp)
-                    next.push(cp)
+                    batchDirs.push(cp)
                   }
                 }
               } catch (e) {
@@ -108,22 +111,33 @@ import { MGR } from '../sidebar/mgr-data.js'
             }),
           )
           if (seq !== pickAll.seq) return
+          // 流式并进清单：本批结果立刻可被 pickItems 检索到，并立刻重渲一次浮窗。
+          pickAll.items.push(...batchItems)
+          next.push(...batchDirs)
+          if (pickAll.onProgress) pickAll.onProgress()
         }
         layer = next
       }
     } finally {
       if (seq === pickAll.seq) {
         pickAll.busy = false
-        if (rootErr) { pickAll.items = null; pickAll.err = rootErr }
-        else { pickAll.items = out; pickAll.err = '' }
+        pickAll.done = !rootErr
+        if (rootErr) { pickAll.items = []; pickAll.err = rootErr }
+        else pickAll.err = ''
+        // 收尾也要重渲一次：否则尾部「搜索中…」会一直挂着（pickSearchKick 只在未开跑时挂 .then）
+        if (pickAll.onProgress) pickAll.onProgress()
       }
     }
   }
   // 搜索模式的异步补拉口（两个浮窗的渲染函数各调一次）：查询非空且处于搜索模式、清单未建 →
   // 建清单，完成后浮窗仍开着才重渲。
   function pickSearchKick(re) {
-    // pickAll.err 非空 = 上一轮根层失败：不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
-    if (pick.q && !pick.searchOff && !pickAll.items && !pickAll.busy && !pickAll.err) ensurePickAll().then(re).catch(() => {})
+    // 清单流式产出：构建期间每批都回调（有结果立刻显示）；err 非空 = 上一轮根层失败，
+    // 不随每次按键重试（会变成按键风暴），等浮窗重开 refreshPick 复位。
+    if (pick.q && !pick.searchOff && !pickAll.done && !pickAll.busy && !pickAll.err) {
+      pickAll.onProgress = re
+      ensurePickAll().then(() => { if (pickAll.onProgress) pickAll.onProgress() }).catch(() => {})
+    }
   }
   // 加载某一层（path 相对工作区根）。完成后由调用方重渲自己的浮窗（本函数不碰 DOM）。
   async function loadPickPath(path) {
@@ -157,7 +171,6 @@ import { MGR } from '../sidebar/mgr-data.js'
     pick.q = ql
     const items = []
     if (ql && !pick.searchOff) {
-      if (!pickAll.items) return items
       for (const e of pickAll.items) {
         if (!e.name.toLowerCase().includes(ql)) continue
         items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true, t: e.mtime || 0 })
@@ -301,12 +314,17 @@ import { MGR } from '../sidebar/mgr-data.js'
     pick.q = '' // 查询/层级同属上一轮手势：不复位会先渲一帧旧查询结果（两个浮窗共用本状态）
     pick.path = ''
     pick.searchOff = false // 浮窗重开 = 新一轮手势：回到全局搜索模式（待办 20）
-    pickAll.items = null // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.items = [] // 递归清单随打开重建（目录内容外部可变，不跨打开缓存；在途轮由 seq 作废）
+    pickAll.done = false
     pickAll.err = ''
     pickAll.seq++
     // 作废在途轮时必须同步释放 busy：旧轮 finally 见 seq 不符只跳过写回、不会复位 busy，
     // 否则下一次输入永远起不了新轮（文件搜索整组空白）
     pickAll.busy = false
+    // 打开即预热全局清单（不等用户打出查询词才开始扫：全量约 1500 个目录请求，早开始早出结果）。
+    // 流式批回调与层加载共用 after（渲染点已判 cmd.open）。
+    pickAll.onProgress = after || null
+    ensurePickAll().catch(() => {})
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 

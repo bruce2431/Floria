@@ -54,7 +54,7 @@
 
 ## 4. 项目预览页机制
 
-点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无后端且无 `.claude/preview/` 时显示空态占位「该项目暂无预览」，不再提供宿主内置默认页**（2026-10-18 删除 `/default-preview/*` 路由与 `web/default-preview/` 资源）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管。`GET /gateway/project?label=` 保留（work 侧栏文件树消费其 `files`；响应仍带 README/会话元信息，是既有形状）。文件树由 `walkProjectTree` 递归扫项目根，跳过点开头条目与 `SKIP_TREE_DIRS`；**不设固定深度上限**，只受 `TREE_BUDGET = 8000` 总节点与 `TREE_PER_LEVEL = 200` 每层 cap 约束（预算全局共享、沿树递减），预算耗尽才退化为 `listOneLevel` 的单层浅节点。**label decode 防护**：`/preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程；新增同类路由照 `/backend` 同款防护。
+点管理视图项目胶囊一律进预览（`openProjectPreview(label, hasPreview)`）——若 `<工作区根>/<项目>/.claude/preview/` 存在（`findProjects` 探测 `hasPreview`，`/gateway/sessions` 会话附 `preview` 标志），在消息区渲染 iframe 加载 `GET /preview/<项目>/*`（默认 index.html，label 须命中 findProjects 且 hasPreview、resolve 须落 preview 目录内防越界）；无预览内返回按钮——退出预览全靠侧栏导航，`route()` 每次导航统一清 `__backendHeartbeat`；**无后端且无 `.claude/preview/` 时显示空态占位「该项目暂无预览」，不再提供宿主内置默认页**（2026-10-18 删除 `/default-preview/*` 路由与 `web/default-preview/` 资源）。真预览页由项目自己维护（自包含静态网页，可带相对 css/js），网关只做静态托管。`GET /gateway/project?label=` 保留（work 侧栏文件树消费其 `files`；响应仍带 README/会话元信息，是既有形状）。文件树由 `walkProjectTree` 递归扫项目根，跳过点开头条目与 `SKIP_TREE_DIRS`；**不设深度上限、不设每层 cap**（单层条目全返；2026-10-25 去掉 `TREE_PER_LEVEL=200`，349 项的目录不再被截成前 200），只受 `TREE_BUDGET = 8000` 总节点约束（预算全局共享、沿树递减），预算耗尽才退化为 `listOneLevel` 的单层浅节点。**label decode 防护**：`/preview/<label>` 的 `decodeURIComponent` 必须包 try-catch（decode 失败保留原文 → 404）——畸形 % 序列（如 `%ZZ`）未捕获 URIError 会崩掉整个网关进程；新增同类路由照 `/backend` 同款防护。
 
 ## 5. 远程宿主同源反代 /backend/<label>/
 
@@ -302,9 +302,9 @@ web「神经」视图（[web-ui.md](web-ui.md) §26；2026-10-10 起为工作区
 
 web `@` 提及 /「+」菜单的「目录 / 文件」组数据源（[web-ui.md](web-ui.md) §44）。`localGateway.ts` 注册在 `/gateway/file` 之后，token/cookie 鉴权同其它 `/gateway/*`。
 
-`GET /gateway/fs?path=<相对工作区根的可选子路径>` → `{ path, entries: [{name, type:'dir'|'file'}] }`；`path` 缺省/空串 = 工作区根（`root` = `getPortableRoot()`，与 `/gateway/project` 同一基准）。
+`GET /gateway/fs?path=<相对工作区根的可选子路径>` → `{ path, entries: [{name, type:'dir'|'file', mtime?}] }`；`path` 缺省/空串 = 工作区根（`root` = `getPortableRoot()`，与 `/gateway/project` 同一基准）。`mtime` = 最后修改时间（ms，`statSync`；失败则省略字段），供前端搜索按时间混排（[web-ui.md](web-ui.md) §44）。
 
-- **单层只读**：复用 `listOneLevel(dir)`——同一套裁剪（跳隐藏项与 `.git`/`node_modules`/`.claude`/`.trash` 等重型目录、目录在前、每层 ≤50），**不另立排除表**；端点内无任何写调用。
+- **单层只读**：复用 `listOneLevel(dir)`——同一套裁剪（跳隐藏项与 `.git`/`node_modules`/`.claude`/`.trash` 等重型目录、目录在前、**单层不设条数上限**），**不另立排除表**；端点内无任何写调用。
 - **穿越防护单一实现**：`resolveWithinRoot(root, rel)`（导出纯函数）先 `resolve(root)` 得 `base`，剥离首尾 `/` 与反斜杠归一后 `resolve(base, rel)`，要求 `abs === base || abs.startsWith(base + sep)`——越界（`..` 逃逸、盘符、根绝对路径）返回 `null` → **403**；命中但非目录 → **404** `not a directory`。**基准必须先 `resolve` 再做 `startsWith` 比较**：直接用调用方传入的 `root` 拼 `sep` 时，形如 `F:/x` 的正斜杠根会与实际解析出的反斜杠路径失配，把根内路径误判成越界。
 - **探针锚点**：`probes/probe-gateway-fs.ts`（直接 import `resolveWithinRoot` 测真实现：根内 6 例 + 越界 7 例 + 分支只读/`listOneLevel`/403/404 文本断言，18 项）。
 

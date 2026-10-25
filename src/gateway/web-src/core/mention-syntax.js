@@ -14,7 +14,11 @@ import { esc } from './util.js'
   const MENTION_SESSION_ICON = I.dshChat
   // 目录 / 文件引用令牌（2026-09-26）：令牌 [@目录:路径] / [@文件:路径] 与上传附件占位 [文件:<路径>]
   // 刻意不同名：后者会被 messages.js 的附件卡片链（userFilesHtml/userBodyHtml）剥走，同名会吞掉 @ chip。
-  const MENTION_PATH_RE = /\[@(目录|文件):([^\]]+)\]/g
+  // 路径里允许出现 `]`（Windows 文件名唯一禁用的是 `\ / : * ? " < > |`），而 `]` 正是令牌收口符 ⇒
+  // 不转义会把令牌提前截断（2026-10-25 用户实报：`[@文件:…_[1617+第5组+…] 1(1).pdf]` 只渲前半截，
+  // 后面 `1(1).pdf]` 裸露成黑字）。转义符用 `\`（Windows 路径不可能含它）：`\`→`\\`、`]`→`\]`。
+  // 正则 `(?:[^\]\\\n]|\\.)+` 认两种字符；旧令牌不含反斜杠 ⇒ 同一正则原样兼容，不引入双语法。
+  const MENTION_PATH_RE = /\[@(目录|文件):((?:[^\]\\\n]|\\.)+)\]/g
   // 选中引用令牌（2026-09-28，inputbar/quote.js 产出）：`[@引用:<路径>#L12-L20]`——**只给位置**，
   // 模型自己 Read 该文件（与 `[文件:]` 上传占位、`[@文件:]` 路径 chip 都不同名，三者互不吞）。
   // 无行号（拿不到原文行偏移的文件）退化为 `[@引用:<路径>]`。MENTION_PATH_RE 只认「目录|文件」，
@@ -42,6 +46,18 @@ import { esc } from './util.js'
     return i >= 0 ? { title: String(v).slice(0, i), sid: String(v).slice(i + 1) } : { title: String(v), sid: '' }
   }
 
+  // 路径令牌的转义/解码 + 唯一序列化口（@ 插入与「+」直选共用，禁各自拼字符串）。
+  // 解码只认 `\X` → `X`：序列化侧保证反斜杠本身也成对转义，故不会误吞真实字符。
+  function escapeMentionPath(p) {
+    return String(p == null ? '' : p).replace(/\\/g, '\\\\').replace(/\]/g, '\\]')
+  }
+  function unescapeMentionPath(p) {
+    return String(p == null ? '' : p).replace(/\\(.)/g, '$1')
+  }
+  function mentionPathToken(p, ptype) {
+    return `[@${ptype === 'dir' ? '目录' : '文件'}:${escapeMentionPath(p)}]`
+  }
+
   // chip HTML（name 为已转义文本：mdInline/addUser 入口已 esc，这里不再二次转义）
   // 消息内渲染=透明胶囊（无图标），仅保留名称文本（用户要求「只要一个白色浮窗似的胶囊」→ 透明胶囊）
   // 路径 chip 额外包一层 .mc-t：长路径在胶囊内省略号收口（inline-flex 直挂文本无法 text-overflow）
@@ -49,9 +65,13 @@ import { esc } from './util.js'
   // 一律 = 图标 + 蓝字（与底栏 .mention 同构），不再有边框胶囊/等宽灰字/无图标形态。
   function mentionChipHtml(kind, name, ptype) {
     if (kind === 'path') {
-      const label = '@' + name
-      const icon = ptype === 'dir' ? I.dshFolder : fileIcon(name)
-      return `<span class="mention-chip m-path" title="${label}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
+      // chip 只显示**末段文件名**，全路径进 title：长路径前缀会把真正要看的文件名挤出可视区
+      // （2026-10-25 用户实测：宽 180px 的胶囊只剩「@20261013120000-形…」）。
+      const full = unescapeMentionPath(name)
+      const base = full.split('/').pop()
+      const label = '@' + base
+      const icon = ptype === 'dir' ? I.dshFolder : fileIcon(full)
+      return `<span class="mention-chip m-path" title="@${full}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
     }
     if (kind === 'session') {
       const title = splitSessionToken(name).title
@@ -151,11 +171,14 @@ export {
   QUOTE_REPLY_RE,
   decodeQuoteBody,
   encodeQuoteBody,
+  escapeMentionPath,
   foldQuoteBodies,
   mentionChipHtml,
+  mentionPathToken,
   quotePdfChipHtml,
   quoteRefChipHtml,
   quoteReplyChipHtml,
   splitSessionToken,
   unfoldQuoteBodies,
+  unescapeMentionPath,
 }

@@ -101,8 +101,9 @@ import { setPanel } from '../sidebar/recent.js'
   // 点击空白关闭弹层（@ 浮窗 / 整理会话 / 最近气泡）
   document.addEventListener('click', (e) => {
     // 输入内 chip 的 × 删除归 composer-cm widget 自有监听（CM 事务删除，DOM 直删会腐蚀 doc）；
-    // 此处只管 @ 浮窗外点关闭
-    if (!e.target.closest('#mention-pop')) closeMentionPop()
+    // 此处只管 @ 会话的外点关闭——@ 的弹窗就是工具栏 #cmd-pop（2026-10-25 定案唯一弹窗），
+    // 点工具栏内部不关，点外部才收（mousedown 链已先关过一次，这里是幂等兜底）。
+    if (!e.target.closest('#cmd-pop')) closeMentionPop()
     if (!$('organize-pop').contains(e.target) && !e.target.closest('#recent-more')) $('organize-pop').classList.remove('show')
     if (!bubblePop.contains(e.target)) bubblePop.classList.remove('show')
   })

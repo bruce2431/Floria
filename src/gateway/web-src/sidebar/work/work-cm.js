@@ -52,3 +52,12 @@
   function wkEdQuoteLines(range) { return wkEditor.quoteLines(range) }
   function wkEdInvalidatePathCache() { wkEditor.invalidatePathCache() }
   function wkEdGetView() { return wkEditor.getView() }
+
+  // 去抖自动保存（冲突未决时暂停，交 Ctrl+S 显式处置，避免覆盖外部改动）。
+  // 2026-10-25 补回：CM6 包化（v3.45.0）把本函数连同 updateListener 一起删了，而 onUserEdit 与
+  // wkEdSave 结尾仍在调用 ⇒ 每次编辑抛 ReferenceError，自动保存永不排程（iPad 无 Ctrl+S 则完全无法落盘）。
+  function wkEdScheduleSave() {
+    if (wkEdConflict) return
+    if (wkEdTimer) clearTimeout(wkEdTimer)
+    wkEdTimer = setTimeout(() => { wkEdTimer = 0; wkEdSave({}) }, WK_SAVE_MS)
+  }

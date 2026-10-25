@@ -4,13 +4,13 @@ import { messagesHtml, addUser } from '../chat/messages.js'
 import { GATEWAY, gateAwait, apiUrl } from '../engine/gateway.js'
 import { I } from '../core/icons.js'
 import { mdInline, relTime } from '../core/markdown.js'
-import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, foldQuoteBodies, mentionChipHtml, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken, unfoldQuoteBodies } from '../core/mention-syntax.js'
+import { MENTION_FILE_ICON, MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_ICON, MENTION_SESSION_RE, QUOTE_PDF_RE, QUOTE_REF_RE, QUOTE_REPLY_RE, foldQuoteBodies, mentionChipHtml, mentionPathToken, quotePdfChipHtml, quoteRefChipHtml, quoteReplyChipHtml, splitSessionToken, unfoldQuoteBodies, unescapeMentionPath } from '../core/mention-syntax.js'
 import { findSession, sessionCwd } from '../engine/sessions.js'
 import { inputEl, state } from '../engine/state.js'
 import { esc, newSessionProject } from '../core/util.js'
 import { syncGwSend } from './send.js'
 import { uploadedMentionItems } from './images.js'
-import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
+import { MGR } from '../sidebar/mgr-data.js'
 /* @module inputbar/mention.js */
   // ---------- @ 提及（2026-08-15）：输入 @ 弹出「近48h 会话 + 插件/技能」浮窗（2026-09-18 会话区提前），选中插入内联 chip ----------
   // 消息文本中 chip 序列化为 [插件:名称] / [会话:名称] 令牌（CLI 终端渲染为 [名称]，遥测端渲染为 chip；
@@ -22,7 +22,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   const MENTION_SKILL_ICON = I.dshSkill
   // ---------- 目录 / 文件引用（2026-09-26）：@ 浮窗与 + 工具栏共用的一组「逐级浏览工作区根」状态 ----------
   // 数据源 = GET /gateway/fs?path=<相对工作区根的子路径>（只读单层；网关侧复用 listOneLevel，跳过隐藏项
-  // 与重型目录、目录在前、每层 ≤50）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
+  // 与重型目录、目录在前、单层不设条数上限）。pick.path 是**相对工作区根**的当前层路径，'' = 根——与 chip 上行的
   // 路径同基准（用户定案：相对全局根）。令牌形态 [@目录:路径] / [@文件:路径] 见 core/mention-syntax.js。
   // 引用原文块 ⇄ 折叠令牌的解析与编码统一在 core/mention-syntax.js（唯一真源：气泡/底栏共用）。
   const MENTION_DIR_ICON = I.dshFolder
@@ -33,35 +33,19 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   // searchOff：搜索/浏览模式开关（2026-10-14 待办 20）——false 且查询非空 = 全局搜索模式；
   // 下钻/返回目录后翻 true（回到层内浏览），浮窗重开（refreshPick）复位 false。
   const pick = { path: '', entries: null, loading: false, err: '', seq: 0, searchOff: false, q: '' }
-  // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层并发），层间 await。
-  // 上限：目录 ≤250 / 条目 ≤2000 / 深度 ≤4——够覆盖散件与项目浅层，防全库深扫拖垮浮窗。
+  // 全工作区递归清单（待办 20 的数据层）：BFS 逐层 /gateway/fs（每层分批并发，层间 await）。
+  // 不设深度/目录数/条目数上限——搜索要能命中工作区任意深度的文件（2026-10-25 用户定案：
+  // 截断过于严重，应显示全部）。隐藏目录与 node_modules/dist/.git 等仍由网关侧跳过。
   // 浮窗每次打开经 refreshPick 重置重建（目录内容是外部可变状态，不跨打开缓存）。
   const pickAll = { items: null, busy: false, seq: 0, err: '' }
+  const PICK_FS_CONCURRENCY = 24
 
-  // ---------- 分组序 + 每组上限（两个浮窗的唯一真源）----------
-  // 组序固定为「上传 → 聊天 → 文件 → 技能 → 指令」，每组只列 GROUP_MAX 行；两处浮窗都走 arrangeItems，
-  // 新增条目只声明 kind、不各自排位（否则两处排位迟早分叉）。
-  const GROUP_ORDER = ['上传', '聊天', '文件', '技能', '指令']
-  const GROUP_MAX = 3
+  // ---------- 条目分组（+ 工具栏入口视图的唯一真源）----------
+  // 搜索结果**不分组也不截断**（2026-10-25 用户定案：@ 唤起同一工具栏、扁平按时间排列）；
+  // groupOf 只服务 + 工具栏的入口视图（每类一屏）与首屏两组（上传 / 浏览）。
   const GROUP_OF = { imgpick: '上传', filepick: '上传', session: '聊天', plugin: '技能', skill: '技能', path: '文件', pathup: '文件', pathwait: '文件' }
   function groupOf(it) {
     return GROUP_OF[it.kind] || '指令'
-  }
-  // 组排序 + 每组截断。**「上级目录」是导航行**：既排在本组最前、也不占列表名额——截到 3 行的是可选项，
-  // 导航入口被截掉会让子目录变成死层。
-  function arrangeItems(items) {
-    const seen = {}
-    const kept = items.filter((it) => {
-      if (it.kind === 'pathup') return true
-      if (it.glob) return true // 全局搜索命中（待办 20）：就是要看的重点结果，不受每组 3 行截断
-      const g = groupOf(it)
-      seen[g] = (seen[g] || 0) + 1
-      return seen[g] <= GROUP_MAX
-    })
-    return kept
-      .map((it, i) => ({ it, i, g: GROUP_ORDER.indexOf(groupOf(it)) }))
-      .sort((a, b) => (a.g - b.g) || (a.i - b.i))
-      .map((x) => x.it)
   }
 
   // ---------- 目录 / 文件浏览（数据层；两个浮窗共用，渲染各自负责） ----------
@@ -91,37 +75,40 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     pickAll.busy = true
     const seq = ++pickAll.seq
     const out = []
-    let layer = [{ p: '', d: 0 }]
+    let layer = ['']
     const seen = new Set()
     let rootErr = ''
     try {
-      while (layer.length && seen.size < 250 && out.length < 2000) {
+      while (layer.length) {
         const next = []
-        await Promise.all(
-          layer.map(async ({ p, d }) => {
-            try {
-              const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
-              const data = await r.json()
-              if (!r.ok || !data || !Array.isArray(data.entries)) {
-                // 根层失败 = 整份清单不可信（空结果会谎报「无匹配」）：记错并作废本轮，浮窗重开再试。
-                if (!p) rootErr = (data && data.error) || '工作区索引失败'
-                return
-              }
-              for (const e of data.entries) {
-                const cp = p ? `${p}/${e.name}` : e.name
-                out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp })
-                if (e.type === 'dir' && d < 4 && !seen.has(cp) && seen.size < 250) {
-                  seen.add(cp)
-                  next.push({ p: cp, d: d + 1 })
+        // 分批并发：整层一次打出去会在目录多的工作区形成数百并发请求（本地网关也能被拖慢）
+        for (let i = 0; i < layer.length; i += PICK_FS_CONCURRENCY) {
+          await Promise.all(
+            layer.slice(i, i + PICK_FS_CONCURRENCY).map(async (p) => {
+              try {
+                const r = await fetch(apiUrl('/gateway/fs?path=' + encodeURIComponent(p)))
+                const data = await r.json()
+                if (!r.ok || !data || !Array.isArray(data.entries)) {
+                  // 根层失败 = 整份清单不可信（空结果会谎报「无匹配」）：记错并作废本轮，浮窗重开再试。
+                  if (!p) rootErr = (data && data.error) || '工作区索引失败'
+                  return
                 }
+                for (const e of data.entries) {
+                  const cp = p ? `${p}/${e.name}` : e.name
+                  out.push({ ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: cp, mtime: e.mtime || 0 })
+                  if (e.type === 'dir' && !seen.has(cp)) {
+                    seen.add(cp)
+                    next.push(cp)
+                  }
+                }
+              } catch (e) {
+                /* 子层失败跳过，不拖垮整轮（根层失败另记） */
+                if (!p) rootErr = e.message || '工作区索引失败'
               }
-            } catch (e) {
-              /* 子层失败跳过，不拖垮整轮（根层失败另记） */
-              if (!p) rootErr = e.message || '工作区索引失败'
-            }
-          }),
-        )
-        if (seq !== pickAll.seq) return
+            }),
+          )
+          if (seq !== pickAll.seq) return
+        }
         layer = next
       }
     } finally {
@@ -160,9 +147,9 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return seq === pick.seq
   }
   // 当前层的可选条目 / 全局搜索结果（2026-10-14 待办 20）。
-  // q 为空或已下钻（searchOff）= 原层内浏览：上级目录行 + 当前层按 q 过滤。
-  // q 非空且未下钻 = 全局搜索：跨工作区递归清单（pickAll）按名称过滤，glob 标记免组截断，
-  // 上限 30 行防溢屏。清单未就绪时文件组暂空（其余组照常），pickSearchKick 建完重渲补上。
+  // q 为空或已下钻（searchOff）= 原层内浏览：上级目录行 + 当前层全部（按 q 过滤后同样全列）。
+  // q 非空且未下钻 = 全局搜索：跨工作区递归清单（pickAll）按名称过滤，命中多少列多少（不截断）。
+  // 清单未就绪时文件组暂空（其余组照常），pickSearchKick 建完重渲补上。
   // 「上级目录」只取决于「当前是不是工作区根」，与**这一层的内容**无关——故加载中/加载失败时它照样在，
   // 否则某一层拉不到（目录已删/端点失败）就退不回去，整个文件组成死层。条目本身不塞假行。
   function pickItems(q) {
@@ -173,8 +160,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       if (!pickAll.items) return items
       for (const e of pickAll.items) {
         if (!e.name.toLowerCase().includes(ql)) continue
-        items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true })
-        if (items.length >= 30) break
+        items.push({ kind: 'path', ptype: e.ptype, name: e.name, path: e.path, glob: true, t: e.mtime || 0 })
       }
       return items
     }
@@ -183,7 +169,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     for (const e of pick.entries) {
       if (ql && !String(e.name).toLowerCase().includes(ql)) continue
       const p = pick.path ? `${pick.path}/${e.name}` : e.name
-      items.push({ kind: 'path', ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: p })
+      items.push({ kind: 'path', ptype: e.type === 'dir' ? 'dir' : 'file', name: e.name, path: p, t: e.mtime || 0 })
     }
     return items
   }
@@ -200,9 +186,13 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return MENTION_PLUGIN_ICON
   }
   // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
+  // 路径 chip 只显示末段文件名，全路径进 title（与消息气泡 mentionChipHtml 同口径）。
   function mentionChipInner(kind, name, ptype) {
-    const label = kind === 'path' ? '@' + name : name
-    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm">${esc(label)}</span>`
+    const full = kind === 'path' ? unescapeMentionPath(name) : name
+    const base = kind === 'path' ? String(full).split('/').pop() : full
+    const label = kind === 'path' ? '@' + base : base
+    const title = kind === 'path' && base !== full ? ` title="${esc(full)}"` : ''
+    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm"${title}>${esc(label)}</span>`
   }
   function buildMentionChip(kind, name, sid, ptype) {
     const chip = document.createElement('span')
@@ -271,14 +261,24 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     return unfoldQuoteBodies(composerDocText())
   }
 
-  function closeMentionPop() {
+  // 复位 @ 数据态（不碰 DOM、不开关工具栏）：@ 关闭链与工具栏关闭链共用同一处，避免两套状态漂移。
+  function resetMention() {
     mention.open = false
     mention.anchor = 0
     mention.q = ''
     mention.items = []
     mention.sel = 0
-    const pop = $('mention-pop')
-    if (pop) pop.hidden = true
+  }
+
+  function closeMentionPop() {
+    const wasOpen = mention.open
+    resetMention()
+    // 工具栏是 @ 与 + 的唯一弹窗（2026-10-25 用户定案）：@ 态结束必须把工具栏一起收起，
+    // 否则会留下一个没有 @ 锚点却仍按 + 模式渲染的弹窗。closeCmdPop 不会回调本函数（只调 resetMention）。
+    // 只在「@ 态确实开着」时才碰 cmd（composer 初始 mount 会在 commands.js 之前调本函数，
+    // 此时 cmd 尚处 TDZ；wasOpen=false 短路即避开）。
+    if (wasOpen && cmd.mentionMode) closeCmdPop()
+    return wasOpen
   }
 
   function openMentionPopAtCaret() {
@@ -287,10 +287,9 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     mention.anchor = cmView.state.selection.main.from - 1 // '@' 的 doc 位置（composer onInputMention 判定后调）
     mention.sel = 0
     mention.q = ''
-    renderMentionPop()
-    // 首次打开确保插件/技能清单已加载（异步），加载完用当前查询重新渲染
-    loadMgrData().then(() => { if (mention.open) renderMentionPop() }).catch(() => {})
-    refreshPick(() => { if (mention.open) renderMentionPop() })
+    // 输入 @ 不另立浮窗，直接唤起同一个 + 工具栏并进入 mention 模式（打开/加载/重渲统一在
+    // commands.js 的 openCmdPopMention；本件只维护 @ 的锚点与查询词）。
+    openCmdPopMention()
   }
 
   // 浮窗打开时定位到当前上下文项目并加载该层（不缓存：目录内容是外部可变状态，缓存会让新建的文件不可见）。
@@ -311,72 +310,40 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     loadPickPath(pickHome()).then((ok) => { if (ok && after) after() })
   }
 
+  // 弹窗的统一条目源（@ 模式与 + 工具栏搜索共用；+ 的入口视图另走 commands.js 的 cmdEntries）。
+  // **全局搜索 = 扁平列表**（2026-10-25 用户定案：不做类别隔离），按时间倒序混排：
+  // 会话 updatedAt / 文件目录 mtime（/gateway/fs 返回）/ 本次上传（now）；无时间字段的技能与指令 t=0 稳定排末尾。
+  // **空查询 / 已下钻 = 浏览**：保留数据层既有顺序（上传 → 近 48h 会话 → 技能 → 当前层），不做时间排序。
   function mentionItems(q) {
     const ql = (q || '').trim().toLowerCase()
-    const match = (s) => !ql || String(s).toLowerCase().includes(ql)
+    const match = (s) => !ql || String(s || '').toLowerCase().includes(ql)
+    const globalSearch = !!ql && !pick.searchOff
+    const now = Date.now()
     const items = []
+    // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。属于「刚刚发生」，时间取 now。
+    for (const u of uploadedMentionItems()) if (match(u.name)) items.push({ ...u, t: now })
     // 会话：**空查询**只给近 48h 建议（免浮窗一开就几百条）；**有查询词**时搜全量——标题检索必须与
     // 侧栏一致，不能因会话旧于 48h 就查不到（2026-10-17 用户实测：侧栏有「202610131215-有机随想」，
     // 输入 @2026101312 却只剩文件命中）。
-    const cutoff = Date.now() - 48 * 3600 * 1000
-    // 「上传」组（待办 6）：本次上传的附件（图片/文件），选中插回正文 md 引用。排最前（GROUP_ORDER 亦首位）。
-    for (const u of uploadedMentionItems()) if (match(u.name)) items.push(u)
-    for (const s of [...ALL].filter((x) => ql || x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const cutoff = now - 48 * 3600 * 1000
+    for (const s of ALL) {
+      if (!globalSearch && s.updatedAt < cutoff) continue
       // sid = 会话转录文件名主干，与会话间协作的寻址键同源（engine/sessions.js hashOf = 路由 hash）
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
+      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt), t: s.updatedAt })
     }
     if (MGR) {
-      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d })
-      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'skill', name: s.n, desc: s.d })
+      for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (match(p.n)) items.push({ kind: 'plugin', name: p.n, desc: p.d, t: 0 })
+      for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n)) items.push({ kind: 'skill', name: s.n, desc: s.d, t: 0 })
     }
     items.push(...pickItems(q))
-    return arrangeItems(items)
-  }
-
-  function renderMentionPop() {
-    const pop = $('mention-pop')
-    if (!pop || !mention.open) return
-    const items = mentionItems(mention.q)
-    const searching = pick.q && !pick.searchOff && !pickAll.items
-    pickSearchKick(() => { if (mention.open) renderMentionPop() }) // 搜索清单未就绪 → 建完补渲（待办 20）
-    if (!items.length && searching) {
-      // 清单在建：占位不关窗（一关就永远等不到补渲），到位后由 pickSearchKick 重渲出真结果。
-      // 必须清空 mention.items：回车选择走 mention.items[sel]，留着上一轮条目会插错东西。
-      mention.items = []
-      pop.innerHTML = `<div class="mp-sec">${esc(pickAll.err ? '文件 · 索引失败：' + pickAll.err : '文件 · 全局搜索…')}</div>`
-      pop.hidden = false
-      return
-    }
-    if (!items.length) { closeMentionPop(); return }
-    mention.items = items
-    mention.sel = Math.min(mention.sel, items.length - 1)
-    let html = ''
-    let lastGroup = ''
-    let idx = 0
-    for (const it of items) {
-      const g = groupOf(it)
-      const group = g === '文件' ? '文件 · ' + pickLabel() : g
-      if (group !== lastGroup) { html += `<div class="mp-sec">${esc(group)}</div>`; lastGroup = group }
-      const on = idx === mention.sel ? ' on' : ''
-      const icon = `<span class="mp-ic">${it.kind === 'pathup' ? MENTION_UP_ICON : mentionChipIcon(it.kind, it.ptype)}</span>`
-      const desc = it.kind === 'path' ? it.path : it.desc
-      html += `<button type="button" class="mp-item${on}" data-idx="${idx}">${icon}<span class="mp-t"><span class="mp-nm">${esc(it.name)}</span>${desc ? `<span class="mp-d">${esc(desc)}</span>` : ''}</span></button>`
-      idx++
-    }
-    pop.innerHTML = html
-    pop.hidden = false
-    pop.querySelectorAll('.mp-item').forEach((b) =>
-      b.addEventListener('click', () => {
-        const it = mention.items[+b.dataset.idx]
-        if (it) selectMentionItem(it)
-      }),
-    )
+    if (globalSearch) items.sort((a, b) => (b.t || 0) - (a.t || 0))
+    return items
   }
 
   // 条目落地的唯一入口（点击与回车共用）：目录/上级=下钻重渲；文件=插 chip；会话/技能=插 chip。
   function selectMentionItem(it) {
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
-      pickEnter(it).then(() => { if (mention.open) renderMentionPop() })
+      pickEnter(it).then(() => { if (cmd.open && cmd.mentionMode) renderCmdPop() })
       return
     }
     // 已上传附件（待办 6）：把正文 md 引用原文写回 doc（与自动插入同一形态，CM 行内直渲）。
@@ -391,18 +358,14 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     else insertMention(it.kind, it.name, it.sid)
   }
 
+  // 键盘移动/选择：@ 模式与 + 模式共用同一个工具栏列表（cmd.items/cmd.active），直接转调 commands.js。
+  // CM 键盘链先判 cmd.isOpen()，mention 分支只在理论上兜底——保持薄转调，不另存一份高亮状态。
   function moveMentionSel(d) {
-    const n = mention.items.length
-    if (!n) return
-    mention.sel = (mention.sel + d + n) % n
-    const pop = $('mention-pop')
-    if (!pop) return
-    pop.querySelectorAll('.mp-item').forEach((b, i) => b.classList.toggle('on', i === mention.sel))
-    const el = pop.querySelector('.mp-item.on')
-    if (el) el.scrollIntoView({ block: 'nearest' })
+    if (cmd.open && cmd.mentionMode) cmdMove(d)
   }
 
   function selectMention() {
+    if (cmd.open && cmd.mentionMode) { cmdSelect(); return }
     const it = mention.items[mention.sel]
     if (it) selectMentionItem(it)
   }
@@ -413,7 +376,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
     const token = kind === 'session'
       ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
       : kind === 'path'
-        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        ? mentionPathToken(name, ptype)
         : `[插件:${name}]`
     const pos = cmView ? cmView.state.selection.main.from : mention.anchor
     composerReplaceRange(mention.anchor, pos, token + ' ')
@@ -438,7 +401,7 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
       const between = st.doc.sliceString(mention.anchor, pos)
       if (pos <= mention.anchor || /[\n\r]/.test(between)) { closeMentionPop(); return }
       const q = between.slice(1)
-      if (q !== mention.q) { mention.q = q; renderMentionPop() }
+      if (q !== mention.q) { mention.q = q; if (cmd.open) renderCmdPop() }
       return
     }
     if (pos > 0 && st.doc.sliceString(pos - 1, pos) === '@') openMentionPopAtCaret()
@@ -452,8 +415,6 @@ import { MGR, loadMgrData } from '../sidebar/mgr-data.js'
   }
 
 export {
-  GROUP_MAX,
-  GROUP_ORDER,
   MENTION_PATH_RE,
   MENTION_PLUGIN_ICON,
   MENTION_PLUGIN_RE,
@@ -464,7 +425,6 @@ export {
   QUOTE_PDF_RE,
   QUOTE_REF_RE,
   QUOTE_REPLY_RE,
-  arrangeItems,
   buildMentionChip,
   groupOf,
   closeMentionPop,
@@ -490,8 +450,8 @@ export {
   quoteRefChipHtml,
   quoteReplyChipHtml,
   refreshPick,
-  renderMentionPop,
   renderUserText,
+  resetMention,
   selectMention,
   selectMentionItem,
   serializeInput,

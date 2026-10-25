@@ -28,7 +28,7 @@
   <!-- UI 基础包（@floria/web，2026-10-24）：主题令牌 + reset + 统一滚动条。须排在业务样式之前，
        app.js 之前另加载其 IIFE（window.FloriaWeb）。源 = SubPj1-遥测网页/packages/web/。 -->
   <link rel="stylesheet" href="/webui/floria-web.css?v=1" />
-  <link rel="stylesheet" href="/styles.css?v=610" />
+  <link rel="stylesheet" href="/styles.css?v=615" />
 </head>
 <body>
 <div id="app">
@@ -316,11 +316,10 @@
                 <div id="task-panel" class="td-panel" role="region" aria-label="任务清单"></div>
               </div>
             </div>
-            <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]） -->
+            <!-- 命令菜单（dsh PopupSelectView shell：.search + .status + .viewport[.row .label/.detail/.check]）：
+                 既是 + 工具栏也是 @ 提及的唯一弹窗（2026-10-25 定案），@ 模式只是同一弹窗的搜索态 -->
             <div id="cmd-pop" hidden></div>
-            <!-- @ 提及浮窗：输入 @ 时在输入栏上方弹出（插件/技能 + 近48h 会话），宽度=输入栏 -->
             <!-- 文件变更胶囊已移除（2026-08-26 任务 C）：实时变更改在处理折叠内内联展示，不再悬浮输入栏上方 -->
-            <div id="mention-pop" hidden></div>
           </div>
         </div>
       </div>
@@ -371,13 +370,13 @@
 <script src="/vendor/katex/katex.min.js?v=473"></script>
 <!-- CM6 编辑层（2026-10-24）：@floria/cm6 包自带的全局 IIFE（CM6 依赖全内联，挂 window.FloriaCM6），
      底栏与 work 编辑区共用。须在 app.js 之前加载；公式渲染调全局 katex，故排在 KaTeX 之后。 -->
-<script src="/cm6/floria-cm6.iife.js?v=1"></script>
+<script src="/cm6/floria-cm6.iife.js?v=2"></script>
 <!-- 解压组件（2026-10-24）：xlsx/docx 预览（web-src/sidebar/work/work-doc.js）用 fflate.unzipSync
      解 OOXML 包；须在 app.js 之前挂到 window.fflate。 -->
 <script src="/vendor/fflate.js?v=1"></script>
 <!-- UI 基础包 IIFE（2026-10-24）：挂 window.FloriaWeb（I / fileIcon / esc / fromHtml / VERSION），
      核心图标表改为转调本全局。须在 app.js 之前加载，缺包时模块直接抛错。 -->
 <script src="/webui/floria-web.iife.js?v=1"></script>
-<script src="/app.js?v=610"></script>
+<script src="/app.js?v=615"></script>
 </body>
 </html>

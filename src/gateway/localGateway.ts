@@ -1861,17 +1861,16 @@ function mergeDisplayMessages(
 // 项目元信息（GET /gateway/project）：work 侧栏文件树消费其中的 files；响应同时带 README /
 // 会话元信息（/gateway/project 的既有形状，不随宿主内置预览页下线而改变）。
 //  - 文件树：递归扫项目根，跳过重型/隐藏目录（.git/node_modules/.claude/.trash/dist 等），
-//    目录在前、名称字典序；不设固定深度上限（层级只受 TREE_BUDGET=8000 全局预算与
-//    TREE_PER_LEVEL=200 每层 cap 约束），预算耗尽才退化为 listOneLevel 的单层浅节点
+//    目录在前、名称字典序；不设深度上限、不设每层 cap——单层条目全部返回，唯一约束是
+//    TREE_BUDGET=8000 全局预算，预算耗尽才退化为 listOneLevel 的单层浅节点
 //    （node_modules 等被跳过，常规项目完整覆盖）。
 //  - README：项目根 README*（.md/.markdown/.txt）优先，内容截断防超大 payload。
 //  - 描述：从 README 首行标题推断，兜底项目名。
 // ============================================================================
 const SKIP_TREE_DIRS = new Set(['.git', 'node_modules', '.claude', '.trash', '.cache', 'dist', 'cli-dist', '.idea', '.vscode'])
-// 护栏：单次响应最多 TREE_BUDGET 个节点、每层最多 TREE_PER_LEVEL 个条目。
-// 目的只是防超大项目撑爆响应与前端渲染，不是业务裁剪——常规项目（数千文件）应完整覆盖。
+// 护栏：单次响应最多 TREE_BUDGET 个节点。目的只是防超大项目撑爆响应，不是业务裁剪——
+// 单层不设 cap（此前每层 200 会把 349 项的目录截成前 200，@/+ 浮窗「进入目录后显示不全」即此）。
 const TREE_BUDGET = 8000
-const TREE_PER_LEVEL = 200
 type TreeNode = { name: string; type: 'file' | 'dir'; children?: TreeNode[] }
 
 /** 轻量列出一层直接子项（不递归），供预算耗尽时保证目录至少可展开一层。 */
@@ -1888,7 +1887,6 @@ function listOneLevel(dir: string): TreeNode[] {
   })
   const out: TreeNode[] = []
   for (const e of entries) {
-    if (out.length >= TREE_PER_LEVEL) break
     if (e.name.startsWith('.')) continue
     if (e.isDirectory() && SKIP_TREE_DIRS.has(e.name)) continue
     out.push(e.isDirectory() ? { name: e.name, type: 'dir' } : { name: e.name, type: 'file' })
@@ -1909,13 +1907,12 @@ function walkProjectTree(dir: string, budget: { n: number }): TreeNode[] | null 
     if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1
     return a.name.localeCompare(b.name)
   })
-  // 每层 cap TREE_PER_LEVEL 防单层巨目录。预算**全局共享**（同一对象沿整棵树递减）：此前按同级目录数
-  // 平均分摊，每深一层 sub.n 就再除以该层目录数，四五层后必然归零——文件树「展开四次后
-  // 再无内容」的第二重根因。共享后只要总量未耗尽，任意深的目录都能继续向下展开。
-  // 预算耗尽用 listOneLevel 兜底，保证边界目录至少可展开看到下一级。
+  // 单层不设 cap（2026-10-25 去掉 TREE_PER_LEVEL=200：349 项的目录只显示前 200 = 用户实报的「截断」）。
+  // 预算**全局共享**（同一对象沿整棵树递减）：此前按同级目录数平均分摊，每深一层 sub.n 就再除以该层
+  // 目录数，四五层后必然归零——文件树「展开四次后再无内容」的第二重根因。共享后只要总量未耗尽，
+  // 任意深的目录都能继续向下展开；预算耗尽用 listOneLevel 兜底，保证边界目录至少可展开看到下一级。
   const out: TreeNode[] = []
   for (const e of entries) {
-    if (out.length >= TREE_PER_LEVEL) break
     if (budget.n <= 0) break
     if (e.name.startsWith('.')) continue
     if (e.isDirectory() && SKIP_TREE_DIRS.has(e.name)) continue
@@ -3086,10 +3083,11 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
     return
   }
   // 工作区根单层列目录（@ 提及「目录 / 文件」能力的数据源，2026-09-26）：
-  //   GET /gateway/fs?path=<相对工作区根的可选子路径> → { path, entries:[{name,type}] }
+  //   GET /gateway/fs?path=<相对工作区根的可选子路径> → { path, entries:[{name,type,mtime}] }
   // path 缺省/空串 = 工作区根。相对路径基准恒为工作区根——与 @ chip 上行的 [@目录:]/[@文件:] 同基准。
-  // 只读单层，复用 listOneLevel（跳过隐藏项与 .git/node_modules/.claude 等重型目录、目录在前、每层 ≤50）
+  // 只读单层，复用 listOneLevel（跳过隐藏项与 .git/node_modules/.claude 等重型目录、目录在前、单层不设上限）
   // ——与 /gateway/project 的文件树同一套裁剪口径，不另立一份排除表。
+  // mtime = 文件/目录最后修改时间（ms），供 @/+ 弹窗「按时间混排」使用；stat 失败则省略该字段（排序时按 0 处理）。
   // 路径穿越防护同 /gateway/file（resolve 后必须仍在工作区根内）。受上方 /gateway/* token 校验保护。
   if (req.method === 'GET' && url.pathname === '/gateway/fs') {
     const qPath = (url.searchParams.get('path') || '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '')
@@ -3108,7 +3106,14 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       sendJson(res, 404, { error: 'not a directory' })
       return
     }
-    sendJson(res, 200, { path: qPath, entries: listOneLevel(qAbs) })
+    const entries = listOneLevel(qAbs).map((e) => {
+      try {
+        return { ...e, mtime: statSync(join(qAbs, e.name)).mtimeMs }
+      } catch {
+        return e
+      }
+    })
+    sendJson(res, 200, { path: qPath, entries })
     return
   }
 

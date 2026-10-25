@@ -19,8 +19,14 @@ import { getPortableRoot } from '../../utils/envUtils.js'
 import { detectImageFormatFromBuffer } from '../../utils/imageResizer.js'
 import type { ImageCapabilities, InputImage } from './types.js'
 
-/** 只认 `[@文件:<路径>]`（`[@目录:]` 非文件；引用/回复/PDF 令牌不参与）。 */
-export const MENTION_IMAGE_PATH_RE = /\[@文件:([^\]]+)\]/g
+/** 只认 `[@文件:<路径>]`（`[@目录:]` 非文件；引用/回复/PDF 令牌不参与）。
+ *  路径转义与前端同文法（`]`→`\]`、`\`→`\\`），否则含 `]` 的文件名令牌会在此提前收口（2026-10-25）。 */
+export const MENTION_IMAGE_PATH_RE = /\[@文件:((?:[^\]\\\n]|\\.)+)\]/g
+
+/** 令牌内的路径解码（`\X` → `X`；序列化侧已把反斜杠成对转义）。 */
+function unescapeMentionPath(p: string): string {
+  return p.replace(/\\(.)/g, '$1')
+}
 
 /** 图片扩展名白名单（与展示链一致）。 */
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif)$/i
@@ -87,7 +93,7 @@ export function extractImageMentionPaths(prompt: string): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   for (const m of prompt.matchAll(MENTION_IMAGE_PATH_RE)) {
-    const raw = (m[1] ?? '').trim().replace(/^["']|["']$/g, '')
+    const raw = unescapeMentionPath(m[1] ?? '').trim().replace(/^["']|["']$/g, '')
     if (!IMAGE_EXT_RE.test(raw) || seen.has(raw)) continue
     seen.add(raw)
     out.push(raw)

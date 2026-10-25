@@ -2,11 +2,12 @@
 
 import { I } from '../core/icons.js'
 import { relTime } from '../core/markdown.js'
+import { mentionPathToken } from '../core/mention-syntax.js'
 import { findSession, hashOf } from '../engine/sessions.js'
 import { inputEl, state, ALL } from '../engine/state.js'
 import { esc, toast, isTouch, newSessionProject } from '../core/util.js'
 import { pendingImages } from './images.js'
-import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, arrangeItems, buildMentionChip, closeMentionPop, groupOf, mention, mentionChipIcon, pick, pickAll, pickEnter, pickItems, pickLabel, pickSearchKick, refreshPick, serializeInput } from './mention.js'
+import { MENTION_PLUGIN_ICON, MENTION_SESSION_ICON, MENTION_SKILL_ICON, MENTION_UP_ICON, buildMentionChip, closeMentionPop, groupOf, mention, mentionChipIcon, mentionItems, pick, pickAll, pickEnter, pickItems, pickLabel, pickSearchKick, refreshPick, resetMention, selectMentionItem, serializeInput } from './mention.js'
 import { MODEL_CUR, closeModelPop } from './model-select.js'
 import { syncGwSend } from './send.js'
 import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
@@ -40,7 +41,18 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // 2026-08-22 取代 MOCK_MODEL_DIR（anthropic 上游）。
 
 /* @module inputbar/commands.js #2 */
-  const cmd = { open: false, status: 'pending', items: [], active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  // mentionMode = 本弹窗由输入 @ 唤起（2026-10-25 用户定案：工具栏是 @ 与 + 的唯一弹窗）。
+  // 该模式下查询词取 mention.q（@ 后到光标的文本）、结果扁平按时间混排、选中写回 @ 锚点；
+  // 非 mention 模式（= + 打开）才走入口视图与首屏。
+  const cmd = { open: false, view: '', mentionMode: false, status: 'pending', items: [], active: 0, submitting: false, confirming: null, acknowledged: false, error: null }
+  // 「+」浮窗的入口视图（2026-10-25 用户定案：扁平分组的工具栏太乱，改为入口形式——首屏只列
+  // 上传动作 + 四类入口，点进某一类后展示该类**全部**条目，不截断；底栏有查询词时退回跨类搜索）。
+  const CMD_VIEWS = [
+    { view: 'session', name: '会话', desc: '引用一个会话', icon: MENTION_SESSION_ICON },
+    { view: 'file', name: '文件', desc: '浏览工作区文件与目录', icon: I.dshFolder },
+    { view: 'skill', name: '技能', desc: '引用插件或技能', icon: MENTION_SKILL_ICON },
+    { view: 'cmd', name: '指令', desc: '运行斜杠命令', icon: I.dshPlus },
+  ]
   // 过滤查询唯一来源 = 底栏输入框文本（2026-10-14 待办 20 返修）：弃独立搜索框——旧框每次 input 都
   // innerHTML 重渲并**重建框自身**，IME 组合期被打断 = 中文打不进；底栏文本驱动则渲染只碰浮窗，
   // 底栏 contenteditable 原样不动，中文 IME 正常。命令前缀 / 由 cmdEntries 剥。
@@ -139,40 +151,71 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   // ---- 命令菜单（dsh PopupSelectController 移植：open→加载一次→本地过滤→高亮→选择→确认门）----
   // 2026-09-09 二轮：统一条目 = 图片选择行（恒首位）+ 技能（MGR.skills.personal，/gateway/plugins）
   // + 近 48h 会话（同 @ 提及链）+ 命令（MOCK_COMMANDS）；搜索滤 name/desc（图片行恒显）。
-  function cmdEntries() {
-    const q = barQuery().toLowerCase().replace(/^\//, '')
-    const match = (s) => !q || String(s || '').toLowerCase().includes(q)
-    const items = [{ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩' }]
-    // 文件上传行（2026-10-24）：任意类型多选，POST /gateway/file-cache 落盘 <项目根>/.claude/file-cache（按会话），
-    // 文件胶囊进附件行
-    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 file-cache/（按会话）' })
-    if (MGR) for (const s of (MGR.skills && MGR.skills.personal) || []) if (match(s.n) || match(s.d)) items.push({ kind: 'skill', name: s.n, desc: s.d })
-    const cutoff = Date.now() - 48 * 3600 * 1000 // 会话仅展示近 48 小时（同 @ 提及）
-    for (const s of [...ALL].filter((x) => x.updatedAt >= cutoff).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      // sid 同 @ 提及链（会话间协作的寻址键）：两个入口是同一个「把会话暴露给 agent」手势，
-      // 授权凭据必须同强（否则同一次提及经菜单走就只有标题，重名时无法寻址）
-      if (match(s.title || '')) items.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt) })
+  // 会话行（会话入口与搜索共用）：sid = 会话间协作的寻址键，两个路口径必须一致（同 @ 提及链）。
+  function cmdSessionRows(match, grp) {
+    const out = []
+    for (const s of [...ALL].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      if (match && !match(s.title || '')) continue
+      out.push({ kind: 'session', name: s.title || '未命名会话', sid: hashOf(s), desc: relTime(s.updatedAt), grp })
     }
-    for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o })
-    // 目录 / 文件组（与 @ 浮窗同一份 pickItems：工作区根逐级浏览，q 在当前层过滤）。
-    // q 必须是**已剥掉前导 / 的查询词**——传 barQuery() 全文会把 "/" 带进过滤词，全局搜索恒不命中。
-    items.push(...pickItems(q))
-    // 清单在建/根层失败：给文件组一行占位（否则整个浮窗只剩上传两行，看起来像搜索坏了）
-    if (q && !pick.searchOff && !pickAll.items) {
-      items.push(pickAll.err
-        ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
-        : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
-    }
-    // 组序与每组上限同 @ 浮窗（arrangeItems 是唯一真源，两处排位不分叉）
-    const arranged = arrangeItems(items)
-    pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲（2026-10-14 待办 20）
-    return arranged
+    return out
   }
-  function toggleCmdPop() {
-    if (cmd.open) { closeCmdPop(); return }
+  // 技能行 = 插件 + 技能（MGR 同源）
+  function cmdSkillRows(match, grp) {
+    const out = []
+    if (!MGR) return out
+    for (const p of (MGR.plugins && MGR.plugins.personal) || []) if (!match || match(p.n) || match(p.d)) out.push({ kind: 'plugin', name: p.n, desc: p.d, grp })
+    for (const s of (MGR.skills && MGR.skills.personal) || []) if (!match || match(s.n) || match(s.d)) out.push({ kind: 'skill', name: s.n, desc: s.d, grp })
+    return out
+  }
+  function cmdEntries() {
+    // 查询词：@ 模式 = @ 后到光标的文本；+ 模式 = 底栏全文（剥掉可能的前导 /）。
+    const q = (cmd.mentionMode ? mention.q : barQuery()).trim().toLowerCase().replace(/^\//, '')
+    const match = (s) => !q || String(s || '').toLowerCase().includes(q)
+    const items = []
+    // 搜索态判据（2026-10-25 用户定案）：**@ 后有查询词**才进扁平全局搜索（不按类隔离、按时间混排）。
+    // 只输入 @ 而没跟其它文本 = 等价于正常唤出工具栏（首屏入口 / 当前视图），不搜索。
+    // + 模式底栏文本只用来**过滤当前入口视图**（2026-10-25 实测：有文字点 + 也被当全局搜索，弹「正在索引工作区」）。
+    if (cmd.mentionMode && q) {
+      items.push(...mentionItems(q))
+      const searchPending = pick.q && !pick.searchOff && !pickAll.items
+      if (searchPending) {
+        items.push(pickAll.err
+          ? { kind: 'pathwait', name: '索引失败', desc: pickAll.err }
+          : { kind: 'pathwait', name: '搜索中…', desc: '正在索引工作区' })
+      } else if (!items.length) {
+        items.push({ kind: 'pathwait', name: '无匹配结果', desc: '' })
+      }
+      pickSearchKick(() => { if (cmd.open) renderCmdPop() }) // 全局搜索清单未就绪 → 建完补渲
+      return items
+    }
+    // 入口视图：返回行 + 该类的全部条目（无条数上限）；底栏文本只做**层内过滤**（不跨类、不全局搜索）
+    if (cmd.view) {
+      items.push({ kind: 'back', name: '返回', grp: '导航' })
+      if (cmd.view === 'session') items.push(...cmdSessionRows(match, '会话'))
+      else if (cmd.view === 'skill') items.push(...cmdSkillRows(match, '技能'))
+      else if (cmd.view === 'cmd') for (const o of MOCK_COMMANDS) if (match(o.name) || match(o.desc)) items.push({ kind: 'cmd', name: o.name, desc: o.desc, ref: o, grp: '指令' })
+      // 文件视图：pickItems('') 保持层内浏览（传 q 会翻成全局搜索），查询词在本地过滤
+      else if (cmd.view === 'file') items.push(...pickItems('').filter((it) => it.kind === 'pathup' || match(it.name)))
+      return items
+    }
+    // 首屏入口：两个上传动作 + 四类入口
+    items.push({ kind: 'imgpick', name: pendingImages.length ? '继续选择图片…' : '选择图片…', desc: pendingImages.length ? `已选 ${pendingImages.length}/9 · 自动压缩` : '一次最多 9 张，自动压缩', grp: '上传' })
+    items.push({ kind: 'filepick', name: '上传文件…', desc: '任意类型可多选 · 存入 file-cache/（按会话）', grp: '上传' })
+    // 首屏四个入口是导航不是数据：底栏有文字也不过滤（否则「有文字点 +」会只剩上传两行，像坏了）
+    for (const v of CMD_VIEWS) items.push({ kind: 'entry', view: v.view, name: v.name, desc: v.desc, icon: v.icon, grp: '浏览' })
+    return items
+  }
+  // 弹窗的**唯一开链**（2026-10-25 用户定案：输入 @ 触发与底栏点 + 完全同一条链路，不另写）。
+  // mentionMode 只决定查询词来源（@ 后文本 vs 底栏全文）；有无查询词由 cmdEntries 判：
+  // 无词 = 首屏入口（与 + 一致），有词且在 @ 模式 = 扁平全局搜索。
+  function openCmdPop(mentionMode) {
+    const fresh = !cmd.open
     if (msel.open) closeModelPop()
-    closeMentionPop()
+    if (!mentionMode) closeMentionPop()
     cmd.open = true
+    cmd.mentionMode = !!mentionMode
+    cmd.view = '' // 每次打开都回首屏入口（手势起点一致）
     cmd.status = 'ready'
     cmd.active = 0
     cmd.confirming = null
@@ -180,18 +223,28 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     cmd.error = null
     renderCmdPop()
     // 过滤在底栏打字（待办 20 返修）：焦点回底栏，用户继续输入列表即变；触屏不抢焦点（iOS 弹键盘，
-    // 与旧搜索框同一处置——用户自己点输入框唤起）
-    if (!isTouch()) composerFocus()
-    // 首次打开确保技能清单已加载（异步），加载完用当前状态重渲（同 @ 提及浮窗）
-    loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
-    refreshPick(() => { if (cmd.open) renderCmdPop() })
+    // 与旧搜索框同一处置——用户自己点输入框唤起）。@ 唤起时光标本就在底栏，不重复聚焦。
+    if (!mentionMode && !isTouch()) composerFocus()
+    if (fresh) {
+      // 首次打开确保技能清单/目录层已加载（异步），加载完用当前状态重渲
+      loadMgrData().then(() => { if (cmd.open) renderCmdPop() }).catch(() => {})
+      refreshPick(() => { if (cmd.open) renderCmdPop() })
+    }
+  }
+  function openCmdPopMention() { openCmdPop(true) }
+  function toggleCmdPop() {
+    if (cmd.open) { closeCmdPop(); return }
+    openCmdPop(false)
   }
   function closeCmdPop() {
-    if (!cmd.open) return
+    if (!cmd.open) { cmd.mentionMode = false; return }
     cmd.open = false
+    cmd.mentionMode = false
     cmd.confirming = null
     cmd.acknowledged = false
     cmdPop.hidden = true
+    // @ 锚点/查询词随弹窗一起复位（resetMention 只碰数据，不回调本函数，无环）
+    resetMention()
     const rm = $('risk-modal')
     if (!rm.hidden) closeRiskModal()
   }
@@ -203,20 +256,24 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     // 独立搜索框已退役（2026-10-14 待办 20 返修）：过滤文本 = 底栏输入框（barQuery），列表随底栏
     // 打字自动变化（ctx-meter 在底栏 input 事件里调 renderCmdPop）。
     cmd.items = cmdEntries()
+    // 视图切换/查询变化后条目数会变：高亮下标夹回合法区间，否则回车会选中 undefined。
+    cmd.active = Math.min(cmd.active, Math.max(0, cmd.items.length - 1))
     let html = ''
     if (cmd.error !== null) {
       html += `<div class="error" role="alert"><span class="errorText">${esc(cmd.error)}</span>${cmd.status === 'failed' ? `<button type="button" class="retry">重试</button>` : ''}</div>`
     } else {
       // 待发附件的唯一可见回显 = 底栏 `#img-pills`（inputbar/images.js renderImgPills）；
       // 本浮窗只做选择/上传入口，不再重复渲染缩略图（2026-10-22 用户实测：同一批图在浮窗与底栏各出现一次）。
+      // 搜索结果（@ 后有查询词）= 扁平时间线，不印分组标题（用户定案「不隔离」）；@ 无词/+ 模式 = 入口视图分组。
+      const flat = cmd.mentionMode && !!mention.q.trim()
       let lastGrp = ''
       html += `<div role="listbox" class="viewport">${cmd.items.map((it, i) => {
-        const g = groupOf(it)
+        const g = it.grp || groupOf(it)
         const grp = g === '文件' ? '文件 · ' + pickLabel() : g
-        const gh = grp !== lastGrp ? `<div class="grp">${esc(grp)}</div>` : ''
+        const gh = flat || grp === lastGrp ? '' : `<div class="grp">${esc(grp)}</div>`
         lastGrp = grp
         const on = i === cmd.active ? ' rowActive' : ''
-        const ico = it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : it.kind === 'pathwait' ? mentionChipIcon('path', 'file') : (CMD_ICON[it.name] || I.dshPlus)
+        const ico = it.kind === 'entry' ? it.icon : it.kind === 'back' ? MENTION_UP_ICON : it.kind === 'imgpick' ? I.dshImage : it.kind === 'filepick' ? I.dshPaperclip : it.kind === 'plugin' ? MENTION_PLUGIN_ICON : it.kind === 'skill' ? MENTION_SKILL_ICON : it.kind === 'session' ? MENTION_SESSION_ICON : it.kind === 'pathup' ? MENTION_UP_ICON : it.kind === 'path' ? mentionChipIcon('path', it.ptype) : it.kind === 'pathwait' ? mentionChipIcon('path', 'file') : (CMD_ICON[it.name] || I.dshPlus)
         const label = it.kind === 'cmd' ? `/${it.name}` : it.name
         const detail = it.kind === 'path' ? it.path : it.desc
         return gh + `<button type="button" role="option" aria-selected="${i === cmd.active}" class="row${on}" data-idx="${i}"><span class="rowIco">${ico}</span><span class="label">${esc(label)}</span>${detail ? `<span class="detail">${esc(detail)}</span>` : ''}</button>`
@@ -279,9 +336,15 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
   function cmdSelect() {
     const it = cmd.items[cmd.active]
     if (!it || cmd.submitting) return
+    // @ 模式：所有条目都落地到 @ 锚点（含上传附件写回正文、目录下钻重渲）——统一走 mention.js，
+    // 与 + 模式的「追加到输入栏末尾」刻意不同（@ 是就地替换查询）。
+    if (cmd.mentionMode) { if (it.kind !== 'pathwait') selectMentionItem(it); return }
     if (it.kind === 'imgpick') { $('img-file').click(); return }
     if (it.kind === 'filepick') { $('file-upload').click(); return }
     if (it.kind === 'pathwait') return // 占位行不可选（清单未就绪）
+    // 入口视图导航（2026-10-25）：入口行 = 进入该类全部条目；返回行 = 回首屏入口。
+    if (it.kind === 'entry') { cmd.view = it.view; cmd.active = 0; renderCmdPop(); return }
+    if (it.kind === 'back') { cmd.view = ''; cmd.active = 0; renderCmdPop(); return }
     // 下钻/返回必须走 pickEnter：它同时把 searchOff 翻回层内浏览模式；只调 loadPickPath 会让
     // pickItems 继续按全局搜索分支渲染，点目录看起来「没反应」。
     if (it.kind === 'pathup' || (it.kind === 'path' && it.ptype === 'dir')) {
@@ -289,7 +352,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
       return
     }
     if (it.kind === 'path') { appendMentionChip('path', it.path, '', 'file'); closeCmdPop(); return }
-    if (it.kind === 'skill') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
+    if (it.kind === 'skill' || it.kind === 'plugin') { appendMentionChip('plugin', it.name); closeCmdPop(); return }
     if (it.kind === 'session') { appendMentionChip('session', it.name, it.sid); closeCmdPop(); return }
     const o = it.ref
     if (o.risk) { cmd.confirming = o; cmd.acknowledged = false; renderCmdPop(); return }
@@ -301,7 +364,7 @@ import { MGR, loadMgrData, MODELS } from '../sidebar/mgr-data.js'
     const token = kind === 'session'
       ? (sid ? `[会话:${name}|${sid}]` : `[会话:${name}]`)
       : kind === 'path'
-        ? `[@${ptype === 'dir' ? '目录' : '文件'}:${name}]`
+        ? mentionPathToken(name, ptype)
         : `[插件:${name}]`
     composerAppendToken(token)
     syncGwSend()

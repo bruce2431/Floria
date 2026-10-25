@@ -2797,7 +2797,9 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   // （供个性化预览页识图渲染 Obsidian canvas / 加载图片音频视频 / 会话消息里 AI 生成图取图）。
   // label 不做 scope 筛选：项目会话 label=<项目名>（fDir=项目根），全局根会话 label=「全局根 · 散装对话」
   // （fDir=工作区根）——两者标签空间不重叠（项目 label 是目录名，不含 `·`）。受上方 /gateway/* token 校验保护。
-  if (req.method === 'GET' && url.pathname === '/gateway/file') {
+  // GET 取原文；HEAD 只回 ETag（= mtimeMs）供 work 编辑卡做 0.5s 外部变更探测——HEAD 不读盘，
+  // 只 stat，避免轮询把整个文件反复搬进内存。鉴权/越界/404/413 与 GET 同一口径。
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/gateway/file') {
     const fLabel = url.searchParams.get('label') || ''
     const fPath = url.searchParams.get('path') || ''
     // label 缺省 = 读工作区根散装文件（2026-10-14 待办 9：work 侧栏「工作区」tab 点开全局文件）。
@@ -2830,16 +2832,21 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       return
     }
     const fMtime = statSync(fAbs).mtimeMs
-    const fBuf = readFileSync(fAbs)
-    const fType = MIME[extname(fAbs)] ?? (sniffBinary(fBuf) ? 'application/octet-stream' : 'text/plain; charset=utf-8')
     // ETag = 毫秒级 mtime（Last-Modified 只有秒级、不足以表达同一秒内的两次写）；work 编辑区记它作
     // 冲突基线，写回时带回由 writeProjectFile 精确比对（见该函数）。
-    res.writeHead(200, {
-      'Content-Type': fType,
+    const fHeaders = {
       'Cache-Control': 'no-cache',
       ETag: `"${fMtime}"`,
       'Last-Modified': new Date(fMtime).toUTCString(),
-    })
+    }
+    if (req.method === 'HEAD') {
+      res.writeHead(200, fHeaders)
+      res.end()
+      return
+    }
+    const fBuf = readFileSync(fAbs)
+    const fType = MIME[extname(fAbs)] ?? (sniffBinary(fBuf) ? 'application/octet-stream' : 'text/plain; charset=utf-8')
+    res.writeHead(200, { ...fHeaders, 'Content-Type': fType })
     res.end(fBuf)
     return
   }

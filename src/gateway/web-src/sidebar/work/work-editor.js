@@ -18,6 +18,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
   }
 
   // 顶部「保存态」文本落地（唯一写点）：conflict > saving > dirty > 空。传 (txt, cls) 则原样落。
+  // 该行不再显示文件名，空态即整行隐藏（.wk-ed-head 的显示与否由这里统一收口）。
   function wkEdState(txt, cls) {
     const el = $('wk-ed-save')
     if (!el) return
@@ -28,12 +29,12 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     el.textContent = txt || ''
     el.classList.toggle('dirty', cls === 'dirty')
     el.classList.toggle('conflict', cls === 'conflict')
+    const head = $('wk-ed-head')
+    if (head) head.hidden = !txt
   }
 
   function renderEditor() {
-    const pathEl = $('wk-ed-path')
     const body = $('wk-ed-body')
-    if (pathEl) pathEl.textContent = state.workFile || ''
     if (!body) return
     if (!state.workFile) {
       wkEdReset()
@@ -54,6 +55,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
   }
 
   function wkEdReset() {
+    wkLiveReset()
     wkEdFile = ''
     wkEdMeta = null
     wkEdText = ''
@@ -118,6 +120,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
+    wkLiveReset() // 新文件的实时同步从不带旧文件的暂停/两次确认态开始
     const seq = ++edSeq
     // 立刻认下新 (proj,path)：并发重渲（切项目那一刻）不得拿旧 wkEdFile 命中缓存渲染上个项目的内容
     wkEdProj = state.workProj
@@ -243,23 +246,25 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     await readFile(p)
   }
 
-  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘（交互式——冲突时弹处置框）
+  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘
   async function wkEdFlush() {
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
     }
     if (!wkEdDirty || wkEdConflict) return
-    await wkEdSave({ interactive: true })
+    await wkEdSave({})
   }
 
-  // 保存：默认带 baseMtime（外部改过 → 409，不覆盖）；force = 无基线强制覆盖（用户确认后）。
+  // 保存：默认带 baseMtime（磁盘已变 → 409，不静默覆盖）；force = 无基线强制覆盖。
+  // 返回 'ok' | 'clean' | 'conflict' | 'error' | 'busy'：409 不再弹模态，统一标记后交给实时合并链
+  // （work-live.js）——无重叠自动三方合并写回，只有真正重叠才落到非模态提示条。
   async function wkEdSave(opts) {
     const force = !!(opts && opts.force)
-    const interactive = !!(opts && opts.interactive)
-    if (!state.workFile || !state.workProj || wkEdSaving) return
-    wkEdText = wkEdDocText() // 落盘 payload = 当前真源（编辑器文档）
-    if (!wkEdDirty && !force) return
+    if (!state.workFile || !state.workProj) return 'clean'
+    if (wkEdSaving) return 'busy'
+    if (!wkEdDirty && !force) return 'clean'
+    const content = wkEdDocText() // 落盘 payload = 当前真源；**不**写进 wkEdText（那是磁盘基线，三方合并的 base）
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
@@ -268,7 +273,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     wkEdState('保存中…', 'dirty')
     let conflict = false
     try {
-      const payload = { label: state.workProj, path: state.workFile, content: wkEdText }
+      const payload = { label: state.workProj, path: state.workFile, content }
       if (!force && wkEdMtime !== null) payload.baseMtime = wkEdMtime
       const res = await fetch(apiUrl('/gateway/file/write'), {
         method: 'POST',
@@ -281,37 +286,26 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
         if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
         if (typeof data.mtime === 'number') wkEdMtime = data.mtime
         wkEdInvalidatePathCache() // 写盘成功 → 路径补全目录缓存失效（新文件/新目录要能补出来）
-        wkEdDirty = wkEdDocText() !== wkEdText // 保存期间又改了 → 留脏，下面续排程
+        wkEdText = content // 写盘成功才推进磁盘基线
+        wkEdDirty = wkEdDocText() !== content // 保存期间又改了 → 留脏，下面续排程
       }
     } catch (e) {
       wkEdSaving = false
       wkEdState('保存失败', 'conflict')
       toast('保存失败：' + (e.message || e))
-      return
+      return 'error'
     }
     wkEdSaving = false
     if (conflict) {
       wkEdConflict = true
       wkEdState('外部已修改', 'conflict')
-      if (interactive) return wkEdResolveConflict()
-      toast('文件已被外部修改，未自动覆盖（Ctrl+S 可覆盖）')
-      return
+      wkLiveKick() // 立即走实时合并链：能合就静默合并写回，重叠才提示
+      return 'conflict'
     }
+    wkEdConflict = false
     wkEdState()
     if (wkEdDirty) wkEdScheduleSave() // 保存期间又改了 → 续排程（wkEdState 先落地「未保存」）
-  }
-
-  // 冲突处置（用户显式保存时）：确定 = 用当前内容覆盖；取消 = 放弃编辑、重载磁盘版本。绝静默二选一。
-  async function wkEdResolveConflict() {
-    const overwrite = window.confirm('磁盘上的文件已被外部修改。\n\n确定：用当前内容覆盖\n取消：放弃编辑，载入磁盘版本')
-    if (overwrite) {
-      wkEdConflict = false
-      wkEdDirty = true
-      return wkEdSave({ force: true })
-    }
-    wkEdDirty = false
-    wkEdConflict = false
-    await wkEdReload()
+    return 'ok'
   }
 
   // 打开一个文件（**唯一口**：侧栏文件树行 / 搜索浮窗行 / 顶栏文件 pill / 评论定位 / 预览卡 src-open 全走这里）。

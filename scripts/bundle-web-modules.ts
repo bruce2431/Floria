@@ -104,6 +104,8 @@ const PIECES: { file: string; part: number }[] = [
   { file: 'sidebar/work/work-assist.js', part: 1 },
   { file: 'sidebar/work/work-files.js', part: 1 },
   { file: 'sidebar/work/work-cm.js', part: 1 },
+  // 行级三方合并纯函数（2026-10-25 编辑卡实时同步）：被 work-live.js 调用，无宿主依赖。
+  { file: 'sidebar/work/work-merge.js', part: 1 },
   // JSON Canvas 图形预览（2026-10-13）：wkCvExt 由 work-cm.js 的 wkEdLangExt 在扩展名为 .canvas 时调用，
   // 故须排在 work-cm.js 之后（函数声明提升，序位按依赖就近）。
   { file: 'sidebar/work/work-canvas.js', part: 1 },
@@ -114,6 +116,9 @@ const PIECES: { file: string; part: number }[] = [
   // 经动态 import 懒加载（/vendor/pdfjs/），本件只承载工具条/页栈/懒渲染逻辑。
   { file: 'sidebar/work/work-pdf.js', part: 1 },
   { file: 'sidebar/work/work-editor.js', part: 1 },
+  // 编辑卡外部改动实时同步（2026-10-25）：读 work-editor 的 wkEd* 状态 + work-merge 的 wkMerge3，
+  // 启停由 work-layout.applySbMode 调用（函数声明提升，序位按依赖就近）。
+  { file: 'sidebar/work/work-live.js', part: 1 },
   { file: 'sidebar/work/work-rows.js', part: 1 },
   // work「+」新建菜单接入（创建文件/文件夹 + 上传文件/文件夹）+ 行「下载」（2026-10-13）：
   // wkNewPick / downloadWorkEntry 被 work-rows.js 与 work-mount.js 调用，排两者之间

@@ -411,27 +411,38 @@ import { renderList, renderProject } from './mgr.js'
   window.addEventListener('scroll', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() })
 
-  // 会话行源：操作对象 = dataset.hash；已从列表消失的会话不弹菜单（items 返回空）。
+  // 会话行菜单「项 + 动作」唯一实现（2026-10-25）：凡呈现同一会话的行（侧栏 `.sess-item`、
+  // work 顶栏会话胶囊 `[data-wkchat]`）共用本 spec，禁止各写一套菜单。
+  //   getHash(el)  = 该行对应的会话 hash
+  //   withPin(el)  = 该行语境是否提供置顶（仅 work：侧栏行宿主 #wk-body / 顶栏胶囊）
+  //   onRename     = 可选，重命名成功后的外部补渲染（如顶栏胶囊标题 renderTopbar）
+  // 会话已从列表消失时 items 返回空（不弹菜单）。
+  function sessionRowMenuSpec(getHash, withPin, onRename) {
+    return {
+      items: (el) => {
+        const hash = getHash(el)
+        if (!hash || !ALL.find((v) => hashOf(v) === hash)) return []
+        const pinItems = withPin(el)
+          ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
+          : []
+        return [
+          ...pinItems,
+          { a: 'rename', icon: I.dshEdit, label: '重命名' },
+          { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
+        ]
+      },
+      pick: (a, el) => {
+        const hash = getHash(el)
+        if (a === 'pin') togglePin(hash)
+        else if (a === 'rename') openSessionRename(hash, onRename)
+        else closeSession(hash)
+      },
+    }
+  }
   registerRowMenu({
     sel: '.sess-item',
     key: (el) => el.dataset.hash || null,
-    items: (el) => {
-      const hash = el.dataset.hash
-      if (!ALL.find((v) => hashOf(v) === hash)) return []
-      // 置顶只属于 work 侧栏（行宿主 = #wk-body）：chat 侧栏 / 气泡弹层的会话行不渲染该项
-      const pinItems = el.closest('#wk-body')
-        ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
-        : []
-      return [
-        ...pinItems,
-        { a: 'rename', icon: I.dshEdit, label: '重命名' },
-        { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
-      ]
-    },
-    pick: (a, el) =>
-      a === 'pin' ? togglePin(el.dataset.hash)
-        : a === 'rename' ? openSessionRename(el.dataset.hash)
-          : closeSession(el.dataset.hash),
+    ...sessionRowMenuSpec((el) => el.dataset.hash, (el) => !!el.closest('#wk-body')),
   })
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
@@ -511,7 +522,8 @@ import { renderList, renderProject } from './mgr.js'
     }
   }
   // 会话重命名：查不到（列表已刷新掉）才报错；提交成功同步内存标题并重渲列表。
-  function openSessionRename(hash) {
+  // onDone（可选）= 本模块之外的标题消费方补渲染（如 work 顶栏胶囊，work-mount.js 传 renderTopbar）。
+  function openSessionRename(hash, onDone) {
     const s = ALL.find((x) => hashOf(x) === hash)
     if (!s) return toast('未找到该会话')
     openRenameDialog({
@@ -529,6 +541,7 @@ import { renderList, renderProject } from './mgr.js'
         if (!res.ok || !body.ok) throw new Error(body.error || '重命名失败')
         s.title = title
         renderRecent()
+        if (onDone) onDone()
         toast('已重命名为「' + title + '」')
       },
     })
@@ -692,6 +705,7 @@ export {
   mouseXY,
   newWebSession,
   openRenameDialog,
+  openSessionRename,
   peekClear,
   projIdOf,
   registerRowMenu,
@@ -704,6 +718,7 @@ export {
   renameTarget,
   renderRecent,
   rowMenuPop,
+  sessionRowMenuSpec,
   setPanel,
   togglePin,
   webCreating,

@@ -4108,27 +4108,38 @@ function setLastNavHash(v) { lastNavHash = v }
   window.addEventListener('scroll', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() }, { passive: true, capture: true })
   window.addEventListener('resize', () => { peekPin = null; peekClear(); if (rowMenuPop) closeRowMenu() })
 
-  // 会话行源：操作对象 = dataset.hash；已从列表消失的会话不弹菜单（items 返回空）。
+  // 会话行菜单「项 + 动作」唯一实现（2026-10-25）：凡呈现同一会话的行（侧栏 `.sess-item`、
+  // work 顶栏会话胶囊 `[data-wkchat]`）共用本 spec，禁止各写一套菜单。
+  //   getHash(el)  = 该行对应的会话 hash
+  //   withPin(el)  = 该行语境是否提供置顶（仅 work：侧栏行宿主 #wk-body / 顶栏胶囊）
+  //   onRename     = 可选，重命名成功后的外部补渲染（如顶栏胶囊标题 renderTopbar）
+  // 会话已从列表消失时 items 返回空（不弹菜单）。
+  function sessionRowMenuSpec(getHash, withPin, onRename) {
+    return {
+      items: (el) => {
+        const hash = getHash(el)
+        if (!hash || !ALL.find((v) => hashOf(v) === hash)) return []
+        const pinItems = withPin(el)
+          ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
+          : []
+        return [
+          ...pinItems,
+          { a: 'rename', icon: I.dshEdit, label: '重命名' },
+          { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
+        ]
+      },
+      pick: (a, el) => {
+        const hash = getHash(el)
+        if (a === 'pin') togglePin(hash)
+        else if (a === 'rename') openSessionRename(hash, onRename)
+        else closeSession(hash)
+      },
+    }
+  }
   registerRowMenu({
     sel: '.sess-item',
     key: (el) => el.dataset.hash || null,
-    items: (el) => {
-      const hash = el.dataset.hash
-      if (!ALL.find((v) => hashOf(v) === hash)) return []
-      // 置顶只属于 work 侧栏（行宿主 = #wk-body）：chat 侧栏 / 气泡弹层的会话行不渲染该项
-      const pinItems = el.closest('#wk-body')
-        ? [{ a: 'pin', icon: I.dshPin, label: isPinned(hash) ? '取消置顶' : '置顶' }]
-        : []
-      return [
-        ...pinItems,
-        { a: 'rename', icon: I.dshEdit, label: '重命名' },
-        { a: 'close', icon: I.dshStop, label: '关闭会话', danger: true },
-      ]
-    },
-    pick: (a, el) =>
-      a === 'pin' ? togglePin(el.dataset.hash)
-        : a === 'rename' ? openSessionRename(el.dataset.hash)
-          : closeSession(el.dataset.hash),
+    ...sessionRowMenuSpec((el) => el.dataset.hash, (el) => !!el.closest('#wk-body')),
   })
 
   // ---------- 关闭会话（2026-09-04 三点浮窗新增：语义 = CLI 两次 Ctrl+C）----------
@@ -4208,7 +4219,8 @@ function setLastNavHash(v) { lastNavHash = v }
     }
   }
   // 会话重命名：查不到（列表已刷新掉）才报错；提交成功同步内存标题并重渲列表。
-  function openSessionRename(hash) {
+  // onDone（可选）= 本模块之外的标题消费方补渲染（如 work 顶栏胶囊，work-mount.js 传 renderTopbar）。
+  function openSessionRename(hash, onDone) {
     const s = ALL.find((x) => hashOf(x) === hash)
     if (!s) return toast('未找到该会话')
     openRenameDialog({
@@ -4226,6 +4238,7 @@ function setLastNavHash(v) { lastNavHash = v }
         if (!res.ok || !body.ok) throw new Error(body.error || '重命名失败')
         s.title = title
         renderRecent()
+        if (onDone) onDone()
         toast('已重命名为「' + title + '」')
       },
     })
@@ -6083,10 +6096,12 @@ function setFirstSendHash(v) { firstSendHash = v }
       applySidebarPin() // 进 work：侧栏开合按工作项目槽里的开关恢复（桌面）
       ensureWork()
       startWorkAuto()
+      startWorkLive() // 编辑卡外部改动实时同步（0.5s HEAD）；与侧栏自动对账同一对启停点
     } else {
       if (wkEdDirty) wkEdFlush() // 退 work 模式：pending 编辑先落盘（不阻塞模式切换）
       hideWkPops()
       stopWorkAuto()
+      stopWorkLive()
     }
   }
 
@@ -7000,6 +7015,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   function wkEdEnsureView() { return wkEditor.ensureView() }
   function wkEdSetLang(path) { wkEditor.setLang(path) }
   function wkEdSetDoc(text) { wkEditor.setDoc(text) }
+  // 外部磁盘内容落进编辑器（最小段替换 + 不进 undo 栈 + 不记脏）；false = IME 组合中，调用方下轮重试
+  function wkEdApplyRemote(text) { return wkEditor.applyRemote(text) }
   function wkEdApplyMarks(marks) { wkEditor.applyMarks(marks) }
   function wkEdScrollToLine(n) { wkEditor.scrollToLine(n) }
   function wkEdQuoteLines(range) { return wkEditor.quoteLines(range) }
@@ -7013,6 +7030,131 @@ function setFirstSendHash(v) { firstSendHash = v }
     if (wkEdConflict) return
     if (wkEdTimer) clearTimeout(wkEdTimer)
     wkEdTimer = setTimeout(() => { wkEdTimer = 0; wkEdSave({}) }, WK_SAVE_MS)
+  }
+
+  // 参与合并的规模上限：超限直接交回调用方走非模态提示（不在这里做压缩/截断）。
+  const WK_MERGE_MAX_LINES = 20000
+
+  function wkMergeSplit(text) {
+    return String(text == null ? '' : text).split('\n')
+  }
+
+  // 两个变动块是否算冲突。同一起止（含同点插入）＝同一处两边都动 → 冲突；半开区间严格相交也算重叠。
+  // 纯插入（be===bs）落在另一侧变动区间的**内部**同样判冲突——插到别人替换掉的段中间无法有序拼接；
+  // 落在边界（bs/be 上）则可以，按 bs 排序后先插入再替换即等价。
+  function wkBlocksOverlap(x, y) {
+    if (x.bs === y.bs && x.be === y.be) return true
+    if (x.bs === x.be) return y.bs < x.bs && x.bs < y.be
+    if (y.bs === y.be) return x.bs < y.bs && y.bs < x.be
+    return Math.max(x.bs, y.bs) < Math.min(x.be, y.be)
+  }
+
+  // 区间 [as,ae) 与 [bs,be) 内「两侧都唯一」的行配对，按 b 侧顺序取 a 索引的最长上升子序列（LIS）。
+  // 返回 [[ai, bi], …]，用作递归切分的锚点（patience diff 核心）。
+  function wkUniqueAnchors(a, as, ae, b, bs, be) {
+    const cntA = new Map()
+    const posA = new Map()
+    for (let i = as; i < ae; i++) {
+      cntA.set(a[i], (cntA.get(a[i]) || 0) + 1)
+      posA.set(a[i], i)
+    }
+    const cand = []
+    const seenB = new Set()
+    for (let j = bs; j < be; j++) {
+      const line = b[j]
+      if (cntA.get(line) !== 1) continue
+      if (seenB.has(line)) continue // b 侧重复出现 → 不是唯一，跳过
+      seenB.add(line)
+      cand.push([posA.get(line), j])
+    }
+    if (!cand.length) return []
+    // LIS（按 a 索引上升），O(n log n)；tails 存候选下标，prev 回溯配对序列
+    const tails = []
+    const prev = new Array(cand.length).fill(-1)
+    for (let i = 0; i < cand.length; i++) {
+      const v = cand[i][0]
+      let lo = 0
+      let hi = tails.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (cand[tails[mid]][0] < v) lo = mid + 1
+        else hi = mid
+      }
+      if (lo > 0) prev[i] = tails[lo - 1]
+      tails[lo] = i
+    }
+    const seq = []
+    for (let k = tails.length ? tails[tails.length - 1] : -1; k >= 0; k = prev[k]) seq.push(cand[k])
+    return seq.reverse()
+  }
+
+  // base → other 的变动块列表：[{bs,be,os,oe,src}]（base 区间 [bs,be) 换成 src[os,oe)）。
+  // 显式栈而非递归：极长文件里锚点可能只切掉一行，递归深度会打穿调用栈。
+  function wkDiffBlocks(base, other, src) {
+    const out = []
+    const stack = [[0, base.length, 0, other.length]]
+    while (stack.length) {
+      let [as, ae, bs, be] = stack.pop()
+      while (as < ae && bs < be && base[as] === other[bs]) { as++; bs++ }
+      while (as < ae && bs < be && base[ae - 1] === other[be - 1]) { ae--; be-- }
+      if (as === ae && bs === be) continue
+      if (as === ae || bs === be) {
+        out.push({ bs: as, be: ae, os: bs, oe: be, src })
+        continue
+      }
+      const anchors = wkUniqueAnchors(base, as, ae, other, bs, be)
+      if (!anchors.length) {
+        out.push({ bs: as, be: ae, os: bs, oe: be, src })
+        continue
+      }
+      let pa = as
+      let pb = bs
+      for (const [ai, bi] of anchors) {
+        if (ai > pa || bi > pb) stack.push([pa, ai, pb, bi])
+        pa = ai + 1
+        pb = bi + 1
+      }
+      if (pa < ae || pb < be) stack.push([pa, ae, pb, be])
+    }
+    out.sort((x, y) => x.bs - y.bs || x.be - y.be || x.os - y.os)
+    return out
+  }
+
+  function wkMerge3(base, local, remote) {
+    const b0 = String(base == null ? '' : base)
+    const l0 = String(local == null ? '' : local)
+    const r0 = String(remote == null ? '' : remote)
+    if (l0 === b0) return { ok: true, text: r0 } // 本地无改动：直接取磁盘版
+    if (r0 === b0 || r0 === l0) return { ok: true, text: l0 } // 磁盘无改动 / 两侧一致
+    const bl = wkMergeSplit(b0)
+    const ll = wkMergeSplit(l0)
+    const rl = wkMergeSplit(r0)
+    if (bl.length > WK_MERGE_MAX_LINES || ll.length > WK_MERGE_MAX_LINES || rl.length > WK_MERGE_MAX_LINES) {
+      return { ok: false, reason: 'too-large' }
+    }
+    const lb = wkDiffBlocks(bl, ll, ll)
+    const rb = wkDiffBlocks(bl, rl, rl)
+    // 冲突检测：两个块列表各自按 bs 升序且内部不重叠 → 双指针即可
+    let i = 0
+    let j = 0
+    while (i < lb.length && j < rb.length) {
+      const x = lb[i]
+      const y = rb[j]
+      if (wkBlocksOverlap(x, y)) return { ok: false, reason: 'conflict' }
+      if (x.be <= y.bs) i++
+      else j++
+    }
+    // 应用：按 base 位置顺序输出，插入块（be===bs）先于同起点的替换块
+    const all = lb.concat(rb).sort((x, y) => x.bs - y.bs || x.be - y.be)
+    const out = []
+    let p = 0
+    for (const b of all) {
+      while (p < b.bs) out.push(bl[p++])
+      for (let k = b.os; k < b.oe; k++) out.push(b.src[k])
+      p = b.be
+    }
+    while (p < bl.length) out.push(bl[p++])
+    return { ok: true, text: out.join('\n') }
   }
 
   // ---------- JSON Canvas 解析 ----------
@@ -9902,6 +10044,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // 顶部「保存态」文本落地（唯一写点）：conflict > saving > dirty > 空。传 (txt, cls) 则原样落。
+  // 该行不再显示文件名，空态即整行隐藏（.wk-ed-head 的显示与否由这里统一收口）。
   function wkEdState(txt, cls) {
     const el = $('wk-ed-save')
     if (!el) return
@@ -9912,12 +10055,12 @@ function setFirstSendHash(v) { firstSendHash = v }
     el.textContent = txt || ''
     el.classList.toggle('dirty', cls === 'dirty')
     el.classList.toggle('conflict', cls === 'conflict')
+    const head = $('wk-ed-head')
+    if (head) head.hidden = !txt
   }
 
   function renderEditor() {
-    const pathEl = $('wk-ed-path')
     const body = $('wk-ed-body')
-    if (pathEl) pathEl.textContent = state.workFile || ''
     if (!body) return
     if (!state.workFile) {
       wkEdReset()
@@ -9938,6 +10081,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   function wkEdReset() {
+    wkLiveReset()
     wkEdFile = ''
     wkEdMeta = null
     wkEdText = ''
@@ -10002,6 +10146,7 @@ function setFirstSendHash(v) { firstSendHash = v }
   async function readFile(p) {
     const body = $('wk-ed-body')
     if (!body) return
+    wkLiveReset() // 新文件的实时同步从不带旧文件的暂停/两次确认态开始
     const seq = ++edSeq
     // 立刻认下新 (proj,path)：并发重渲（切项目那一刻）不得拿旧 wkEdFile 命中缓存渲染上个项目的内容
     wkEdProj = state.workProj
@@ -10127,23 +10272,25 @@ function setFirstSendHash(v) { firstSendHash = v }
     await readFile(p)
   }
 
-  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘（交互式——冲突时弹处置框）
+  // 切文件 / 切项目 / 退 work 前 flush：把 pending 编辑立即落盘
   async function wkEdFlush() {
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
     }
     if (!wkEdDirty || wkEdConflict) return
-    await wkEdSave({ interactive: true })
+    await wkEdSave({})
   }
 
-  // 保存：默认带 baseMtime（外部改过 → 409，不覆盖）；force = 无基线强制覆盖（用户确认后）。
+  // 保存：默认带 baseMtime（磁盘已变 → 409，不静默覆盖）；force = 无基线强制覆盖。
+  // 返回 'ok' | 'clean' | 'conflict' | 'error' | 'busy'：409 不再弹模态，统一标记后交给实时合并链
+  // （work-live.js）——无重叠自动三方合并写回，只有真正重叠才落到非模态提示条。
   async function wkEdSave(opts) {
     const force = !!(opts && opts.force)
-    const interactive = !!(opts && opts.interactive)
-    if (!state.workFile || !state.workProj || wkEdSaving) return
-    wkEdText = wkEdDocText() // 落盘 payload = 当前真源（编辑器文档）
-    if (!wkEdDirty && !force) return
+    if (!state.workFile || !state.workProj) return 'clean'
+    if (wkEdSaving) return 'busy'
+    if (!wkEdDirty && !force) return 'clean'
+    const content = wkEdDocText() // 落盘 payload = 当前真源；**不**写进 wkEdText（那是磁盘基线，三方合并的 base）
     if (wkEdTimer) {
       clearTimeout(wkEdTimer)
       wkEdTimer = 0
@@ -10152,7 +10299,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEdState('保存中…', 'dirty')
     let conflict = false
     try {
-      const payload = { label: state.workProj, path: state.workFile, content: wkEdText }
+      const payload = { label: state.workProj, path: state.workFile, content }
       if (!force && wkEdMtime !== null) payload.baseMtime = wkEdMtime
       const res = await fetch(apiUrl('/gateway/file/write'), {
         method: 'POST',
@@ -10165,37 +10312,26 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (!res.ok || !data.ok) throw new Error(data.error || '保存失败')
         if (typeof data.mtime === 'number') wkEdMtime = data.mtime
         wkEdInvalidatePathCache() // 写盘成功 → 路径补全目录缓存失效（新文件/新目录要能补出来）
-        wkEdDirty = wkEdDocText() !== wkEdText // 保存期间又改了 → 留脏，下面续排程
+        wkEdText = content // 写盘成功才推进磁盘基线
+        wkEdDirty = wkEdDocText() !== content // 保存期间又改了 → 留脏，下面续排程
       }
     } catch (e) {
       wkEdSaving = false
       wkEdState('保存失败', 'conflict')
       toast('保存失败：' + (e.message || e))
-      return
+      return 'error'
     }
     wkEdSaving = false
     if (conflict) {
       wkEdConflict = true
       wkEdState('外部已修改', 'conflict')
-      if (interactive) return wkEdResolveConflict()
-      toast('文件已被外部修改，未自动覆盖（Ctrl+S 可覆盖）')
-      return
+      wkLiveKick() // 立即走实时合并链：能合就静默合并写回，重叠才提示
+      return 'conflict'
     }
+    wkEdConflict = false
     wkEdState()
     if (wkEdDirty) wkEdScheduleSave() // 保存期间又改了 → 续排程（wkEdState 先落地「未保存」）
-  }
-
-  // 冲突处置（用户显式保存时）：确定 = 用当前内容覆盖；取消 = 放弃编辑、重载磁盘版本。绝静默二选一。
-  async function wkEdResolveConflict() {
-    const overwrite = window.confirm('磁盘上的文件已被外部修改。\n\n确定：用当前内容覆盖\n取消：放弃编辑，载入磁盘版本')
-    if (overwrite) {
-      wkEdConflict = false
-      wkEdDirty = true
-      return wkEdSave({ force: true })
-    }
-    wkEdDirty = false
-    wkEdConflict = false
-    await wkEdReload()
+    return 'ok'
   }
 
   // 打开一个文件（**唯一口**：侧栏文件树行 / 搜索浮窗行 / 顶栏文件 pill / 评论定位 / 预览卡 src-open 全走这里）。
@@ -10233,6 +10369,185 @@ function setFirstSendHash(v) { firstSendHash = v }
     renderEditor()
     renderWorkBody()
     applyPanes()
+  }
+
+  const WK_LIVE_MS = 500
+  let wkLiveT = 0
+  let wkLiveBusy = false
+  let wkLivePendingMtime = null // 连续两次 HEAD 得到同一个新 mtime 才采纳（防 AI 非原子写读到半截）
+  let wkLivePausedKey = ''      // 冲突未处置时的 (proj\path)；换文件自动解除
+
+  function wkLiveKey() {
+    return state.workProj + '\n' + state.workFile
+  }
+
+  function setWkRemoteNote(text) {
+    const el = $('wk-ed-remote')
+    if (!el) return
+    el.hidden = !text
+    const t = el.querySelector('.wk-ed-remote-txt')
+    if (t) t.textContent = text || ''
+  }
+
+  // 重置探测/暂停态（换文件、切项目、重载、退 work 共用）
+  function wkLiveReset() {
+    wkLivePendingMtime = null
+    wkLivePausedKey = ''
+    setWkRemoteNote('')
+  }
+
+  function startWorkLive() {
+    if (!wkLiveT) wkLiveT = setInterval(() => { wkLiveTick(false) }, WK_LIVE_MS)
+  }
+  function stopWorkLive() {
+    if (wkLiveT) {
+      clearInterval(wkLiveT)
+      wkLiveT = 0
+    }
+    wkLiveBusy = false
+    wkLiveReset()
+  }
+
+  // 立即探测一次（保存 409 后由保存链调用；跳过「两次确认」，冲突处置不能再等一轮）
+  function wkLiveKick() {
+    wkLiveTick(true)
+  }
+
+  async function wkLiveTick(force) {
+    if (wkLiveBusy) return
+    if (state.sbMode !== 'work' || document.visibilityState !== 'visible' || needToken()) return
+    if (!state.workFile || !state.workProj) return
+    if (!wkEdMeta || !wkEdMeta.editable) return
+    if (wkEdSaving) return
+    const key = wkLiveKey()
+    // 暂停态挡的是自动轮询；force（保存 409 后的立即重试）必须绕过它，否则冲突后 Ctrl+S 永远不再尝试合并。
+    if (wkLivePausedKey === key && !force) return
+    if (wkLivePausedKey) {
+      // 换文件留下的暂停态：连提示一起清；同文件显式重试：先解暂停，提示留到结果（仍冲突会重写、合并成功才清）
+      if (!force) wkLiveReset()
+      else { wkLivePausedKey = ''; wkLivePendingMtime = null }
+    }
+    const proj = state.workProj
+    const path = state.workFile
+    const seq = edSeq
+    wkLiveBusy = true
+    try {
+      const res = await fetch(fileUrl(path), { method: 'HEAD', cache: 'no-store' })
+      if (proj !== state.workProj || path !== state.workFile || seq !== edSeq) return
+      if (res.status === 404) {
+        // 外部删除：无本地改动 → 与「打开着的文件消失」同语义摘胶囊；有改动则保留内容并提示
+        if (wkEdDirty) return wkLiveConflict('文件已在外部删除，编辑器保留你的未保存内容')
+        wkLiveReset()
+        wkDropDeadFile(path)
+        return
+      }
+      if (!res.ok) {
+        wkLivePendingMtime = null // 413/网络错误不是「文件变了」，下轮重试
+        return
+      }
+      const etag = res.headers.get('etag')
+      const mtime = etag ? Number(etag.replace(/"/g, '')) : NaN
+      if (!Number.isFinite(mtime)) return
+      if (mtime === wkEdMtime) {
+        wkLivePendingMtime = null
+        return
+      }
+      if (!force) {
+        if (wkLivePendingMtime !== mtime) {
+          wkLivePendingMtime = mtime
+          return // 首次看到新 mtime：等下一轮确认（写盘可能还未完成）
+        }
+      }
+      wkLivePendingMtime = null
+      await wkLiveAdopt(proj, path, seq, mtime)
+    } catch {
+      /* 瞬时网络错误忽略，下轮重试 */
+    } finally {
+      wkLiveBusy = false
+    }
+  }
+
+  // 采纳一次外部变更：拉新内容 → 无脏直接换 / 有脏三方合并写回
+  async function wkLiveAdopt(proj, path, seq, headMtime) {
+    const res = await fetch(fileUrl(path), { cache: 'no-store' })
+    if (proj !== state.workProj || path !== state.workFile || seq !== edSeq) return
+    if (!res.ok) return
+    const text = await res.text()
+    if (proj !== state.workProj || path !== state.workFile || seq !== edSeq) return
+    const etag = res.headers.get('etag')
+    let mtime = etag ? Number(etag.replace(/"/g, '')) : NaN
+    if (!Number.isFinite(mtime)) mtime = headMtime
+    if (!wkEdDirty) {
+      // 无未落盘编辑：最小段替换直接映进编辑器（光标/选区/滚动由 CM 按变更映射）
+      if (!wkEdApplyRemote(text)) return // IME 组合中：本轮放弃，下轮重试
+      wkEdText = text
+      wkEdMtime = mtime
+      wkEdConflict = false
+      wkEdState('')
+      setWkRemoteNote('')
+      return
+    }
+    await wkLiveMergeAndSave(proj, path, seq, text, mtime, 2)
+  }
+
+  // 有脏：三方合并（base = 上次磁盘基线 wkEdText）→ 写回；409 = 期间磁盘又变 → 重取重合并
+  async function wkLiveMergeAndSave(proj, path, seq, remote, baseMtime, retries) {
+    const merged = wkMerge3(wkEdText, wkEdDocText(), remote)
+    if (!merged.ok) {
+      return wkLiveConflict(
+        merged.reason === 'too-large'
+          ? '文件改动较大且与本地编辑重叠，已保留本地内容'
+          : '文件已在外部更新且与本地编辑重叠，已保留本地内容'
+      )
+    }
+    if (merged.text !== wkEdDocText()) {
+      if (!wkEdApplyRemote(merged.text)) return
+    }
+    wkEdMtime = baseMtime
+    const r = await wkEdSave({})
+    if (r === 'ok' || r === 'clean') {
+      wkLiveReset()
+      return
+    }
+    if (r !== 'conflict' || retries <= 0) {
+      return wkLiveConflict('外部改动频繁且与本地编辑重叠，已保留本地内容')
+    }
+    // 409：磁盘在我们合并期间又变了 → 取最新内容再合一次（base 仍是 wkEdText）
+    const res = await fetch(fileUrl(path), { cache: 'no-store' })
+    if (!res.ok) return
+    const nextRemote = await res.text()
+    if (proj !== state.workProj || path !== state.workFile || seq !== edSeq) return
+    const etag = res.headers.get('etag')
+    let nextMtime = etag ? Number(etag.replace(/"/g, '')) : NaN
+    if (!Number.isFinite(nextMtime)) return
+    return wkLiveMergeAndSave(proj, path, seq, nextRemote, nextMtime, retries - 1)
+  }
+
+  // 非模态提示：保留本地内容，暂停本文件的自动保存与实时同步，等用户显式处置
+  function wkLiveConflict(text) {
+    wkLivePausedKey = wkLiveKey()
+    wkEdConflict = true
+    wkEdState('外部已修改', 'conflict')
+    setWkRemoteNote(text)
+  }
+
+  // 提示条「保留我的版本」：放弃磁盘那次外部改动、以本地内容强制覆盖（原模态的「确定」分支）
+  async function wkLiveKeepLocal() {
+    if (!state.workFile) return
+    wkLiveReset()
+    wkEdConflict = false
+    await wkEdSave({ force: true })
+    wkEdState('')
+  }
+
+  // 提示条「载入磁盘版本」：放弃本地编辑，重读磁盘（404 时按文件消失语义收口）
+  async function wkLiveTakeRemote() {
+    if (!state.workFile) return
+    wkLiveReset()
+    wkEdDirty = false
+    wkEdConflict = false
+    await wkEdReload()
+    wkEdState('')
   }
 
   // ---------- 文件 / 目录行操作（2026-09-27：与侧栏会话行同一套右键 / 长按浮窗，见 recent.js registerRowMenu）----------
@@ -10315,34 +10630,37 @@ function setFirstSendHash(v) { firstSendHash = v }
       toast('删除失败：' + (e.message || e))
     }
   }
+  // 文件 / 目录行菜单「项 + 动作」唯一实现（2026-10-25）：侧栏文件树行 `.wk-row` 与 work 顶栏
+  // 文件 pill `[data-wkftab]` 共用本 spec，禁止各写一套菜单。getEntry(el) → { path, dir }。
+  // 「下载」仅文件出（2026-10-13 待办 1）：目录整棵打包无既有实现，不新造。
+  function fileRowMenuSpec(getEntry) {
+    const entryOf = (el) => getEntry(el) || {}
+    return {
+      items: (el) => {
+        const { path, dir } = entryOf(el)
+        if (!path) return []
+        const head = [
+          { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
+          { a: 'rename', icon: I.dshEdit, label: '重命名' },
+        ]
+        const del = { a: 'delete', icon: I.dshStop, label: '删除', danger: true }
+        return dir ? [...head, del] : [...head, { a: 'download', icon: I.dshDownload, label: '下载' }, del]
+      },
+      pick: (a, el) => {
+        const { path } = entryOf(el)
+        if (a === 'reveal') revealWorkEntry(path)
+        else if (a === 'rename') openFileRename(path)
+        else if (a === 'download') downloadWorkEntry(path)
+        else deleteWorkEntry(path)
+      },
+    }
+  }
   // 文件树行源：文件与目录同一套菜单（目录删除 = 整棵子树进 .trash/）；操作对象 = 行的项目内相对路径。
-  // 「下载」仅文件行出（2026-10-13 待办 1）：目录整棵打包无既有实现，不新造。
   function registerWorkRows() {
     registerRowMenu({
       sel: '.wk-row',
       key: (el) => el.dataset.wkfile || el.dataset.wkdir || null,
-      items: (el) =>
-        el.dataset.wkfile
-          ? [
-              { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
-              { a: 'rename', icon: I.dshEdit, label: '重命名' },
-              { a: 'download', icon: I.dshDownload, label: '下载' },
-              { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
-            ]
-          : el.dataset.wkdir
-            ? [
-                { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
-                { a: 'rename', icon: I.dshEdit, label: '重命名' },
-                { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
-              ]
-            : [],
-      pick: (a, el) => {
-        const p = el.dataset.wkfile || el.dataset.wkdir
-        if (a === 'reveal') revealWorkEntry(p)
-        else if (a === 'rename') openFileRename(p)
-        else if (a === 'download') downloadWorkEntry(p)
-        else deleteWorkEntry(p)
-      },
+      ...fileRowMenuSpec((el) => ({ path: el.dataset.wkfile || el.dataset.wkdir || '', dir: !!el.dataset.wkdir })),
     })
   }
 
@@ -10628,6 +10946,21 @@ function setFirstSendHash(v) { firstSendHash = v }
       // 是顶栏独有的一条残链——预览卡收不到广播，故「侧栏点文件」与「顶栏点 pill」表现不一致。
       openWorkFile(fp)
     })
+    // 顶栏胶囊的右键 / 长按浮窗（2026-10-25）：与侧栏行**共用同一份菜单 spec**，不另写菜单项——
+    // 会话胶囊复用 recent.js 的 sessionRowMenuSpec（置顶 / 重命名 / 关闭会话，与侧栏会话行完全一致），
+    // 文件 pill 复用 work-rows.js 的 fileRowMenuSpec（在资源管理器中打开 / 重命名 / 下载 / 删除，
+    // 与文件树文件行完全一致）。顶栏胶囊属 work 语境，故 withPin 恒真；
+    // 重命名成功后 renderTopbar 让胶囊标题即时跟上（侧栏行由 renderRecent 自理）。
+    registerRowMenu({
+      sel: '[data-wkchat]',
+      key: (el) => el.dataset.wkchat || null,
+      ...sessionRowMenuSpec((el) => wkKeyHash(el.dataset.wkchat), () => true, renderTopbar),
+    })
+    registerRowMenu({
+      sel: '[data-wkftab]',
+      key: (el) => el.dataset.wkftab || null,
+      ...fileRowMenuSpec((el) => ({ path: el.dataset.wkftab, dir: false })),
+    })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')
     if (wap) wap.innerHTML = I.dshSend
@@ -10749,18 +11082,21 @@ function setFirstSendHash(v) { firstSendHash = v }
       wkTreeMove(from, dir)
     })
     body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
-    // 编辑卡左上角文件名 = 重命名入口（与文件树行「重命名」同一函数 openFileRename）。
-    $('wk-ed-path').addEventListener('click', () => {
-      if (state.workFile) openFileRename(state.workFile)
-    })
+    // 编辑卡左上角文件名只作展示：重命名入口统一在顶栏文件 pill / 侧栏文件行的右键菜单里
+    // （2026-10-25 定案，删掉此处点击直调 openFileRename 的旧入口）。
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       if (e.key.toLowerCase() === 's') {
         e.preventDefault()
-        wkEdSave({ interactive: true })
+        wkEdSave({})
       }
     })
+    // 外部改动提示条：保留本地（强制覆盖） / 载入磁盘版本（404 时按文件消失语义收口）
+    const remoteSave = $('wk-ed-remote-save')
+    if (remoteSave) remoteSave.addEventListener('click', () => { wkLiveKeepLocal() })
+    const remoteLoad = $('wk-ed-remote-load')
+    if (remoteLoad) remoteLoad.addEventListener('click', () => { wkLiveTakeRemote() })
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
@@ -10769,7 +11105,9 @@ function setFirstSendHash(v) { firstSendHash = v }
     })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') workAutoTick()
+      if (document.visibilityState !== 'visible') return
+      workAutoTick()
+      wkLiveTick(false) // 外部改动同步同一时刻补一次，不等下一个 500ms
     })
   }
 

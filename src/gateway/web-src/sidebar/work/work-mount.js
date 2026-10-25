@@ -145,6 +145,21 @@
       // 是顶栏独有的一条残链——预览卡收不到广播，故「侧栏点文件」与「顶栏点 pill」表现不一致。
       openWorkFile(fp)
     })
+    // 顶栏胶囊的右键 / 长按浮窗（2026-10-25）：与侧栏行**共用同一份菜单 spec**，不另写菜单项——
+    // 会话胶囊复用 recent.js 的 sessionRowMenuSpec（置顶 / 重命名 / 关闭会话，与侧栏会话行完全一致），
+    // 文件 pill 复用 work-rows.js 的 fileRowMenuSpec（在资源管理器中打开 / 重命名 / 下载 / 删除，
+    // 与文件树文件行完全一致）。顶栏胶囊属 work 语境，故 withPin 恒真；
+    // 重命名成功后 renderTopbar 让胶囊标题即时跟上（侧栏行由 renderRecent 自理）。
+    registerRowMenu({
+      sel: '[data-wkchat]',
+      key: (el) => el.dataset.wkchat || null,
+      ...sessionRowMenuSpec((el) => wkKeyHash(el.dataset.wkchat), () => true, renderTopbar),
+    })
+    registerRowMenu({
+      sel: '[data-wkftab]',
+      key: (el) => el.dataset.wkftab || null,
+      ...fileRowMenuSpec((el) => ({ path: el.dataset.wkftab, dir: false })),
+    })
     // 收敛输入栏末端的箭头 = 正常底栏发送钮的同一枚图标（单源 core/icons.js，勿在 HTML 内联自绘）
     const wap = document.querySelector('.wap-arrow')
     if (wap) wap.innerHTML = I.dshSend
@@ -266,18 +281,21 @@
       wkTreeMove(from, dir)
     })
     body.addEventListener('dragend', () => { wkDragPath = ''; dndMark(null) })
-    // 编辑卡左上角文件名 = 重命名入口（与文件树行「重命名」同一函数 openFileRename）。
-    $('wk-ed-path').addEventListener('click', () => {
-      if (state.workFile) openFileRename(state.workFile)
-    })
+    // 编辑卡左上角文件名只作展示：重命名入口统一在顶栏文件 pill / 侧栏文件行的右键菜单里
+    // （2026-10-25 定案，删掉此处点击直调 openFileRename 的旧入口）。
     // 编辑区：Ctrl+S 立即保存（绑在 #work-editor 上；编辑器自身处理其余按键，未消费的键冒泡到此处）
     $('work-editor').addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       if (e.key.toLowerCase() === 's') {
         e.preventDefault()
-        wkEdSave({ interactive: true })
+        wkEdSave({})
       }
     })
+    // 外部改动提示条：保留本地（强制覆盖） / 载入磁盘版本（404 时按文件消失语义收口）
+    const remoteSave = $('wk-ed-remote-save')
+    if (remoteSave) remoteSave.addEventListener('click', () => { wkLiveKeepLocal() })
+    const remoteLoad = $('wk-ed-remote-load')
+    if (remoteLoad) remoteLoad.addEventListener('click', () => { wkLiveTakeRemote() })
     $('wk-foot').addEventListener('click', () => toast(state.workspace ? `工作区：${state.workspace}` : '工作区路径未知'))
     // 点空白收起两个浮层（浮层与触发按钮之外的点击都算）
     document.addEventListener('click', (e) => {
@@ -286,7 +304,9 @@
     })
     // 后台标签页不做对账（定时器仍在跑，tick 内自会跳过）；切回前台立刻补一次，不等下一个间隔
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') workAutoTick()
+      if (document.visibilityState !== 'visible') return
+      workAutoTick()
+      wkLiveTick(false) // 外部改动同步同一时刻补一次，不等下一个 500ms
     })
   }
 

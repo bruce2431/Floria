@@ -2583,15 +2583,10 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wap-arrow svg { width: 16px; height: 16px; display: block; }
 .wk-assist-pill:hover .wap-arrow { background: #679efe; }
 
-.wk-ed-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
-/* 文件名 = 按钮（点击重命名）：盒模型与旧 span 完全一致，只补「可点」的 hover 反馈。 */
-.wk-ed-path {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  padding: 0; border: none; border-radius: 5px; background: transparent;
-  font: inherit; font-size: 12.5px; color: var(--text-2); text-align: left; cursor: pointer;
-}
-.wk-ed-path:hover { color: var(--text); background: var(--hover); }
-.wk-ed-path:empty { pointer-events: none; }
+/* 保存态行：只在有「未保存 / 保存中… / 外部已修改」时出现（显隐由 work-editor.js 的 wkEdState 切）；
+   文件名不再自占一行。作者 display:flex 会盖掉 UA [hidden]，故显式补 hidden 规则。 */
+.wk-ed-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
+.wk-ed-head[hidden] { display: none; }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 /* 编辑区（CodeMirror 6，2026-10-07）：所有可编辑文本文件挂 .wk-ed-cm 宿主，md 走 Live Preview、
    代码按扩展名高亮。字号/配色与本项目 .msg .body 同源（库自带 editorTheme 用 em/hsl 变量，
@@ -2753,6 +2748,12 @@ html[data-theme="dark"] {
 .wk-ed-save { flex: none; font-size: 12.5px; color: var(--text-3); }
 .wk-ed-save.dirty { color: var(--text-2); }
 .wk-ed-save.conflict { color: #e0603f; }
+/* 外部改动非模态提示条（#wk-ed-remote）：合并重叠 / 外部删除且本地有脏时才出现一行，不挡编辑。 */
+.wk-ed-remote { display: flex; align-items: center; gap: 8px; flex: none; padding: 6px 14px; font-size: 12.5px; color: var(--text-2); background: color-mix(in srgb, #e0603f 8%, transparent); border-bottom: 1px solid var(--border-soft); }
+.wk-ed-remote[hidden] { display: none; }
+.wk-ed-remote-txt { flex: 1; min-width: 0; }
+.wk-ed-remote-btn { flex: none; font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--plane); color: var(--text); cursor: pointer; }
+.wk-ed-remote-btn:hover { background: var(--sunken-bg, var(--plane)); }
 
 /* 手机端（≤720px）：grid 三列不成立 → 退化为单列 flex（顶栏 + 下沉格），预览列与分界条不出
    （开关状态照常持久化，回宽屏即恢复）。tab 切换天然覆盖「点文件看内容」的场景。 */

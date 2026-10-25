@@ -27,10 +27,12 @@
       applySidebarPin() // 进 work：侧栏开合按工作项目槽里的开关恢复（桌面）
       ensureWork()
       startWorkAuto()
+      startWorkLive() // 编辑卡外部改动实时同步（0.5s HEAD）；与侧栏自动对账同一对启停点
     } else {
       if (wkEdDirty) wkEdFlush() // 退 work 模式：pending 编辑先落盘（不阻塞模式切换）
       hideWkPops()
       stopWorkAuto()
+      stopWorkLive()
     }
   }
 

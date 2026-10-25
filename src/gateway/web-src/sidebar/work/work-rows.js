@@ -81,34 +81,37 @@
       toast('删除失败：' + (e.message || e))
     }
   }
+  // 文件 / 目录行菜单「项 + 动作」唯一实现（2026-10-25）：侧栏文件树行 `.wk-row` 与 work 顶栏
+  // 文件 pill `[data-wkftab]` 共用本 spec，禁止各写一套菜单。getEntry(el) → { path, dir }。
+  // 「下载」仅文件出（2026-10-13 待办 1）：目录整棵打包无既有实现，不新造。
+  function fileRowMenuSpec(getEntry) {
+    const entryOf = (el) => getEntry(el) || {}
+    return {
+      items: (el) => {
+        const { path, dir } = entryOf(el)
+        if (!path) return []
+        const head = [
+          { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
+          { a: 'rename', icon: I.dshEdit, label: '重命名' },
+        ]
+        const del = { a: 'delete', icon: I.dshStop, label: '删除', danger: true }
+        return dir ? [...head, del] : [...head, { a: 'download', icon: I.dshDownload, label: '下载' }, del]
+      },
+      pick: (a, el) => {
+        const { path } = entryOf(el)
+        if (a === 'reveal') revealWorkEntry(path)
+        else if (a === 'rename') openFileRename(path)
+        else if (a === 'download') downloadWorkEntry(path)
+        else deleteWorkEntry(path)
+      },
+    }
+  }
   // 文件树行源：文件与目录同一套菜单（目录删除 = 整棵子树进 .trash/）；操作对象 = 行的项目内相对路径。
-  // 「下载」仅文件行出（2026-10-13 待办 1）：目录整棵打包无既有实现，不新造。
   function registerWorkRows() {
     registerRowMenu({
       sel: '.wk-row',
       key: (el) => el.dataset.wkfile || el.dataset.wkdir || null,
-      items: (el) =>
-        el.dataset.wkfile
-          ? [
-              { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
-              { a: 'rename', icon: I.dshEdit, label: '重命名' },
-              { a: 'download', icon: I.dshDownload, label: '下载' },
-              { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
-            ]
-          : el.dataset.wkdir
-            ? [
-                { a: 'reveal', icon: I.dshExplorer, label: '在资源管理器中打开' },
-                { a: 'rename', icon: I.dshEdit, label: '重命名' },
-                { a: 'delete', icon: I.dshStop, label: '删除', danger: true },
-              ]
-            : [],
-      pick: (a, el) => {
-        const p = el.dataset.wkfile || el.dataset.wkdir
-        if (a === 'reveal') revealWorkEntry(p)
-        else if (a === 'rename') openFileRename(p)
-        else if (a === 'download') downloadWorkEntry(p)
-        else deleteWorkEntry(p)
-      },
+      ...fileRowMenuSpec((el) => ({ path: el.dataset.wkfile || el.dataset.wkdir || '', dir: !!el.dataset.wkdir })),
     })
   }
 

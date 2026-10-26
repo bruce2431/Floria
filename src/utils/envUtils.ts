@@ -63,12 +63,18 @@ export function maybeInitPortableRoot(): void {
   if (process.env.CLAUDE_CONFIG_DIR) return
   const exeDir = dirname(process.execPath)
   if (exeDir === homedir()) return
-  // Never touch an existing `.claude` next to the exe — it may be project-local
-  // session storage; seeding into it could hijack or pollute it.
-  if (existsSync(join(exeDir, '.claude'))) return
   if (findPortableRoot(exeDir)) return
   const configHome = join(exeDir, '.claude')
-  mkdirSync(configHome)
+  // `.claude` may already exist by the time the user accepts trust: when the
+  // exe is launched from its own folder, startup writes project-local session
+  // storage there (`<cwd>/.claude/projects`). That bare directory is NOT a
+  // config home — and refusing to touch it left the folder with no marker, so
+  // every later launch fell back to the home directory. Seed the marker into
+  // it (the user just designated this folder as the global root).
+  // A directory that already looks like a real config home is left untouched:
+  // it belongs to a project and hijacking it would move plugins/credentials.
+  if (looksLikeConfigHome(configHome)) return
+  mkdirSync(configHome, { recursive: true })
   writeFileSync(join(configHome, PORTABLE_MARKER_FILE), '')
 }
 

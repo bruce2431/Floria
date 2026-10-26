@@ -1,3 +1,5 @@
+import { activePreviewFrame, setPreviewActiveHook, setRailExtItems, takePendingCardPayload, warmProjectBackend } from '../../feature/preview-frame.js'
+import { renderRailExt } from '../rail-ext.js'
 // 右栏预览与工具页态：预览帧挂载 renderWorkPreview / 页态唯一写口 setPvPane（setPvTab 与侧栏 api setPane('workspace') 是它的入口）/ 顶栏工具栏胶囊 + tab 条渲染。（拆自 sidebar/work.js，纯搬迁零行为变更；符号经单 IIFE 共享作用域可见）
 /* @module sidebar/work/work-preview.js */
 
@@ -53,6 +55,16 @@
   // id = 工具页。两个入口一律经此：setPvTab（右栏 tab 条，含首枚「预览」页签）与 setPane('workspace')（顶栏
   // 「工具栏」胶囊，work-files.js）——顶栏不另立链路，故两条入口行为必然同源。
   // 注：page !== '' 时才走 wkToolNormId（未注册 id 会回落到首枚工具，不能拿它表达「回预览态」）。
+  // 工具栏一打开就预热该项目后端：卡 tab 首次点击才 spawn 会空等，PDF 卡 / 日志卡切换尤其明显。
+  // 只对声明了 backend 的项目发；走同一 /gateway/backend 口（ensureBackend 存活复用 + in-flight 去重）。
+  function warmWorkBackend() {
+    const label = state.workProj
+    if (!label) return
+    const g = wkProjGroups().find((p) => p.label === label)
+    if (!g || !g.hasBackend) return
+    warmProjectBackend(label)
+  }
+
   function setPvPane(on, page) {
     state.wkPreview = !!on
     if (!on) state.wkPvTab = ''
@@ -60,6 +72,7 @@
     // 卡表已在时归一激活卡（表未就绪不能归一：会把持久化的卡 id 冲成 ''）；
     // 未就绪由 renderWorkPreview 拉完申报后再归一。
     if (on && previewCardsFor(state.workProj).length) state.wkPvCard = wkCardNormId()
+    if (on) warmWorkBackend()
     applyPanes()
     if (state.wkPreview) syncPvContent()
     saveWork()
@@ -119,11 +132,41 @@
     try { f.contentWindow.postMessage({ type: 'floria-wk-tool-select', id }, '*') } catch { /* 帧已销毁：动作无声丢弃 */ }
     wkFrameSentId = id
   }
-  // work 右栏预览帧（唯一取处）：#wk-pv-body 内那枚 .preview-frame
+  // work 右栏预览帧（唯一取处）：#wk-pv-body 内**当前显示**的那枚 .preview-frame。
+  // 卡池化后同容器可能并存多枚帧（隐藏帧留在池里不重载），一切「当前卡」判断必须按显隐取。
   function wkFrame() {
     const body = $('wk-pv-body')
-    return body ? body.querySelector('.preview-frame') : null
+    return body ? activePreviewFrame(body) : null
   }
+  // 按来源窗口反查池内预览帧（含隐藏帧）：帧申报只认自己那枚，不取「第一个」（池化后第一个常是隐藏的）。
+  function wkFrameBySource(src) {
+    const body = $('wk-pv-body')
+    if (!body || !src) return null
+    for (const el of body.querySelectorAll('.preview-frame')) if (el.contentWindow === src) return el
+    return null
+  }
+  // 池内激活帧变更（preview-frame.pvShow 的唯一回呼）：池内切回不重载 ⇒ load 不会再来一次，
+  // 该帧申报过的帧工具 / 侧栏按钮只能从帧上缓存恢复；卡→卡交接数据也只能在此补发。
+  // 首次建帧同样会走到这里（缓存为空、payload 留给 load 处理器），故不做新旧区分。
+  setPreviewActiveHook((container, el, key) => {
+    if (container !== $('wk-pv-body')) return // 槽位预览卡（chat 模式）：不参与 work 右栏的工具/按钮表
+    const label = el.dataset.label || ''
+    registerWkFrameTools(label, el.__wkTools || [])
+    setRailExtItems(el.__railItems || [])
+    renderRailExt()
+    if (state.wkPvTab && !wkToolDef(state.wkPvTab)) state.wkPvTab = ''
+    applyPanes()
+    // 换帧 = 选中态必须重发给新帧（wkFrameSentId 的去重只对同一帧成立）
+    wkFrameSentId = null
+    const tool = state.wkPvTab ? wkToolDef(state.wkPvTab) : null
+    notifyFrame(tool && !tool.pane ? tool.id : '')
+    // 新帧还没加载完就发 postMessage 会丢；交接数据等 load 处理器消费（它在加载后自会发）。
+    if (!el.__pvLoaded) return
+    const payload = takePendingCardPayload(label, key)
+    if (payload !== null && payload !== undefined) {
+      try { el.contentWindow.postMessage({ type: 'floria-wk-card-init', card: key, payload }, '*') } catch { /* 帧已销毁：丢弃 */ }
+    }
+  })
 
   // 预览帧挂载（唯一处）：内容渲染一律走 preview-card 的 mountPreview（与槽位预览卡同一份后端容器 /
   // 静态页两级链），本模块只决定「挂哪个项目的、什么时候挂」，不碰 iframe。
@@ -151,13 +194,15 @@
     }
     const cardId = wkCardNormId()
     state.wkPvCard = cardId
-    const f = el.querySelector('.preview-frame')
+    const f = wkFrame()
     if (f && f.dataset.label === label && (f.dataset.card || '') === cardId) {
-      // 同项目同卡已挂：交给 mountPreview 的软重入（不重载 = 零导航扰动）。
+      // 同项目同卡已亮着：零操作（不重载 = 零导航扰动）。
       return
     }
     clearWkFrameTools() // 帧换文档：上一份预览页申报的工具 tab 失效（不变量同 rail-ext）
     wkFrameSentId = null
+    // 建帧 / 池内切显隐都是异步回程，激活帧落地后由 setPreviewActiveHook 统一收尾
+    // （见下方 hook：恢复帧工具、侧栏按钮、补发交接数据）。
     mountPreview(el, label, hasPreviewOf(label), cardId)
   }
 

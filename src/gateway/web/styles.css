@@ -1732,6 +1732,9 @@ body.touch .mgr-card .mgr-more { opacity: 1; } /* 真触屏恒显（iPad 伪装 
   border-radius: 2px; transition: opacity 0.4s ease; cursor: pointer;
 }
 .preview-overlay.done { opacity: 0; pointer-events: none; }
+/* 卡池（2026-10-26）：同容器并存多枚帧，非激活帧靠 hidden 退出布局；作者 display 会盖掉 UA 的
+   [hidden] 默认值，必须显式兜住，否则隐藏帧仍按 flex 铺满、与激活帧叠在一起。 */
+.preview-frame[hidden], .preview-overlay[hidden] { display: none !important; }
 .preview-overlay-spin { width: 26px; height: 26px; border: 3px solid rgba(77, 107, 254, 0.22); border-top-color: #4d6bfe; border-radius: 50%; animation: preview-spin 0.8s linear infinite; margin-bottom: 12px; }
 .preview-overlay-title { font-size: 13px; font-weight: 500; color: var(--text); }
 .preview-overlay-sub { font-size: 12px; color: var(--text-2); margin-top: 6px; }
@@ -2583,9 +2586,11 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 .wap-arrow svg { width: 16px; height: 16px; display: block; }
 .wk-assist-pill:hover .wap-arrow { background: #679efe; }
 
-/* 保存态行：只在有「未保存 / 保存中… / 外部已修改」时出现（显隐由 work-editor.js 的 wkEdState 切）；
-   文件名不再自占一行。作者 display:flex 会盖掉 UA [hidden]，故显式补 hidden 规则。 */
-.wk-ed-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); flex: none; }
+/* 保存态：只在有「未保存 / 保存中… / 外部已修改」时出现（显隐由 work-editor.js 的 wkEdState 切）。
+   **不参与布局**——绝对定位浮在编辑区右上角：若留在文档流里，每次输入触发出现/消失会把编辑器整体
+   挤上挤下（用户实测「每输一个字符都跳」）。作者 display:flex 会盖掉 UA [hidden]，故显式补 hidden 规则。
+   pointer-events:none —— 纯提示，不挡编辑区点选。 */
+.wk-ed-head { position: absolute; top: 8px; right: 14px; z-index: 4; display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 6px; background: var(--plane); pointer-events: none; }
 .wk-ed-head[hidden] { display: none; }
 .wk-ed-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
 /* 编辑区（CodeMirror 6，2026-10-07）：所有可编辑文本文件挂 .wk-ed-cm 宿主，md 走 Live Preview、
@@ -2611,7 +2616,10 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 /* 表格 widget（库 TableWidget → `.cm-table-widget`）：库自带表线写的是 hsl(var(--border, …))，
    而本项目 --border 是十六进制（#ececec/#2a2a2a）⇒ hsl() 非法 ⇒ 边框声明在计算值阶段作废、全部无框。
    此处用项目令牌重写表线/表头底（同样是为 vendored 库的 hsl 假设兜底，与 .cm-header-* 覆盖同源）。 */
-#work-editor .cm-table-widget { margin: 12px var(--wk-ed-pad-x); }
+/* 纵向间距只能用 padding：CM6 高度图取 widget 的 getBoundingClientRect（**不含 margin**），
+   margin 会把之后所有行的缓存 top 顶偏 ⇒ 表格/代码块下方的点击落错行（库在 .cm-table-widget
+   注释里明确警告过这一点）。横向 margin 不进高度图，保留用于与正文左边线对齐。 */
+#work-editor .cm-table-widget { margin: 0 var(--wk-ed-pad-x); padding: 12px 0; }
 #work-editor .cm-table-widget table { border-collapse: collapse; width: 100%; }
 #work-editor .cm-table-widget th, #work-editor .cm-table-widget td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; }
 #work-editor .cm-table-widget th { background: color-mix(in srgb, var(--text) 7%, transparent); font-weight: 600; }
@@ -2621,7 +2629,8 @@ body.wk-assist-dragging iframe { pointer-events: none; }
    宿主统一为编辑器口径（EditorView.lineWrapping）：pre-wrap 软换行。底/边同聊天区代码块（--field-2 + --border），
    替换库的 hsl(var(--muted,…)) 回落值（本项目无 --muted，暗色下会留浅灰底）。 */
 #work-editor .cm-codeblock-widget {
-  margin: 14px var(--wk-ed-pad-x); border: 1px solid var(--border); border-radius: 10px;
+  /* 纵向 14px 同上：走 padding 进 widget 矩形，margin 不进高度图 ⇒ 代码块下方点击偏移 */
+  margin: 0 var(--wk-ed-pad-x); padding: 14px 0; border: 1px solid var(--border); border-radius: 10px;
   background: var(--field-2); overflow: hidden;
 }
 #work-editor .cm-codeblock-widget pre { padding: 28px 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -2636,7 +2645,7 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 }
 #work-editor .cm-codeblock-copy:hover { background: var(--hover); color: var(--text-2); }
 /* 块级公式 widget（editor/cm-math.js）：与正文同一边线，KaTeX 显示模式在该栏内居中 */
-#work-editor .cm-math-block { margin: 12px var(--wk-ed-pad-x); }
+#work-editor .cm-math-block { margin: 0 var(--wk-ed-pad-x); padding: 12px 0; }
 /* Live Preview（vendor 库 live-markdown.js）主题兜底（2026-10-09 根修）：库内置主题的颜色一律写
    hsl(var(--x, <浅色回落>))，而本项目从不定义 --muted/--foreground/--primary/--background/--md-*
    （令牌全为十六进制、名字也不同）⇒ 库的**浅色回落值全部生效** = 硬编码浅色主题 ⇒ 黑夜模式白底白字 /
@@ -2656,6 +2665,12 @@ body.wk-assist-dragging iframe { pointer-events: none; }
 /* 格式化标记（** ` # 等）与围栏标记：库用 --muted-foreground 回落 */
 #work-editor .cm-formatting-inline, #work-editor .cm-formatting-block,
 #work-editor .cm-codeblock-fence { color: var(--text-3); }
+/* 标记显隐必须瞬时：库给 `.cm-formatting-inline` / `-block` 配了 0.2s 的 max-width / font-size 过渡，
+   而 CM6 在 dispatch 后的测量取到的是过渡**起点**宽度，之后行内宽度继续变（可能触发软换行改行高）
+   ⇒ 高度图与真实布局脱节，点击按旧图映射 = 光标落错位置（偶发，只在刚切换标记显隐的行附近）。
+   去掉过渡即可让布局在测量前就位。 */
+#work-editor .cm-formatting-inline, #work-editor .cm-formatting-block,
+#cm-host .cm-formatting-inline, #cm-host .cm-formatting-block { transition: none; }
 /* 图片占位 / 信息 / 错误 */
 #work-editor .cm-image-loading, #work-editor .cm-image-info { background: var(--field-2); color: var(--text-3); }
 #work-editor .cm-image-alt { color: var(--text-3); }

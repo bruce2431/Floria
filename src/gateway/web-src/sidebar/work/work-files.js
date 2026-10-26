@@ -256,6 +256,7 @@ import { cmtRender } from '../../feature/comment/comment-panel.js'
     applySidebarPin() // 侧栏开合按新项目的槽（桌面）
     renderEditor()
     hydrateExtCards(label) // 换项目：外部卡先按缓存即时换槽（tab 不断档），再走下面一次网络清单
+    if (state.wkPreview) warmWorkBackend() // 右栏开着就预热新项目后端（工具态不会走下面的 mountPreview）
     renderWorkPreview() // 预览帧跟着换项目（异 label = 换源，mountPreview 内部重建；工具态则早退）
     cmtInvalidate() // 评论按项目分库：旧项目副本作废（下一行 cmtLoad 重拉，评论面板与原文标记共用）
     cmtLoad(label) // 原文标记也需要当前项目的评论（不止评论面板）；拉到后 cmtApplyMarks 自动补标

@@ -110,12 +110,15 @@
         return
       }
       if (d.type !== 'floria-wk-tool-register') return
-      const f = wkFrame()
-      if (!f || f.contentWindow !== e.source) return
+      // 卡池化（2026-10-26）：来源按窗口反查池内任一预览帧（含隐藏帧），不取「第一个」。
+      const f = wkFrameBySource(e.source)
+      if (!f) return
       const tools = (Array.isArray(d.tools) ? d.tools : [])
         .filter((t) => t && typeof t.id === 'string' && t.id)
         .map((t) => ({ id: t.id, title: typeof t.title === 'string' ? t.title : t.id, pane: '', mount: null }))
-      registerWkFrameTools(f.dataset.label || '', tools)
+      // 每帧缓存自己申报的工具表：池内切回（无 load）时由 work-preview 直接恢复，不必等页面再申报。
+      f.__wkTools = tools
+      if (f !== wkFrame()) return // 隐藏帧只记缓存，不上 tab 条（tab 条恒属当前显示的那张卡）
       // 申报集变了：当前 active 若已不存在（被撤的帧工具）→ 回落预览态；否则照旧。
       if (state.wkPvTab && !wkToolDef(state.wkPvTab)) state.wkPvTab = ''
       wkFrameSentId = null // 帧重挂/重申报 → 强制再回传一次当前选中

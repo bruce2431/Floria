@@ -54,7 +54,7 @@ const cardBus = (function () {
     const key = frames.has(base) ? `${base}#${++seq}` : base
     frames.set(key, {
       key, kind, label, el: rec.el, ns: '', cmds: [], ready: false, latestState: null,
-      handlers: null, busy: false, queue: [], timer: null, updatedAt: Date.now(),
+      handlers: null, busy: false, queue: [], timer: null, updatedAt: Date.now(), active: true,
     })
     rec.el.__cardKey = key // 反向键：DOM 被拆的挂点（preview-frame 换 label）据此注销，不必另存表
     scheduleCaps()
@@ -78,7 +78,7 @@ const cardBus = (function () {
       key, kind: 'inline', label: rec.label || '', el: null, ns: rec.ns || '',
       cmds: Array.isArray(rec.cmds) ? rec.cmds.map(String) : [], ready: true, latestState: null,
       handlers: rec.handlers && typeof rec.handlers === 'object' ? rec.handlers : {},
-      busy: false, queue: [], timer: null, updatedAt: Date.now(),
+      busy: false, queue: [], timer: null, updatedAt: Date.now(), active: true,
     })
     scheduleCaps()
     return key
@@ -94,10 +94,24 @@ const cardBus = (function () {
     [t.label ? `项目=${t.label}` : '', t.ns ? `ns=${t.ns}` : '', t.instanceId ? `实例=${t.instanceId}` : '']
       .filter(Boolean).join(' ') || '(未指定)'
 
-  // 在场 = 帧仍挂在文档里。iframe 卡随宿主卡片 DOM 被拆（换 label / 退卡）即失格——以元素 isConnected 为准，
-  // 不要求每个拆除点都记得注销（漏注销只会留个不可达表项，不会让 agent 打到一个已死的帧上）。
-  const isLive = (f) => !!f.handlers || !!(f.el && f.el.isConnected)
+  // 在场 = 帧仍挂在文档里**且处于激活态**。iframe 卡随宿主卡片 DOM 被拆（换 label / 退卡）即失格——以元素
+  // isConnected 为准，不要求每个拆除点都记得注销（漏注销只会留个不可达表项，不会让 agent 打到一个已死的帧上）。
+  // active（2026-10-26 卡池）：work 右栏多卡并行时同时挂着多枚 iframe，只有当前显示的那枚可寻址——
+  // 隐藏帧留在池里仅为「切回不重载」，不参与 resolveTarget/listCaps，否则同 label 多帧会判「目标卡不唯一」。
+  const isLive = (f) => !!f.handlers || !!(f.el && f.el.isConnected && f.active !== false)
   const liveFrames = () => [...frames.values()].filter(isLive)
+  // 广播面 = 所有仍挂着的帧（含隐藏帧）：「事实类」通知必须让后台卡保持同步（隐藏的 PDF 卡也要跟上
+  // 用户新打开的文件），与「指令类」的可寻址面刻意分家。
+  const attachedFrames = () => [...frames.values()].filter((f) => f.handlers || (f.el && f.el.isConnected))
+  // 卡池切显隐的唯一写口：work 右栏换卡时对旧帧调 off、新帧调 on（registerFrame 缺省 active=true）。
+  function setFrameActive(key, on) {
+    const f = frames.get(key)
+    if (!f || f.handlers) return
+    const next = on !== false
+    if (f.active === next) return
+    f.active = next
+    scheduleCaps()
+  }
 
   // 寻址：instanceId 最精确；否则按 label 过滤。ns 只用于构造命令信封，不作筛选键（卡 ready 前宿主
   // 尚不知其 ns，用它筛选会让未就绪的卡不可达）。命中 0/多 → 报错，不猜不兜底。
@@ -255,7 +269,7 @@ const cardBus = (function () {
     const t = target && typeof target === 'object' ? target : {}
     const payload = data && typeof data === 'object' ? data : {}
     lastNotes.set(String(ev), { target: t, data: payload })
-    for (const f of liveFrames()) sendNote(f, t, ev, payload)
+    for (const f of attachedFrames()) sendNote(f, t, ev, payload)
   }
   function matchesTarget(f, t) {
     if (t.instanceId && f.key !== t.instanceId) return false
@@ -367,6 +381,7 @@ const cardBus = (function () {
     registerFrame,
     registerInlineCard,
     reportCaps,
+    setFrameActive,
     setGatewaySender,
     setSlotHost,
     setSourceOpener,

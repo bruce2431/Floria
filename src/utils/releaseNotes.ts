@@ -1,5 +1,4 @@
 import axios from 'axios'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { coerce } from 'semver'
@@ -14,88 +13,47 @@ import { gt } from './semver.js'
 const MAX_RELEASE_NOTES_SHOWN = 5
 
 /**
- * We fetch the changelog from GitHub instead of bundling it with the build.
+ * What's New 数据源 = 本仓库（bruce2431/Floria）的 GitHub Release 正文。
  *
- * This is necessary because Ink's static rendering makes it difficult to
- * dynamically update/show components after initial render. By storing the
- * changelog in config, we ensure it's available on the next startup without
- * requiring a full re-render of the current UI.
- *
- * The flow is:
- * 1. User updates to a new version
- * 2. We fetch the changelog in the background and store it in config
- * 3. Next time the user starts Claude, the cached changelog is available immediately
- *
- * Free Code fork: local `.claude/cache/changelog.md` (relative path, portable mode)
- * is checked first, then `changes.md` (next to exe or in CWD). Content is synced
- * to `cache/changelog.md` so the "What's new" feed shows our fork changelog
- * instead of Anthropic's upstream.
+ * 取不到网络时不清缓存：上次成功写入的 changelog.md 继续供下次启动展示。
+ * 流程：版本变化 → 后台拉 releases → 转成 `## <version>` + `- ` 行 → 写缓存；
+ * 下次启动同步读内存/缓存即可，UI 不需要为网络等待。
  */
-export const CHANGELOG_URL =
-  'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
-const RAW_CHANGELOG_URL =
-  'https://raw.githubusercontent.com/anthropics/claude-code/refs/heads/main/CHANGELOG.md'
+export const CHANGELOG_URL = 'https://github.com/bruce2431/Floria/releases'
+const RELEASES_API_URL =
+  'https://api.github.com/repos/bruce2431/Floria/releases?per_page=30'
 
-/** Possible local paths for the fork's changelog, checked in order. */
-function getLocalChangelogPaths(): string[] {
-  const paths: string[] = []
-  // 1. Portable mode: .claude/cache/changelog.md next to executable (relative path)
-  try {
-    const exePath = process.execPath
-    if (exePath) {
-      paths.push(join(dirname(exePath), '.claude', 'cache', 'changelog.md'))
-    }
-  } catch {
-    // process.execPath unavailable
-  }
-  // 2. CWD: .claude/cache/changelog.md (relative path)
-  try {
-    paths.push(join(process.cwd(), '.claude', 'cache', 'changelog.md'))
-  } catch {
-    // cwd unavailable
-  }
-  // 3. Legacy: changes.md next to executable
-  try {
-    const exePath = process.execPath
-    if (exePath) {
-      paths.push(join(dirname(exePath), 'changes.md'))
-    }
-  } catch {
-    // process.execPath unavailable
-  }
-  // 4. Legacy: changes.md in CWD
-  try {
-    paths.push(join(process.cwd(), 'changes.md'))
-  } catch {
-    // cwd unavailable
-  }
-  return paths
+interface GitHubRelease {
+  tag_name?: string
+  name?: string
+  body?: string
+  draft?: boolean
+}
+
+/** `v3.48.0+20261025.t185506.shab544d08c` → `3.48.0` */
+function releaseTagToVersion(tag: string): string {
+  const m = /^v?(\d+\.\d+\.\d+)/.exec(tag.trim())
+  return m?.[1] ?? ''
 }
 
 /**
- * Sync changes.md → cache/changelog.md if changes.md exists and is newer.
- * Returns the synced content, or null if no local changes.md found.
+ * Release 列表 → parseChangelog 认的格式（`## <version>` 后跟 `- ` 条目）。
+ * 只取 bullet 行；空正文 / draft 的 release 跳过。
  */
-function syncLocalChangesToCache(): string | null {
-  for (const p of getLocalChangelogPaths()) {
-    try {
-      if (existsSync(p)) {
-        const content = readFileSync(p, 'utf-8')
-        const cachePath = getChangelogCachePath()
-        // Write to cache file so getStoredChangelog() can read it from there
-        try {
-          mkdirSync(dirname(cachePath), { recursive: true })
-          writeFileSync(cachePath, content, { encoding: 'utf-8' })
-        } catch {
-          // Best-effort; fall through to return content anyway
-        }
-        return content
-      }
-    } catch {
-      continue
-    }
+export function releasesToChangelog(releases: GitHubRelease[]): string {
+  const out: string[] = []
+  for (const r of releases) {
+    if (!r || r.draft || !r.tag_name) continue
+    const version = releaseTagToVersion(r.tag_name)
+    if (!version) continue
+    const notes = String(r.body ?? '')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('- '))
+    if (notes.length === 0) continue
+    out.push(`## ${version}\n${notes.join('\n')}`)
   }
-  return null
+  return out.join('\n\n')
 }
 
 /**
@@ -147,9 +105,8 @@ export async function migrateChangelogFromConfig(): Promise<void> {
  * Fetch the changelog from GitHub and store it in cache file
  * This runs in the background and doesn't block the UI
  *
- * Free Code fork: skip network fetch if a local changelog file exists
- * (`.claude/cache/changelog.md` or `changes.md`), since our fork
- * changelog takes priority over Anthropic's upstream.
+ * 数据源是本仓库的 GitHub Release（见 RELEASES_API_URL），不再读本地
+ * changelog.md / changes.md，也不再抓 Anthropic 上游。
  */
 export async function fetchAndStoreChangelog(): Promise<void> {
   // Skip in noninteractive mode
@@ -162,16 +119,14 @@ export async function fetchAndStoreChangelog(): Promise<void> {
     return
   }
 
-  // Free Code: sync local changes.md → cache instead of fetching from GitHub
-  const localContent = syncLocalChangesToCache()
-  if (localContent !== null) {
-    changelogMemoryCache = localContent
-    return
-  }
-
-  const response = await axios.get(RAW_CHANGELOG_URL)
-  if (response.status === 200) {
-    const changelogContent = response.data
+  const response = await axios.get<GitHubRelease[]>(RELEASES_API_URL, {
+    headers: { Accept: 'application/vnd.github+json' },
+  })
+  if (response.status === 200 && Array.isArray(response.data)) {
+    const changelogContent = releasesToChangelog(response.data)
+    if (!changelogContent) {
+      return
+    }
 
     // Skip write if content unchanged — writing Date.now() defeats the
     // dirty-check in saveGlobalConfig since the timestamp always differs.
@@ -201,9 +156,8 @@ export async function fetchAndStoreChangelog(): Promise<void> {
  * Get the stored changelog from cache file if available.
  * Populates the in-memory cache for subsequent sync reads.
  *
- * Free Code fork: reads from cache/changelog.md (relative path, portable mode)
- * which has been synced from `changes.md` or directly written as the canonical
- * changelog source.
+ * 缓存文件 = <配置根>/cache/changelog.md，由 fetchAndStoreChangelog 从
+ * GitHub Release 转换后写入。
  *
  * @returns The cached changelog content or empty string if not available
  */
@@ -301,14 +255,27 @@ export function getRecentReleaseNotes(
   changelogContent: string = getStoredChangelogFromMemory(),
 ): string[] {
   try {
-    return getRecentReleaseNoteGroups(
+    const notes = getRecentReleaseNoteGroups(
       currentVersion,
       previousVersion,
       changelogContent,
     )
-      .flatMap(([, notes]) => notes)
+      .flatMap(([, n]) => n)
       .filter(Boolean)
       .slice(0, MAX_RELEASE_NOTES_SHOWN)
+    if (notes.length > 0) return notes
+
+    // 不变量：只要有 changelog 内容，「What's new」就必须有东西可展示。
+    // release 键是 base semver（3.48.0），而 dev 构建每版只变 build metadata
+    // （3.48.0+20261026…）⇒ 同一 base 的条目永远不满足「比 lastSeen 新」，直接过滤会恒空，
+    // 只剩一句「去 changelog 看」。此时回落到最新一版的条目（与 /release-notes 命令同义）。
+    const [latest] = getRecentReleaseNoteGroups(
+      currentVersion,
+      null,
+      changelogContent,
+      1,
+    )
+    return latest ? latest[1].slice(0, MAX_RELEASE_NOTES_SHOWN) : []
   } catch (error) {
     logError(toError(error))
     return []

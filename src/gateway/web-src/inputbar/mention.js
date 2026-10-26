@@ -200,12 +200,12 @@ import { MGR } from '../sidebar/mgr-data.js'
   }
   // 输入栏内联 chip 的 HTML（@ 插入与 + 工具栏追加共用一份，勿各写一套）
   // 路径 chip 只显示末段文件名，全路径进 title（与消息气泡 mentionChipHtml 同口径）。
+  // 展示不带 @ 前缀（2026-10-26 与消息气泡同步：@ 只是唤出手势，不属文件名）。
   function mentionChipInner(kind, name, ptype) {
     const full = kind === 'path' ? unescapeMentionPath(name) : name
     const base = kind === 'path' ? String(full).split('/').pop() : full
-    const label = kind === 'path' ? '@' + base : base
     const title = kind === 'path' && base !== full ? ` title="${esc(full)}"` : ''
-    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm"${title}>${esc(label)}</span>`
+    return `<span class="m-ic">${mentionChipIcon(kind, ptype)}</span><span class="m-nm"${title}>${esc(base)}</span>`
   }
   function buildMentionChip(kind, name, sid, ptype) {
     const chip = document.createElement('span')

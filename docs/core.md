@@ -10,7 +10,7 @@
 
 **信任判据同源**：`computeTrustDialogAccepted()` / `isPathTrusted()`（均 `config.ts`）把便携根标记当**唯一显式信任锚**——`isUnderPortableRoot(cwd)` 命中即已信任，压过 `projects[<绝对路径>].hasTrustDialogAccepted` 记录（标记优先于路径推断，与上行解析链同序）。理由：TrustDialog yes 分支同时写标记（`maybeInitPortableRoot`）与路径记录，唯有标记能在盘符 / 挂载点 / 机器变化后存活 ⇒ 换盘符、换机器不触发重新信任。复验锚点 `probes/probe-portable-trust.ts`。
 
-**裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无 `.claude/`、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。`exeDir===homedir()` 或邻接已有 `.claude/` 不动；失败 throw 由调用方报，不阻断 trust。本机配置根由工作区根 `.claude-portable` 标记（walk-up 第 2 步）决定，本步不触发。
+**裸机初始化**：TrustDialog yes 分支调 `maybeInitPortableRoot()`——无 env、exe 邻接无标记、向上无标记（=本轮落 `~/.claude` 兜底）时，于 **exe 邻接**（`dirname(process.execPath)`，非 cwd——walk-up 从 exeDir 出发，cwd 建标记会死）建 `.claude/` 并写 `.claude-portable` 空标记，**下一轮启动**第 2 步命中生效（初始化=写标记，非运行中热切换；首轮 trust 记录留旧根，第二轮需再点一次 yes）。**判定按配置根内容而非目录存在性**（`looksLikeConfigHome`）：exe 邻接 `.claude/` 若只是启动时写下的项目本地 `projects/`，不算配置根，照常补标记（早期用 `existsSync` 判存在，导致从新盘/新目录启动时该目录已存在 → 永远不建根、每轮都落 `~/.claude`；E 盘实测即此形态）。exe 邻接已是真配置根则不动；`exeDir===homedir()` 直退；失败 throw 由调用方报，不阻断 trust。本机配置根由工作区根 `.claude-portable` 标记（walk-up 第 2 步）决定，本步不触发。
 
 ## 逐家 wire protocol 与 openai-chat 适配器
 
@@ -69,7 +69,7 @@
 
 ## Changelog（`releaseNotes.ts`）
 
-源=`changes.md`，启动同步进 `.claude/cache/changelog.md`（会被覆盖，**禁手写**）。标准 → [standards.md](standards.md) §8。
+源 = 本仓库 GitHub Release（`api.github.com/repos/bruce2431/Floria/releases`，取 `body` 的 `- ` 行转 `## <version>`），版本变化时后台拉取写入 `<配置根>/cache/changelog.md`（会被覆盖，**禁手写**）；取不到网络不清缓存，沿用上次内容。**展示过滤**：只取新于 `lastReleaseNotesSeen` 的版本；同 base semver（dev 构建仅变 build metadata）无新条目时回落最新一版，避免 What's new 恒空。标准 → [standards.md](standards.md) §8。
 
 ## 沙箱权限（`permissions/`）
 

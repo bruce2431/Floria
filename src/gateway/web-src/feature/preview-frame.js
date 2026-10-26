@@ -110,6 +110,54 @@ import { navigate } from '../chat/route.js'
     return card.entry.split('/').map(encodeURIComponent).join('/')
   }
 
+  // ---------- 卡池（2026-10-26 用户实报「PDF 卡 / 日志卡切换卡顿」根修）----------
+  // 旧行为 = 换卡就换 iframe 的 src ⇒ 整页重载（pdf.js 重新初始化、日志重新拉取），每次切换都在等启动。
+  // 新行为 = **同一容器里每张卡一枚 iframe，首次进入才创建，之后切换只切显隐**：页面状态（页码 / 滚动 /
+  // 展开项）原样保留，切换瞬时完成。池按卡 id 存在 .preview-body 上（body 随容器重建即整池作废）。
+  // 隐藏帧：留在文档里继续接收广播（事实类，如 file-open），但**不可被指令寻址**（cardBus.setFrameActive），
+  // 否则同 label 多帧会判「目标卡不唯一」。
+  function pvPool(body) {
+    if (!body.__pvFrames) body.__pvFrames = new Map()
+    return body.__pvFrames
+  }
+  // 当前显示的那枚预览帧（唯一取处）：池化后 .preview-frame 可能有多枚，一律按显隐取。
+  function activePreviewFrame(root) {
+    const scope = root || document
+    for (const el of scope.querySelectorAll('.preview-frame')) if (!el.hidden) return el
+    return null
+  }
+  // 激活帧变更回调（唯一处）：池内切显隐后宿主据此恢复「该帧自己申报过的」帧工具 / 侧栏按钮 /
+  // 卡→卡交接数据——帧没换文档 ⇒ load 不会再触发，这些只能在切显隐这一刻补。
+  let pvActiveHook = null
+  function setPreviewActiveHook(fn) {
+    pvActiveHook = typeof fn === 'function' ? fn : null
+  }
+  // 池内切显隐（唯一写口）：目标帧亮、其余帧隐，并同步 cardBus 激活态。
+  function pvShow(container, key) {
+    const body = container.querySelector('.preview-body')
+    if (!body) return
+    for (const [k, rec] of pvPool(body)) {
+      const on = k === key
+      rec.el.hidden = !on
+      if (rec.overlay && rec.overlay.isConnected) rec.overlay.hidden = !on
+      if (rec.el.__cardKey) cardBus.setFrameActive(rec.el.__cardKey, on)
+    }
+    const rec = pvPool(body).get(key)
+    if (rec && pvActiveHook) pvActiveHook(container, rec.el, key)
+  }
+  // 拆池：换项目 / 容器离场时逐帧注销并清 DOM（旧项目的所有卡一并作废）。
+  function pvClear(container) {
+    const body = container.querySelector('.preview-body')
+    const pool = body ? pvPool(body) : null
+    if (pool) {
+      for (const rec of pool.values()) {
+        if (rec.el && rec.el.__cardKey) cardBus.unregisterFrame(rec.el.__cardKey)
+      }
+      pool.clear()
+    }
+    container.innerHTML = ''
+  }
+
   function syncExtCards(label) {
     const seq = ++extCardsSeq
     clearExtCards()
@@ -133,6 +181,15 @@ import { navigate } from '../chat/route.js'
   //  ① preview.json 声明 backend → 网关 /gateway/backend 懒加载 spawn 后端进程，iframe 直连 http://127.0.0.1:<port>/
   //     （并 60s 心跳刷新网关侧 lastActive，防空闲回收误杀）；
   //  ② 有 .claude/preview/ 静态页（hasPreview=true）→ 加载卡目录页；都没有 → 空态占位（不提供的项目不造页）。
+  // 项目后端预热：右栏「工具栏」一打开就拉起该项目 backend，免去「点了第一个卡 tab 才开始 spawn」的等待。
+  // 与 mountPreview 的 ① 分支同一请求（/gateway/backend 是唯一 spawn 口，未声明 backend 的项目 404 静默）；
+  // ensureBackend 自带存活复用与 in-flight 去重，重复调用不会产生第二个进程。
+  function warmProjectBackend(label) {
+    if (!label) return
+    fetch(`/gateway/backend?label=${encodeURIComponent(label)}${gToken ? '&token=' + encodeURIComponent(gToken) : ''}`)
+      .catch(() => {})
+  }
+
   function openProjectPreview(label, hasPreview) {
     // 硬进入（异 label / 帧不在场；软重入不清不重建 shell，见 mountPreview 两级重入说明）：先卸会话视图
     // 再占预览槽——deactivateCard('session') 即 registry 契约出口，给到会话卡自身的 teardown 钩子
@@ -158,9 +215,9 @@ import { navigate } from '../chat/route.js'
   // 异 label 或 iframe 不在场 = 硬挂载。
   function mountPreview(container, label, hasPreview, cardId) {
     if (!container) return
-    // 换项目 = 换源：上一份的帧留不得（软重入只对同 label 成立）
-    const prev = container.querySelector('.preview-frame')
-    const hard = !prev || prev.dataset.label !== label
+    // 换项目 = 换源：上一份的帧留不得（软重入 / 卡池只对同 label 成立）
+    const prevLabel = container.__pvLabel || ''
+    const hard = prevLabel !== label
     // 卡片清单必须就位才能决定 URL（有卡 = 卡目录页，无卡 = 传统 index.html）。
     // 清单未就绪先拉一次申报再重入；ensure 自带 in-flight 去重，这里只防同一容器并行重入。
     if (!previewCardsReadyFor(label)) {
@@ -176,10 +233,11 @@ import { navigate } from '../chat/route.js'
     const list = previewCardsFor(label)
     const card = list.length ? (previewPaneCardDef(label, cardId) || list.find((c) => c.default) || list[0]) : null
     const cardActual = card ? card.id : ''
-    if (prev && prev.dataset.label !== label) {
-      cardBus.unregisterFrame(prev.__cardKey) // 换项目 = 上一份帧彻底拆除：表项当场注销（不等 isConnected 失格）
-      container.innerHTML = ''
+    if (hard && prevLabel) {
+      // 换项目 = 上一项目的整池帧彻底拆除：逐帧当场注销（不等 isConnected 失格）
+      pvClear(container)
     }
+    container.__pvLabel = label
     // 预览 iframe 挂在 .preview-body 里（该层由下面的 shell 建立，软重入时原样保留）
     if (!container.querySelector('.preview-body')) {
       container.innerHTML =
@@ -193,7 +251,9 @@ import { navigate } from '../chat/route.js'
       const body = container.querySelector('.preview-body')
       if (!body) return
       clearRailExt() // 旧文档注册的侧栏快捷按钮随文档失效
-      body.innerHTML = '<div class="preview-empty">该项目暂无预览</div>'
+      pvClear(container) // 池内旧帧一并作废（空态下没有卡可切，留着只会切到已离场的元素）
+      container.innerHTML =
+        '<div class="preview-shell"><div class="preview-body"><div class="preview-empty">该项目暂无预览</div></div></div>'
       state.previewMounted = label
     }
     const mount = (src, name, already) => {
@@ -201,16 +261,24 @@ import { navigate } from '../chat/route.js'
       if (!container.isConnected) return
       const body = container.querySelector('.preview-body')
       if (!body) return
-      // 软重入：iframe 已在场——同 src 零操作（不重载 = 零导航扰动）；异 src 只换 src（保 DOM/覆盖层），
-      // 一律不走下方整区重建
-      const cur = body.querySelector('.preview-frame')
+      const key = cardActual || ''
+      const cur = pvPool(body).get(key)
       if (cur) {
-        // iframe 换文档/换卡 → 上一份预览页注册的侧栏快捷按钮失效（不变量见 sidebar/rail-ext.js）
-        if (cur.getAttribute('src') !== src) { clearRailExt(); cur.setAttribute('src', src) }
-        cur.dataset.card = cardActual
+        // 池内已有这张卡：只切显隐，**不重载**（页码/滚动/展开项原样保留 = 切换瞬时）。
+        // 异 src（后端直连 → 代理 / 就绪升级）才换 src 纠正，那是真换文档。
+        if (cur.el.getAttribute('src') !== src) {
+          // 真换文档：旧文档的申报与总线状态一并作废（缓存清空 + loaded 复位，
+          // 交接数据必须等新文档 load 再发），否则切显隐那刻会把上一份文档的工具表恢复出来。
+          clearRailExt()
+          cur.el.__railItems = []
+          cur.el.__wkTools = []
+          cur.el.__pvLoaded = false
+          cur.el.setAttribute('src', src)
+          cardBus.registerFrame({ kind: 'preview', label, el: cur.el }) // 同 el 复用 key，重置 ns/ready/cmds
+        }
+        cur.el.dataset.card = cardActual
         state.previewMounted = label
-        // 软重入也回表：同 el 复用 key，但 resetFrame 清掉旧文档的 ns/ready/cmds（换 src = 换了卡）
-        cardBus.registerFrame({ kind: 'preview', label, el: cur })
+        pvShow(container, key)
         return
       }
       // 覆盖层遮住后端前端加载时的深色初始化画面（2026-08-20 三轮反馈后定稿 v81）：
@@ -222,27 +290,39 @@ import { navigate } from '../chat/route.js'
       // ④ 2026-08-28 生命周期解耦：already=后端进程已在跑（复用/收养）→ 不渲染覆盖层，iframe 直挂秒开
       //    （后端常驻后刷新/重进预览不再见「正在启动」，仅冷启动时显示）。
       clearRailExt() // 新文档重挂 → 清上一份预览页注册的侧栏快捷按钮（不变量见 sidebar/rail-ext.js）
-      body.innerHTML =
-        `<iframe class="preview-frame" title="${esc(label)} 项目主页" data-label="${esc(label)}" data-card="${esc(cardActual)}" src="${src}"></iframe>` +
-        (already
-          ? ''
-          : `<div class="preview-overlay"><div class="preview-overlay-spin"></div>` +
-            `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
-            `<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div></div>`)
+      const loading = body.querySelector('.preview-loading')
+      if (loading) loading.remove()
+      const frame = document.createElement('iframe')
+      frame.className = 'preview-frame'
+      frame.title = `${label} 项目主页`
+      frame.dataset.label = label
+      frame.dataset.card = cardActual
+      frame.src = src
+      body.appendChild(frame)
+      let overlay = null
+      if (!already) {
+        overlay = document.createElement('div')
+        overlay.className = 'preview-overlay'
+        overlay.innerHTML =
+          '<div class="preview-overlay-spin"></div>' +
+          `<div class="preview-overlay-title">正在启动 ${esc(name || '项目服务')}…</div>` +
+          '<div class="preview-overlay-sub">首次启动需等待后端就绪，加载完成后将自动进入</div>'
+        body.appendChild(overlay)
+      }
+      pvPool(body).set(key, { el: frame, overlay })
       state.previewMounted = label
-      const frame = body.querySelector('.preview-frame')
-      const overlay = body.querySelector('.preview-overlay')
-      if (!frame) return
       // 挂进卡片总线：预览页（如 Pj18 的 floria-pv）说 `<ns>-cmd`/`<ns>-event` 即被总线认领
       cardBus.registerFrame({ kind: 'preview', label, el: frame })
+      pvShow(container, key)
       let autoDismiss = null
       const dismiss = () => {
         if (autoDismiss) { clearTimeout(autoDismiss); autoDismiss = null }
         if (overlay) { overlay.classList.add('done'); setTimeout(() => overlay.remove(), 400) }
       }
       frame.addEventListener('load', () => {
+        frame.__pvLoaded = true
         frame.focus()
-        // 卡片身份 + 交接数据（卡→卡跳转）：以 dataset 为准（软重入换 src 时闭包里的 card 已过期）。
+        // 卡片身份 + 交接数据（卡→卡跳转）：以 dataset 为准（换 src 时闭包里的 card 已过期）。
         // 无卡（传统单页预览）不发，旧页不受影响。
         const liveCard = frame.dataset.card || ''
         if (liveCard) {
@@ -304,6 +384,7 @@ import { navigate } from '../chat/route.js'
   }
 
 export {
+  activePreviewFrame,
   clearRailExt,
   ensurePreviewDecls,
   mountPreview,
@@ -314,6 +395,9 @@ export {
   previewCardsReadyFor,
   railExtItems,
   setPendingCardPayload,
+  setPreviewActiveHook,
   setRailExtItems,
   syncExtCards,
+  takePendingCardPayload,
+  warmProjectBackend,
 }

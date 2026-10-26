@@ -69,9 +69,11 @@ import { esc } from './util.js'
       // （2026-10-25 用户实测：宽 180px 的胶囊只剩「@20261013120000-形…」）。
       const full = unescapeMentionPath(name)
       const base = full.split('/').pop()
-      const label = '@' + base
+      // 展示不带头部 @（2026-10-26 用户定案「引用的文本应该过滤掉艾特这个字符」）：
+      // @ 只是输入侧唤出提及的手势字符，落地文本里它既不参与令牌解析也不属文件名。
+      const label = base
       const icon = ptype === 'dir' ? I.dshFolder : fileIcon(full)
-      return `<span class="mention-chip m-path" title="@${full}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
+      return `<span class="mention-chip m-path" title="${full}"><span class="mc-ic">${icon}</span><span class="mc-t">${label}</span></span>`
     }
     if (kind === 'session') {
       const title = splitSessionToken(name).title

@@ -3,6 +3,7 @@ import { mdHtml, messageMd, toggleCodeWrap } from '../../core/markdown.js'
 import { I, fileIcon } from '../../core/icons.js'
 import { esc, toast } from '../../core/util.js'
 import { messagesEl, live, state } from '../../engine/state.js'
+import { findSession } from '../../engine/sessions.js'
 import { cardBus } from '../../engine/card-bus.js'
 import { quoteBodiesAsMarkdown } from '../../inputbar/mention.js'
 import { ICON_COPY, writeClipboard } from './usage.js'
@@ -211,8 +212,17 @@ import { ICON_COPY, writeClipboard } from './usage.js'
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     if (!ids.length) ids.push(...textImageIds(m))
     if (!ids.length) return ''
-    const sid = state.currentHash ? '?sid=' + encodeURIComponent(state.currentHash) : ''
-    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${sid}">`).join('')
+    // 取字节的基址由网关按 sid → project → 网关自身根 解析。sid = currentHash，**首屏早期它可能还是
+    // 路由里的短 uuid（会话列表未拉到时 resolveSessionHash 原样透传）**，解不出启动根 → 落到网关自身
+    // 根，全局会话（jsonl 在工作区根）的图因此 404、onerror 变 [Image #N] 裸文本（用户实测）。
+    // 故同时带上会话自带 projectLabel（项目会话=项目名 / 全局=「全局根 · 散装对话」），网关按 label
+    // 解析到会话启动根——与 /gateway/file 取 AI 生成图是同一口径，不再依赖 currentHash 是否已归一。
+    const s = findSession(live.curUuid)
+    const q = []
+    if (state.currentHash) q.push('sid=' + encodeURIComponent(state.currentHash))
+    if (s && s.projectLabel) q.push('project=' + encodeURIComponent(s.projectLabel))
+    const qs = q.length ? '?' + q.join('&') : ''
+    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${qs}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
 

@@ -3187,8 +3187,17 @@ function setLastNavHash(v) { lastNavHash = v }
     for (const b of m.blocks) if (b.kind === 'image' && b.imageId) ids.push(b.imageId)
     if (!ids.length) ids.push(...textImageIds(m))
     if (!ids.length) return ''
-    const sid = state.currentHash ? '?sid=' + encodeURIComponent(state.currentHash) : ''
-    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${sid}">`).join('')
+    // 取字节的基址由网关按 sid → project → 网关自身根 解析。sid = currentHash，**首屏早期它可能还是
+    // 路由里的短 uuid（会话列表未拉到时 resolveSessionHash 原样透传）**，解不出启动根 → 落到网关自身
+    // 根，全局会话（jsonl 在工作区根）的图因此 404、onerror 变 [Image #N] 裸文本（用户实测）。
+    // 故同时带上会话自带 projectLabel（项目会话=项目名 / 全局=「全局根 · 散装对话」），网关按 label
+    // 解析到会话启动根——与 /gateway/file 取 AI 生成图是同一口径，不再依赖 currentHash 是否已归一。
+    const s = findSession(live.curUuid)
+    const q = []
+    if (state.currentHash) q.push('sid=' + encodeURIComponent(state.currentHash))
+    if (s && s.projectLabel) q.push('project=' + encodeURIComponent(s.projectLabel))
+    const qs = q.length ? '?' + q.join('&') : ''
+    const imgs = ids.map((id) => `<img class="msg-img" loading="lazy" alt="图片" data-ph="[Image #${id}]" onerror="this.replaceWith(document.createTextNode(this.dataset.ph))" src="/gateway/file-cache/${live.curUuid || ''}/${id}${qs}">`).join('')
     return `<div class="msg-imgs">${imgs}</div>`
   }
 
@@ -6318,6 +6327,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 布局落地（不变量判定唯一处 + 各布局类的唯一写口）：聊天 tab / 文件 tab / 预览至少一个在场，
   // 全无 → 强制开助手（聊天 tab，唯一还能承载内容的常驻件）。判定仍是这一处。
   function applyPanes() {
+    // 编辑区滚动记忆（见 work-editor.js wkEdCaptureScroll）：必须在写 .wk-show-file 类**之前**取位置，
+    // 类一落地 #work-editor 就 display:none、scrollTop 立刻被夹回 0。
+    const wasFile = chatArea.classList.contains('wk-show-file')
+    const willFile = state.sbMode === 'work' && wkShownTab() === 'file'
+    if (wasFile && !willFile) wkEdCaptureScroll()
     if (state.sbMode === 'work') {
       if (!state.wkAssist && !state.workFile && !state.wkPreview) {
         state.wkAssist = true
@@ -6336,6 +6350,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     } else {
       chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
+    // 文件栏从无到有 → 编辑器重新参与布局，把切走前的滚动位置写回去（同文件才恢复）。
+    if (!wasFile && chatArea.classList.contains('wk-show-file')) wkEdRestoreScroll()
     applyWorkCols()
     renderTopbar()
     applyPvTab()
@@ -9875,7 +9891,8 @@ function setFirstSendHash(v) { firstSendHash = v }
   }
 
   // 入口：body = #wk-ed-body，buf = ArrayBuffer（原样交给 pdf.js，worker 侧会转移）。
-  async function wkPdfRender(body, path, buf) {
+  // restoreTop = 该文件上次的滚动位置（切到别的文件/tab 再切回时由 work-editor.js 传入）。
+  async function wkPdfRender(body, path, buf, restoreTop) {
     wkPdfClose()
     const gen = wkPdfGen
     body.innerHTML = '<div class="wk-ed-empty">正在打开 PDF…</div>'
@@ -9907,10 +9924,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       try { doc.destroy() } catch { /* 已作废 */ }
       return
     }
-    wkPdfMount(body, path, lib, doc)
+    wkPdfMount(body, path, lib, doc, restoreTop)
   }
 
-  function wkPdfMount(body, path, lib, doc) {
+  function wkPdfMount(body, path, lib, doc, restoreTop) {
     const scroll = document.createElement('div')
     scroll.className = 'wk-pdf-scroll'
     const pages = document.createElement('div')
@@ -9993,6 +10010,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         text: el.querySelector('.textLayer'),
         surface: el.querySelector('.wk-pdf-surface'),
         base: 0, // 页面在 scale=96/72 下的 CSS 宽
+        h: 0,    // 同基准下的 CSS 高（占位先按真实尺寸排好，滚动恢复才准）
         renderedZoom: 0,
         epoch: -1,
         n,
@@ -10008,11 +10026,20 @@ function setFirstSendHash(v) { firstSendHash = v }
       const p0 = st.pages[0]
       return st.zoom === 'fit' ? fitZoom(p0) : st.zoom
     }
+    // 占位盒按当前缩放落定尺寸：页栈总高与真实排版一致，恢复滚动位置（以及渲染前的观感）才准。
+    function applyPageBoxes(zoom) {
+      for (const p of st.pages) {
+        if (!p.base) continue
+        p.el.style.width = Math.round(p.base * zoom) + 'px'
+        if (p.h) p.el.style.height = Math.round(p.h * zoom) + 'px'
+      }
+    }
     function setZoom(z) {
       st.zoom = z
       st.epochs++
       fitBtn.classList.toggle('on', z === 'fit')
       pctEl.textContent = Math.round(zoomValue() * 100) + '%'
+      applyPageBoxes(zoomValue())
       // 重渲可见页 + 当前页（其余页在滚入可视区时按新 epoch 渲染）
       const want = new Set(st.visible)
       want.add(st.cur)
@@ -10166,21 +10193,41 @@ function setFirstSendHash(v) { firstSendHash = v }
       st.obsResize = ro
     }
 
-    // 先取首页尺寸再落 fit 比例（numPages 为空时不崩）
-    void doc.getPage(1).then((p0) => {
+    // 首页尺寸 → fit 比例 → 立即渲首页（大文档不因量尺寸而空等）；其余页尺寸后台并行取，
+    // 占位盒落成真实尺寸后再写回滚动位置（否则占位高 320px 会把 scrollTop 夹短）。
+    void (async () => {
+      try {
+        const p0 = await doc.getPage(1)
+        if (st.dead) return
+        const vp = p0.getViewport({ scale: WK_PDF_BASE })
+        st.pages[0].base = vp.width
+        st.pages[0].h = vp.height
+        try { p0.cleanup() } catch { /* 元数据已取到，资源可放 */ }
+      } catch { /* 取不到尺寸：按占位高继续 */ }
       if (st.dead) return
-      const vp = p0.getViewport({ scale: WK_PDF_BASE })
-      st.pages[0].base = vp.width
       st.ready = true
       setZoom('fit')
       requestRender(1)
       if (!st.dead && st.queue.length) void pump()
-    }).catch(() => {
+      try {
+        await Promise.all(st.pages.slice(1).map(async (p) => {
+          const page = await doc.getPage(p.n)
+          if (st.dead) return
+          const vp = page.getViewport({ scale: WK_PDF_BASE })
+          p.base = vp.width
+          p.h = vp.height
+          try { page.cleanup() } catch { /* 同上 */ }
+        }))
+      } catch { /* 单页取不到尺寸：该页保持占位高 */ }
       if (st.dead) return
-      st.ready = true
-      setZoom('fit')
-      void pump()
-    })
+      applyPageBoxes(zoomValue())
+      if (restoreTop) {
+        requestAnimationFrame(() => {
+          if (st.dead) return
+          scroll.scrollTop = Math.min(restoreTop, Math.max(0, scroll.scrollHeight - scroll.clientHeight))
+        })
+      }
+    })()
   }
 
   // ---------- 评论标记（原文行打标，2026-10-06；2026-10-07 改编辑器行装饰器） ----------
@@ -10212,6 +10259,36 @@ function setFirstSendHash(v) { firstSendHash = v }
     el.classList.toggle('conflict', cls === 'conflict')
     const head = $('wk-ed-head')
     if (head) head.hidden = !txt
+  }
+
+  // 编辑卡的滚动位置按 (项目, 文件) 逐份记忆——「切走」有两种形态，都必须记：①主区「文件 ↔ 聊天」
+  // 切换时 #work-editor 变 display:none，不参与布局的元素其滚动容器 scrollTop 被浏览器夹回 0；
+  // ②切到另一个文件 tab 再切回来，readFile 换文档、旧 DOM 连同滚动位置一起没了。故捕获点有两处
+  // （applyPanes 隐藏前 / openWorkFile 换文件前），恢复点也有两处（重新显示 / 文档重新载入）。
+  // 滚动容器两态：CM6 的 scrollDOM / PDF 卡自己的 .wk-pdf-scroll。
+  const wkEdScrollMemo = new Map()
+  const wkEdScrollKey = () => state.workProj + '\u0000' + state.workFile
+  function wkEdScroller() {
+    const v = wkEdGetView()
+    if (v && v.scrollDOM && v.scrollDOM.isConnected) return v.scrollDOM
+    const body = $('wk-ed-body')
+    return (body && body.querySelector('.wk-pdf-scroll')) || null
+  }
+  function wkEdCaptureScroll() {
+    const el = wkEdScroller()
+    if (!el || !state.workFile) return
+    wkEdScrollMemo.set(wkEdScrollKey(), el.scrollTop)
+  }
+  // 恢复：key 缺省 = 当前 (项目, 文件)。容器取「此刻」的滚动容器而非捕获时那个——换文件后
+  // PDF 会重建新的 .wk-pdf-scroll 节点。
+  function wkEdRestoreScroll(key) {
+    const top = wkEdScrollMemo.get(key || wkEdScrollKey())
+    if (!top) return
+    // 布局本帧才切回 flex / 文档本帧才灌入，容器高度此刻未必已恢复；下一帧再写，否则 scrollTop 仍被夹到 0。
+    requestAnimationFrame(() => {
+      const el = wkEdScroller()
+      if (el && el.isConnected) el.scrollTop = top
+    })
   }
 
   function renderEditor() {
@@ -10263,6 +10340,10 @@ function setFirstSendHash(v) { firstSendHash = v }
       return
     }
     if (!wkEdMeta.editable) {
+      // PDF / Office 的只读视图由 readFile 直渲（wkPdfRender / wkDocRender），本函数**不得**用
+      // 「不支持预览」占位覆盖它——否则同一文件重新过一遍 renderEditor（切走再切回、评论重渲）就把
+      // 页栈连同滚动位置一起销毁。错误态（413/403/二进制）没有 view 标记，照旧落提示。
+      if (wkEdMeta.view) return
       body.innerHTML = `<div class="wk-ed-empty">${esc(wkEdMeta.msg || '不支持预览')}</div>`
       return
     }
@@ -10270,7 +10351,8 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 子节点）；仅当 readFile 置了 wkEdPendingDoc（新文件）才换文档 + 热换语言，否则保留编辑器现状
     // （重渲不得用陈旧基线覆盖用户未保存的编辑）。
     wkEditor.attach(body)
-    if (wkEdPendingDoc !== null) {
+    const fresh = wkEdPendingDoc !== null
+    if (fresh) {
       wkEdSetLang(state.workFile)
       wkEdSetDoc(wkEdPendingDoc)
       wkEdPendingDoc = null
@@ -10278,6 +10360,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     wkEditor.measure()
     cmtApplyMarks() // 评论标记：被批注的行加高亮
     wkEdState()
+    if (fresh) wkEdRestoreScroll() // 换文件重载 → 写回该文件上次的滚动位置（同文件切回不丢位置）
   }
 
   let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
@@ -10321,7 +10404,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
     if (/\.pdf$/i.test(p)) {
       wkEdFile = p
-      wkEdMeta = { isImg: false, editable: false }
+      wkEdMeta = { isImg: false, editable: false, view: 'pdf' } // view ⇒ 后续 renderEdBody 不覆盖已渲好的页栈
       wkEdText = ''
       wkEdMtime = null
       body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -10330,6 +10413,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (seq !== edSeq) return
         if (!res.ok) {
           if (res.status === 404) return wkDropDeadFile(p)
+          wkEdMeta = { isImg: false, editable: false } // 错误态无视图，renderEdBody 落提示
           body.innerHTML =
             '<div class="wk-ed-empty">' +
             esc(res.status === 413 ? 'PDF 超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
@@ -10338,7 +10422,8 @@ function setFirstSendHash(v) { firstSendHash = v }
         }
         const buf = await res.arrayBuffer()
         if (seq !== edSeq) return
-        await wkPdfRender(body, p, buf)
+        // 该文件上次的滚动位置（切到别的 tab 再切回 = 重新载入，页栈重建后写回）
+        await wkPdfRender(body, p, buf, wkEdScrollMemo.get(state.workProj + '\u0000' + p))
       } catch (e) {
         if (seq !== edSeq) return
         body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
@@ -10349,7 +10434,7 @@ function setFirstSendHash(v) { firstSendHash = v }
     // 否则 content-type 判成二进制直接「不支持预览」）。网关读侧 4 MB 上限同样生效。
     if (wkDocKind(p)) {
       wkEdFile = p
-      wkEdMeta = { isImg: false, editable: false }
+      wkEdMeta = { isImg: false, editable: false, view: 'doc' } // view ⇒ 后续 renderEdBody 不覆盖已渲好的视图
       wkEdText = ''
       wkEdMtime = null
       body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -10358,6 +10443,7 @@ function setFirstSendHash(v) { firstSendHash = v }
         if (seq !== edSeq) return
         if (!res.ok) {
           if (res.status === 404) return wkDropDeadFile(p)
+          wkEdMeta = { isImg: false, editable: false } // 错误态无视图，renderEdBody 落提示
           body.innerHTML =
             '<div class="wk-ed-empty">' +
             esc(res.status === 413 ? '文件超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
@@ -10493,7 +10579,11 @@ function setFirstSendHash(v) { firstSendHash = v }
   // 顶栏文件 pill 的多枚开放集由 applyPanes 兜底并入（`wkEnsureFileTab(state.workFile)`），故此处不必另加。
   async function openWorkFile(p) {
     if (!p) return
-    if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
+    if (p !== state.workFile) {
+      // 切文件前先记住**旧文件**的滚动位置（键取自此刻仍有效的 state.workFile），再 flush 旧文件编辑
+      wkEdCaptureScroll()
+      if (wkEdDirty) await wkEdFlush()
+    }
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
     saveWork()
@@ -10945,12 +11035,19 @@ function setFirstSendHash(v) { firstSendHash = v }
         return
       }
       const blob = await res.blob()
+      // PDF 等浏览器可内联渲染的类型：未入文档的 <a download> 在部分浏览器（Edge）被忽略 download
+      // 语义 → 直接导航到 blob URL 走内置阅读器（用户实测「点下载变预览」）。必须挂进文档再点，
+      // 且 blob URL 不能在 click() 同帧 revoke（下载尚未开始取字节会失败/退化成导航）。
       const a = document.createElement('a')
       const url = URL.createObjectURL(blob)
       a.href = url
       a.download = baseOf(p)
+      a.rel = 'noopener'
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       toast('已下载「' + baseOf(p) + '」')
     } catch (e) {
       toast('下载失败：' + (e.message || e))

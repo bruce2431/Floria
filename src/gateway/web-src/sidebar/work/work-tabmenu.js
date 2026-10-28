@@ -118,12 +118,19 @@
         return
       }
       const blob = await res.blob()
+      // PDF 等浏览器可内联渲染的类型：未入文档的 <a download> 在部分浏览器（Edge）被忽略 download
+      // 语义 → 直接导航到 blob URL 走内置阅读器（用户实测「点下载变预览」）。必须挂进文档再点，
+      // 且 blob URL 不能在 click() 同帧 revoke（下载尚未开始取字节会失败/退化成导航）。
       const a = document.createElement('a')
       const url = URL.createObjectURL(blob)
       a.href = url
       a.download = baseOf(p)
+      a.rel = 'noopener'
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       toast('已下载「' + baseOf(p) + '」')
     } catch (e) {
       toast('下载失败：' + (e.message || e))

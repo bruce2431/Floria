@@ -138,6 +138,11 @@
   // 布局落地（不变量判定唯一处 + 各布局类的唯一写口）：聊天 tab / 文件 tab / 预览至少一个在场，
   // 全无 → 强制开助手（聊天 tab，唯一还能承载内容的常驻件）。判定仍是这一处。
   function applyPanes() {
+    // 编辑区滚动记忆（见 work-editor.js wkEdCaptureScroll）：必须在写 .wk-show-file 类**之前**取位置，
+    // 类一落地 #work-editor 就 display:none、scrollTop 立刻被夹回 0。
+    const wasFile = chatArea.classList.contains('wk-show-file')
+    const willFile = state.sbMode === 'work' && wkShownTab() === 'file'
+    if (wasFile && !willFile) wkEdCaptureScroll()
     if (state.sbMode === 'work') {
       if (!state.wkAssist && !state.workFile && !state.wkPreview) {
         state.wkAssist = true
@@ -156,6 +161,8 @@
     } else {
       chatArea.classList.remove('wk-show-chat', 'wk-show-file', 'wk-preview')
     }
+    // 文件栏从无到有 → 编辑器重新参与布局，把切走前的滚动位置写回去（同文件才恢复）。
+    if (!wasFile && chatArea.classList.contains('wk-show-file')) wkEdRestoreScroll()
     applyWorkCols()
     renderTopbar()
     applyPvTab()

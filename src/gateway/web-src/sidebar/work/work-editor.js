@@ -33,6 +33,36 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     if (head) head.hidden = !txt
   }
 
+  // 编辑卡的滚动位置按 (项目, 文件) 逐份记忆——「切走」有两种形态，都必须记：①主区「文件 ↔ 聊天」
+  // 切换时 #work-editor 变 display:none，不参与布局的元素其滚动容器 scrollTop 被浏览器夹回 0；
+  // ②切到另一个文件 tab 再切回来，readFile 换文档、旧 DOM 连同滚动位置一起没了。故捕获点有两处
+  // （applyPanes 隐藏前 / openWorkFile 换文件前），恢复点也有两处（重新显示 / 文档重新载入）。
+  // 滚动容器两态：CM6 的 scrollDOM / PDF 卡自己的 .wk-pdf-scroll。
+  const wkEdScrollMemo = new Map()
+  const wkEdScrollKey = () => state.workProj + '\u0000' + state.workFile
+  function wkEdScroller() {
+    const v = wkEdGetView()
+    if (v && v.scrollDOM && v.scrollDOM.isConnected) return v.scrollDOM
+    const body = $('wk-ed-body')
+    return (body && body.querySelector('.wk-pdf-scroll')) || null
+  }
+  function wkEdCaptureScroll() {
+    const el = wkEdScroller()
+    if (!el || !state.workFile) return
+    wkEdScrollMemo.set(wkEdScrollKey(), el.scrollTop)
+  }
+  // 恢复：key 缺省 = 当前 (项目, 文件)。容器取「此刻」的滚动容器而非捕获时那个——换文件后
+  // PDF 会重建新的 .wk-pdf-scroll 节点。
+  function wkEdRestoreScroll(key) {
+    const top = wkEdScrollMemo.get(key || wkEdScrollKey())
+    if (!top) return
+    // 布局本帧才切回 flex / 文档本帧才灌入，容器高度此刻未必已恢复；下一帧再写，否则 scrollTop 仍被夹到 0。
+    requestAnimationFrame(() => {
+      const el = wkEdScroller()
+      if (el && el.isConnected) el.scrollTop = top
+    })
+  }
+
   function renderEditor() {
     const body = $('wk-ed-body')
     if (!body) return
@@ -82,6 +112,10 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
       return
     }
     if (!wkEdMeta.editable) {
+      // PDF / Office 的只读视图由 readFile 直渲（wkPdfRender / wkDocRender），本函数**不得**用
+      // 「不支持预览」占位覆盖它——否则同一文件重新过一遍 renderEditor（切走再切回、评论重渲）就把
+      // 页栈连同滚动位置一起销毁。错误态（413/403/二进制）没有 view 标记，照旧落提示。
+      if (wkEdMeta.view) return
       body.innerHTML = `<div class="wk-ed-empty">${esc(wkEdMeta.msg || '不支持预览')}</div>`
       return
     }
@@ -89,7 +123,8 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     // 子节点）；仅当 readFile 置了 wkEdPendingDoc（新文件）才换文档 + 热换语言，否则保留编辑器现状
     // （重渲不得用陈旧基线覆盖用户未保存的编辑）。
     wkEditor.attach(body)
-    if (wkEdPendingDoc !== null) {
+    const fresh = wkEdPendingDoc !== null
+    if (fresh) {
       wkEdSetLang(state.workFile)
       wkEdSetDoc(wkEdPendingDoc)
       wkEdPendingDoc = null
@@ -97,6 +132,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     wkEditor.measure()
     cmtApplyMarks() // 评论标记：被批注的行加高亮
     wkEdState()
+    if (fresh) wkEdRestoreScroll() // 换文件重载 → 写回该文件上次的滚动位置（同文件切回不丢位置）
   }
 
   let wkEdProj = '' // 当前编辑内容所属项目（缓存键第二维；与 wkEdFile 配对，切项目即失效）
@@ -140,7 +176,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     // 网关读侧 4 MB 上限对 PDF 同样生效，超限显式提示。
     if (/\.pdf$/i.test(p)) {
       wkEdFile = p
-      wkEdMeta = { isImg: false, editable: false }
+      wkEdMeta = { isImg: false, editable: false, view: 'pdf' } // view ⇒ 后续 renderEdBody 不覆盖已渲好的页栈
       wkEdText = ''
       wkEdMtime = null
       body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -149,6 +185,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
         if (seq !== edSeq) return
         if (!res.ok) {
           if (res.status === 404) return wkDropDeadFile(p)
+          wkEdMeta = { isImg: false, editable: false } // 错误态无视图，renderEdBody 落提示
           body.innerHTML =
             '<div class="wk-ed-empty">' +
             esc(res.status === 413 ? 'PDF 超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
@@ -157,7 +194,8 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
         }
         const buf = await res.arrayBuffer()
         if (seq !== edSeq) return
-        await wkPdfRender(body, p, buf)
+        // 该文件上次的滚动位置（切到别的 tab 再切回 = 重新载入，页栈重建后写回）
+        await wkPdfRender(body, p, buf, wkEdScrollMemo.get(state.workProj + '\u0000' + p))
       } catch (e) {
         if (seq !== edSeq) return
         body.innerHTML = `<div class="wk-ed-empty">读取失败：${esc(e.message || e)}</div>`
@@ -168,7 +206,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
     // 否则 content-type 判成二进制直接「不支持预览」）。网关读侧 4 MB 上限同样生效。
     if (wkDocKind(p)) {
       wkEdFile = p
-      wkEdMeta = { isImg: false, editable: false }
+      wkEdMeta = { isImg: false, editable: false, view: 'doc' } // view ⇒ 后续 renderEdBody 不覆盖已渲好的视图
       wkEdText = ''
       wkEdMtime = null
       body.innerHTML = '<div class="wk-ed-empty">读取中…</div>'
@@ -177,6 +215,7 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
         if (seq !== edSeq) return
         if (!res.ok) {
           if (res.status === 404) return wkDropDeadFile(p)
+          wkEdMeta = { isImg: false, editable: false } // 错误态无视图，renderEdBody 落提示
           body.innerHTML =
             '<div class="wk-ed-empty">' +
             esc(res.status === 413 ? '文件超过 4 MB，网关读取上限内不支持预览' : `读取失败（HTTP ${res.status}）`) +
@@ -312,7 +351,11 @@ import { cmtRangesFor } from '../../feature/comment/comment-data.js'
   // 顶栏文件 pill 的多枚开放集由 applyPanes 兜底并入（`wkEnsureFileTab(state.workFile)`），故此处不必另加。
   async function openWorkFile(p) {
     if (!p) return
-    if (p !== state.workFile && wkEdDirty) await wkEdFlush() // 切文件前 flush 旧文件的 pending 编辑
+    if (p !== state.workFile) {
+      // 切文件前先记住**旧文件**的滚动位置（键取自此刻仍有效的 state.workFile），再 flush 旧文件编辑
+      wkEdCaptureScroll()
+      if (wkEdDirty) await wkEdFlush()
+    }
     state.workFile = p
     state.wkMainTab = 'file' // 点文件 = 明确要看内容 → 文件 tab 顶上来（不静默什么都不发生）
     saveWork()

@@ -35,7 +35,8 @@ import { esc } from '../../core/util.js'
   }
 
   // 入口：body = #wk-ed-body，buf = ArrayBuffer（原样交给 pdf.js，worker 侧会转移）。
-  async function wkPdfRender(body, path, buf) {
+  // restoreTop = 该文件上次的滚动位置（切到别的文件/tab 再切回时由 work-editor.js 传入）。
+  async function wkPdfRender(body, path, buf, restoreTop) {
     wkPdfClose()
     const gen = wkPdfGen
     body.innerHTML = '<div class="wk-ed-empty">正在打开 PDF…</div>'
@@ -67,10 +68,10 @@ import { esc } from '../../core/util.js'
       try { doc.destroy() } catch { /* 已作废 */ }
       return
     }
-    wkPdfMount(body, path, lib, doc)
+    wkPdfMount(body, path, lib, doc, restoreTop)
   }
 
-  function wkPdfMount(body, path, lib, doc) {
+  function wkPdfMount(body, path, lib, doc, restoreTop) {
     const scroll = document.createElement('div')
     scroll.className = 'wk-pdf-scroll'
     const pages = document.createElement('div')
@@ -153,6 +154,7 @@ import { esc } from '../../core/util.js'
         text: el.querySelector('.textLayer'),
         surface: el.querySelector('.wk-pdf-surface'),
         base: 0, // 页面在 scale=96/72 下的 CSS 宽
+        h: 0,    // 同基准下的 CSS 高（占位先按真实尺寸排好，滚动恢复才准）
         renderedZoom: 0,
         epoch: -1,
         n,
@@ -168,11 +170,20 @@ import { esc } from '../../core/util.js'
       const p0 = st.pages[0]
       return st.zoom === 'fit' ? fitZoom(p0) : st.zoom
     }
+    // 占位盒按当前缩放落定尺寸：页栈总高与真实排版一致，恢复滚动位置（以及渲染前的观感）才准。
+    function applyPageBoxes(zoom) {
+      for (const p of st.pages) {
+        if (!p.base) continue
+        p.el.style.width = Math.round(p.base * zoom) + 'px'
+        if (p.h) p.el.style.height = Math.round(p.h * zoom) + 'px'
+      }
+    }
     function setZoom(z) {
       st.zoom = z
       st.epochs++
       fitBtn.classList.toggle('on', z === 'fit')
       pctEl.textContent = Math.round(zoomValue() * 100) + '%'
+      applyPageBoxes(zoomValue())
       // 重渲可见页 + 当前页（其余页在滚入可视区时按新 epoch 渲染）
       const want = new Set(st.visible)
       want.add(st.cur)
@@ -326,21 +337,41 @@ import { esc } from '../../core/util.js'
       st.obsResize = ro
     }
 
-    // 先取首页尺寸再落 fit 比例（numPages 为空时不崩）
-    void doc.getPage(1).then((p0) => {
+    // 首页尺寸 → fit 比例 → 立即渲首页（大文档不因量尺寸而空等）；其余页尺寸后台并行取，
+    // 占位盒落成真实尺寸后再写回滚动位置（否则占位高 320px 会把 scrollTop 夹短）。
+    void (async () => {
+      try {
+        const p0 = await doc.getPage(1)
+        if (st.dead) return
+        const vp = p0.getViewport({ scale: WK_PDF_BASE })
+        st.pages[0].base = vp.width
+        st.pages[0].h = vp.height
+        try { p0.cleanup() } catch { /* 元数据已取到，资源可放 */ }
+      } catch { /* 取不到尺寸：按占位高继续 */ }
       if (st.dead) return
-      const vp = p0.getViewport({ scale: WK_PDF_BASE })
-      st.pages[0].base = vp.width
       st.ready = true
       setZoom('fit')
       requestRender(1)
       if (!st.dead && st.queue.length) void pump()
-    }).catch(() => {
+      try {
+        await Promise.all(st.pages.slice(1).map(async (p) => {
+          const page = await doc.getPage(p.n)
+          if (st.dead) return
+          const vp = page.getViewport({ scale: WK_PDF_BASE })
+          p.base = vp.width
+          p.h = vp.height
+          try { page.cleanup() } catch { /* 同上 */ }
+        }))
+      } catch { /* 单页取不到尺寸：该页保持占位高 */ }
       if (st.dead) return
-      st.ready = true
-      setZoom('fit')
-      void pump()
-    })
+      applyPageBoxes(zoomValue())
+      if (restoreTop) {
+        requestAnimationFrame(() => {
+          if (st.dead) return
+          scroll.scrollTop = Math.min(restoreTop, Math.max(0, scroll.scrollHeight - scroll.clientHeight))
+        })
+      }
+    })()
   }
 
 export {

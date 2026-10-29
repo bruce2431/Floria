@@ -213,8 +213,16 @@ import { MENTION_PATH_RE, MENTION_PLUGIN_RE, MENTION_SESSION_RE, QUOTE_PDF_RE, Q
       const raw = codeBuf.join('\n')
       const fence = '```' + codeLang + '\n' + raw + '\n```' // data-md：围栏原文重建
       const sec = (codeLang === 'chart' && closed) ? chartSplit(codeBuf) : null
+      // ---- 公式围栏（```math，2026-10-29 与 CM6 口径统一）----
+      // CM6 vendor live-markdown 的 blockMathField 只认语言名 `math`（SubPj4 cm-math.js 同口径）；
+      // 消息流此前把它当普通代码块，同一段内容在底栏是公式、发出后变灰色代码。此处补齐。
+      // 流式未闭合（closed=false）或 katex 缺失（renderMath 回 null）→ 回落代码块：与 chart 同口径，
+      // 防流式每帧在「代码块 ↔ 公式」之间重建闪烁。codeBuf 是 esc 后文本，喂 KaTeX 前须 unesc。
+      const mathHtml = (closed && codeLang === 'math') ? renderMath(unesc(raw), true) : null
       if (sec && sec.hasHtml && sec.html.trim()) {
         html += `<div class="chart-embed"${mdAttr(fence)}><div class="chart-bar"><span class="chart-tag">CHART</span><button type="button" class="chart-src" title="切换 图表/源码">源码</button></div><iframe class="chart-frame" sandbox="allow-scripts" srcdoc="${sec.html}${esc(CHART_BOOT)}"></iframe><pre class="chart-raw"><code>${raw}</code></pre></div>`
+      } else if (mathHtml) {
+        html += `<div class="math-block"${mdAttr(fence)}>${mathHtml}</div>`
       } else {
         html += renderCodeBlock(fence, codeLang, raw)
       }

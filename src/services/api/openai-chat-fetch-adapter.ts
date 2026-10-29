@@ -17,6 +17,48 @@
  * `message_delta` → `message_stop`.
  */
 
+// ── Thought-signature carrier ────────────────────────────────────────
+//
+// Gemini 3+ attaches an opaque `thought_signature` to every tool call and
+// rejects the next request unless the same signature is echoed back on the
+// matching functionCall. The core only persists {id,name,input} on tool_use
+// blocks, so `extra_content` never survives the conversation store — but the
+// id does (it is written verbatim and replayed as `tool_use_id`). The adapter
+// therefore carries the signature inside the tool_use id itself, which keeps
+// signed history replayable across process restarts and session resumes with
+// no side store.
+
+const ID_PAYLOAD_SEP = '__fs'
+
+function encodeToolCallId(
+  baseId: string,
+  extra: Record<string, unknown> | undefined,
+): string {
+  if (!extra) return baseId
+  const payload = Buffer.from(JSON.stringify(extra), 'utf8').toString('base64url')
+  return `${baseId}${ID_PAYLOAD_SEP}${payload}`
+}
+
+function decodeToolCallId(id: string | undefined): {
+  id: string
+  extra?: Record<string, unknown>
+} {
+  if (!id) return { id: '' }
+  const at = id.lastIndexOf(ID_PAYLOAD_SEP)
+  if (at < 0) return { id }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(id.slice(at + ID_PAYLOAD_SEP.length), 'base64url').toString('utf8'),
+    )
+    if (parsed && typeof parsed === 'object') {
+      return { id: id.slice(0, at), extra: parsed as Record<string, unknown> }
+    }
+  } catch {
+    // Not one of our ids — treat the whole string as the provider id.
+  }
+  return { id }
+}
+
 // ── Types ───────────────────────────────────────────────────────────
 
 interface AnthropicContentBlock {
@@ -47,6 +89,13 @@ interface OpenAIToolCallDelta {
   id?: string
   type?: string
   function?: { name?: string; arguments?: string }
+  /**
+   * Provider-specific opaque metadata attached to a tool call. Gemini 3+ puts
+   * `{google:{thought_signature}}` here and rejects the *next* request with
+   * "Function call is missing a thought_signature in functionCall parts"
+   * unless it is echoed back verbatim on the same tool call.
+   */
+  extra_content?: Record<string, unknown>
 }
 
 // ── Request translation: Anthropic → OpenAI Chat Completions ─────────
@@ -99,6 +148,24 @@ function blockToUserPart(block: AnthropicContentBlock): Record<string, unknown> 
 function translateMessages(
   anthropicMessages: AnthropicMessage[],
 ): Array<Record<string, unknown>> {
+  // Gemini 3+ rejects the whole request if any replayed functionCall part lacks
+  // its thought_signature. Calls carrying one (encoded in the id, see
+  // encodeToolCallId) replay as real tool_calls. Calls without one — history
+  // written before this carrier existed, or a session resumed on another
+  // provider — cannot be replayed as functionCall parts at all, so they are
+  // dropped; their output is kept as plain user text. Never synthesise
+  // `[tool call …]` syntax: the model imitates it as prose instead of calling
+  // a tool.
+  const signedIds = new Set<string>()
+  for (const msg of anthropicMessages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block.type === 'tool_use' && block.id && decodeToolCallId(block.id).extra) {
+        signedIds.add(block.id)
+      }
+    }
+  }
+
   const out: Array<Record<string, unknown>> = []
 
   for (const msg of anthropicMessages) {
@@ -114,11 +181,16 @@ function translateMessages(
       const userParts: Array<Record<string, unknown>> = []
       for (const block of msg.content) {
         if (block.type === 'tool_result') {
-          out.push({
-            role: 'tool',
-            tool_call_id: block.tool_use_id || '',
-            content: toolResultText(block),
-          })
+          const text = toolResultText(block)
+          if (block.tool_use_id && signedIds.has(block.tool_use_id)) {
+            out.push({
+              role: 'tool',
+              tool_call_id: decodeToolCallId(block.tool_use_id).id,
+              content: text,
+            })
+          } else if (text) {
+            userParts.push({ type: 'text', text })
+          }
           continue
         }
         const part = blockToUserPart(block)
@@ -137,13 +209,16 @@ function translateMessages(
         if (block.type === 'text' && typeof block.text === 'string') {
           textParts.push(block.text)
         } else if (block.type === 'tool_use') {
+          const { id: baseId, extra } = decodeToolCallId(block.id)
+          if (!extra) continue // unsigned legacy call: not replayable to Gemini
           toolCalls.push({
-            id: block.id || '',
+            id: baseId,
             type: 'function',
             function: {
               name: block.name || '',
               arguments: JSON.stringify(block.input || {}),
             },
+            extra_content: extra,
           })
         }
         // thinking / redacted_thinking / others are dropped (no OpenAI equivalent)
@@ -366,12 +441,22 @@ function translateChatStreamToAnthropic(upstream: Response, model: string): Resp
                   blockIndex = nextIndex++
                   toolIndexByOai.set(oaiIndex, blockIndex)
                   hadToolCalls = true
+                  const baseId = tc.id || `toolu_${Date.now()}_${oaiIndex}`
+                  // Gemini ships thought_signature on the same delta as the id
+                  // and the function name, so the id can carry it from the
+                  // outset — no side store, no deferred block start.
+                  const callId = encodeToolCallId(
+                    baseId,
+                    tc.extra_content && typeof tc.extra_content === 'object'
+                      ? tc.extra_content
+                      : undefined,
+                  )
                   emit('content_block_start', {
                     type: 'content_block_start',
                     index: blockIndex,
                     content_block: {
                       type: 'tool_use',
-                      id: tc.id || `toolu_${Date.now()}_${oaiIndex}`,
+                      id: callId,
                       name: tc.function?.name || '',
                       input: {},
                     },
@@ -445,6 +530,7 @@ interface OpenAIChatResponse {
       tool_calls?: Array<{
         id?: string
         function?: { name?: string; arguments?: string }
+        extra_content?: Record<string, unknown>
       }>
     }
     finish_reason?: string | null
@@ -474,7 +560,12 @@ function translateChatResponseToAnthropic(
     }
     content.push({
       type: 'tool_use',
-      id: tc.id || `toolu_${Date.now()}`,
+      id: encodeToolCallId(
+        tc.id || `toolu_${Date.now()}`,
+        tc.extra_content && typeof tc.extra_content === 'object'
+          ? tc.extra_content
+          : undefined,
+      ),
       name: tc.function?.name || '',
       input,
     })

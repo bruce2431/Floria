@@ -51,7 +51,7 @@ function build(windowObj: Record<string, unknown>) {
     'MENTION_PATH_RE', 'MENTION_PLUGIN_RE', 'MENTION_SESSION_RE', 'QUOTE_PDF_RE', 'QUOTE_REF_RE', 'QUOTE_REPLY_RE',
     'mentionChipHtml', 'quotePdfChipHtml', 'quoteRefChipHtml', 'quoteReplyChipHtml',
     'MATH_SRC_BLOCK_DOLLAR', 'MATH_SRC_BLOCK_BRACKET', 'MATH_SRC_INLINE_PAREN', 'MATH_SRC_INLINE_DOLLAR', 'mathInlineOk',
-    'window',
+    'window', 'edCMG',
     `${body}\nreturn { mdHtml, mdInline }`,
   )
   const chip = () => ''
@@ -59,6 +59,7 @@ function build(windowObj: Record<string, unknown>) {
     esc, never, never, never, never, never, never, chip, chip, chip, chip,
     spec.MATH_SRC_BLOCK_DOLLAR, spec.MATH_SRC_BLOCK_BRACKET, spec.MATH_SRC_INLINE_PAREN, spec.MATH_SRC_INLINE_DOLLAR, spec.mathInlineOk,
     windowObj,
+    {}, // edCMG：本探针不测语法高亮，空对象使 highlightCodeHtml 走「回落纯文本」分支
   ) as {
     mdHtml: (s: string, la?: string) => string
     mdInline: (s: string) => string
@@ -102,6 +103,17 @@ const h5 = mdHtml('用 `$x$` 表示变量，代码块：\n\n```\n$y = mx + b$\n`
 ok(h5.includes('<code>$x$</code>'), '行内代码内 $…$ 不被公式化')
 ok(h5.includes('$y = mx + b$'), '围栏代码内 $…$ 不被公式化')
 ok(!h5.includes('class="katex"'), '代码内无误渲染')
+
+// ```math 围栏（2026-10-29 与 CM6 blockMathField 口径统一）：闭合 → 块级公式；未闭合 → 代码块
+const h9 = mdHtml('```math\nE=mc^2\n```')
+ok(h9.includes('math-block'), '```math 围栏 → <div class="math-block">')
+ok(h9.includes('class="katex"') && h9.includes('katex-display'), '```math 围栏渲染出 KaTeX display HTML')
+ok(!h9.includes('code-block'), '```math 围栏不再回落代码块')
+ok(h9.includes('data-md="```math'), '```math 围栏 data-md 保留围栏原文（复制契约）')
+const h10 = mdHtml('```math\nE=mc^2\n')
+ok(h10.includes('code-block') && !h10.includes('math-block'), '```math 流式未闭合 → 回落代码块')
+const h11 = mdHtml('```python\nprint(1)\n```')
+ok(h11.includes('code-block') && !h11.includes('math-block'), '非 math 语言围栏不受影响')
 
 const h6 = mdHtml('成本 $5 and $10 合计 $15。')
 ok(!h6.includes('class="katex"'), '货币 "$5 and $10" 不被误吃为公式')

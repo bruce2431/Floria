@@ -122,7 +122,19 @@ async function run() {
   ok(ub.messages[0].role === 'system' && ub.messages[0].content === 'be terse', 'system -> system message')
   ok(ub.tools?.[0]?.function?.name === 'Read', 'tool translated to functions')
   ok(ub.tool_choice === 'auto', 'tool_choice auto')
-  ok(ub.thinking === undefined && ub.messages.some((m: any) => m.role === 'tool' && m.tool_call_id === 'toolu_x'), 'thinking dropped + tool_result -> role:tool')
+  ok(ub.thinking === undefined, 'thinking dropped')
+  // History written without a captured thought_signature cannot be replayed to
+  // Gemini 3+ at all (any unsigned functionCall part 400s). The call is dropped
+  // and its output kept as plain text — never as `[tool call …]` syntax, which
+  // the model imitates as prose instead of making a real call.
+  ok(!ub.messages.some((m: any) => m.role === 'tool'), 'unsigned history: no role:tool replay')
+  ok(!ub.messages.some((m: any) => m.tool_calls), 'unsigned history: no functionCall parts')
+  ok(!JSON.stringify(ub.messages).includes('[tool call'), 'unsigned history: no fake tool-call prose')
+  ok(!JSON.stringify(ub.messages).includes('[tool result'), 'unsigned history: no fake tool-result prose')
+  ok(
+    ub.messages.some((m: any) => m.role === 'user' && m.content === 'ok'),
+    'unsigned history: tool output kept as plain user text',
+  )
   ok(captured!.headers['authorization'] === 'Bearer KEY', 'bearer auth set')
   ok(captured!.headers['anthropic-version'] === undefined, 'anthropic-version stripped')
 
@@ -148,6 +160,83 @@ async function run() {
   // index 单调：所有 content_block_start 的 index 唯一递增
   const starts = events.filter(e => e.event === 'content_block_start').map(e => e.data.index)
   ok(starts.length === 2 && starts[0] === 0 && starts[1] === 1, `block indices monotonic [${starts}]`)
+
+  // ── Test A2: thought_signature 随 tool_use id 持久 / 回填 ──────────
+  // Gemini 3+ 要求每个 functionCall 回传签名；核心只持久化 {id,name,input}，
+  // 适配器把签名 base64url 编码进 id，回放时解出原 id + 签名。
+  console.log('Test A2: thought_signature carried in the tool_use id')
+  const sigChunks = [
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call_sig',
+                type: 'function',
+                function: { name: 'Read', arguments: '{}' },
+                extra_content: { google: { thought_signature: 'SIG123' } },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+  ]
+  const fetchSig = createOpenAIChatFetch({
+    baseUrl: 'https://example.test/v1beta/openai',
+    apiKey: 'KEY',
+    innerFetch: makeInner(sigChunks, null),
+  })
+  const respSig = await fetchSig('https://example.test/v1beta/openai/v1/messages', {
+    method: 'POST',
+    body: JSON.stringify({ model: 'gemini-3.8-flash', max_tokens: 50, stream: true, messages: [{ role: 'user', content: 'go' }] }),
+  })
+  const sigEvents = parseSSE(await respSig.text())
+  const sigStart = sigEvents.find(e => e.event === 'content_block_start' && e.data.content_block.type === 'tool_use')
+  const signedId: string = sigStart?.data.content_block.id ?? ''
+  const [baseFromId, payloadB64] = signedId.split('__fs')
+  ok(baseFromId === 'call_sig', `stream: provider id preserved in carrier (${baseFromId})`)
+  ok(
+    JSON.parse(Buffer.from(payloadB64 ?? '', 'base64url').toString('utf8'))?.google?.thought_signature ===
+      'SIG123',
+    'stream: signature encoded in tool_use id',
+  )
+
+  const fetchReplay = createOpenAIChatFetch({
+    baseUrl: 'https://example.test/v1beta/openai',
+    apiKey: 'KEY',
+    innerFetch: makeInner(null, { choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }] }),
+  })
+  await fetchReplay('https://example.test/v1beta/openai/v1/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      model: 'gemini-3.8-flash',
+      max_tokens: 50,
+      messages: [
+        { role: 'user', content: 'go' },
+        // 核心持久化形状：只有 id/name/input，没有 extra_content（签名在 id 里）
+        { role: 'assistant', content: [{ type: 'tool_use', id: signedId, name: 'Read', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: signedId, content: 'ok' }] },
+      ],
+    }),
+  })
+  const replayBody = captured!.body as any
+  ok(
+    replayBody.messages.find((m: any) => m.role === 'assistant')?.tool_calls?.[0]?.extra_content?.google
+      ?.thought_signature === 'SIG123',
+    'replay: signature decoded from the id',
+  )
+  ok(
+    replayBody.messages.find((m: any) => m.role === 'assistant')?.tool_calls?.[0]?.id === 'call_sig',
+    'replay: upstream sees the provider id, not the carrier',
+  )
+  ok(
+    replayBody.messages.some((m: any) => m.role === 'tool' && m.tool_call_id === 'call_sig'),
+    'replay: signed tool_result stays role:tool',
+  )
 
   // ── Test B: 非流式 ────────────────────────────────────────────────
   console.log('Test B: non-streaming')

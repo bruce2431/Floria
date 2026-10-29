@@ -765,7 +765,8 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 
 **能力**：消息流（及 work 阅读态 markdown 预览）里的 LaTeX 公式渲染成排版结果。**仅 web**——CLI（`components/Markdown.tsx`，`marked` 无 math 扩展）不渲染，公式作普通文本。
 
-- **语法**：`$…$` 行内、`$$…$$` 块级；另兼容 `\(…\)` 行内 / `\[…\]` 块级。定界符须成对；`$$` 块级先于 `$` 行内抽取（否则被 `$` 抢占）。
+- **语法**：`$…$` 行内、`$$…$$` 块级；另兼容 `\(…\)` 行内 / `\[…\]` 块级；围栏 ` ```math `（语言名恰为 `math`，与 CM6 vendor `blockMathField` 同口径）闭合时渲染为块级公式。定界符须成对；`$$` 块级先于 `$` 行内抽取（否则被 `$` 抢占）。
+- **```math 围栏**（`mdHtml` 行循环 `closeCode`）：围栏内文本 `unesc` 后交 `renderMath(displayMode=true)` → `<div class="math-block" data-md=" ```math…``` ">`。**闭合才渲染**——流式未闭合帧与 `katex` 缺失（`renderMath` 回 null）一律回落 `renderCodeBlock`（与 ` ```chart ` 同口径，防每帧在代码块↔公式间重建闪烁）；`data-md` 保留围栏原文供复制还原。其它语言名（含 `latex`/`tex`）不特殊处理，仍是代码块。
 - **渲染引擎**：`src/gateway/web/vendor/katex/`（KaTeX 0.16.11，`katex.min.js` 全局 UMD + `katex.min.css`），`index.html` 在 `/app.js` **之前**以 `<script>` 引入（`core/markdown.js` 直接读全局 `katex`）。`renderToString` 选项 `{ displayMode, throwOnError:false, strict:false, output:'html' }`——`output:'html'` 省去隐藏 MathML 层。**字体只随 woff2**（20 个，~296 KB）：css 里 `woff`/`ttf` 两条 `src` 已剥除（现代浏览器恒取 woff2，不留指向不存在文件的死链）。
 - **抽取时机**（`core/markdown.js` `extractMath`）：必须在 `esc` **之前、原文上**做——`esc` 会把 `& < > " '` 转义，而 LaTeX 的 `a<b`、`&` 对齐符、`\alpha` 需原样交给 KaTeX。管线：①遮罩围栏/行内代码（`\u0003N\u0003`，防公式误伤代码）；②抽公式 → KaTeX HTML 存 `mathStore`，原文留 `\u0002N\u0002` 占位（控制字符可安全穿过 `esc`）；③代码遮罩原样放回。
 - **还原**：块级占位（抽取时前后补 `\n` 独占一行）由 `mdHtml` 行循环识别 `/^\u0002(\d+)\u0002$/` → `<div class="math-block">`；行内占位随段落文字留在行内，由 `mdInline` 末尾 `restoreMath()` 还原。`katex` 全局缺失（脚本加载失败）时 `extractMath` 整段跳过，`$…$` 原样显示。
@@ -773,7 +774,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 - **安全**：KaTeX 输出自身可信（`trust` 默认 false，不产 `<a>`/HTML），且公式内容在 `esc` 前抽取、渲染结果于 `mdInline` 末尾整体插入，不进任何再转义/再解析环节。
 - **样式**（`styles.css`）：`.md-math`（行内）/`.math-block`（块级，居中 + `overflow-x:auto`——`.katex-display` 是 `nowrap`，不设会撑破消息区）；字号 `1.06em`（KaTeX 默认 1.21em 相对正文偏大）。**昼/夜通用**：KaTeX 输出颜色全继承父级 `currentColor`，无需按主题另写覆盖。
 - **缓存**：`web/sw.js` `CACHE` 与 `web/index.html` 两处 `?v=` 同值（本期 v463）；`CORE` 预缓存 `katex.min.js`/`.css` + 全部 woff2 字体（保离线公式可排版）。
-- **探针锚点**：`probes/probe-math-render.ts`（16 断言，取 `core/markdown.js` 真实源码 + vendored katex 执行：`$$`块级/`$`行内/`\(\)`/`\[\]`、代码内 `$…$` 不误伤、货币不误吃、HTML 转义链未破、katex 缺失降级）。
+- **探针锚点**：`probes/probe-math-render.ts`（23 断言，取 `core/markdown.js` 真实源码 + vendored katex 执行：`$$`块级/`$`行内/`\(\)`/`\[\]`、` ```math ` 围栏闭合/未闭合/`data-md` 契约、代码内 `$…$` 不误伤、货币不误吃、HTML 转义链未破、katex 缺失降级）。
 
 ## 58. work 右栏：顶栏「工具栏」胶囊 + 预览态/工具态两态（2026-10-07）
 
@@ -900,7 +901,7 @@ AppState store 是 React Provider 内 `useState` 创建**非模块单例**，Rea
 | work md 编辑区 | 包内 `kernel/cm-math.js` StateField（`cmMathExt`，经 `createWorkEditor` 装配） | 挂 `sidebar/work/work-cm.js`（适配层） |
 | 底栏 composer | 同一 `cmMathExt` | 挂 `inputbar/composer-cm.js` |
 
-- **覆盖形态**：`$…$` 行内 / `$$…$$` 块级 / `\(…\)` 行内 / `\[…\]` 块级，四形态三链一致。
+- **覆盖形态**：`$…$` 行内 / `$$…$$` 块级 / `\(…\)` 行内 / `\[…\]` 块级，四形态三链一致。围栏 ` ```math ` 不属于 math-spec（它是语言名判据，不是分隔符）：消息流由 `closeCode` 处理，CM6 由 vendor `blockMathField` 处理，两边语言名同为 `math`；`latex`/`tex` 两边都不认（当代码块）。
 - **抽取顺序契约**：`MATH_EXTRACT_ORDER = [blockDollar, blockBracket, inlineParen, inlineDollar]`——块级先于行内（否则 `$$` 被 `$` 抢占）。消费方各自 `new RegExp(src, 'g')`（共享 RegExp 对象会踩 `lastIndex`）。
 - **行内合法性判据** `mathInlineOk(body)`：首尾不留空白、不紧跟数字 ⇒ `成本 $5 and $10` 不被误吃。
 - **流式未闭合容忍**：抽取按对匹配，未闭合的 `$$`/`$` 原样留作可见文本（不吞、不闪）；CM 侧代码区间（InlineCode / FencedCode）跳过公式扫描。

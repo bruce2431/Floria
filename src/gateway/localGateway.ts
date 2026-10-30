@@ -21,7 +21,7 @@
  * HTTP/WS 用 node:http + ws（已验证可打包进 bun 编译产物），不依赖 Bun.serve。
  */
 import { createServer, request as httpRequest, type Server } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, renameSync, type FSWatcher, type Dirent } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, openSync, closeSync, truncateSync, watch, mkdirSync, renameSync, createReadStream, type FSWatcher, type Dirent } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join, resolve, dirname, extname, basename, sep, isAbsolute, delimiter } from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -2936,6 +2936,10 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/gateway/file') {
     const fLabel = url.searchParams.get('label') || ''
     const fPath = url.searchParams.get('path') || ''
+    // dl=1 = 浏览器下载语义（work 文件树「下载」）：不套 4MB 预览上限、回 Content-Disposition
+    // attachment、GET 走流式管道（不把整文件读进内存）。4MB 口径只守护「预览/识图/编辑」读取，
+    // 下载是要把用户自己的文件取走，不属于该上限的守护对象；确认门（过大先确认）在前端做。
+    const fDl = url.searchParams.get('dl') === '1'
     // label 缺省 = 读工作区根散装文件（2026-10-14 待办 9：work 侧栏「工作区」tab 点开全局文件）。
     // 根直读仅限 label 缺省；另拒顶层隐藏段（.claude/.trash 等，防摸 token/凭据），其余走同一条防越界与 4MB 口径。
     let fDir: string
@@ -2961,21 +2965,38 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
       sendJson(res, 404, { error: 'not found' })
       return
     }
-    if (statSync(fAbs).size > 4 * 1024 * 1024) {
+    const fStat = statSync(fAbs)
+    if (!fDl && fStat.size > 4 * 1024 * 1024) {
       sendJson(res, 413, { error: 'too large' })
       return
     }
-    const fMtime = statSync(fAbs).mtimeMs
+    const fMtime = fStat.mtimeMs
     // ETag = 毫秒级 mtime（Last-Modified 只有秒级、不足以表达同一秒内的两次写）；work 编辑区记它作
     // 冲突基线，写回时带回由 writeProjectFile 精确比对（见该函数）。
-    const fHeaders = {
+    const fHeaders: Record<string, string> = {
       'Cache-Control': 'no-cache',
       ETag: `"${fMtime}"`,
       'Last-Modified': new Date(fMtime).toUTCString(),
     }
+    if (fDl) {
+      // 文件名双写：filename=ASCII 回退（非 ASCII/引号/反斜杠统一换成 _），
+      // filename*=RFC 5987 UTF-8 原文——浏览器优先取后者，中文名不乱码。
+      const fName = basename(fAbs)
+      const fAscii = fName.replace(/[^\x20-\x7e]|["\\]/g, '_')
+      const fEnc = encodeURIComponent(fName).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+      fHeaders['Content-Length'] = String(fStat.size)
+      fHeaders['Content-Disposition'] = `attachment; filename="${fAscii}"; filename*=UTF-8''${fEnc}`
+    }
     if (req.method === 'HEAD') {
       res.writeHead(200, fHeaders)
       res.end()
+      return
+    }
+    if (fDl) {
+      res.writeHead(200, { ...fHeaders, 'Content-Type': 'application/octet-stream' })
+      const fStream = createReadStream(fAbs)
+      fStream.on('error', () => res.destroy())
+      fStream.pipe(res)
       return
     }
     const fBuf = readFileSync(fAbs)

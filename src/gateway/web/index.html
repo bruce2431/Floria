@@ -28,7 +28,7 @@
   <!-- UI 基础包（@floria/web，2026-10-24）：主题令牌 + reset + 统一滚动条。须排在业务样式之前，
        app.js 之前另加载其 IIFE（window.FloriaWeb）。源 = SubPj1-遥测网页/packages/web/。 -->
   <link rel="stylesheet" href="/webui/floria-web.css?v=1" />
-  <link rel="stylesheet" href="/styles.css?v=628" />
+  <link rel="stylesheet" href="/styles.css?v=629" />
 </head>
 <body>
 <div id="app">
@@ -364,6 +364,23 @@
       </div>
     </div>
   </div>
+  <!-- 大文件下载确认弹窗（work 文件行「下载」；复用 #rename-modal 的 mask/dialog/header/body/footer 骨架） -->
+  <div id="dl-modal" hidden>
+    <div class="mask"></div>
+    <div class="dialog" role="dialog" aria-modal="true" aria-label="确认下载">
+      <div class="header">
+        <h2 class="title">下载大文件</h2>
+        <button type="button" class="close" aria-label="关闭"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M14.1168 13.197L13.197 14.1167L1.8833 2.80303L2.80309 1.88324L14.1168 13.197Z"/><path d="M13.197 1.88326L14.1168 2.80305L2.80309 14.1168L1.8833 13.197L13.197 1.88326Z"/></svg></button>
+      </div>
+      <div class="body">
+        <div id="dl-modal-text"></div>
+      </div>
+      <div class="footer">
+        <button type="button" class="button outline" id="dl-cancel">取消</button>
+        <button type="button" class="button primary" id="dl-ok">仍要下载</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 聊天气泡弹层（最近会话；原开启入口 rail-bubble 已随折叠带撤除，现无开启点——待定夺） -->
@@ -383,6 +400,6 @@
 <!-- UI 基础包 IIFE（2026-10-24）：挂 window.FloriaWeb（I / fileIcon / esc / fromHtml / VERSION），
      核心图标表改为转调本全局。须在 app.js 之前加载，缺包时模块直接抛错。 -->
 <script src="/webui/floria-web.iife.js?v=1"></script>
-<script src="/app.js?v=628"></script>
+<script src="/app.js?v=629"></script>
 </body>
 </html>

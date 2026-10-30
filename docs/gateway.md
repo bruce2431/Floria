@@ -367,3 +367,12 @@ agent 驱动浏览器里「在场卡片」的网关侧链路（总设计 → [we
 - **响应归一化**（`normalizeCatalogModels()`）：兼容 `{data:[{id,display_name}]}`（Anthropic/OpenAI/GLM）与 `{models:[{id,name}]}`（Gemini）；`models/<id>` 前缀剥除。
 - **返回**：`{provider, ok, url, error, enabled:[已启用], models:[{id,name?,enabled,vision,tool}]}`。`models` = **已启用项恒在（在前）** + 厂商返回的其余模型；`ok=false` 时前端回落为「仅密钥池现有模型 + 手动添加」，不让启用项消失。`vision` 读 `modelVision`，`tool` = `isToolBoundModel()`（工具绑定模型可展示但不出现在切换列表）。
 - **实测边界**：DeepSeek/Kimi/GLM 可达（deepseek 走 root `/v1/models`，kimi 同，GLM 走 `/api/anthropic/v1/models`）；Google 端点在本机直连超时（无代理）→ `ok:false` + 回落。
+
+## 20. 文件下载（`GET /gateway/file?...&dl=1`，2026-10-30）
+
+work 文件树 / 顶栏文件 pill 行菜单「下载」的唯一取件口。与同端点的**预览读取**（识图、图片音视频、编辑卡打开）刻意分语义：
+
+- **`dl=1` 不套 4MB 上限**：4MB 只守护「把字节读进前端内存做预览/编辑」，下载是要把用户自己的文件取走，不属于该上限的守护对象；`dl` 缺省时行为完全不变（>4MB → 413 `too large`）。
+- **响应头**：`Content-Disposition: attachment; filename="<ASCII 回退:非 ASCII 与引号/反斜杠→_>"; filename*=UTF-8''<RFC5987 编码原文>`（中文名不乱码）+ `Content-Length`；GET 走 `createReadStream().pipe(res)` **流式**发送，不把整文件读进网关内存；`Content-Type: application/octet-stream`。
+- **HEAD 同头**：前端下载前先 HEAD 取 `Content-Length`，超过确认阈值（前端 `WK_DL_CONFIRM_BYTES = 50MB`）弹 `#dl-modal` 确认栏（文件名 + 人类可读大小，取消/关闭/遮罩/Esc = 放弃），确认后才导航下载。
+- **根治「PDF 点下载变预览/跳转」**：旧实现是 `blob:` URL + `a[download]`，浏览器（Edge/iPad Safari）忽略 download 属性时把 blob 当文档导航 ⇒ 地址栏出现 `blob:https://<host>/<uuid>` 预览 PDF。现在下载 URL 指向网关且带 `attachment` 头，浏览器只会落盘；前端也不再 blob 化（大文件不占内存）。鉴权/越界 403/404 与 GET 同口径。

@@ -2128,16 +2128,18 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 /* ===== 会话重命名弹窗 #rename-modal（2026-08-24 对齐 DSH Modal.module.css + WorkspaceBrowser.renameInput）=====
    dsh Modal：mask rgba(0,0,0,0.24)+blur2 · dialog r24 宽 min(380px,100%) · header[t22/l24/r14/b12] ·
    body mt20 px24 · footer px24 右对齐 gap8 · Button outline/primary r18 h36 */
-#rename-modal {
+/* 共用壳：#rename-modal（会话/文件重命名、新建名称）与 #dl-modal（大文件下载确认）同一套
+   mask/dialog/header/body/footer 骨架，差异只在 body 内容（input vs 纯文本）。 */
+:is(#rename-modal, #dl-modal) {
   /* 键盘适配（2026-09-19）：随 #app 锚定（见「键盘弹出」节）——absolute 于 app 壳体内，top 收
      --kb-total ⇒ 遮罩恒等于 app 的可视窗（屏顶到键盘上沿），对话框在可视窗内居中；
      勿改回 position:fixed（挂 body 会与 app 的视口锚定脱钩，随键盘下移）。*/
   position: absolute; top: var(--kb-total, 0px); right: 0; bottom: 0; left: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
-#rename-modal[hidden] { display: none; }
-#rename-modal .mask { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.24); backdrop-filter: blur(2px); }
-#rename-modal .dialog {
+:is(#rename-modal, #dl-modal)[hidden] { display: none; }
+:is(#rename-modal, #dl-modal) .mask { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.24); backdrop-filter: blur(2px); }
+:is(#rename-modal, #dl-modal) .dialog {
   position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 20px;
   width: min(380px, 100%); max-width: 100%;
@@ -2152,19 +2154,20 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
   background: var(--bg);
   box-shadow: var(--shadow-sm), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
 }
-#rename-modal .header {
+:is(#rename-modal, #dl-modal) .header {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 22px 14px 12px 24px;
 }
-#rename-modal .title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); }
-#rename-modal .close {
+:is(#rename-modal, #dl-modal) .title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink); }
+:is(#rename-modal, #dl-modal) .close {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: none; border-radius: 8px; background: transparent;
   cursor: pointer; color: var(--ink-2);
 }
-#rename-modal .close:hover { background: var(--hover-ink); }
-#rename-modal .close svg { width: 14px; height: 14px; }
-#rename-modal .body { display: flex; flex-direction: column; min-width: 0; margin-top: 20px; padding: 0 24px; }
+:is(#rename-modal, #dl-modal) .close:hover { background: var(--hover-ink); }
+:is(#rename-modal, #dl-modal) .close svg { width: 14px; height: 14px; }
+:is(#rename-modal, #dl-modal) .body { display: flex; flex-direction: column; min-width: 0; margin-top: 20px; padding: 0 24px; }
+#dl-modal-text { font-size: 14px; line-height: 22px; color: var(--ink); word-break: break-all; }
 /* dsh WorkspaceBrowser.renameInput：h44 pad 7/14 r22 胶囊、透明底、l2 边框 */
 #rename-modal .rename-input {
   box-sizing: border-box; width: 100%; height: 44px; padding: 7px 14px;
@@ -2176,20 +2179,20 @@ body.touch .folder-head .folder-add { display: inline-flex; } /* 真触屏恒显
 #rename-modal .rename-error {
   margin-top: 8px; font-size: 12px; line-height: 18px; color: #ec1313;
 }
-#rename-modal .footer {
+:is(#rename-modal, #dl-modal) .footer {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 24px;
 }
 /* dsh Button.module.css：r18 h36 pad 0/14 · outline=l2 hairline 透明 · primary=brand ink 黑 */
-#rename-modal .button {
+:is(#rename-modal, #dl-modal) .button {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   border: none; border-radius: 18px; cursor: pointer; font-size: 14px; line-height: 22px;
   padding: 0 14px; height: 36px; color: var(--ink); background: transparent;
 }
-#rename-modal .button:disabled { cursor: not-allowed; opacity: 0.4; }
-#rename-modal .button.outline { border: 1px solid var(--hairline-strong); min-width: 72px; }
-#rename-modal .button.outline:hover:not(:disabled) { background: var(--hover-ink); }
-#rename-modal .button.primary { background: var(--ink); color: var(--bg); min-width: 136px; }
-#rename-modal .button.primary:hover:not(:disabled) { background: var(--ink-hover); }
+:is(#rename-modal, #dl-modal) .button:disabled { cursor: not-allowed; opacity: 0.4; }
+:is(#rename-modal, #dl-modal) .button.outline { border: 1px solid var(--hairline-strong); min-width: 72px; }
+:is(#rename-modal, #dl-modal) .button.outline:hover:not(:disabled) { background: var(--hover-ink); }
+:is(#rename-modal, #dl-modal) .button.primary { background: var(--ink); color: var(--bg); min-width: 136px; }
+:is(#rename-modal, #dl-modal) .button.primary:hover:not(:disabled) { background: var(--ink-hover); }
 
 /* 矮屏桌面（≤779px 高，非手机）：stage = 100vh-160px 主导，输入栏在 stage 内相对定位自动适配（无需覆盖） */
 

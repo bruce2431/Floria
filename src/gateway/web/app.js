@@ -11212,32 +11212,76 @@ function setFirstSendHash(v) { firstSendHash = v }
     else if (a === 'upload-dir') wkNewUpload(true)
   }
 
-  // 下载一个文件（行操作浮窗「下载」项，2026-10-13 待办 1）：走 GET /gateway/file 读原始字节
-  // （同 work 编辑区读侧：4 MB 上限、路径穿越防护、鉴权），blob 化后经 a[download] 落浏览器下载。
-  // 目录不出此项（整棵打包下载无既有实现，不新造——待办只提文件下载）。
+  // 下载超过此大小先弹确认栏（防止误点超大文件把本机/远端流量一次拉满）。
+  const WK_DL_CONFIRM_BYTES = 50 * 1024 * 1024
+
+  function wkDlFmtSize(n) {
+    if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(1) + ' GB'
+    if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB'
+    if (n >= 1024) return Math.round(n / 1024) + ' KB'
+    return n + ' B'
+  }
+
+  // 下载确认弹窗（#dl-modal，DOM 在 index.html，样式复用 #rename-modal 的 mask/dialog 骨架）：
+  // 返回 Promise<boolean>——确认 true，取消/关闭/点遮罩/Esc 均 false。监听器在收尾时点名移除。
+  function wkDlConfirm(name, size) {
+    const modal = $('dl-modal')
+    const ok = $('dl-ok')
+    const cancel = $('dl-cancel')
+    const closeBtn = modal.querySelector('.close')
+    $('dl-modal-text').textContent = '「' + name + '」约 ' + wkDlFmtSize(size) + '，确定下载？'
+    return new Promise((resolve) => {
+      let done = false
+      function finish(v) {
+        if (done) return
+        done = true
+        modal.hidden = true
+        ok.removeEventListener('click', onOk)
+        cancel.removeEventListener('click', onCancel)
+        closeBtn.removeEventListener('click', onCancel)
+        modal.removeEventListener('mousedown', onMask)
+        document.removeEventListener('keydown', onKey)
+        resolve(v)
+      }
+      function onOk() { finish(true) }
+      function onCancel() { finish(false) }
+      function onMask(e) { if (!e.target.closest('.dialog')) finish(false) }
+      function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); finish(false) } }
+      ok.addEventListener('click', onOk)
+      cancel.addEventListener('click', onCancel)
+      closeBtn.addEventListener('click', onCancel)
+      modal.addEventListener('mousedown', onMask)
+      document.addEventListener('keydown', onKey)
+      modal.hidden = false
+      ok.focus()
+    })
+  }
+
+  // 下载一个文件（行操作浮窗「下载」项，2026-10-13 待办 1）：走 GET /gateway/file?dl=1
+  // （下载语义：不套 4MB 预览上限、Content-Disposition: attachment、服务端流式发送），
+  // 导航到带 token 的 URL 由浏览器原生下载管理器接收——不经 blob，任意大小都不占前端内存；
+  // attachment 头也让 PDF 等内联类型只下载不预览（旧 blob 方案的「点下载变预览」由此消失）。
+  // 先 HEAD 取 Content-Length，超过 WK_DL_CONFIRM_BYTES 弹确认栏。目录不出此项。
   async function downloadWorkEntry(p) {
     if (!p || !state.workProj) return
+    const u = fileUrl(p) + '&dl=1'
     try {
-      const res = await fetch(fileUrl(p))
-      if (!res.ok) {
-        toast(res.status === 413 ? '文件超过 4 MB，不支持下载' : '下载失败（HTTP ' + res.status + '）')
+      const head = await fetch(u, { method: 'HEAD' })
+      if (!head.ok) {
+        toast('下载失败（HTTP ' + head.status + '）')
         return
       }
-      const blob = await res.blob()
-      // PDF 等浏览器可内联渲染的类型：未入文档的 <a download> 在部分浏览器（Edge）被忽略 download
-      // 语义 → 直接导航到 blob URL 走内置阅读器（用户实测「点下载变预览」）。必须挂进文档再点，
-      // 且 blob URL 不能在 click() 同帧 revoke（下载尚未开始取字节会失败/退化成导航）。
+      const size = Number(head.headers.get('Content-Length') || 0)
+      if (size > WK_DL_CONFIRM_BYTES && !(await wkDlConfirm(baseOf(p), size))) return
       const a = document.createElement('a')
-      const url = URL.createObjectURL(blob)
-      a.href = url
+      a.href = u
       a.download = baseOf(p)
       a.rel = 'noopener'
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
       a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      toast('已下载「' + baseOf(p) + '」')
+      toast('开始下载「' + baseOf(p) + '」')
     } catch (e) {
       toast('下载失败：' + (e.message || e))
     }

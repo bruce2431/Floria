@@ -18,6 +18,7 @@ import { gToken } from './gateway.js'
         path: typeof c.path === 'string' ? c.path.trim() : '',
         host: typeof c.host === 'string' ? c.host : '',
         tab: c.tab !== false,
+        repo: typeof c.repo === 'string' ? c.repo.trim() : '',
       }))
       .filter((c) => /^[a-zA-Z0-9_-]{1,32}$/.test(c.id) && c.title && c.host === 'view' && isExtPath(c.path))
   }

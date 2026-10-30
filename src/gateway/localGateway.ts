@@ -148,6 +148,7 @@ interface PreviewCard {
   path: string // preview 目录内相对路径，可带 #片段（同页自我定位）
   host: 'view' // 渲染位置，由 preview 声明；本版只定义 view（主区独立视图卡）
   tab: boolean // host=view 时是否上侧栏 tab，缺省 true
+  repo: string // 上游仓库（GitHub 等，用户填写；插件卡「应用」详情页展示与写入），缺省 ''
 }
 // 预览工作区的独立卡片（2026-10-18）：<previewDir>/<id>/card.json，id = 目录名。
 // 每张卡是一份独立静态页（entry 默认 index.html），宿主把它注册成右栏工具栏 tab；
@@ -1404,6 +1405,7 @@ function readPreviewCards(previewDir: string): PreviewCard[] {
       path,
       host: 'view',
       tab: c.tab !== false,
+      repo: typeof c.repo === 'string' ? c.repo.trim().slice(0, 500) : '',
     })
   }
   return out
@@ -2170,6 +2172,124 @@ function listModels(root: string): Record<string, unknown> {
   }
 }
 
+// 供应商模型目录（2026-10-30 模型卡「选择启用」）：用凭据池里的 key 实时向供应商拉取
+// **全部**模型清单，只读——写回 providers[].models 由前端经 /gateway/file/write 完成。
+// 端点探测顺序（各厂商把 /v1/models 挂在不同根）：
+//   openai-chat → {baseUrl}/models
+//   anthropic   → {baseUrl}/v1/models → 去掉尾部 /anthropic 的 {root}/v1/models
+// 响应归一化：{data:[{id,display_name}]}（Anthropic/OpenAI/GLM）与 {models:[{id,name}]}。
+// 失败不抛错：ok=false + error，前端回落密钥池现有清单。
+const CATALOG_TIMEOUT_MS = 9000
+function catalogUrls(cfg: ProviderConfig): string[] {
+  const base = String(cfg.baseUrl || '').replace(/\/+$/, '')
+  if (!base) return []
+  if (cfg.protocol === 'openai-chat') return [base + '/models']
+  const out = [base + '/v1/models']
+  const stripped = base.replace(/\/api\/anthropic$/, '').replace(/\/anthropic$/, '')
+  if (stripped !== base) out.push(stripped + '/v1/models')
+  return [...new Set(out)]
+}
+function normalizeCatalogModels(json: unknown): Array<{ id: string; name?: string }> {
+  const obj = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
+  const arr = Array.isArray(obj.data) ? obj.data : Array.isArray(obj.models) ? obj.models : []
+  const out: Array<{ id: string; name?: string }> = []
+  const seen = new Set<string>()
+  for (const raw of arr) {
+    const it = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+    let id = String(it.id || it.name || '').trim()
+    if (!id) continue
+    if (id.startsWith('models/')) id = id.slice(7)
+    if (seen.has(id)) continue
+    seen.add(id)
+    const dn =
+      typeof it.display_name === 'string'
+        ? it.display_name
+        : typeof it.name === 'string' && it.name !== id
+          ? it.name
+          : undefined
+    out.push(dn ? { id, name: dn } : { id })
+  }
+  return out
+}
+async function fetchCatalogModels(url: string, key: string): Promise<Array<{ id: string; name?: string }>> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), CATALOG_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        Accept: 'application/json',
+      },
+      signal: ctl.signal,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return normalizeCatalogModels(await res.json())
+  } finally {
+    clearTimeout(timer)
+  }
+}
+async function listProviderCatalog(name: string): Promise<Record<string, unknown>> {
+  const creds = loadCredentials()
+  const providers = creds.providers as Record<string, ProviderConfig>
+  const cfg = providers[name]
+  if (!cfg) return { provider: name, ok: false, error: 'provider not found', enabled: [], models: [] }
+  const enabled = Array.isArray(cfg.models) ? (cfg.models as unknown[]).map(String) : []
+  const keys = (Array.isArray(cfg.keys) ? cfg.keys : [])
+    .filter((k) => k && typeof k.value === 'string' && k.value && !k.exhausted)
+    .map((k) => k.value)
+  let discovered: Array<{ id: string; name?: string }> = []
+  let usedUrl: string | null = null
+  let firstError = ''
+  outer: for (const url of catalogUrls(cfg)) {
+    for (const key of keys) {
+      try {
+        const list = await fetchCatalogModels(url, key)
+        usedUrl = url
+        if (list.length) {
+          discovered = list
+          break outer
+        }
+      } catch (e) {
+        if (!firstError) firstError = e instanceof Error ? e.message : String(e)
+      }
+    }
+  }
+  // 已启用的模型恒在（目录拉取失败也不能让启用项从界面消失），其余按厂商返回顺序追加
+  const merged: Array<{ id: string; name?: string; enabled: boolean; vision: boolean; tool: boolean }> = []
+  const seen = new Set<string>()
+  for (const id of enabled) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    merged.push({
+      id,
+      enabled: true,
+      vision: !!(cfg.modelVision && cfg.modelVision[id] === true),
+      tool: isToolBoundModel(name, cfg, id),
+    })
+  }
+  for (const it of discovered) {
+    if (seen.has(it.id)) continue
+    seen.add(it.id)
+    merged.push({
+      id: it.id,
+      ...(it.name ? { name: it.name } : {}),
+      enabled: false,
+      vision: !!(cfg.modelVision && cfg.modelVision[it.id] === true),
+      tool: isToolBoundModel(name, cfg, it.id),
+    })
+  }
+  return {
+    provider: name,
+    ok: discovered.length > 0,
+    url: usedUrl,
+    error: discovered.length ? null : firstError || '未发现模型清单端点',
+    enabled,
+    models: merged,
+  }
+}
+
 /** 统一群发（P2 收敛）：逐个发送并吞掉单个客户端断开异常，broadcast/broadcastToClients/pollSse/内联群发共用。 */
 function sendAll<T>(targets: Iterable<T>, send: (t: T) => void): void {
   for (const t of targets) {
@@ -2381,6 +2501,20 @@ async function handleRequest(req: import('node:http').IncomingMessage, res: impo
   if (req.method === 'GET' && url.pathname === '/gateway/models') {
     try {
       sendJson(res, 200, listModels(root))
+    } catch (e) {
+      sendError(res, e)
+    }
+    return
+  }
+  // 供应商全部模型目录（模型卡「选择启用」的只读数据源，见 listProviderCatalog 头注）
+  if (req.method === 'GET' && url.pathname === '/gateway/models/catalog') {
+    try {
+      const name = (url.searchParams.get('provider') || '').trim()
+      if (!name) {
+        sendJson(res, 400, { error: '缺少 provider 参数' })
+        return
+      }
+      sendJson(res, 200, await listProviderCatalog(name))
     } catch (e) {
       sendError(res, e)
     }

@@ -5,7 +5,7 @@
 
 ## 1. API 前缀与端点总览
 
-端点全挂 `/gateway/<端点>`：health / activate / shutdown / sessions / plugins / models / model / model-report / wsession[/stop] / diagnostics / session[/rename / .queued] / backend / project / file / file-cache / conversation / activity / events。根 `/api` 撤空（不保留旧路径、无兼容双挂）。**不变量**：网关与 `/backend/<label>/` 代理页面共享同一 origin，端点若挂根，被代理页面写死的绝对路径会误打网关自身；前缀化后写错只 404，永不误伤网关（「故意打网关」的预览页显式用 `/gateway/*`）。CLI 侧 `gatewayClient`/`conversationDisplay`/`server`、前端 `app.js`/`sw.js` 同此前缀。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开），sw 缓存排除同步 `/gateway/`。
+端点全挂 `/gateway/<端点>`：health / activate / shutdown / sessions / plugins / models / models/catalog / model / model-report / wsession[/stop] / diagnostics / session[/rename / .queued] / backend / project / file / file-cache / conversation / activity / events。根 `/api` 撤空（不保留旧路径、无兼容双挂）。**不变量**：网关与 `/backend/<label>/` 代理页面共享同一 origin，端点若挂根，被代理页面写死的绝对路径会误打网关自身；前缀化后写错只 404，永不误伤网关（「故意打网关」的预览页显式用 `/gateway/*`）。CLI 侧 `gatewayClient`/`conversationDisplay`/`server`、前端 `app.js`/`sw.js` 同此前缀。**唯一例外**：`readyPath` 缺省 `/api/system_stats` 是项目后端（ComfyUI）自身 API，勿迁移。总门鉴权 `startsWith('/gateway/')`（health/activate 公开），sw 缓存排除同步 `/gateway/`。
 
 **文件缓存 `file-cache`（附件与粘贴图片共用一条链）**：`<会话启动根>/.claude/file-cache/<dirKey>/`，`dirKey` = 会话 uuid（`getSessionId()` 的目录名；与 sid 解码所得同源），无会话归属（首页首送前上传）= `_pending`。**`dirKey` 不编码项目**，读写都必须带 `sid`（或 `project` label）让网关解析出会话启动根。
 
@@ -126,6 +126,7 @@
 
 - `GET /gateway/preview-cards?label=<label>` → `{ label, cards:[…], quoteActions:[…], previewCards:[…] }`（**同一端点一次取三份申报**，见 §6.6/§6.7）。label 未命中 / 无 preview → 404；有 preview 但 `cards` 缺失 → `[]`（空集是正常态，非错误）。**label 范围含全局根**（`全局根 · 散装对话`）：全局项的 preview 目录 = `<工作区根>/.claude/preview/`（`findProjects` 对该项 `hasPreview` 探此目录），与项目项共用同一条解析链——工作区根的卡片申报即落此处（web-ui.md §42「常驻应用卡」）。
 - 解析：`readPreviewJson(previewDir)` 是 `preview.json` 的**单一解析入口**（`readBackendCfg` 与 `readPreviewCards` 共用；`JSON.parse` 带 `try/catch`，坏 JSON / 顶层非对象一律返回 null ⇒ 空集，不抛到 `findProjects`）。`readPreviewCards` 逐条校验：`id` 匹配 `/^[a-zA-Z0-9_-]{1,32}$/` 且不重复（重复保首次）、`title` 非空、`host === 'view'`、`isPreviewRelPath(path)` 为真；不合格项**整条丢弃**（不猜、不补默认值、不回落）。`icon` 非空串即留（是否为合法图标键由前端 `I` 表判定，缺省回落 `plug`）。
+- `repo`（可选，2026-10-30）：上游 GitHub 仓库地址，供插件卡「应用」详情页展示与编辑（web-ui.md §42）。`readPreviewCards` 只做 `trim()` + 截 500 字符透传，**不校验 URL 形态**——链接化判定在前端（仅 `http(s)://` 才渲成 `<a>`，其余按纯文本）。**写回链**：前端读 `GET /gateway/file?label=<全局根>&path=.claude/preview/preview.json`（取 ETag 毫秒 mtime 作基线）→ 改该卡 `repo` → `POST /gateway/file/write`（带 `baseMtime`，冲突 409 不覆盖）。网关不为表单新增写端点，复用既有文件读写。
 - `isPreviewRelPath`：preview 目录内相对路径 —— 拒绝对路径 / 反斜杠 / `?` / 空段 / `.` `..` 段 / 解码后越界 / 非法 `%` 序列；允许尾随 `#片段`。**同款规则在前端 `engine/ext-decl.js` `isExtPath` 再写一份**——两条外部输入（网关读的 `preview.json` / 不过网关的 `postMessage`）各自守门，不是重复实现。
 - 卡片资源**不需要新路由**：`/preview/<label>/<path>` 已托管 preview 目录内任意文件（`resolve` + `startsWith(pvDir+sep)` 越界防护 + 鉴权）；**同一条路由的 label 亦含全局根**（全局项 `pvDir` = `<工作区根>/.claude/preview`），故工作区根卡片页经 `/preview/全局根 · 散装对话/<path>` 托管。
 - 解析行为真值表见 `probes/probe-web-ext-cards.ts`（从源码提取函数体、剥 TS 类型后直接跑，不另起网关）。
@@ -356,3 +357,13 @@ agent 驱动浏览器里「在场卡片」的网关侧链路（总设计 → [we
 - **探针锚点**：`probes/probe-web-cards-api.ts`（§ 网关帧型/路由/状态码真值表 与 CLI 侧 `listGatewayCards`/`callGatewayCard`、工具/feature 登记的字面量一致性）。
 
 
+
+## 19. 供应商模型目录端点（`GET /gateway/models/catalog`，只读，2026-10-30）
+
+模型卡（工作区根应用 `.claude/preview/models/`）「点进供应商 → 勾选启用模型」的数据源：用凭据池里该 provider 的 key **实时**向供应商拉取**全部**模型清单，只读——启用项写回 `providers[].models` 仍走 `POST /gateway/file/write`（前端整份回写 + mtime 冲突校验），本端点不写任何配置。
+
+- **请求**：`GET /gateway/models/catalog?provider=<providers 键名>`；缺 `provider` → **400**；未知名 → 200 `{ok:false,error:'provider not found',models:[]}`（同其它 `/gateway/*` 受 token/cookie 校验）。
+- **端点探测顺序**（各厂商把 `/v1/models` 挂在不同根，实现 `catalogUrls()`）：`protocol==='openai-chat'` → `{baseUrl}/models`；`anthropic` → `{baseUrl}/v1/models` → 再去掉尾部 `/anthropic` 的 `{root}/v1/models`。逐个试，首个返回非空清单即用；单次超时 9s（`CATALOG_TIMEOUT_MS`）。
+- **响应归一化**（`normalizeCatalogModels()`）：兼容 `{data:[{id,display_name}]}`（Anthropic/OpenAI/GLM）与 `{models:[{id,name}]}`（Gemini）；`models/<id>` 前缀剥除。
+- **返回**：`{provider, ok, url, error, enabled:[已启用], models:[{id,name?,enabled,vision,tool}]}`。`models` = **已启用项恒在（在前）** + 厂商返回的其余模型；`ok=false` 时前端回落为「仅密钥池现有模型 + 手动添加」，不让启用项消失。`vision` 读 `modelVision`，`tool` = `isToolBoundModel()`（工具绑定模型可展示但不出现在切换列表）。
+- **实测边界**：DeepSeek/Kimi/GLM 可达（deepseek 走 root `/v1/models`，kimi 同，GLM 走 `/api/anthropic/v1/models`）；Google 端点在本机直连超时（无代理）→ `ok:false` + 回落。

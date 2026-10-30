@@ -132,6 +132,9 @@ import { normExtCards, normQuoteActions } from './ext-decl.js'
   // 工作区根 label 判定（registry 据 state.preview / state.mgr 判「当前语境 = 工作区根」用；GLOBAL_LABEL
   // 本身留本件私有，不外泄裸字符串，避免第二处硬编码 label 漂移）。
   const isGlobalLabel = (l) => l === GLOBAL_LABEL
+  // 应用详情的写回链（preview.json 的 repo 字段）要按 label 调 /gateway/file*——取 label 走本出口，
+  // 不新增第二处字面量。
+  const globalLabel = () => GLOBAL_LABEL
   const APPS_KEY = 'appsEnabled' // floria-ui-v1 段名：已启用应用 id 数组
   let APP_CATALOG = [] // 全部可用应用（normExtCards 产物；插件卡「应用」列表数据源）
   let APP_TABS = [] // 已启用的应用 tab（侧栏；openCard 可解析）
@@ -208,6 +211,7 @@ export {
   clearQuoteActions,
   extLabel,
   extTabs,
+  globalLabel,
   hydrateExtCardId,
   hydrateExtCards,
   isAppEnabled,
